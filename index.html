@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
+  <title>warehouseMos</title>
+  <link rel="manifest" href="manifest.json"/>
+  <meta name="theme-color" content="#1e3a5f"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            wh: {
+              900: '#0f172a', 800: '#1e293b', 700: '#334155',
+              600: '#475569', accent: '#3b82f6', danger: '#ef4444',
+              warn: '#f59e0b', ok: '#22c55e'
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- ── Configuración: cambiar GAS_URL antes de desplegar ── -->
+  <script>
+    window.WH_CONFIG = {
+      gasUrl:  '',   // ← PEGAR aquí la URL del Web App GAS desplegado
+      usuario: localStorage.getItem('wh_usuario') || 'operador',
+      version: '1.0.0'
+    };
+  </script>
+
+  <style>
+    * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background:#0f172a; color:#f1f5f9; }
+    .view { display:none; }
+    .view.active { display:block; }
+    .nav-btn.active { color:#3b82f6; border-top:2px solid #3b82f6; }
+    .badge { display:inline-flex;align-items:center;justify-content:center;
+             min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700; }
+    .card { background:#1e293b;border-radius:12px;padding:16px; }
+    .card-sm { background:#1e293b;border-radius:10px;padding:12px; }
+    .btn { display:inline-flex;align-items:center;justify-content:center;
+           gap:6px;border-radius:8px;font-weight:600;cursor:pointer;
+           border:none;transition:all .15s; }
+    .btn-primary { background:#3b82f6;color:#fff; padding:10px 18px; }
+    .btn-primary:active { background:#2563eb; }
+    .btn-danger  { background:#ef4444;color:#fff; padding:10px 18px; }
+    .btn-outline { background:transparent;color:#94a3b8;border:1px solid #334155;padding:8px 14px; }
+    .btn-lg { padding:14px 24px;font-size:16px;border-radius:12px; }
+    .input { background:#0f172a;border:1px solid #334155;color:#f1f5f9;
+             border-radius:8px;padding:10px 12px;width:100%;font-size:15px; }
+    .input:focus { outline:none;border-color:#3b82f6; }
+    .tag-ok      { background:#166534;color:#86efac;border-radius:6px;padding:2px 8px;font-size:12px; }
+    .tag-warn    { background:#854d0e;color:#fde68a;border-radius:6px;padding:2px 8px;font-size:12px; }
+    .tag-danger  { background:#7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 8px;font-size:12px; }
+    .tag-blue    { background:#1e3a8a;color:#93c5fd;border-radius:6px;padding:2px 8px;font-size:12px; }
+    .spinner { display:inline-block;width:20px;height:20px;border:2px solid #334155;
+               border-top-color:#3b82f6;border-radius:50%;animation:spin .7s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .slide-up { animation:slideUp .25s ease-out; }
+    @keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:none;opacity:1} }
+    /* Bottom sheet */
+    .sheet-overlay { position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:40;display:none; }
+    .sheet-overlay.open { display:block; }
+    .bottom-sheet { position:fixed;bottom:0;left:0;right:0;background:#1e293b;
+                    border-radius:20px 20px 0 0;z-index:50;padding:16px;
+                    transform:translateY(100%);transition:transform .3s ease;max-height:92vh;overflow-y:auto; }
+    .bottom-sheet.open { transform:none; }
+    /* Modal */
+    .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:60;display:none;
+                     align-items:center;justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:#1e293b;border-radius:16px;padding:20px;width:92%;max-width:420px;
+                 max-height:88vh;overflow-y:auto; }
+    /* Scanner overlay */
+    #scannerModal { position:fixed;inset:0;background:#000;z-index:70;display:none; }
+    #scannerModal.open { display:flex;flex-direction:column; }
+    #scanVideo { width:100%;height:100%;object-fit:cover;flex:1; }
+    /* Modo envasador */
+    .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
+                  border-radius:6px;padding:3px 8px;letter-spacing:.5px; }
+    /* Alertas badge navbar */
+    #navAlertaBadge { position:absolute;top:4px;right:4px; }
+    .nav-item { position:relative; }
+    /* KPI cards */
+    .kpi-card { background:#1e293b;border-radius:12px;padding:14px;text-align:center; }
+    .kpi-num { font-size:28px;font-weight:800;line-height:1; }
+    /* Progress bar */
+    .bar-bg { background:#334155;border-radius:4px;height:6px; }
+    .bar-fill { height:6px;border-radius:4px;transition:width .5s ease; }
+    /* Lista scroll horizontal */
+    .scroll-x { display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;
+                scroll-snap-type:x mandatory; }
+    .scroll-x::-webkit-scrollbar { display:none; }
+    .scroll-x > * { flex-shrink:0;scroll-snap-align:start; }
+  </style>
+</head>
+<body class="pb-20">
+
+<!-- ════════════════════════════════════════════════
+     NAVBAR SUPERIOR
+═══════════════════════════════════════════════════ -->
+<header id="topBar" class="sticky top-0 z-30 flex items-center justify-between px-4 py-3"
+        style="background:#0f172a;border-bottom:1px solid #1e293b;">
+  <div class="flex items-center gap-2">
+    <span id="modoIndicador" class="hidden modo-badge">ENVASADOR</span>
+    <h1 id="pageTitle" class="font-bold text-base text-white">Dashboard</h1>
+  </div>
+  <div class="flex items-center gap-3">
+    <span id="userLabel" class="text-xs text-slate-400 cursor-pointer" onclick="App.showUsuarioDialog()">
+      👤 <span id="usuarioNombre">operador</span>
+    </span>
+    <button onclick="App.toggleModoEnvasador()" id="btnModo"
+            class="text-xs btn btn-outline py-1 px-2">⚡ Modo</button>
+  </div>
+</header>
+
+<!-- ════════════════════════════════════════════════
+     VIEWS
+═══════════════════════════════════════════════════ -->
+<main id="mainContent" class="px-3 pt-3">
+
+  <!-- ── DASHBOARD ─────────────────────────────── -->
+  <section id="view-dashboard" class="view active slide-up">
+    <div id="alertasBanner" class="hidden mb-3"></div>
+
+    <!-- KPIs row -->
+    <div class="grid grid-cols-2 gap-2 mb-4" id="kpiGrid">
+      <div class="kpi-card">
+        <div class="kpi-num text-blue-400" id="kpiCriticos">—</div>
+        <div class="text-xs text-slate-400 mt-1">Alertas críticas</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-num text-amber-400" id="kpiVencimientos">—</div>
+        <div class="text-xs text-slate-400 mt-1">Vencen &lt;30 días</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-num text-emerald-400" id="kpiEficiencia">—</div>
+        <div class="text-xs text-slate-400 mt-1">Eficiencia envasado</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-num text-rose-400" id="kpiMermas">—</div>
+        <div class="text-xs text-slate-400 mt-1">Mermas este mes</div>
+      </div>
+    </div>
+
+    <!-- Alertas vencimiento crítico -->
+    <div id="secVencCrit" class="hidden mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-red-400">🚨 Vencimiento crítico</span>
+        <span id="cntVencCrit" class="badge bg-red-600 text-white"></span>
+      </div>
+      <div id="listVencCrit" class="space-y-2"></div>
+    </div>
+
+    <!-- Pendientes de envasado -->
+    <div id="secPendEnv" class="hidden mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-amber-400">📦 Pendiente envasar</span>
+        <span id="cntPendEnv" class="badge bg-amber-600 text-white"></span>
+      </div>
+      <div id="listPendEnv" class="space-y-2"></div>
+    </div>
+
+    <!-- Stock bajo -->
+    <div id="secStockBajo" class="hidden mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-sm font-bold text-orange-400">📉 Stock bajo mínimo</span>
+        <span id="cntStockBajo" class="badge bg-orange-700 text-white"></span>
+      </div>
+      <div id="listStockBajo" class="space-y-2"></div>
+    </div>
+
+    <!-- Accesos rápidos -->
+    <div class="mb-4">
+      <p class="text-xs text-slate-400 mb-2 uppercase tracking-wider">Acceso rápido</p>
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="App.nav('guias')"       class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">📋</span>Guías
+        </button>
+        <button onclick="App.nav('envasados')"   class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">📦</span>Envasado
+        </button>
+        <button onclick="App.nav('preingresos')" class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">🚚</span>Preingreso
+        </button>
+        <button onclick="App.nav('mermas')"      class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">⚠️</span>Mermas
+        </button>
+        <button onclick="App.nav('auditorias')"  class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">🔍</span>Auditoría
+        </button>
+        <button onclick="App.nav('productos')"   class="card-sm flex flex-col items-center gap-1 text-xs text-slate-300">
+          <span class="text-2xl">🏷️</span>Productos
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── MODO ENVASADOR ────────────────────────── -->
+  <section id="view-envasador" class="view slide-up">
+    <div class="mb-3 flex items-center gap-2">
+      <span class="modo-badge">⚡ MODO ENVASADOR</span>
+      <span class="text-xs text-slate-400">Productos urgentes</span>
+    </div>
+
+    <!-- Lista de pendientes urgentes -->
+    <div id="listEnvasadorUrgentes" class="space-y-3 mb-4">
+      <div class="flex justify-center py-8"><div class="spinner"></div></div>
+    </div>
+  </section>
+
+  <!-- ── GUIAS ──────────────────────────────────── -->
+  <section id="view-guias" class="view slide-up">
+    <div class="flex gap-2 mb-3 overflow-x-auto pb-1">
+      <button onclick="GuiasView.filtrar('')"      class="btn btn-outline text-xs py-1 guia-tab active-tab">Todas</button>
+      <button onclick="GuiasView.filtrar('INGRESO')" class="btn btn-outline text-xs py-1 guia-tab">Ingresos</button>
+      <button onclick="GuiasView.filtrar('SALIDA')"  class="btn btn-outline text-xs py-1 guia-tab">Salidas</button>
+      <button onclick="GuiasView.filtrar('ABIERTA')" class="btn btn-outline text-xs py-1 guia-tab">Abiertas</button>
+    </div>
+    <div id="listGuias" class="space-y-2"></div>
+    <button onclick="GuiasView.nueva()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── ENVASADOS ──────────────────────────────── -->
+  <section id="view-envasados" class="view slide-up">
+    <div id="listEnvasados" class="space-y-2"></div>
+    <button onclick="EnvasadosView.nuevo()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── PREINGRESOS ────────────────────────────── -->
+  <section id="view-preingresos" class="view slide-up">
+    <div class="flex gap-2 mb-3">
+      <button onclick="PreingresosView.filtrar('PENDIENTE')" class="btn btn-outline text-xs py-1">Pendientes</button>
+      <button onclick="PreingresosView.filtrar('')"          class="btn btn-outline text-xs py-1">Todos</button>
+    </div>
+    <div id="listPreingresos" class="space-y-2"></div>
+    <button onclick="PreingresosView.nuevo()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── MERMAS ────────────────────────────────── -->
+  <section id="view-mermas" class="view slide-up">
+    <div id="listMermas" class="space-y-2"></div>
+    <button onclick="MermasView.nueva()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-red-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── AUDITORIAS ────────────────────────────── -->
+  <section id="view-auditorias" class="view slide-up">
+    <div class="flex gap-2 mb-3">
+      <button onclick="AuditoriasView.filtrar('ASIGNADA')" class="btn btn-outline text-xs py-1">Pendientes</button>
+      <button onclick="AuditoriasView.filtrar('')"         class="btn btn-outline text-xs py-1">Todas</button>
+    </div>
+    <div id="listAuditorias" class="space-y-2"></div>
+    <button onclick="AuditoriasView.nueva()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── PRODUCTOS ─────────────────────────────── -->
+  <section id="view-productos" class="view slide-up">
+    <div class="flex gap-2 mb-3">
+      <input id="inputBuscarProd" type="text" placeholder="🔍 Buscar producto o código..."
+             class="input flex-1" oninput="ProductosView.buscar(this.value)"/>
+      <button onclick="Scanner.start('scanVideo', c => ProductosView.buscar(c)); abrirScanner()"
+              class="btn btn-outline px-3">📷</button>
+    </div>
+    <div id="listProductos" class="space-y-2"></div>
+  </section>
+
+  <!-- ── PROVEEDORES ───────────────────────────── -->
+  <section id="view-proveedores" class="view slide-up">
+    <div id="listProveedores" class="space-y-2"></div>
+    <button onclick="ProveedoresView.nuevo()"
+            class="fixed bottom-24 right-4 w-14 h-14 bg-blue-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
+      +
+    </button>
+  </section>
+
+  <!-- ── AJUSTES / CONFIG ─────────────────────── -->
+  <section id="view-config" class="view slide-up">
+    <div class="card mb-4">
+      <p class="font-semibold mb-3">⚙️ Configuración</p>
+      <div class="space-y-3">
+        <div>
+          <label class="text-xs text-slate-400">URL del Web App GAS</label>
+          <input id="cfgGasUrl" class="input mt-1" type="url" placeholder="https://script.google.com/..."/>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">PrintNode API Key</label>
+          <input id="cfgPrintKey" class="input mt-1" type="text" placeholder="sk_live_..."/>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">PrintNode Printer ID</label>
+          <input id="cfgPrintId" class="input mt-1" type="text" placeholder="12345"/>
+        </div>
+        <div>
+          <label class="text-xs text-slate-400">Días alerta vencimiento</label>
+          <input id="cfgDiasAlerta" class="input mt-1" type="number" value="30"/>
+        </div>
+        <button onclick="ConfigView.guardar()" class="btn btn-primary w-full mt-2">Guardar configuración</button>
+      </div>
+    </div>
+    <div class="card">
+      <p class="font-semibold mb-2">👤 Usuario activo</p>
+      <input id="cfgUsuario" class="input mb-2" type="text" placeholder="Nombre del operador"/>
+      <button onclick="ConfigView.guardarUsuario()" class="btn btn-outline w-full">Cambiar usuario</button>
+    </div>
+  </section>
+
+</main>
+
+<!-- ════════════════════════════════════════════════
+     NAVBAR INFERIOR
+═══════════════════════════════════════════════════ -->
+<nav class="fixed bottom-0 left-0 right-0 flex border-t z-30"
+     style="background:#0f172a;border-color:#1e293b;">
+  <button onclick="App.nav('dashboard')"   class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400 active nav-item">
+    <span class="text-xl">🏠</span>Inicio
+    <span id="navAlertaBadge" class="badge bg-red-600 text-white hidden"></span>
+  </button>
+  <button onclick="App.nav('guias')"       class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
+    <span class="text-xl">📋</span>Guías
+  </button>
+  <button onclick="App.nav('envasados')"   class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
+    <span class="text-xl">📦</span>Envasar
+  </button>
+  <button onclick="App.nav('productos')"   class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
+    <span class="text-xl">🏷️</span>Stock
+  </button>
+  <button onclick="App.nav('config')"      class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
+    <span class="text-xl">⚙️</span>Config
+  </button>
+</nav>
+
+<!-- ════════════════════════════════════════════════
+     SCANNER OVERLAY
+═══════════════════════════════════════════════════ -->
+<div id="scannerModal">
+  <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.8)">
+    <span class="text-white font-bold">📷 Escanear código</span>
+    <button onclick="cerrarScanner()" class="text-white text-2xl leading-none">✕</button>
+  </div>
+  <video id="scanVideo" playsinline autoplay muted></video>
+  <div class="flex items-center justify-center px-4 py-3" style="background:rgba(0,0,0,.8)">
+    <span class="text-slate-300 text-sm">Apunta la cámara al código de barras</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: NUEVA GUIA
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayGuia" onclick="cerrarSheet('sheetGuia')"></div>
+<div class="bottom-sheet" id="sheetGuia">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <p class="font-bold text-base mb-4">📋 Nueva Guía</p>
+  <div class="space-y-3">
+    <div>
+      <label class="text-xs text-slate-400">Tipo de guía</label>
+      <select id="guiaTipo" class="input mt-1">
+        <option value="INGRESO_PROVEEDOR">Ingreso – Proveedor</option>
+        <option value="INGRESO_JEFATURA">Ingreso – Jefatura</option>
+        <option value="SALIDA_ZONA">Salida – Zona</option>
+        <option value="SALIDA_DEVOLUCION">Salida – Devolución proveedor</option>
+        <option value="SALIDA_JEFATURA">Salida – Jefatura</option>
+        <option value="SALIDA_MERMA">Salida – Merma</option>
+      </select>
+    </div>
+    <div id="guiaProvRow">
+      <label class="text-xs text-slate-400">Proveedor</label>
+      <select id="guiaProveedor" class="input mt-1"><option value="">— Sin proveedor —</option></select>
+    </div>
+    <div id="guiaZonaRow" class="hidden">
+      <label class="text-xs text-slate-400">Zona destino</label>
+      <select id="guiaZona" class="input mt-1">
+        <option value="">— Seleccionar —</option>
+        <option value="Z001">Zona Norte</option>
+        <option value="Z002">Zona Sur</option>
+        <option value="Z003">Zona Centro</option>
+        <option value="Z004">Zona Este</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Nº Documento (guía remisión / factura)</label>
+      <input id="guiaNumDoc" class="input mt-1" type="text" placeholder="GR-2024-000"/>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Comentario</label>
+      <input id="guiaComentario" class="input mt-1" type="text"/>
+    </div>
+    <button onclick="GuiasView.crearGuia()" class="btn btn-primary btn-lg w-full">Crear guía</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: NUEVO ENVASADO
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayEnvasado" onclick="cerrarSheet('sheetEnvasado')"></div>
+<div class="bottom-sheet" id="sheetEnvasado">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <p class="font-bold text-base mb-1">📦 Registrar Envasado</p>
+
+  <!-- Info factor (se llena al seleccionar derivado) -->
+  <div id="envasadoFactorInfo" class="hidden card-sm mb-3 text-sm space-y-1">
+    <div class="flex justify-between">
+      <span class="text-slate-400">Factor conversión:</span>
+      <span id="envFactor" class="font-bold text-blue-400"></span>
+    </div>
+    <div class="flex justify-between">
+      <span class="text-slate-400">Merma esperada:</span>
+      <span id="envMerma" class="text-amber-400"></span>
+    </div>
+    <div class="flex justify-between">
+      <span class="text-slate-400">Stock base disp.:</span>
+      <span id="envStockBase" class="text-emerald-400"></span>
+    </div>
+    <div class="flex justify-between font-semibold">
+      <span class="text-slate-300">Máx. producibles:</span>
+      <span id="envMaxProd" class="text-white"></span>
+    </div>
+  </div>
+
+  <div class="space-y-3">
+    <div>
+      <label class="text-xs text-slate-400">Producto a envasar (derivado)</label>
+      <select id="envProductoDerivado" class="input mt-1" onchange="EnvasadosView.onDerivadoChange(this.value)">
+        <option value="">— Seleccionar —</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Cantidad base usada (<span id="envUnidadBase">unidades</span>)</label>
+      <input id="envCantBase" class="input mt-1" type="number" step="0.5" min="0.5"
+             oninput="EnvasadosView.calcularProyeccion()"/>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Unidades producidas (real)</label>
+      <!-- Selector rápido + manual -->
+      <div class="flex gap-2 mt-1">
+        <button onclick="EnvasadosView.ajustarUnidades(-10)" class="btn btn-outline px-3 text-lg font-bold">−</button>
+        <input id="envUnidades" class="input text-center font-bold text-lg flex-1" type="number" min="1" value="0"/>
+        <button onclick="EnvasadosView.ajustarUnidades(+10)" class="btn btn-outline px-3 text-lg font-bold">+</button>
+      </div>
+      <div class="flex gap-2 mt-2 overflow-x-auto">
+        <button onclick="EnvasadosView.setUnidades(10)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">10</button>
+        <button onclick="EnvasadosView.setUnidades(25)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">25</button>
+        <button onclick="EnvasadosView.setUnidades(50)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">50</button>
+        <button onclick="EnvasadosView.setUnidades(100)" class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">100</button>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Fecha de vencimiento (del producto envasado)</label>
+      <input id="envFechaVenc" class="input mt-1" type="date"/>
+    </div>
+    <div class="flex items-center gap-2">
+      <input id="envImprimirEtiq" type="checkbox" checked class="w-4 h-4"/>
+      <label class="text-sm text-slate-300">Imprimir etiquetas adhesivas al guardar</label>
+    </div>
+    <div id="envResumen" class="hidden card-sm text-sm space-y-1 border border-blue-900">
+      <p class="font-semibold text-blue-300">Resumen del lote</p>
+      <div class="flex justify-between"><span class="text-slate-400">Esperadas:</span><span id="rEsperadas">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-400">Producidas:</span><span id="rProducidas">—</span></div>
+      <div class="flex justify-between"><span class="text-slate-400">Merma real:</span><span id="rMerma">—</span></div>
+      <div class="flex justify-between font-bold"><span class="text-slate-300">Eficiencia:</span><span id="rEficiencia">—</span></div>
+    </div>
+    <button id="btnRegistrarEnvasado" onclick="EnvasadosView.registrar()"
+            class="btn btn-primary btn-lg w-full">
+      📦 Registrar + Imprimir etiquetas
+    </button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: NUEVO PREINGRESO
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayPreingreso" onclick="cerrarSheet('sheetPreingreso')"></div>
+<div class="bottom-sheet" id="sheetPreingreso">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <p class="font-bold text-base mb-4">🚚 Nuevo Preingreso</p>
+  <div class="space-y-3">
+    <div>
+      <label class="text-xs text-slate-400">Proveedor</label>
+      <select id="preProvSelect" class="input mt-1"><option value="">— Seleccionar —</option></select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Nº Factura / Comprobante</label>
+      <input id="preNumFact" class="input mt-1" type="text" placeholder="FAC-001-00000"/>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Monto (S/.)</label>
+      <input id="preMonto" class="input mt-1" type="number" step="0.01" placeholder="0.00"/>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Comentario / Etiqueta</label>
+      <input id="preComentario" class="input mt-1" type="text"/>
+    </div>
+    <button onclick="PreingresosView.crear()" class="btn btn-primary btn-lg w-full">Registrar preingreso</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: NUEVA MERMA
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayMerma" onclick="cerrarSheet('sheetMerma')"></div>
+<div class="bottom-sheet" id="sheetMerma">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <p class="font-bold text-base mb-4">⚠️ Registrar Merma</p>
+  <div class="space-y-3">
+    <div>
+      <label class="text-xs text-slate-400">Producto</label>
+      <div class="flex gap-2 mt-1">
+        <input id="mermaCodigoProd" class="input flex-1" type="text" placeholder="Escanear o escribir código"/>
+        <button onclick="abrirScannerPara('mermaCodigoProd')" class="btn btn-outline px-3">📷</button>
+      </div>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Origen</label>
+      <select id="mermaOrigen" class="input mt-1">
+        <option value="RECEPCION">Recepción</option>
+        <option value="ALMACEN">Almacén</option>
+        <option value="VENCIMIENTO">Vencimiento</option>
+        <option value="ENVASADO">Envasado</option>
+        <option value="TRANSPORTE">Transporte</option>
+      </select>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Cantidad</label>
+      <input id="mermaCantidad" class="input mt-1" type="number" step="0.01" min="0"/>
+    </div>
+    <div>
+      <label class="text-xs text-slate-400">Motivo</label>
+      <input id="mermaMotivo" class="input mt-1" type="text"/>
+    </div>
+    <div class="flex items-center gap-2">
+      <input id="mermaDescontar" type="checkbox" checked class="w-4 h-4"/>
+      <label class="text-sm text-slate-300">Descontar del stock ahora</label>
+    </div>
+    <button onclick="MermasView.crear()" class="btn btn-danger btn-lg w-full">Registrar merma</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     MODAL: AUDITORÍA EJECUTAR
+═══════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalAuditoria">
+  <div class="modal-box">
+    <p class="font-bold text-base mb-1">🔍 Ejecutar Auditoría</p>
+    <p class="text-xs text-slate-400 mb-3" id="audModalSubtitle"></p>
+    <div class="space-y-3">
+      <div class="flex justify-between text-sm">
+        <span class="text-slate-400">Stock sistema:</span>
+        <span id="audStockSis" class="font-bold text-blue-400"></span>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">Conteo físico real</label>
+        <input id="audConteoFisico" class="input mt-1 text-xl font-bold text-center" type="number" step="0.5"/>
+      </div>
+      <div id="audDiferenciaInfo" class="hidden card-sm text-sm">
+        <div class="flex justify-between">
+          <span class="text-slate-400">Diferencia:</span>
+          <span id="audDifValor" class="font-bold"></span>
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400">Observación</label>
+        <input id="audObservacion" class="input mt-1" type="text"/>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="cerrarModal('modalAuditoria')" class="btn btn-outline flex-1">Cancelar</button>
+        <button onclick="AuditoriasView.ejecutar()" class="btn btn-primary flex-1">Confirmar conteo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     TOAST
+═══════════════════════════════════════════════════ -->
+<div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm font-semibold shadow-xl
+     transition-all duration-300 pointer-events-none opacity-0"
+     style="min-width:200px;text-align:center;max-width:320px;"></div>
+
+<!-- ════════════════════════════════════════════════
+     SCRIPTS
+═══════════════════════════════════════════════════ -->
+<script src="js/api.js"></script>
+<script src="js/scanner.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
