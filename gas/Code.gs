@@ -101,12 +101,19 @@ function _route(method, e) {
       // ── Lotes ──────────────────────────────────────────────
       case 'getLotesVencimiento': return getLotesVencimiento(params);
 
-      // ── Config ─────────────────────────────────────────────
+      // ── Config (solo lectura desde frontend) ───────────────
       case 'getConfig':          return getConfigAll();
-      case 'setConfig':          return setConfigValue(params.clave, params.valor);
 
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':   return imprimirEtiqueta(params);
+
+      // ── Personal ───────────────────────────────────────────
+      case 'loginPersonal':      return loginPersonal(params);
+      case 'cerrarTurno':        return cerrarTurno(params);
+      case 'getPersonal':        return getPersonal(params);
+      case 'getSesionActiva':    return getSesionActiva(params);
+      case 'getDesempenoDia':    return getDesempenoDia(params);
+      case 'getResumenPersonal': return getResumenPersonal(params);
 
       default:
         return { ok: false, error: 'Acción no reconocida: ' + action };

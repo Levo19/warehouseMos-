@@ -19,7 +19,10 @@ var SHEET_NAMES = {
   AJUSTES:           'AJUSTES',
   ENVASADOS:         'ENVASADOS',
   PRODUCTO_NUEVO:    'PRODUCTO_NUEVO',
-  ZONAS:             'ZONAS'
+  ZONAS:             'ZONAS',
+  PERSONAL:          'PERSONAL',
+  SESIONES:          'SESIONES',
+  DESEMPENO:         'DESEMPENO'
 };
 
 var HEADERS = {
@@ -55,7 +58,20 @@ var HEADERS = {
   PRODUCTO_NUEVO:    ['idProductoNuevo','idGuia','marca','descripcion','codigoBarra',
                       'idCategoria','unidad','cantidad','fechaVencimiento','foto',
                       'estado','usuario','fechaRegistro','aprobadoPor','fechaAprobacion'],
-  ZONAS:             ['idZona','nombre','descripcion','responsable','estado']
+  ZONAS:             ['idZona','nombre','descripcion','responsable','estado'],
+  PERSONAL:          ['idPersonal','nombre','apellido','pin','rol','tarifaHora',
+                      'montoBase','estado','fechaIngreso','foto','color'],
+  SESIONES:          ['idSesion','idPersonal','fechaInicio','horaInicio','fechaFin',
+                      'horaFin','minutosActivos','estado'],
+  DESEMPENO:         ['idDesempeno','idPersonal','idSesion','fecha',
+                      'minutosActivos','horasTrabajadas',
+                      'guiasCreadas','guiasCerradas',
+                      'envasadosRegistrados','unidadesEnvasadas',
+                      'mermasRegistradas','auditoriaEjecutadas',
+                      'preingresoCreados','ajustesRealizados',
+                      'totalActividades','actividadesPorHora',
+                      'puntuacion','calificacion',
+                      'montoBase','montoBonus','montoTotal','estado']
 };
 
 // ============================================================
@@ -65,8 +81,13 @@ function setupWarehouse() {
   var ss = SpreadsheetApp.create('warehouseMos_DB');
   var ssId = ss.getId();
 
-  // Guardar ID en propiedades del script
-  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ssId);
+  // Guardar propiedades del script
+  PropertiesService.getScriptProperties().setProperties({
+    'SPREADSHEET_ID':      ssId,
+    'PRINTNODE_API_KEY':   '',   // ← Ingresar en Project Settings > Script Properties
+    'PRINTER_ETIQUETAS_ID':'',   // ← ID impresora etiquetas adhesivas (código de barras)
+    'PRINTER_TICKETS_ID':  ''    // ← ID impresora tickets/reportes
+  });
 
   Logger.log('Spreadsheet creado: ' + ssId);
   Logger.log('URL: ' + ss.getUrl());
@@ -88,11 +109,14 @@ function setupWarehouse() {
   _seedAuditorias(ss);
   _seedEnvasados(ss);
   _seedConfig(ss);
+  _seedPersonal(ss);
 
   // Formatear cabeceras
   _formatearCabeceras(ss);
 
-  Logger.log('✅ Setup completado. Copia el SPREADSHEET_ID en Code.gs: ' + ssId);
+  Logger.log('✅ Setup completado. ID: ' + ssId);
+  Logger.log('⚠️  Ir a Project Settings > Script Properties para ingresar:');
+  Logger.log('   PRINTNODE_API_KEY, PRINTER_ETIQUETAS_ID, PRINTER_TICKETS_ID');
 
   return ssId;
 }
@@ -438,4 +462,31 @@ function _seedEnvasados(ss) {
     ['ENV003','P002',3,'KG','P202',5.82,6,0,103.0,hoy,'envasador1','COMPLETADO','G007','','Sobraron 30g de otro lote']
   ];
   sheet.getRange(2, 1, rows.length, HEADERS.ENVASADOS.length).setValues(rows);
+}
+
+// ============================================================
+// SEED — PERSONAL + CONFIG adicional
+// ============================================================
+function _seedPersonal(ss) {
+  // PERSONAL — 3 operadores de almacén
+  var sheetP = ss.getSheetByName(SHEET_NAMES.PERSONAL);
+  var hoy = new Date();
+  // idPersonal | nombre | apellido | pin | rol | tarifaHora | montoBase | estado | fechaIngreso | foto | color
+  var personal = [
+    ['OP001','Carlos','Ramos','1234','ALMACENERO',5.00,1200,'1',hoy,'','#3b82f6'],
+    ['OP002','Ana','Torres','5678','ENVASADOR', 4.50,1100,'1',hoy,'','#22c55e'],
+    ['OP003','Luis','Medina','9012','ALMACENERO',5.00,1200,'1',hoy,'','#f59e0b']
+  ];
+  sheetP.getRange(2, 1, personal.length, HEADERS.PERSONAL.length).setValues(personal);
+
+  // Agregar config adicional en CONFIG
+  var sheetC = ss.getSheetByName(SHEET_NAMES.CONFIG);
+  var extraConfig = [
+    ['HORA_CIERRE_FORZADO', '22:00', 'Hora de cierre automático de turno (HH:MM)'],
+    ['MIN_INACTIVIDAD_BLOQUEO', '5',  'Minutos sin actividad para bloquear pantalla'],
+    ['BONUS_PUNTUACION_MIN',   '8',   'Puntuación mínima para bonus (actividades/hora)'],
+    ['BONUS_PORCENTAJE',       '10',  'Porcentaje de bonus sobre monto base al superar meta']
+  ];
+  var lastRow = sheetC.getLastRow();
+  sheetC.getRange(lastRow + 1, 1, extraConfig.length, 3).setValues(extraConfig);
 }

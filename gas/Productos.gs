@@ -266,6 +266,8 @@ function registrarMerma(params) {
   var id    = _generateId('M');
   var cant  = parseFloat(params.cantidadOriginal) || 0;
 
+  if (params.idSesion) registrarActividad(params.idSesion, 'MERMA_REGISTRADA', 1);
+
   sheet.appendRow([
     id,
     new Date(),
@@ -343,7 +345,7 @@ function ejecutarAuditoria(params) {
       sheet.getRange(i + 1, hdrs.indexOf('observacion')    + 1).setValue(params.observacion || '');
       sheet.getRange(i + 1, hdrs.indexOf('estado')         + 1).setValue('EJECUTADA');
       sheet.getRange(i + 1, hdrs.indexOf('fechaEjecucion') + 1).setValue(new Date());
-
+      if (params.idSesion) registrarActividad(params.idSesion, 'AUDITORIA_EJECUTADA', 1);
       return { ok: true, data: { idAuditoria: params.idAuditoria, diferencia: diff, resultado: resultado } };
     }
   }

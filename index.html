@@ -99,6 +99,13 @@
                 scroll-snap-type:x mandatory; }
     .scroll-x::-webkit-scrollbar { display:none; }
     .scroll-x > * { flex-shrink:0;scroll-snap-align:start; }
+    /* PIN teclado */
+    .pin-btn { background:#1e293b;color:#f1f5f9;font-size:22px;font-weight:700;
+               border-radius:12px;padding:18px 0;border:none;cursor:pointer;
+               transition:background .1s;width:100%; }
+    .pin-btn:active { background:#334155; }
+    /* Pantallas full z-index */
+    .z-80 { z-index:80; }
   </style>
 </head>
 <body class="pb-20">
@@ -113,8 +120,9 @@
     <h1 id="pageTitle" class="font-bold text-base text-white">Dashboard</h1>
   </div>
   <div class="flex items-center gap-3">
-    <span id="userLabel" class="text-xs text-slate-400 cursor-pointer" onclick="App.showUsuarioDialog()">
-      👤 <span id="usuarioNombre">operador</span>
+    <span id="userLabel" class="text-xs text-slate-400 flex items-center gap-1 cursor-pointer"
+          onclick="Session.bloquear()">
+      👤 <span id="usuarioNombre"></span>
     </span>
     <button onclick="App.toggleModoEnvasador()" id="btnModo"
             class="text-xs btn btn-outline py-1 px-2">⚡ Modo</button>
@@ -346,8 +354,8 @@
   <button onclick="App.nav('productos')"   class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
     <span class="text-xl">🏷️</span>Stock
   </button>
-  <button onclick="App.nav('config')"      class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-slate-400">
-    <span class="text-xl">⚙️</span>Config
+  <button onclick="Session.confirmarCierre()" class="nav-btn flex-1 flex flex-col items-center py-2 text-xs text-red-400">
+    <span class="text-xl">🔴</span>Cerrar
   </button>
 </nav>
 
@@ -587,6 +595,154 @@
         <button onclick="AuditoriasView.ejecutar()" class="btn btn-primary flex-1">Confirmar conteo</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     PANTALLA LOGIN
+═══════════════════════════════════════════════════ -->
+<div id="loginScreen" class="fixed inset-0 z-80 flex flex-col"
+     style="background:#0f172a;display:none;">
+
+  <!-- Header login -->
+  <div class="flex flex-col items-center pt-10 pb-6 px-4">
+    <div class="text-5xl mb-3">🏭</div>
+    <h1 class="text-2xl font-black text-white tracking-tight">warehouseMos</h1>
+    <p class="text-slate-400 text-sm mt-1">InversionMos — Almacén Central</p>
+  </div>
+
+  <!-- Paso 1: seleccionar operador -->
+  <div id="loginPaso1" class="flex-1 px-4">
+    <p class="text-xs text-slate-400 uppercase tracking-wider mb-3 text-center">¿Quién eres?</p>
+    <div id="loginOperadores" class="space-y-3"></div>
+  </div>
+
+  <!-- Paso 2: PIN -->
+  <div id="loginPaso2" class="hidden flex-1 px-4 flex flex-col">
+    <div id="loginNombreDisplay" class="flex items-center gap-3 mb-6 px-2">
+      <div id="loginAvatar" class="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-lg"></div>
+      <div>
+        <p class="font-bold text-white text-lg" id="loginNombreText"></p>
+        <p class="text-xs text-slate-400" id="loginRolText"></p>
+      </div>
+    </div>
+    <p class="text-xs text-slate-400 uppercase tracking-wider mb-3 text-center">Ingresa tu PIN</p>
+
+    <!-- Puntos PIN -->
+    <div class="flex justify-center gap-4 mb-6">
+      <div id="pin0" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+      <div id="pin1" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+      <div id="pin2" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+      <div id="pin3" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+    </div>
+
+    <!-- Teclado PIN -->
+    <div class="grid grid-cols-3 gap-3 px-4">
+      <button onclick="Session.pinTecla('1')" class="pin-btn">1</button>
+      <button onclick="Session.pinTecla('2')" class="pin-btn">2</button>
+      <button onclick="Session.pinTecla('3')" class="pin-btn">3</button>
+      <button onclick="Session.pinTecla('4')" class="pin-btn">4</button>
+      <button onclick="Session.pinTecla('5')" class="pin-btn">5</button>
+      <button onclick="Session.pinTecla('6')" class="pin-btn">6</button>
+      <button onclick="Session.pinTecla('7')" class="pin-btn">7</button>
+      <button onclick="Session.pinTecla('8')" class="pin-btn">8</button>
+      <button onclick="Session.pinTecla('9')" class="pin-btn">9</button>
+      <button onclick="Session.pinAtras()"    class="pin-btn text-slate-400 text-lg">⌫</button>
+      <button onclick="Session.pinTecla('0')" class="pin-btn">0</button>
+      <button onclick="Session.pinAtras(true)" class="pin-btn text-slate-400 text-sm">← volver</button>
+    </div>
+    <p id="loginError" class="text-red-400 text-center text-sm mt-4 h-5"></p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     PANTALLA BLOQUEO
+═══════════════════════════════════════════════════ -->
+<div id="lockScreen" class="fixed inset-0 z-80 flex flex-col items-center justify-center"
+     style="background:rgba(10,14,23,0.97);display:none;">
+  <div id="lockAvatar" class="w-20 h-20 rounded-full flex items-center justify-center text-white font-black text-3xl mb-3"></div>
+  <p class="text-white font-bold text-xl mb-1" id="lockNombre"></p>
+  <p class="text-slate-400 text-sm mb-1">Pantalla bloqueada</p>
+  <p class="text-slate-500 text-xs mb-8" id="lockTiempo"></p>
+
+  <div class="flex justify-center gap-4 mb-5">
+    <div id="lpin0" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+    <div id="lpin1" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+    <div id="lpin2" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+    <div id="lpin3" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+  </div>
+  <div class="grid grid-cols-3 gap-3 px-10 w-full max-w-xs">
+    <button onclick="Session.lockTecla('1')" class="pin-btn">1</button>
+    <button onclick="Session.lockTecla('2')" class="pin-btn">2</button>
+    <button onclick="Session.lockTecla('3')" class="pin-btn">3</button>
+    <button onclick="Session.lockTecla('4')" class="pin-btn">4</button>
+    <button onclick="Session.lockTecla('5')" class="pin-btn">5</button>
+    <button onclick="Session.lockTecla('6')" class="pin-btn">6</button>
+    <button onclick="Session.lockTecla('7')" class="pin-btn">7</button>
+    <button onclick="Session.lockTecla('8')" class="pin-btn">8</button>
+    <button onclick="Session.lockTecla('9')" class="pin-btn">9</button>
+    <button onclick="Session.lockAtras()"    class="pin-btn text-slate-400">⌫</button>
+    <button onclick="Session.lockTecla('0')" class="pin-btn">0</button>
+    <div></div>
+  </div>
+  <p id="lockError" class="text-red-400 text-sm mt-4 h-5"></p>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     MODAL REPORTE DE TURNO (al cerrar)
+═══════════════════════════════════════════════════ -->
+<div id="reporteTurnoOverlay" class="fixed inset-0 z-80 flex flex-col"
+     style="background:#0f172a;display:none;overflow-y:auto;">
+  <div class="px-4 pt-8 pb-24">
+    <!-- Header -->
+    <div id="reporteHeader" class="flex items-center gap-4 mb-6">
+      <div id="reporteAvatar" class="w-16 h-16 rounded-full flex items-center justify-center text-white font-black text-2xl flex-shrink-0"></div>
+      <div>
+        <p class="text-white font-black text-xl" id="reporteNombre"></p>
+        <p class="text-slate-400 text-sm" id="reporteRol"></p>
+        <p class="text-slate-500 text-xs" id="reporteFecha"></p>
+      </div>
+    </div>
+
+    <!-- Calificación grande -->
+    <div id="reporteCalif" class="card text-center mb-4 py-6">
+      <div class="text-6xl font-black mb-1" id="reportePuntos"></div>
+      <div class="text-xl font-bold mb-1" id="reporteCalifTexto"></div>
+      <div class="text-slate-400 text-sm" id="reporteHoras"></div>
+    </div>
+
+    <!-- Métricas grid -->
+    <div class="grid grid-cols-2 gap-2 mb-4">
+      <div class="kpi-card"><div class="kpi-num text-blue-400" id="rGuias">—</div><div class="text-xs text-slate-400 mt-1">Guías creadas</div></div>
+      <div class="kpi-card"><div class="kpi-num text-emerald-400" id="rEnvasados">—</div><div class="text-xs text-slate-400 mt-1">Lotes envasados</div></div>
+      <div class="kpi-card"><div class="kpi-num text-purple-400" id="rUnidades">—</div><div class="text-xs text-slate-400 mt-1">Unidades envasadas</div></div>
+      <div class="kpi-card"><div class="kpi-num text-amber-400" id="rMermas">—</div><div class="text-xs text-slate-400 mt-1">Mermas registradas</div></div>
+      <div class="kpi-card"><div class="kpi-num text-cyan-400" id="rAuditorias">—</div><div class="text-xs text-slate-400 mt-1">Auditorías</div></div>
+      <div class="kpi-card"><div class="kpi-num text-rose-400" id="rTotal">—</div><div class="text-xs text-slate-400 mt-1">Total actividades</div></div>
+    </div>
+
+    <!-- Monto -->
+    <div class="card mb-6">
+      <p class="text-xs text-slate-400 mb-3 uppercase tracking-wider">Resumen de pago</p>
+      <div class="flex justify-between text-sm mb-1">
+        <span class="text-slate-400">Monto base</span>
+        <span class="font-mono" id="rMontoBase">—</span>
+      </div>
+      <div class="flex justify-between text-sm mb-2">
+        <span class="text-slate-400">Bonus desempeño</span>
+        <span class="font-mono text-emerald-400" id="rBonus">—</span>
+      </div>
+      <div class="flex justify-between font-black text-lg border-t border-slate-700 pt-2">
+        <span>Total estimado</span>
+        <span class="text-emerald-400" id="rMontoTotal">—</span>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">* Sujeto a confirmación del supervisor</p>
+    </div>
+
+    <button onclick="Session.cerrarTurnoFinal()"
+            class="btn btn-danger btn-lg w-full text-base font-black">
+      ✅ Confirmar cierre de turno
+    </button>
   </div>
 </div>
 

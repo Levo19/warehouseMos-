@@ -21,6 +21,9 @@ const API = (() => {
 
   async function post(params) {
     if (!GAS_URL) return { ok: false, error: 'Sin conexión al servidor' };
+    // Inyectar idSesion automáticamente si hay sesión activa
+    const idSesion = window.WH_CONFIG?.idSesion;
+    if (idSesion && !params.idSesion) params = { ...params, idSesion };
     try {
       const res  = await fetch(GAS_URL, {
         method:  'POST',
@@ -89,11 +92,18 @@ const API = (() => {
     registrarPN:        (p)      => post({ action: 'registrarProductoNuevo', ...p }),
     aprobarPN:          (p)      => post({ action: 'aprobarProductoNuevo', ...p }),
 
-    // Config
+    // Config (solo lectura)
     getConfig:          ()       => call({ action: 'getConfig' }),
-    setConfig:          (k, v)   => post({ action: 'setConfig', clave: k, valor: v }),
 
     // Etiquetas
-    imprimirEtiqueta:   (p)      => post({ action: 'imprimirEtiqueta', ...p })
+    imprimirEtiqueta:   (p)      => post({ action: 'imprimirEtiqueta', ...p }),
+
+    // Personal / Sesiones
+    loginPersonal:      (pin)    => post({ action: 'loginPersonal', pin }),
+    cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
+    getPersonal:        ()       => call({ action: 'getPersonal', estado: '1' }),
+    getSesionActiva:    (id)     => call({ action: 'getSesionActiva', idSesion: id }),
+    getDesempenoDia:    (p={})   => call({ action: 'getDesempenoDia', ...p }),
+    getResumenPersonal: (fecha)  => call({ action: 'getResumenPersonal', fecha: fecha || '' })
   };
 })();

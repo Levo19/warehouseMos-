@@ -48,6 +48,8 @@ function crearGuia(params) {
     return { ok: false, error: 'Tipo de guía inválido: ' + tipo };
   }
 
+  if (params.idSesion) registrarActividad(params.idSesion, 'GUIA_CREADA', 1);
+
   sheet.appendRow([
     idGuia,
     tipo,
@@ -149,6 +151,8 @@ function cerrarGuia(idGuia, usuario) {
       _actualizarLote(d.idLote, d.codigoProducto, cantidad, idGuia);
     }
   });
+
+  if (params && params.idSesion) registrarActividad(params.idSesion, 'GUIA_CERRADA', 1);
 
   // Marcar guía como cerrada
   guiasSheet.getRange(filaGuia, idxEstado + 1).setValue('CERRADA');

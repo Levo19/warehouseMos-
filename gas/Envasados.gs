@@ -143,6 +143,12 @@ function registrarEnvasado(params) {
     params.observacion || ''
   ]);
 
+  // ── Registrar actividad en desempeño ──────────────────────
+  if (params.idSesion) {
+    registrarActividad(params.idSesion, 'ENVASADO_REGISTRADO', 1);
+    registrarActividad(params.idSesion, 'UNIDADES_ENVASADAS', unidadesReales);
+  }
+
   // ── Imprimir etiquetas adhesivas ───────────────────────────
   var resultImpresion = null;
   if (imprimirEtiq) {
@@ -177,9 +183,19 @@ function registrarEnvasado(params) {
 // Impresión de etiquetas adhesivas vía PrintNode (ZPL)
 // Se imprime una etiqueta por unidad producida
 // ============================================================
+function _getPrintNodeProps() {
+  var props = PropertiesService.getScriptProperties();
+  return {
+    apiKey:           props.getProperty('PRINTNODE_API_KEY')    || '',
+    printerEtiquetas: props.getProperty('PRINTER_ETIQUETAS_ID') || '',
+    printerTickets:   props.getProperty('PRINTER_TICKETS_ID')   || ''
+  };
+}
+
 function _imprimirEtiquetasEnvasado(data) {
-  var apiKey    = _getConfigValue('PRINTNODE_API_KEY');
-  var printerId = _getConfigValue('PRINTNODE_PRINTER_ID');
+  var pn        = _getPrintNodeProps();
+  var apiKey    = pn.apiKey;
+  var printerId = pn.printerEtiquetas;
   if (!apiKey || !printerId) {
     return { ok: false, error: 'PrintNode no configurado (PRINTNODE_API_KEY / PRINTNODE_PRINTER_ID)' };
   }

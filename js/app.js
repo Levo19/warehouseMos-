@@ -88,6 +88,332 @@ function diasColor(dias) {
 }
 
 // ════════════════════════════════════════════════
+// SESSION — Login, bloqueo, cierre de turno
+// ════════════════════════════════════════════════
+const Session = (() => {
+  let pinBuffer = '';
+  let lockPinBuffer = '';
+  let operadorSeleccionado = null;
+  let sesionActual = null;
+  let lockTimer = null;
+  let lockInterval = null;
+  let cierreReporte = null;
+  const MIN_INACTIVIDAD = 5; // minutos (se sobreescribe desde config)
+
+  async function init() {
+    // Verificar sesión guardada
+    const saved = _cargarSesion();
+    if (saved) {
+      const res = await API.getSesionActiva(saved.idSesion).catch(() => ({ ok: false }));
+      if (res.ok) {
+        sesionActual = saved;
+        _aplicarSesion();
+        return;
+      } else {
+        _limpiarSesion();
+      }
+    }
+    // Sin sesión → mostrar login
+    await mostrarLogin();
+  }
+
+  async function mostrarLogin() {
+    _ocultarApp();
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('loginPaso1').classList.remove('hidden');
+    document.getElementById('loginPaso2').classList.add('hidden');
+
+    const res = await API.getPersonal().catch(() => ({ ok: false }));
+    const personal = res.ok ? res.data : [];
+    const container = document.getElementById('loginOperadores');
+    container.innerHTML = personal.map(p => `
+      <button onclick="Session.seleccionarOperador('${p.idPersonal}','${p.nombre}','${p.apellido}','${p.rol}','${p.color}')"
+              class="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-700 active:border-blue-500"
+              style="background:#1e293b;">
+        <div class="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-xl flex-shrink-0"
+             style="background:${p.color}">${p.nombre[0]}${p.apellido[0]}</div>
+        <div class="text-left">
+          <p class="text-white font-bold text-lg">${p.nombre} ${p.apellido}</p>
+          <p class="text-slate-400 text-sm">${p.rol}</p>
+        </div>
+        <span class="ml-auto text-slate-500 text-2xl">›</span>
+      </button>`).join('');
+  }
+
+  function seleccionarOperador(id, nombre, apellido, rol, color) {
+    operadorSeleccionado = { idPersonal: id, nombre, apellido, rol, color };
+    pinBuffer = '';
+    _actualizarPuntos('pin', 0);
+    document.getElementById('loginNombreText').textContent = nombre + ' ' + apellido;
+    document.getElementById('loginRolText').textContent = rol;
+    const av = document.getElementById('loginAvatar');
+    av.textContent = nombre[0] + apellido[0];
+    av.style.background = color;
+    document.getElementById('loginError').textContent = '';
+    document.getElementById('loginPaso1').classList.add('hidden');
+    document.getElementById('loginPaso2').classList.remove('hidden');
+  }
+
+  function pinTecla(d) {
+    if (pinBuffer.length >= 4) return;
+    pinBuffer += d;
+    _actualizarPuntos('pin', pinBuffer.length);
+    if (pinBuffer.length === 4) setTimeout(() => _intentarLogin(), 150);
+  }
+
+  function pinAtras(volverPaso1 = false) {
+    if (volverPaso1) {
+      pinBuffer = '';
+      document.getElementById('loginPaso1').classList.remove('hidden');
+      document.getElementById('loginPaso2').classList.add('hidden');
+      return;
+    }
+    if (pinBuffer.length > 0) {
+      pinBuffer = pinBuffer.slice(0, -1);
+      _actualizarPuntos('pin', pinBuffer.length);
+    }
+  }
+
+  async function _intentarLogin() {
+    // El PIN completo del operador ya lo tenemos — enviamos al GAS
+    const res = await API.loginPersonal(pinBuffer);
+    pinBuffer = '';
+    _actualizarPuntos('pin', 0);
+    if (res.ok) {
+      sesionActual = res.data;
+      _guardarSesion(sesionActual);
+      document.getElementById('loginScreen').style.display = 'none';
+      _aplicarSesion();
+      toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 3000);
+    } else {
+      document.getElementById('loginError').textContent = '❌ ' + (res.error || 'PIN incorrecto');
+      setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
+    }
+  }
+
+  function _aplicarSesion() {
+    window.WH_CONFIG.usuario = sesionActual.nombre + ' ' + sesionActual.apellido;
+    window.WH_CONFIG.idSesion = sesionActual.idSesion;
+    document.getElementById('usuarioNombre').textContent = sesionActual.nombre;
+
+    // Color del avatar en topbar
+    const lbl = document.getElementById('userLabel');
+    lbl.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;
+      width:28px;height:28px;border-radius:50%;background:${sesionActual.color};
+      color:#fff;font-weight:800;font-size:12px;">${sesionActual.nombre[0]}${sesionActual.apellido[0]}</span>
+      <span class="ml-1 text-xs text-slate-400">${sesionActual.nombre}</span>`;
+
+    _mostrarApp();
+    _iniciarTimerBloqueo();
+    App.cargarDashboard();
+    App.cargarProductosMaestro();
+    App.cargarProveedoresMaestro();
+  }
+
+  // ── Bloqueo por inactividad ────────────────────────────────
+  function _iniciarTimerBloqueo() {
+    _resetTimerBloqueo();
+    ['touchstart','click','keydown','scroll'].forEach(ev =>
+      document.addEventListener(ev, _resetTimerBloqueo, { passive: true })
+    );
+  }
+
+  function _resetTimerBloqueo() {
+    clearTimeout(lockTimer);
+    const min = parseInt(localStorage.getItem('wh_min_inactividad')) || MIN_INACTIVIDAD;
+    lockTimer = setTimeout(() => bloquear(), min * 60 * 1000);
+  }
+
+  function bloquear() {
+    if (!sesionActual) return;
+    lockPinBuffer = '';
+    _actualizarPuntos('lpin', 0);
+    document.getElementById('lockError').textContent = '';
+
+    const av = document.getElementById('lockAvatar');
+    av.textContent = sesionActual.nombre[0] + sesionActual.apellido[0];
+    av.style.background = sesionActual.color;
+    document.getElementById('lockNombre').textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
+
+    const inicio = parseInt(localStorage.getItem('wh_lock_inicio') || Date.now());
+    localStorage.setItem('wh_lock_inicio', Date.now());
+
+    document.getElementById('lockScreen').style.display = 'flex';
+
+    clearInterval(lockInterval);
+    lockInterval = setInterval(() => {
+      const seg = Math.floor((Date.now() - parseInt(localStorage.getItem('wh_lock_inicio'))) / 1000);
+      const m = Math.floor(seg / 60), s = seg % 60;
+      document.getElementById('lockTiempo').textContent =
+        `Bloqueado hace ${m > 0 ? m + 'm ' : ''}${s}s`;
+    }, 1000);
+  }
+
+  function lockTecla(d) {
+    if (lockPinBuffer.length >= 4) return;
+    lockPinBuffer += d;
+    _actualizarPuntos('lpin', lockPinBuffer.length);
+    if (lockPinBuffer.length === 4) setTimeout(() => _intentarDesbloqueo(), 150);
+  }
+
+  function lockAtras() {
+    if (lockPinBuffer.length > 0) {
+      lockPinBuffer = lockPinBuffer.slice(0, -1);
+      _actualizarPuntos('lpin', lockPinBuffer.length);
+    }
+  }
+
+  async function _intentarDesbloqueo() {
+    // Verificar contra sesión activa
+    const res = await API.loginPersonal(lockPinBuffer);
+    lockPinBuffer = '';
+    _actualizarPuntos('lpin', 0);
+    if (res.ok && res.data.idPersonal === sesionActual.idPersonal) {
+      clearInterval(lockInterval);
+      document.getElementById('lockScreen').style.display = 'none';
+      _resetTimerBloqueo();
+    } else {
+      document.getElementById('lockError').textContent = '❌ PIN incorrecto';
+      setTimeout(() => { document.getElementById('lockError').textContent = ''; }, 2000);
+    }
+  }
+
+  // ── Cierre de turno ────────────────────────────────────────
+  function confirmarCierre() {
+    // Mostrar reporte preliminar antes de confirmar
+    _mostrarReportePreliminar();
+  }
+
+  async function _mostrarReportePreliminar() {
+    const overlay = document.getElementById('reporteTurnoOverlay');
+    overlay.style.display = 'flex';
+    overlay.style.flexDirection = 'column';
+
+    // Calcular tiempo transcurrido localmente
+    const sesGuardada = _cargarSesion();
+    const inicioSes = new Date(sesGuardada?.fechaGuardado || Date.now());
+    const minutos = Math.round((Date.now() - inicioSes) / 60000);
+    const horas = (minutos / 60).toFixed(1);
+
+    // Traer desempeño actual del GAS
+    const res = await API.getDesempenoDia({ idPersonal: sesionActual.idPersonal })
+                         .catch(() => ({ ok: false }));
+    const des = (res.ok && res.data.length) ? res.data[res.data.length - 1] : {};
+
+    cierreReporte = { minutos, horas };
+
+    // Llenar reporte
+    const av = document.getElementById('reporteAvatar');
+    av.textContent = sesionActual.nombre[0] + sesionActual.apellido[0];
+    av.style.background = sesionActual.color;
+    document.getElementById('reporteNombre').textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
+    document.getElementById('reporteRol').textContent = sesionActual.rol;
+    document.getElementById('reporteFecha').textContent = new Date().toLocaleDateString('es-PE', { weekday:'long', day:'numeric', month:'long' });
+
+    const total = parseInt(des.totalActividades) || 0;
+    const actPH = horas > 0 ? (total / parseFloat(horas)).toFixed(1) : 0;
+    const punt  = Math.min(10, parseFloat(actPH)).toFixed(1);
+    const calif = punt >= 9 ? ['EXCELENTE','text-emerald-400','🏆']
+                : punt >= 7 ? ['BUENO','text-blue-400','⭐']
+                : punt >= 5 ? ['REGULAR','text-amber-400','👍']
+                : ['BAJO','text-red-400','📉'];
+
+    document.getElementById('reportePuntos').textContent = punt + '/10';
+    document.getElementById('reportePuntos').className = 'text-6xl font-black mb-1 ' + calif[1];
+    document.getElementById('reporteCalifTexto').textContent = calif[2] + ' ' + calif[0];
+    document.getElementById('reporteCalifTexto').className = 'text-xl font-bold mb-1 ' + calif[1];
+    document.getElementById('reporteHoras').textContent = `${horas}h trabajadas · ${total} actividades · ${actPH}/h`;
+
+    document.getElementById('rGuias').textContent     = des.guiasCreadas || 0;
+    document.getElementById('rEnvasados').textContent = des.envasadosRegistrados || 0;
+    document.getElementById('rUnidades').textContent  = des.unidadesEnvasadas || 0;
+    document.getElementById('rMermas').textContent    = des.mermasRegistradas || 0;
+    document.getElementById('rAuditorias').textContent= des.auditoriaEjecutadas || 0;
+    document.getElementById('rTotal').textContent     = total;
+
+    const montoBase = parseFloat(des.montoBase) || 0;
+    const bonusMin  = 8;
+    const bonusPct  = 10;
+    const bonus     = parseFloat(punt) >= bonusMin ? Math.round(montoBase * bonusPct / 100 * 100) / 100 : 0;
+    const montoTot  = montoBase + bonus;
+
+    document.getElementById('rMontoBase').textContent  = 'S/. ' + fmt(montoBase, 2);
+    document.getElementById('rBonus').textContent      = bonus > 0 ? '+S/. ' + fmt(bonus, 2) : 'S/. 0.00';
+    document.getElementById('rMontoTotal').textContent = 'S/. ' + fmt(montoTot, 2);
+  }
+
+  async function cerrarTurnoFinal() {
+    const res = await API.cerrarTurno({ idSesion: sesionActual.idSesion }).catch(() => ({ ok: false }));
+    _limpiarSesion();
+    sesionActual = null;
+    clearTimeout(lockTimer);
+    clearInterval(lockInterval);
+
+    document.getElementById('reporteTurnoOverlay').style.display = 'none';
+    _ocultarApp();
+    toast('Turno cerrado. ¡Hasta mañana! 👋', 'ok', 3000);
+    setTimeout(() => mostrarLogin(), 2000);
+  }
+
+  // ── Cierre forzado al final del día ───────────────────────
+  function _verificarCierreForzado() {
+    if (!sesionActual) return;
+    const horaConfig = localStorage.getItem('wh_hora_cierre') || '22:00';
+    const [hh, mm] = horaConfig.split(':').map(Number);
+    const ahora = new Date();
+    if (ahora.getHours() === hh && ahora.getMinutes() === mm) {
+      toast('⏰ Fin de turno — cerrando automáticamente', 'warn', 5000);
+      setTimeout(() => confirmarCierre(), 5000);
+    }
+  }
+
+  // ── Helpers ────────────────────────────────────────────────
+  function _actualizarPuntos(prefix, n) {
+    for (let i = 0; i < 4; i++) {
+      const el = document.getElementById(prefix + i);
+      if (el) {
+        el.className = i < n
+          ? 'w-4 h-4 rounded-full bg-blue-500'
+          : 'w-4 h-4 rounded-full border-2 border-slate-600';
+      }
+    }
+  }
+
+  function _guardarSesion(ses) {
+    localStorage.setItem('wh_sesion', JSON.stringify({ ...ses, fechaGuardado: new Date().toISOString() }));
+  }
+
+  function _cargarSesion() {
+    try { return JSON.parse(localStorage.getItem('wh_sesion')); }
+    catch { return null; }
+  }
+
+  function _limpiarSesion() { localStorage.removeItem('wh_sesion'); }
+
+  function _mostrarApp() {
+    document.getElementById('topBar').style.display = '';
+    document.querySelector('main').style.display = '';
+    document.querySelector('nav').style.display = '';
+  }
+
+  function _ocultarApp() {
+    document.getElementById('topBar').style.display = 'none';
+    document.querySelector('main').style.display = 'none';
+    document.querySelector('nav').style.display = 'none';
+  }
+
+  function getSesion() { return sesionActual; }
+
+  // Verificar cierre forzado cada minuto
+  setInterval(_verificarCierreForzado, 60000);
+
+  return { init, mostrarLogin, seleccionarOperador,
+           pinTecla, pinAtras, lockTecla, lockAtras,
+           bloquear, confirmarCierre, cerrarTurnoFinal,
+           getSesion };
+})();
+
+// ════════════════════════════════════════════════
 // App principal — navegación y estado global
 // ════════════════════════════════════════════════
 const App = (() => {
@@ -98,18 +424,14 @@ const App = (() => {
   let todosProveedores = [];
 
   function init() {
-    // Restaurar usuario
-    const u = localStorage.getItem('wh_usuario') || 'operador';
-    window.WH_CONFIG.usuario = u;
-    document.getElementById('usuarioNombre').textContent = u;
-
     // Restaurar GAS URL si fue guardada localmente
     const gasUrl = localStorage.getItem('wh_gas_url');
     if (gasUrl) window.WH_CONFIG.gasUrl = gasUrl;
 
-    // Llenar inputs de config
-    document.getElementById('cfgGasUrl').value  = window.WH_CONFIG.gasUrl || '';
-    document.getElementById('cfgUsuario').value = u;
+    // Ocultar app hasta login
+    document.getElementById('topBar').style.display = 'none';
+    document.querySelector('main').style.display = 'none';
+    document.querySelector('nav').style.display = 'none';
 
     // Tipo guía → mostrar/ocultar zona
     document.getElementById('guiaTipo')?.addEventListener('change', e => {
@@ -129,15 +451,13 @@ const App = (() => {
       document.getElementById('audDiferenciaInfo').classList.remove('hidden');
     });
 
-    // Cargar datos iniciales
-    cargarDashboard();
-    cargarProductosMaestro();
-    cargarProveedoresMaestro();
-
     // Registrar SW
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
+
+    // Iniciar sesión (muestra login si no hay sesión activa)
+    Session.init();
   }
 
   function nav(viewName) {
