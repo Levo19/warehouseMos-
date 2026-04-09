@@ -123,9 +123,22 @@ const Session = (() => {
     document.getElementById('loginPaso1').classList.remove('hidden');
     document.getElementById('loginPaso2').classList.add('hidden');
 
+    const container = document.getElementById('loginOperadores');
+    container.innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
+
     const res = await API.getPersonal().catch(() => ({ ok: false }));
     const personal = res.ok ? res.data : [];
-    const container = document.getElementById('loginOperadores');
+
+    if (!personal.length) {
+      container.innerHTML = `
+        <div class="text-center py-4 space-y-4">
+          <p class="text-red-400 text-sm">No se pudo cargar el personal.</p>
+          <p class="text-slate-500 text-xs">Verifica que el Web App de GAS esté desplegado<br>y que la tabla PERSONAL tenga datos.</p>
+          <button onclick="Session.mostrarLogin()" class="btn btn-outline w-full py-3">🔄 Reintentar</button>
+        </div>`;
+      return;
+    }
+
     container.innerHTML = personal.map(p => `
       <button onclick="Session.seleccionarOperador('${p.idPersonal}','${p.nombre}','${p.apellido}','${p.rol}','${p.color}')"
               class="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-700 active:border-blue-500"
