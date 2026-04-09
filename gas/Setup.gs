@@ -465,6 +465,41 @@ function _seedEnvasados(ss) {
 }
 
 // ============================================================
+// Agregar tablas de Personal al Spreadsheet existente
+// Ejecutar UNA vez si ya corriste setupWarehouse() antes
+// ============================================================
+function setupAgregarPersonal() {
+  var ss = SpreadsheetApp.openById(
+    PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
+  );
+
+  var tablasFaltantes = ['PERSONAL', 'SESIONES', 'DESEMPENO'];
+  var existentes = ss.getSheets().map(function(s){ return s.getName(); });
+
+  tablasFaltantes.forEach(function(nombre) {
+    if (existentes.indexOf(nombre) >= 0) {
+      Logger.log('⏭ Ya existe: ' + nombre);
+      return;
+    }
+    var sheet = ss.insertSheet(nombre);
+    var hdrs  = HEADERS[nombre];
+    if (hdrs) sheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]);
+
+    // Formato cabecera
+    sheet.getRange(1, 1, 1, hdrs.length)
+         .setBackground('#1e3a5f').setFontColor('#ffffff')
+         .setFontWeight('bold').setFontSize(10);
+    sheet.setFrozenRows(1);
+    Logger.log('✅ Creada: ' + nombre);
+  });
+
+  // Seed personal + config extra
+  _seedPersonal(ss);
+
+  Logger.log('✅ Tablas de personal listas. Revisa el Sheet.');
+}
+
+// ============================================================
 // SEED — PERSONAL + CONFIG adicional
 // ============================================================
 function _seedPersonal(ss) {
