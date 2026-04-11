@@ -6,14 +6,14 @@
 
 function getEnvasados(params) {
   var rows = _sheetToObjects(getSheet('ENVASADOS'));
-  if (params.estado) rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.fecha)  rows = rows.filter(function(r){ return r.fecha  === params.fecha; });
   if (params.limit)  rows = rows.slice(0, parseInt(params.limit));
   return { ok: true, data: rows };
 }
 
 function getPendientesEnvasado() {
-  var productos = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos = _sheetToObjects(getProductosSheet());
   var stock     = _sheetToObjects(getSheet('STOCK'));
 
   var stockMap = {};
@@ -44,7 +44,7 @@ function registrarEnvasado(params) {
   }
 
   // Cargar producto derivado para calcular factor
-  var productos = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos = _sheetToObjects(getProductosSheet());
   var prodDerivado = productos.find(function(p){ return p.idProducto === codigoDerivado; });
   var prodBase     = productos.find(function(p){ return p.idProducto === codigoBase; });
   if (!prodDerivado) return { ok: false, error: 'Producto derivado no encontrado: ' + codigoDerivado };

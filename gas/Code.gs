@@ -93,7 +93,7 @@ function _route(method, e) {
       case 'getGuia':            return getGuia(params.idGuia);
       case 'crearGuia':          return crearGuia(params);
       case 'agregarDetalleGuia': return agregarDetalleGuia(params);
-      case 'cerrarGuia':         return cerrarGuia(params.idGuia, params.usuario);
+      case 'cerrarGuia':         return cerrarGuia(params.idGuia, params.usuario, params.idSesion);
 
       // ── Preingresos ────────────────────────────────────────
       case 'getPreingresos':     return getPreingresos(params);

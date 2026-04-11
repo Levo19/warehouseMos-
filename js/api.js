@@ -1,41 +1,58 @@
-// warehouseMos — api.js  Comunicación con GAS
-const API = (() => {
-  const GAS_URL = window.WH_CONFIG?.gasUrl || '';
+// warehouseMos — api.js  Comunicación con GAS + soporte offline
+'use strict';
 
+const API = (() => {
+  function _gasUrl() { return window.WH_CONFIG?.gasUrl || ''; }
+
+  // GET: network first, cache como fallback
   async function call(params) {
-    if (!GAS_URL) {
-      console.warn('[API] GAS_URL no configurada. Modo offline.');
-      return { ok: false, error: 'Sin conexión al servidor' };
-    }
+    const GAS_URL = _gasUrl();
+    if (!GAS_URL) return _fromCache(params);
     try {
       const url = new URL(GAS_URL);
       Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-      const res  = await fetch(url.toString(), { mode: 'cors' });
+      const res  = await fetch(url.toString(), { redirect: 'follow' });
       const data = await res.json();
       return data;
-    } catch (err) {
-      console.error('[API GET]', err);
-      return { ok: false, error: err.message };
+    } catch {
+      return _fromCache(params);
     }
   }
 
+  // Fallback GET desde caché offline
+  function _fromCache(params) {
+    const action = params.action;
+    if (action === 'getProductos')   return { ok: true, data: OfflineManager.getProductosCache() };
+    if (action === 'getStock')       return { ok: true, data: OfflineManager.getStockCache() };
+    if (action === 'getProveedores') return { ok: true, data: OfflineManager.getProveedoresCache() };
+    if (action === 'getPersonal')    return { ok: true, data: OfflineManager.getPersonalCache().map(p => { const s = {...p}; delete s.pin; return s; }) };
+    if (action === 'getConfig')      return { ok: true, data: OfflineManager.getConfigCache() };
+    return { ok: false, error: 'Sin conexión y sin caché disponible' };
+  }
+
+  // POST: si offline → encolar y devolver respuesta optimista
   async function post(params) {
-    if (!GAS_URL) return { ok: false, error: 'Sin conexión al servidor' };
-    // Inyectar idSesion automáticamente si hay sesión activa
+    const GAS_URL = _gasUrl();
+    // Inyectar idSesion automáticamente
     const idSesion = window.WH_CONFIG?.idSesion;
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
+
+    if (!GAS_URL || !navigator.onLine) {
+      const localId = OfflineManager.encolar(params.action, params);
+      return { ok: true, offline: true, localId, data: { idLocal: localId } };
+    }
+
     try {
       const res  = await fetch(GAS_URL, {
         method:  'POST',
-        mode:    'cors',
         headers: { 'Content-Type': 'text/plain' },
         body:    JSON.stringify(params)
       });
-      const data = await res.json();
-      return data;
-    } catch (err) {
-      console.error('[API POST]', err);
-      return { ok: false, error: err.message };
+      return await res.json();
+    } catch {
+      // Red falló → encolar
+      const localId = OfflineManager.encolar(params.action, params);
+      return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
   }
 
@@ -92,7 +109,7 @@ const API = (() => {
     registrarPN:        (p)      => post({ action: 'registrarProductoNuevo', ...p }),
     aprobarPN:          (p)      => post({ action: 'aprobarProductoNuevo', ...p }),
 
-    // Config (solo lectura)
+    // Config
     getConfig:          ()       => call({ action: 'getConfig' }),
 
     // Etiquetas
@@ -101,7 +118,7 @@ const API = (() => {
     // Personal / Sesiones
     loginPersonal:      (pin)    => post({ action: 'loginPersonal', pin }),
     cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
-    getPersonal:        ()       => call({ action: 'getPersonal', estado: '1' }),
+    getPersonal:        ()       => call({ action: 'getPersonal' }),
     getSesionActiva:    (id)     => call({ action: 'getSesionActiva', idSesion: id }),
     getDesempenoDia:    (p={})   => call({ action: 'getDesempenoDia', ...p }),
     getResumenPersonal: (fecha)  => call({ action: 'getResumenPersonal', fecha: fecha || '' })

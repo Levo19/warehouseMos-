@@ -124,10 +124,26 @@ const Session = (() => {
     document.getElementById('loginPaso2').classList.add('hidden');
 
     const container = document.getElementById('loginOperadores');
+
+    // Cargar personal CON pins para validación local + sin pins para mostrar botones
     container.innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
 
-    const res = await API.getPersonal().catch(() => ({ ok: false }));
-    const personal = res.ok ? res.data : [];
+    // Siempre intentar red para tener PINs frescos en caché
+    if (navigator.onLine) {
+      const GAS = window.WH_CONFIG.gasUrl;
+      if (GAS) {
+        fetch(`${GAS}?action=getPersonalConPin`)
+          .then(r => r.json())
+          .then(res => { if (res.ok) OfflineManager._guardarPersonalConPin(res.data); })
+          .catch(() => {});
+      }
+    }
+
+    let personal = OfflineManager.getPersonalCache().map(p => { const s={...p}; delete s.pin; return s; });
+    if (!personal.length) {
+      const res = await API.getPersonal().catch(() => ({ ok: false }));
+      personal = res.ok ? res.data : [];
+    }
 
     if (!personal.length) {
       container.innerHTML = `
@@ -188,39 +204,112 @@ const Session = (() => {
   }
 
   async function _intentarLogin() {
-    // El PIN completo del operador ya lo tenemos — enviamos al GAS
-    const res = await API.loginPersonal(pinBuffer);
+    const pinIntento = pinBuffer;
     pinBuffer = '';
     _actualizarPuntos('pin', 0);
-    if (res.ok) {
+
+    // 1. Validar PIN localmente (instantáneo si hay caché)
+    let localOp = OfflineManager.validarPinLocal(pinIntento);
+
+    // Sin caché → validar directo en GAS
+    if (!localOp && navigator.onLine) {
+      const res = await API.loginPersonal(pinIntento);
+      if (!res.ok || res.offline) {
+        document.getElementById('loginError').textContent = '❌ PIN incorrecto';
+        setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
+        return;
+      }
+      // Login exitoso vía GAS
       sesionActual = res.data;
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
       _aplicarSesion();
-      toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 3000);
-    } else {
-      document.getElementById('loginError').textContent = '❌ ' + (res.error || 'PIN incorrecto');
-      setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
+      toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
+      return;
     }
+
+    if (!localOp) {
+      document.getElementById('loginError').textContent = '❌ PIN incorrecto';
+      setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
+      return;
+    }
+
+    // 2. Sesión optimista inmediata
+    sesionActual = {
+      idSesion:   'LOCAL_' + Date.now(),
+      idPersonal: localOp.idPersonal,
+      nombre:     localOp.nombre,
+      apellido:   localOp.apellido,
+      rol:        localOp.rol,
+      color:      localOp.color,
+      horaInicio: new Date().toLocaleTimeString('es-PE')
+    };
+    _guardarSesion(sesionActual);
+    document.getElementById('loginScreen').style.display = 'none';
+    _aplicarSesion();
+    toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
+
+    // 3. Confirmar sesión con GAS en segundo plano
+    API.loginPersonal(pinIntento).then(res => {
+      if (res.ok && !res.offline) {
+        sesionActual = { ...sesionActual, ...res.data };
+        window.WH_CONFIG.idSesion = sesionActual.idSesion;
+        _guardarSesion(sesionActual);
+      }
+    }).catch(() => {});
   }
 
   function _aplicarSesion() {
-    window.WH_CONFIG.usuario = sesionActual.nombre + ' ' + sesionActual.apellido;
-    window.WH_CONFIG.idSesion = sesionActual.idSesion;
-    document.getElementById('usuarioNombre').textContent = sesionActual.nombre;
+    window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
+    window.WH_CONFIG.idSesion  = sesionActual.idSesion;
 
-    // Color del avatar en topbar
-    const lbl = document.getElementById('userLabel');
-    lbl.innerHTML = `<span style="display:inline-flex;align-items:center;justify-content:center;
-      width:28px;height:28px;border-radius:50%;background:${sesionActual.color};
-      color:#fff;font-weight:800;font-size:12px;">${sesionActual.nombre[0]}${sesionActual.apellido[0]}</span>
-      <span class="ml-1 text-xs text-slate-400">${sesionActual.nombre}</span>`;
+    // Avatar header
+    const av = document.getElementById('topAvatar');
+    av.textContent   = sesionActual.nombre[0] + sesionActual.apellido[0];
+    av.style.background = sesionActual.color;
+    document.getElementById('usuarioNombre').textContent = sesionActual.nombre;
 
     _mostrarApp();
     _iniciarTimerBloqueo();
-    App.cargarDashboard();
-    App.cargarProductosMaestro();
-    App.cargarProveedoresMaestro();
+
+    // Conectar indicador de estado online/offline/sync
+    OfflineManager.onStatusChange(_actualizarEstadoHeader);
+    _actualizarEstadoHeader({
+      online:  navigator.onLine,
+      pending: OfflineManager.getQueue().length,
+      syncing: false
+    });
+
+    // Precargar datos en background
+    OfflineManager.precargar().then(() => {
+      App.cargarDashboard();
+      App.cargarProductosMaestro();
+      App.cargarProveedoresMaestro();
+    });
+
+    // Si hay cola pendiente y hay red, sincronizar
+    if (navigator.onLine) OfflineManager.sincronizar();
+  }
+
+  function _actualizarEstadoHeader({ online, pending, syncing }) {
+    const dot    = document.getElementById('statusDot');
+    const dotM   = document.getElementById('statusDotMobile');
+    const lbl    = document.getElementById('statusLabel');
+
+    let color, texto;
+    if (syncing) {
+      color = '#f59e0b'; texto = 'Sincronizando...';
+    } else if (!online) {
+      color = '#ef4444'; texto = pending > 0 ? `${pending} pendientes` : 'Sin conexión';
+    } else if (pending > 0) {
+      color = '#f59e0b'; texto = `${pending} por sync`;
+    } else {
+      color = '#22c55e'; texto = 'En línea';
+    }
+
+    if (dot)  { dot.style.background  = color; }
+    if (dotM) { dotM.style.background = color; }
+    if (lbl)  { lbl.textContent = texto; }
   }
 
   // ── Bloqueo por inactividad ────────────────────────────────
@@ -427,6 +516,30 @@ const Session = (() => {
 })();
 
 // ════════════════════════════════════════════════
+// DASHBOARD — paneles expandibles
+// ════════════════════════════════════════════════
+const Dashboard = (() => {
+  let panelActivo = null;
+  const panelMap = { venc: 'panelVenc', env: 'panelEnv', stock: 'panelStock', mermas: 'panelMermas' };
+
+  function toggle(key) {
+    const id = panelMap[key];
+    if (!id) return;
+    if (panelActivo === key) {
+      document.getElementById(id)?.classList.add('hidden');
+      panelActivo = null;
+      return;
+    }
+    if (panelActivo) document.getElementById(panelMap[panelActivo])?.classList.add('hidden');
+    document.getElementById(id)?.classList.remove('hidden');
+    panelActivo = key;
+    setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+  }
+
+  return { toggle };
+})();
+
+// ════════════════════════════════════════════════
 // App principal — navegación y estado global
 // ════════════════════════════════════════════════
 const App = (() => {
@@ -484,10 +597,13 @@ const App = (() => {
     if (el) { el.classList.add('active'); el.classList.add('slide-up'); }
 
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    const navMap = { dashboard: 0, guias: 1, envasados: 2, envasador: 2, productos: 3, config: 4 };
-    const idx = navMap[viewName];
-    if (idx !== undefined) {
-      document.querySelectorAll('.nav-btn')[idx]?.classList.add('active');
+    // 3-button nav: 0=Inicio, 1=Guías, 2=Más (envasador has no nav highlight)
+    const navBtnIdx = viewName === 'dashboard' ? 0
+                    : viewName === 'guias'     ? 1
+                    : viewName === 'envasador' ? -1
+                    : 2;
+    if (navBtnIdx >= 0) {
+      document.querySelectorAll('.nav-btn')[navBtnIdx]?.classList.add('active');
     }
 
     document.getElementById('pageTitle').textContent = {
@@ -546,67 +662,85 @@ const App = (() => {
 
   function renderDashboard(d) {
     if (!d) return;
-    const { alertas, kpis, contadores } = d;
+    const { alertas = {}, kpis = {}, contadores = {} } = d;
 
-    // KPIs
-    document.getElementById('kpiCriticos').textContent   = contadores.criticos;
-    document.getElementById('kpiVencimientos').textContent = kpis.lotesCriticos + kpis.lotesEnAlerta;
-    document.getElementById('kpiEficiencia').textContent  = kpis.eficienciaEnvasadoPct + '%';
-    document.getElementById('kpiMermas').textContent      = fmt(kpis.mermasTotalMes, 1);
+    const criticos = alertas.vencimientosCriticos || [];
+    const enAlerta = alertas.vencimientosAlerta || alertas.vencimientosEnAlerta || [];
+    const pendEnv  = alertas.pendientesEnvasado  || [];
+    const stockBajo = alertas.stockBajoMinimo    || [];
+    const mermasPend = alertas.mermasPendientes  || [];
+
+    // KPIs principales
+    document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
+    document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
+    document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
+    document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
+
+    // KPIs secundarios
+    document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
+    document.getElementById('kpiSalidas').textContent    = contadores.salidasMes ?? '—';
 
     // Badge navbar
     const badge = document.getElementById('navAlertaBadge');
-    if (contadores.alertasTotal > 0) {
-      badge.textContent = contadores.alertasTotal > 9 ? '9+' : contadores.alertasTotal;
+    const totalAlertas = contadores.alertasTotal ?? 0;
+    if (totalAlertas > 0) {
+      badge.textContent = totalAlertas > 9 ? '9+' : totalAlertas;
       badge.classList.remove('hidden');
     }
 
-    // Vencimientos críticos
-    if (alertas.vencimientosCriticos.length) {
-      document.getElementById('secVencCrit').classList.remove('hidden');
-      document.getElementById('cntVencCrit').textContent = alertas.vencimientosCriticos.length;
-      document.getElementById('listVencCrit').innerHTML = alertas.vencimientosCriticos.map(v => `
-        <div class="card-sm flex items-center justify-between">
-          <div>
-            <p class="font-semibold text-sm">${v.descripcion}</p>
-            <p class="text-xs text-slate-400">Lote ${v.idLote} — ${fmt(v.cantidadActual)} uds</p>
-          </div>
-          <span class="${diasColor(v.diasRestantes)} font-bold">${v.diasRestantes}d</span>
-        </div>`).join('');
-    }
+    // Panel Vencimientos
+    document.getElementById('listVencCrit').innerHTML = criticos.map(v => `
+      <div class="card-sm flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-sm">${v.descripcion}</p>
+          <p class="text-xs text-slate-400">Lote ${v.idLote} — ${fmt(v.cantidadActual)} uds</p>
+        </div>
+        <span class="${diasColor(v.diasRestantes)} font-bold">${v.diasRestantes}d</span>
+      </div>`).join('');
+    document.getElementById('listVencAlerta').innerHTML = enAlerta.map(v => `
+      <div class="card-sm flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-sm">${v.descripcion}</p>
+          <p class="text-xs text-slate-400">Lote ${v.idLote} — ${fmt(v.cantidadActual)} uds</p>
+        </div>
+        <span class="${diasColor(v.diasRestantes)} font-bold">${v.diasRestantes}d</span>
+      </div>`).join('');
+    document.getElementById('vencVacio')?.classList.toggle('hidden', criticos.length + enAlerta.length > 0);
 
-    // Pendientes envasado
-    if (alertas.pendientesEnvasado.length) {
-      document.getElementById('secPendEnv').classList.remove('hidden');
-      document.getElementById('cntPendEnv').textContent = alertas.pendientesEnvasado.length;
-      document.getElementById('listPendEnv').innerHTML = alertas.pendientesEnvasado.map(p => `
-        <div class="card-sm flex items-center justify-between cursor-pointer" onclick="App.nav('envasador')">
-          <div>
-            <p class="font-semibold text-sm">${p.descripcion}</p>
-            <p class="text-xs text-slate-400">Stock: ${fmt(p.stockDerivado)} / Mín: ${fmt(p.stockMinimoDerivado)}</p>
-            <p class="text-xs text-emerald-400">Base disp: ${fmt(p.stockBase)} → max ${fmt(p.maxProducibles)} uds</p>
-          </div>
-          <span class="tag-${p.urgencia === 'CRITICA' ? 'danger' : 'warn'}">${p.urgencia}</span>
-        </div>`).join('');
-    }
+    // Panel Pendientes envasado
+    document.getElementById('listPendEnvDash').innerHTML = pendEnv.map(p => `
+      <div class="card-sm flex items-center justify-between cursor-pointer" onclick="App.toggleModoEnvasador()">
+        <div>
+          <p class="font-semibold text-sm">${p.descripcion}</p>
+          <p class="text-xs text-slate-400">Stock: ${fmt(p.stockDerivado)} / Mín: ${fmt(p.stockMinimoDerivado)}</p>
+          <p class="text-xs text-emerald-400">Base disp: ${fmt(p.stockBase)} → max ${fmt(p.maxProducibles)} uds</p>
+        </div>
+        <span class="tag-${p.urgencia === 'CRITICA' ? 'danger' : 'warn'}">${p.urgencia}</span>
+      </div>`).join('');
 
-    // Stock bajo
-    if (alertas.stockBajoMinimo.length) {
-      document.getElementById('secStockBajo').classList.remove('hidden');
-      document.getElementById('cntStockBajo').textContent = alertas.stockBajoMinimo.length;
-      document.getElementById('listStockBajo').innerHTML = alertas.stockBajoMinimo.slice(0, 5).map(s => `
-        <div class="card-sm">
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-sm font-semibold">${s.descripcion}</span>
-            <span class="text-xs ${s.stockActual === 0 ? 'tag-danger' : 'tag-warn'}">
-              ${s.stockActual === 0 ? 'SIN STOCK' : fmt(s.stockActual)}
-            </span>
-          </div>
-          <div class="bar-bg"><div class="bar-fill bg-amber-500"
-            style="width:${Math.min(100, (s.stockActual / s.stockMinimo * 100)).toFixed(0)}%"></div></div>
-          <p class="text-xs text-slate-500 mt-1">Mínimo: ${fmt(s.stockMinimo)} — Faltan: ${fmt(s.diferencia)}</p>
-        </div>`).join('');
-    }
+    // Panel Stock bajo
+    document.getElementById('listStockBajoDash').innerHTML = stockBajo.slice(0, 8).map(s => `
+      <div class="card-sm">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-semibold">${s.descripcion}</span>
+          <span class="text-xs ${s.stockActual === 0 ? 'tag-danger' : 'tag-warn'}">
+            ${s.stockActual === 0 ? 'SIN STOCK' : fmt(s.stockActual)}
+          </span>
+        </div>
+        <div class="bar-bg"><div class="bar-fill bg-amber-500"
+          style="width:${Math.min(100, (s.stockActual / s.stockMinimo * 100)).toFixed(0)}%"></div></div>
+        <p class="text-xs text-slate-500 mt-1">Mínimo: ${fmt(s.stockMinimo)} — Faltan: ${fmt(s.diferencia)}</p>
+      </div>`).join('');
+
+    // Panel Mermas pendientes
+    document.getElementById('listMermasDash').innerHTML = mermasPend.map(m => `
+      <div class="card-sm flex items-center justify-between">
+        <div>
+          <p class="font-semibold text-sm">${m.codigoProducto || m.descripcion || '—'}</p>
+          <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen || ''}</p>
+        </div>
+        <span class="tag-warn text-xs">${fmt(m.cantidadOriginal, 1)}</span>
+      </div>`).join('');
   }
 
   async function cargarProductosMaestro() {
@@ -645,7 +779,11 @@ const App = (() => {
   function getProductosMaestro() { return todosProductos; }
   function getProveedoresMaestro() { return todosProveedores; }
 
-  return { init, nav, toggleModoEnvasador, cargarDashboard, showUsuarioDialog,
+  function abrirMas() { abrirSheet('sheetMas'); }
+  function navMas(viewName) { cerrarSheet('sheetMas'); nav(viewName); }
+
+  return { init, nav, abrirMas, navMas, toggleModoEnvasador, cargarDashboard, showUsuarioDialog,
+           cargarProductosMaestro, cargarProveedoresMaestro,
            getProductosMaestro, getProveedoresMaestro };
 })();
 
@@ -912,7 +1050,49 @@ const EnvasadosView = (() => {
 // MODO ENVASADOR — vista rápida urgentes
 // ════════════════════════════════════════════════
 const EnvasadorView = (() => {
+  let _historialCargado = false;
+
+  function setTab(tab) {
+    const isUrg = tab === 'urgentes';
+    document.getElementById('tabPanelUrgentes').classList.toggle('hidden', !isUrg);
+    document.getElementById('tabPanelHistorial').classList.toggle('hidden', isUrg);
+    const actCls = 'flex-1 py-2 text-sm font-semibold border-b-2 -mb-px text-blue-400 border-blue-400';
+    const inaCls = 'flex-1 py-2 text-sm font-semibold border-b-2 -mb-px text-slate-500 border-transparent';
+    document.getElementById('tabBtnUrgentes').className  = isUrg  ? actCls : inaCls;
+    document.getElementById('tabBtnHistorial').className = !isUrg ? actCls : inaCls;
+    if (!isUrg && !_historialCargado) _cargarHistorial();
+  }
+
+  async function _cargarHistorial() {
+    _historialCargado = true;
+    const container = document.getElementById('listHistorialEnvasado');
+    container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+    const res = await API.getEnvasados({ limit: 30 }).catch(() => ({ ok: false }));
+    const list = res.ok ? res.data : [];
+    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin historial</p>'; return; }
+    container.innerHTML = list.map(e => {
+      const efPct = parseFloat(e.eficienciaPct) || 0;
+      const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
+      return `
+      <div class="card-sm">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs tag-blue">${e.codigoProductoBase} → ${e.codigoProductoEnvasado}</span>
+          <span class="${efColor} font-bold text-sm">${efPct}%</span>
+        </div>
+        <p class="text-xs text-slate-400">${fmtFecha(e.fecha)} · ${e.usuario}</p>
+        <div class="flex gap-4 mt-1 text-xs text-slate-300">
+          <span>Base: ${fmt(e.cantidadBase, 1)}</span>
+          <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
+          <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   async function cargar() {
+    _historialCargado = false;
+    // Asegurar que estamos en tab urgentes al entrar
+    setTab('urgentes');
     const container = document.getElementById('listEnvasadorUrgentes');
     container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
 
@@ -1004,7 +1184,7 @@ const EnvasadorView = (() => {
     }
   }
 
-  return { cargar, ajustar, registrarRapido };
+  return { cargar, setTab, ajustar, registrarRapido };
 })();
 
 // ════════════════════════════════════════════════

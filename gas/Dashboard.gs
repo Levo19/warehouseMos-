@@ -9,7 +9,7 @@ function getDashboard() {
   var limAlerta        = new Date(hoy); limAlerta.setDate(hoy.getDate() + diasAlerta);
   var limCritico       = new Date(hoy); limCritico.setDate(hoy.getDate() + diasAlertaCrit);
 
-  var productos  = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos  = _sheetToObjects(getProductosSheet());
   var stock      = _sheetToObjects(getSheet('STOCK'));
   var lotes      = _sheetToObjects(getSheet('LOTES_VENCIMIENTO'));
   var guias      = _sheetToObjects(getSheet('GUIAS'));

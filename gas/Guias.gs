@@ -11,7 +11,7 @@ function getGuias(params) {
   var rows  = _sheetToObjects(sheet);
 
   if (params.tipo)    rows = rows.filter(function(r){ return r.tipo === params.tipo; });
-  if (params.estado)  rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.usuario) rows = rows.filter(function(r){ return r.usuario === params.usuario; });
   if (params.limit)   rows = rows.slice(0, parseInt(params.limit));
 
@@ -28,7 +28,7 @@ function getGuia(idGuia) {
   guia.detalle = detalles.filter(function(d){ return d.idGuia === idGuia; });
 
   // Enriquecer con nombres de productos
-  var productos = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos = _sheetToObjects(getProductosSheet());
   var prodMap = {};
   productos.forEach(function(p){ prodMap[p.idProducto] = p.descripcion; });
   guia.detalle.forEach(function(d){
@@ -73,7 +73,7 @@ function agregarDetalleGuia(params) {
   var idDetalle = _generateId('DET');
 
   // Validar que el código de producto existe
-  var productos = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos = _sheetToObjects(getProductosSheet());
   var prod = productos.find(function(p){ return p.idProducto === params.codigoProducto || p.codigoBarra === params.codigoProducto; });
 
   // Si no existe → sugerir ProductoNuevo
@@ -104,7 +104,7 @@ function agregarDetalleGuia(params) {
   return { ok: true, data: { idDetalle: idDetalle, codigoProducto: prod.idProducto } };
 }
 
-function cerrarGuia(idGuia, usuario) {
+function cerrarGuia(idGuia, usuario, idSesion) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
 
   var guiasSheet    = getSheet('GUIAS');
@@ -152,7 +152,7 @@ function cerrarGuia(idGuia, usuario) {
     }
   });
 
-  if (params && params.idSesion) registrarActividad(params.idSesion, 'GUIA_CERRADA', 1);
+  if (idSesion) registrarActividad(idSesion, 'GUIA_CERRADA', 1);
 
   // Marcar guía como cerrada
   guiasSheet.getRange(filaGuia, idxEstado + 1).setValue('CERRADA');

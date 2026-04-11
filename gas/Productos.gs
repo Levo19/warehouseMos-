@@ -4,9 +4,9 @@
 // ============================================================
 
 function getProductos(params) {
-  var rows = _sheetToObjects(getSheet('PRODUCTOS'));
+  var rows = _sheetToObjects(getProductosSheet());
   if (params.categoria) rows = rows.filter(function(r){ return r.idCategoria === params.categoria; });
-  if (params.estado)    rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado)    rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.soloBase)  rows = rows.filter(function(r){ return r.esEnvasable === '1'; });
   if (params.q) {
     var q = params.q.toLowerCase();
@@ -20,7 +20,7 @@ function getProductos(params) {
 }
 
 function getProducto(codigo) {
-  var rows = _sheetToObjects(getSheet('PRODUCTOS'));
+  var rows = _sheetToObjects(getProductosSheet());
   var prod = rows.find(function(p){
     return p.idProducto === codigo || p.codigoBarra === codigo;
   });
@@ -42,7 +42,7 @@ function getProducto(codigo) {
 function getStock(params) {
   var rows = _sheetToObjects(getSheet('STOCK'));
   // Enriquecer con info de producto
-  var productos = _sheetToObjects(getSheet('PRODUCTOS'));
+  var productos = _sheetToObjects(getProductosSheet());
   var prodMap = {};
   productos.forEach(function(p){ prodMap[p.idProducto] = p; });
 
@@ -65,7 +65,7 @@ function getStock(params) {
 
 function getStockProducto(codigo) {
   var info = _getStockProducto(codigo);
-  var prods = _sheetToObjects(getSheet('PRODUCTOS'));
+  var prods = _sheetToObjects(getProductosSheet());
   var prod  = prods.find(function(p){ return p.idProducto === codigo; }) || {};
   return {
     ok: true,
@@ -81,7 +81,7 @@ function getStockProducto(codigo) {
 }
 
 function crearProducto(params) {
-  var sheet = getSheet('PRODUCTOS');
+  var sheet = getProductosSheet();
   var id    = params.idProducto || ('P' + new Date().getTime());
 
   // Verificar duplicado por código de barras
@@ -117,7 +117,7 @@ function crearProducto(params) {
 }
 
 function actualizarProducto(params) {
-  var sheet = getSheet('PRODUCTOS');
+  var sheet = getProductosSheet();
   var data  = sheet.getDataRange().getValues();
   var headers = data[0];
 
@@ -176,7 +176,7 @@ function getLotesVencimiento(params) {
 // ── Producto Nuevo ──────────────────────────────────────────
 function getProductosNuevos(params) {
   var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
-  if (params.estado) rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   return { ok: true, data: rows };
 }
 
@@ -255,7 +255,7 @@ function aprobarProductoNuevo(params) {
 // ── Mermas ──────────────────────────────────────────────────
 function getMermas(params) {
   var rows = _sheetToObjects(getSheet('MERMAS'));
-  if (params.estado)  rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.codigo)  rows = rows.filter(function(r){ return r.codigoProducto === params.codigo; });
   if (params.limit)   rows = rows.slice(0, parseInt(params.limit));
   return { ok: true, data: rows };
@@ -309,7 +309,7 @@ function registrarMerma(params) {
 // ── Auditorias ──────────────────────────────────────────────
 function getAuditorias(params) {
   var rows = _sheetToObjects(getSheet('AUDITORIAS'));
-  if (params.estado)  rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.usuario) rows = rows.filter(function(r){ return r.usuario === params.usuario; });
   return { ok: true, data: rows };
 }
@@ -379,8 +379,8 @@ function crearAjuste(params) {
 
 // ── Proveedores ─────────────────────────────────────────────
 function getProveedores(params) {
-  var rows = _sheetToObjects(getSheet('PROVEEDORES'));
-  if (params.estado) rows = rows.filter(function(r){ return r.estado === params.estado; });
+  var rows = _sheetToObjects(getProveedoresSheet());
+  if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.q) {
     var q = params.q.toLowerCase();
     rows = rows.filter(function(r){
@@ -392,7 +392,7 @@ function getProveedores(params) {
 }
 
 function crearProveedor(params) {
-  var sheet = getSheet('PROVEEDORES');
+  var sheet = getProveedoresSheet();
   var id    = _generateId('PROV');
   sheet.appendRow([
     id, params.nombre, params.ruc || '', params.imagen || '',
@@ -406,7 +406,7 @@ function crearProveedor(params) {
 }
 
 function actualizarProveedor(params) {
-  var sheet = getSheet('PROVEEDORES');
+  var sheet = getProveedoresSheet();
   var data  = sheet.getDataRange().getValues();
   var hdrs  = data[0];
   for (var i = 1; i < data.length; i++) {
@@ -429,7 +429,7 @@ function actualizarProveedor(params) {
 // ── Preingresos ─────────────────────────────────────────────
 function getPreingresos(params) {
   var rows = _sheetToObjects(getSheet('PREINGRESOS'));
-  if (params.estado)     rows = rows.filter(function(r){ return r.estado === params.estado; });
+  if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.idProveedor) rows = rows.filter(function(r){ return r.idProveedor === params.idProveedor; });
   return { ok: true, data: rows };
 }
