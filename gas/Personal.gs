@@ -8,9 +8,9 @@ function loginPersonal(params) {
   var pin = String(params.pin || '').trim();
   if (!pin) return { ok: false, error: 'PIN requerido' };
 
-  var personal = _sheetToObjects(getSheet('PERSONAL'));
+  var personal = _sheetToObjects(getPersonalSheet());
   var operador = personal.find(function(p) {
-    return String(p.pin) === pin && p.estado === '1';
+    return String(p.pin) === pin && String(p.estado) === '1';
   });
   if (!operador) return { ok: false, error: 'PIN incorrecto' };
 
@@ -191,7 +191,7 @@ function _calcularYCerrarDesempeno(idSesion, minutos, horas) {
 
     // Construir reporte para mostrar al operador
     var idPersonal = row[hdrs.indexOf('idPersonal')];
-    var personal   = _sheetToObjects(getSheet('PERSONAL'));
+    var personal   = _sheetToObjects(getPersonalSheet());
     var operador   = personal.find(function(p){ return p.idPersonal === idPersonal; }) || {};
 
     return {
@@ -222,8 +222,9 @@ function _calcularYCerrarDesempeno(idSesion, minutos, horas) {
 
 // ── Getters ──────────────────────────────────────────────────
 function getPersonal(params) {
-  var rows = _sheetToObjects(getSheet('PERSONAL'));
-  if (params && params.estado) rows = rows.filter(function(r){ return r.estado === params.estado; });
+  var rows = _sheetToObjects(getPersonalSheet());
+  // Solo activos (comparación flexible: 1, '1', true)
+  rows = rows.filter(function(r) { return String(r.estado) === '1'; });
   // No enviar el PIN al frontend
   rows = rows.map(function(r) {
     var safe = Object.assign({}, r);
@@ -231,6 +232,13 @@ function getPersonal(params) {
     return safe;
   });
   return { ok: true, data: rows };
+}
+
+// Solo para precarga offline — incluye PIN para validación local
+function getPersonalConPin(params) {
+  var rows = _sheetToObjects(getPersonalSheet());
+  rows = rows.filter(function(r) { return String(r.estado) === '1'; });
+  return { ok: true, data: rows }; // PIN incluido intencionalmente para caché local
 }
 
 function getSesionActiva(params) {
@@ -253,7 +261,7 @@ function getResumenPersonal(params) {
   var hoy  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   var fecha = params.fecha || hoy;
   var desempeno = _sheetToObjects(getSheet('DESEMPENO')).filter(function(r){ return r.fecha === fecha; });
-  var personal  = _sheetToObjects(getSheet('PERSONAL'));
+  var personal  = _sheetToObjects(getPersonalSheet());
   var resumen   = personal.filter(function(p){ return p.estado === '1'; }).map(function(p) {
     var des = desempeno.find(function(d){ return d.idPersonal === p.idPersonal; }) || {};
     return {

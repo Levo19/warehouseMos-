@@ -22,14 +22,16 @@ var SHEET_NAMES = {
   ZONAS:             'ZONAS',
   PERSONAL:          'PERSONAL',
   SESIONES:          'SESIONES',
-  DESEMPENO:         'DESEMPENO'
+  DESEMPENO:         'DESEMPENO',
+  SYNC_LOG:          'SYNC_LOG'
 };
 
 var HEADERS = {
   CONFIG:            ['clave','valor','descripcion'],
   CATEGORIAS:        ['idCategoria','nombre','descripcion','icono','activo'],
-  PRODUCTOS:         ['idProducto','codigoBarra','descripcion','marca','idCategoria',
+  PRODUCTOS:         ['idProducto','skuBase','codigoBarra','descripcion','marca','idCategoria',
                       'unidad','stockMinimo','stockMaximo','precioCompra',
+                      'Cod_Tributo','IGV_Porcentaje','Cod_SUNAT','Tipo_IGV',
                       'esEnvasable','codigoProductoBase','factorConversion',
                       'mermaEsperadaPct','foto','estado','fechaCreacion'],
   STOCK:             ['idStock','codigoProducto','cantidadDisponible','ultimaActualizacion'],
@@ -63,6 +65,7 @@ var HEADERS = {
                       'montoBase','estado','fechaIngreso','foto','color'],
   SESIONES:          ['idSesion','idPersonal','fechaInicio','horaInicio','fechaFin',
                       'horaFin','minutosActivos','estado'],
+  SYNC_LOG:          ['localId','action','resultado','fecha'],
   DESEMPENO:         ['idDesempeno','idPersonal','idSesion','fecha',
                       'minutosActivos','horasTrabajadas',
                       'guiasCreadas','guiasCerradas',
@@ -84,8 +87,9 @@ function setupWarehouse() {
   // Guardar propiedades del script
   PropertiesService.getScriptProperties().setProperties({
     'SPREADSHEET_ID':      ssId,
+    'MOS_SS_ID':           '',   // ← ID Spreadsheet ProyectoMOS (dejar vacío hasta que MOS esté listo)
     'PRINTNODE_API_KEY':   '',   // ← Ingresar en Project Settings > Script Properties
-    'PRINTER_ETIQUETAS_ID':'',   // ← ID impresora etiquetas adhesivas (código de barras)
+    'PRINTER_ETIQUETAS_ID':'',   // ← ID impresora etiquetas adhesivas
     'PRINTER_TICKETS_ID':  ''    // ← ID impresora tickets/reportes
   });
 
@@ -226,61 +230,65 @@ function _seedProveedores(ss) {
 
 // ============================================================
 // SEED — PRODUCTOS
-// idProducto | codigoBarra | descripcion | marca | idCategoria |
+// idProducto | skuBase | codigoBarra | descripcion | marca | idCategoria |
 // unidad | stockMinimo | stockMaximo | precioCompra |
 // esEnvasable | codigoProductoBase | factorConversion |
 // mermaEsperadaPct | foto | estado | fechaCreacion
+//
+// skuBase: vacío en bases/granel (no se venden en POS)
+//          = codigoBarra en derivados (enlace con MosExpress/MOS)
 // ============================================================
 function _seedProductos(ss) {
   var sheet = ss.getSheetByName(SHEET_NAMES.PRODUCTOS);
   var hoy = new Date();
   var rows = [
-    // ── BASES (esEnvasable=false, son los que se envasan) ──
-    ['P001','','Arroz Extra Granel','El Sol','CAT001','SACO',
-     10,100,85,'1','','','','','1',hoy],
-    ['P002','','Comino Molido Granel','Del Norte','CAT002','KG',
-     5,50,18,'1','','','','','1',hoy],
-    ['P003','','Azúcar Rubia Granel','Paramonga','CAT003','SACO',
-     8,80,120,'1','','','','','1',hoy],
-    ['P004','','Sal de Mesa Granel','Emsal','CAT004','SACO',
-     5,60,12,'1','','','','','1',hoy],
-    ['P005','','Pimienta Negra Granel','Del Norte','CAT002','KG',
-     2,30,45,'1','','','','','1',hoy],
-    ['P006','','Orégano Seco Granel','Andino','CAT002','KG',
-     3,30,22,'1','','','','','1',hoy],
-    ['P007','','Frijol Canario Granel','Selecto','CAT007','SACO',
-     6,60,95,'1','','','','','1',hoy],
-    // ── DERIVADOS (codigoProductoBase y factorConversion definidos) ──
+    // ── BASES granel — no se venden en POS, skuBase vacío ──
+    // cols: id,skuBase,codBarra,desc,marca,cat,unidad,stkMin,stkMax,precioCompra, Cod_Tributo,IGV_Pct,Cod_SUNAT,Tipo_IGV, esEnv,codBase,factor,merma,foto,estado,fecha
+    ['P001','','','Arroz Extra Granel','El Sol','CAT001','SACO',
+     10,100,85,'','','','','1','','','','','1',hoy],
+    ['P002','','','Comino Molido Granel','Del Norte','CAT002','KG',
+     5,50,18,'','','','','1','','','','','1',hoy],
+    ['P003','','','Azúcar Rubia Granel','Paramonga','CAT003','SACO',
+     8,80,120,'','','','','1','','','','','1',hoy],
+    ['P004','','','Sal de Mesa Granel','Emsal','CAT004','SACO',
+     5,60,12,'','','','','1','','','','','1',hoy],
+    ['P005','','','Pimienta Negra Granel','Del Norte','CAT002','KG',
+     2,30,45,'','','','','1','','','','','1',hoy],
+    ['P006','','','Orégano Seco Granel','Andino','CAT002','KG',
+     3,30,22,'','','','','1','','','','','1',hoy],
+    ['P007','','','Frijol Canario Granel','Selecto','CAT007','SACO',
+     6,60,95,'','','','','1','','','','','1',hoy],
+    // ── DERIVADOS envasados — skuBase = codigoBarra (enlace MOS/MosExpress) ──
     // Arroz Extra: 1 saco 50kg → bolsas de 1kg = 50 uds (merma 2%)
-    ['P101','7501234100011','Arroz Extra 1kg','El Sol','CAT001','BOLSA',
-     200,2000,2.20,'0','P001',50,2,'','1',hoy],
+    ['P101','7501234100011','7501234100011','Arroz Extra 1kg','El Sol','CAT001','BOLSA',
+     200,2000,2.20,'','','','','0','P001',50,2,'','1',hoy],
     // Arroz Extra: 1 saco 50kg → bolsas de 5kg = 10 uds (merma 1%)
-    ['P102','7501234100012','Arroz Extra 5kg','El Sol','CAT001','BOLSA',
-     50,500,10.50,'0','P001',10,1,'','1',hoy],
+    ['P102','7501234100012','7501234100012','Arroz Extra 5kg','El Sol','CAT001','BOLSA',
+     50,500,10.50,'','','','','0','P001',10,1,'','1',hoy],
     // Comino: 1 kg → bolsas de 100g = 10 uds (merma 3%)
-    ['P201','7501234200011','Comino Molido 100g','Del Norte','CAT002','BOLSA',
-     100,1000,2.30,'0','P002',10,3,'','1',hoy],
+    ['P201','7501234200011','7501234200011','Comino Molido 100g','Del Norte','CAT002','BOLSA',
+     100,1000,2.30,'','','','','0','P002',10,3,'','1',hoy],
     // Comino: 1 kg → bolsas de 500g = 2 uds (merma 3%)
-    ['P202','7501234200012','Comino Molido 500g','Del Norte','CAT002','BOLSA',
-     50,500,10.80,'0','P002',2,3,'','1',hoy],
+    ['P202','7501234200012','7501234200012','Comino Molido 500g','Del Norte','CAT002','BOLSA',
+     50,500,10.80,'','','','','0','P002',2,3,'','1',hoy],
     // Azúcar: 1 saco 50kg → bolsas de 1kg = 50 uds (merma 1%)
-    ['P301','7501234300011','Azúcar Rubia 1kg','Paramonga','CAT003','BOLSA',
-     200,2000,2.90,'0','P003',50,1,'','1',hoy],
+    ['P301','7501234300011','7501234300011','Azúcar Rubia 1kg','Paramonga','CAT003','BOLSA',
+     200,2000,2.90,'','','','','0','P003',50,1,'','1',hoy],
     // Azúcar: 1 saco 50kg → bolsas de 2kg = 25 uds (merma 1%)
-    ['P302','7501234300012','Azúcar Rubia 2kg','Paramonga','CAT003','BOLSA',
-     100,1000,5.60,'0','P003',25,1,'','1',hoy],
+    ['P302','7501234300012','7501234300012','Azúcar Rubia 2kg','Paramonga','CAT003','BOLSA',
+     100,1000,5.60,'','','','','0','P003',25,1,'','1',hoy],
     // Sal: 1 saco 25kg → bolsas de 1kg = 25 uds (merma 0.5%)
-    ['P401','7501234400011','Sal de Mesa 1kg','Emsal','CAT004','BOLSA',
-     150,1500,0.55,'0','P004',25,0.5,'','1',hoy],
+    ['P401','7501234400011','7501234400011','Sal de Mesa 1kg','Emsal','CAT004','BOLSA',
+     150,1500,0.55,'','','','','0','P004',25,0.5,'','1',hoy],
     // Pimienta: 1 kg → sobres 50g = 20 uds (merma 4%)
-    ['P501','7501234500011','Pimienta Negra 50g','Del Norte','CAT002','SOBRE',
-     80,800,2.70,'0','P005',20,4,'','1',hoy],
+    ['P501','7501234500011','7501234500011','Pimienta Negra 50g','Del Norte','CAT002','SOBRE',
+     80,800,2.70,'','','','','0','P005',20,4,'','1',hoy],
     // Orégano: 1 kg → sobres 25g = 40 uds (merma 5%)
-    ['P601','7501234600011','Orégano Seco 25g','Andino','CAT002','SOBRE',
-     100,1000,0.80,'0','P006',40,5,'','1',hoy],
+    ['P601','7501234600011','7501234600011','Orégano Seco 25g','Andino','CAT002','SOBRE',
+     100,1000,0.80,'','','','','0','P006',40,5,'','1',hoy],
     // Frijol: 1 saco 50kg → bolsas de 500g = 100 uds (merma 2%)
-    ['P701','7501234700011','Frijol Canario 500g','Selecto','CAT007','BOLSA',
-     200,2000,1.20,'0','P007',100,2,'','1',hoy]
+    ['P701','7501234700011','7501234700011','Frijol Canario 500g','Selecto','CAT007','BOLSA',
+     200,2000,1.20,'','','','','0','P007',100,2,'','1',hoy]
   ];
   sheet.getRange(2, 1, rows.length, HEADERS.PRODUCTOS.length).setValues(rows);
 }

@@ -27,6 +27,30 @@ function doPost(e) {
   return _respond(result);
 }
 
+// ── Deduplicación por localId ──────────────────────────────
+function _checkDuplicado(localId) {
+  if (!localId || !String(localId).startsWith('L')) return null;
+  try {
+    var sheet = getSheet('SYNC_LOG');
+    if (!sheet) return null;
+    var data = sheet.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === localId) {
+        try { return JSON.parse(data[i][2]); } catch { return { ok: true, dedup: true }; }
+      }
+    }
+  } catch(e) {}
+  return null;
+}
+
+function _logSync(localId, action, resultado) {
+  if (!localId || !String(localId).startsWith('L')) return;
+  try {
+    var sheet = getSheet('SYNC_LOG');
+    if (sheet) sheet.appendRow([localId, action, JSON.stringify(resultado), new Date()]);
+  } catch(e) {}
+}
+
 function _respond(data) {
   var output = ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
@@ -44,7 +68,13 @@ function _route(method, e) {
 
     var action = params.action || '';
 
-    switch (action) {
+    // Deduplicar operaciones offline (solo para POSTs con localId)
+    if (params.localId) {
+      var dup = _checkDuplicado(params.localId);
+      if (dup) return dup;
+    }
+
+    result = (function() { switch (action) {
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();
 
@@ -111,13 +141,20 @@ function _route(method, e) {
       case 'loginPersonal':      return loginPersonal(params);
       case 'cerrarTurno':        return cerrarTurno(params);
       case 'getPersonal':        return getPersonal(params);
+      case 'getPersonalConPin':  return getPersonalConPin(params);
       case 'getSesionActiva':    return getSesionActiva(params);
       case 'getDesempenoDia':    return getDesempenoDia(params);
       case 'getResumenPersonal': return getResumenPersonal(params);
 
       default:
         return { ok: false, error: 'Acción no reconocida: ' + action };
+    }})();
+
+    // Loguear para deduplicación futura
+    if (params.localId && result && result.ok) {
+      _logSync(params.localId, action, result);
     }
+    return result;
   } catch (err) {
     return { ok: false, error: err.message, stack: err.stack };
   }
@@ -193,6 +230,64 @@ function _getStockProducto(codigo) {
     }
   }
   return { fila: -1, cantidad: 0 };
+}
+
+// ============================================================
+// Bridge hacia ProyectoMOS
+// Cuando MOS_SS_ID esté configurado, warehouseMos lee
+// PRODUCTOS_MASTER y PROVEEDORES_MASTER del Sheet de MOS.
+// Mientras esté vacío, usa sus propias tablas (sin cambios).
+// ============================================================
+function getProductosSheet() {
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  if (mosSsId) {
+    try { return SpreadsheetApp.openById(mosSsId).getSheetByName('PRODUCTOS_MASTER'); }
+    catch(e) { Logger.log('[WH] getProductosSheet fallback: ' + e.message); }
+  }
+  return getSheet('PRODUCTOS');
+}
+
+function getProveedoresSheet() {
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  if (mosSsId) {
+    try { return SpreadsheetApp.openById(mosSsId).getSheetByName('PROVEEDORES_MASTER'); }
+    catch(e) {}
+  }
+  return getSheet('PROVEEDORES');
+}
+
+// Personal: lee PERSONAL_MASTER de MOS (solo tipo=OPERADOR/appOrigen=warehouseMos)
+// Si MOS no conectado → tabla PERSONAL local
+function getPersonalSheet() {
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  if (mosSsId) {
+    try { return SpreadsheetApp.openById(mosSsId).getSheetByName('PERSONAL_MASTER'); }
+    catch(e) { Logger.log('[WH] getPersonalSheet fallback: ' + e.message); }
+  }
+  return getSheet('PERSONAL');
+}
+
+// Devuelve el PrintNode ID de una impresora configurada en MOS para WH.
+// tipo: 'ADHESIVO' o 'TICKET'. Fallback a Script Properties (modo standalone).
+function getPrinterNodeId(tipo) {
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  if (mosSsId) {
+    try {
+      var sheet = SpreadsheetApp.openById(mosSsId).getSheetByName('IMPRESORAS');
+      var rows  = _sheetToObjects(sheet);
+      var imp   = rows.find(function(r){
+        return r.appOrigen === 'warehouseMos' &&
+               r.tipo      === tipo           &&
+               String(r.activo) === '1'       &&
+               r.printNodeId    !== '';
+      });
+      if (imp) return imp.printNodeId;
+    } catch(e) {}
+  }
+  // Fallback: Script Properties originales
+  return tipo === 'ADHESIVO'
+    ? (PropertiesService.getScriptProperties().getProperty('PRINTER_ETIQUETAS_ID') || '')
+    : (PropertiesService.getScriptProperties().getProperty('PRINTER_TICKETS_ID')   || '');
 }
 
 function _actualizarStock(codigo, delta) {
