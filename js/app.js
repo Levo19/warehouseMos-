@@ -390,6 +390,9 @@ const Session = (() => {
 
     // Si hay cola pendiente y hay red, sincronizar
     if (navigator.onLine) OfflineManager.sincronizar();
+
+    // Cierre forzado: verificar cada 30s si llegó la hora configurada
+    setInterval(_verificarCierreForzado, 30000);
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -438,7 +441,6 @@ const Session = (() => {
     av.style.background = sesionActual.color;
     document.getElementById('lockNombre').textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
 
-    const inicio = parseInt(localStorage.getItem('wh_lock_inicio') || Date.now());
     localStorage.setItem('wh_lock_inicio', Date.now());
 
     document.getElementById('lockScreen').style.display = 'flex';
@@ -679,7 +681,7 @@ const App = (() => {
     });
 
     // Conteo auditoría → mostrar diferencia en tiempo real
-    document.getElementById('audConteoFisico')?.addEventListener('input', e => {
+    document.getElementById('auditConteo')?.addEventListener('input', e => {
       const sis = parseFloat(document.getElementById('audStockSis')?.textContent) || 0;
       const fis = parseFloat(e.target.value) || 0;
       const diff = fis - sis;
@@ -860,7 +862,7 @@ const App = (() => {
     const { alertas = {}, kpis = {}, contadores = {} } = d;
 
     const criticos = alertas.vencimientosCriticos || [];
-    const enAlerta = alertas.vencimientosAlerta || alertas.vencimientosEnAlerta || [];
+    const enAlerta = alertas.vencimientosAlertas  || [];
     const pendEnv  = alertas.pendientesEnvasado  || [];
     const stockBajo = alertas.stockBajoMinimo    || [];
     const mermasPend = alertas.mermasPendientes  || [];
@@ -873,7 +875,7 @@ const App = (() => {
 
     // KPIs secundarios
     document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
-    document.getElementById('kpiSalidas').textContent    = contadores.salidasMes ?? '—';
+    document.getElementById('kpiSalidas').textContent    = kpis.salidasUltimos30dias ?? '—';
 
     // Logo alert dot (el badge de nav inferior fue eliminado junto con el botón Inicio)
     const totalAlertas = contadores.alertasTotal ?? 0;
@@ -1453,13 +1455,8 @@ const GuiasView = (() => {
     if (!_guiaActual || !idDetalle) return;
     const d = _guiaActual.detalle?.[idx];
     if (d) { d.fechaVencimiento = venc; _mostrarDetalleSheet(_guiaActual, false); }
-    // Sync en background (no hay endpoint específico, usamos observacion o guardamos en lote)
-    // Por ahora: si hay idLote, actualizar lote; sino crear uno
-    API.agregarDetalle({
-      idGuia: _guiaActual.idGuia, codigoProducto: d?.codigoProducto || '',
-      cantidadEsperada: d?.cantidadEsperada || 0, cantidadRecibida: d?.cantidadRecibida || 0,
-      precioUnitario: d?.precioUnitario || 0, fechaVencimiento: venc, idLote: d?.idLote || ''
-    }).catch(() => {});
+    // Usa endpoint dedicado para evitar duplicar la fila en GUIA_DETALLE
+    API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: venc }).catch(() => {});
     toast('Vencimiento guardado', 'ok', 1500);
   }
 
@@ -1712,7 +1709,12 @@ const GuiasView = (() => {
           ? 'Producto no registrado en el sistema' : 'Error: ' + (res.error || res.mensaje),
           res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
       }
-    }).catch(() => {});
+    }).catch(err => {
+      console.error('[guardarItem] Error de red:', err);
+      _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);
+      _mostrarDetalleSheet(_guiaActual, false);
+      toast('Sin conexión — el ítem no se guardó. Intenta de nuevo.', 'danger', 5000);
+    });
   }
 
   async function confirmarCerrarGuia() {
@@ -2280,10 +2282,9 @@ const PreingresosView = (() => {
     if (!_busquedaQ) return list;
     const qL = _busquedaQ.toLowerCase();
     return list.filter(p =>
-      (p.idPreingreso  || '').toLowerCase().includes(qL) ||
-      (p.idProveedor   || '').toLowerCase().includes(qL) ||
-      (p.numeroFactura || '').toLowerCase().includes(qL) ||
-      (p.comentario    || '').toLowerCase().includes(qL)
+      (p.idPreingreso || '').toLowerCase().includes(qL) ||
+      (p.idProveedor  || '').toLowerCase().includes(qL) ||
+      (p.comentario   || '').toLowerCase().includes(qL)
     );
   }
 
@@ -2493,7 +2494,6 @@ const PreingresosView = (() => {
             <span class="tag-${p.estado === 'PENDIENTE' ? 'warn' : p.estado === 'PROCESADO' ? 'ok' : 'blue'} text-xs">${p.estado}</span>
           </div>
           <p class="text-xs text-slate-400">${fmtFecha(p.fecha)} · ${p.idProveedor || '—'}</p>
-          ${p.numeroFactura ? `<p class="text-xs text-slate-500">Fact. ${p.numeroFactura}</p>` : ''}
           <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(p.monto, 2)}</p>
           ${p.estado === 'PENDIENTE'
             ? `<button onclick="PreingresosView.aprobarDesdePanel('${p.idPreingreso}')"

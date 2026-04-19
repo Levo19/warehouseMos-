@@ -661,9 +661,8 @@ function crearPreingreso(params) {
 
   sheet.appendRow([
     id, new Date(), params.idProveedor || '', params.usuario || '',
-    params.numeroFactura || '', parseFloat(params.monto) || 0,
-    params.comprobante || '', params.fotos || '', params.comentario || '',
-    params.etiqueta || '', 'PENDIENTE', ''
+    parseFloat(params.monto) || 0, params.fotos || '', params.comentario || '',
+    'PENDIENTE', ''
   ]);
   return { ok: true, data: { idPreingreso: id } };
 }
