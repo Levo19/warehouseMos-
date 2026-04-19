@@ -74,11 +74,80 @@ function fmt(n, dec = 0) {
   return (parseFloat(n) || 0).toFixed(dec).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// Convierte string de fecha del sheet (yyyy-MM-dd) a Date local sin drift UTC
+function _parseLocalDate(s) {
+  if (!s) return new Date(NaN);
+  const str = String(s);
+  // Si ya tiene componente de hora, parsear directo; si solo tiene fecha yyyy-MM-dd, añadir mediodia local
+  return str.length <= 10 ? new Date(str + 'T12:00:00') : new Date(str);
+}
+
 function fmtFecha(s) {
   if (!s) return '—';
-  const d = new Date(s);
+  const d = _parseLocalDate(s);
   if (isNaN(d)) return s;
   return d.toLocaleDateString('es-PE', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+// Fecha corta "19 abr" para cards
+function _fmtCorta(s) {
+  if (!s) return '—';
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const d = _parseLocalDate(s);
+  if (isNaN(d)) return s;
+  return `${d.getDate()} ${months[d.getMonth()]}`;
+}
+
+// Hora desde timestamp embebido en ID (ej: PI1745123456789 → "10:28")
+function _horaDesdeId(id) {
+  const ts = parseInt((id || '').replace(/\D/g, ''));
+  if (!ts || ts < 1e12) return '';
+  return new Date(ts).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12: false });
+}
+
+// Escapa para insertar en atributos onclick="..." (evita romper comillas)
+function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+
+// Hora desde campo fecha de guía — solo si tiene componente de hora explícito
+function _horaDesdeGuia(g) {
+  const f = String(g.fecha || '');
+  // Solo usar si contiene hora (ISO 'T' o string con ':' y largo > 10)
+  const tieneHora = f.includes('T') || (f.length > 10 && f.includes(':'));
+  if (tieneHora) {
+    const d = new Date(f);
+    if (!isNaN(d)) return d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12: false });
+  }
+  return _horaDesdeId(g.idGuia);
+}
+
+// Parsea comentario → { comp: 'si'|'no'|null, compl: 'si'|'no'|null }
+function _tagsFromComentario(comentario) {
+  const s = String(comentario || '');
+  const tags = { comp: null, compl: null };
+  if (/comprobante:\s*sí/i.test(s))        tags.comp  = 'si';
+  else if (/comprobante:\s*no/i.test(s))    tags.comp  = 'no';
+  if (/completo:\s*sí/i.test(s))            tags.compl = 'si';
+  else if (/completo:\s*no/i.test(s))       tags.compl = 'no';
+  return tags;
+}
+
+// Extrae el texto libre quitando los prefijos de tags
+function _textoLibreFromComentario(comentario) {
+  return (comentario || '')
+    .replace(/Comprobante:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/Completo:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '')
+    .trim();
+}
+
+// Construye string de comentario desde tags + texto libre
+function _buildComentario(tags, textoExtra) {
+  const partes = [];
+  if (tags.comp)  partes.push(`Comprobante: ${tags.comp === 'si' ? 'Sí' : 'No'}`);
+  if (tags.compl) partes.push(`Completo: ${tags.compl === 'si' ? 'Sí' : 'No'}`);
+  const txt = (textoExtra || '').trim();
+  if (txt) partes.push(txt);
+  return partes.join(' | ');
 }
 
 function diasColor(dias) {
@@ -88,12 +157,56 @@ function diasColor(dias) {
 }
 
 // ════════════════════════════════════════════════
+// Carrusel de fotos (global — usado por Preingresos y futuras vistas)
+// ════════════════════════════════════════════════
+let _carFotos = [];
+let _carIdx   = 0;
+
+function abrirCarrusel(fotos, titulo, startIdx) {
+  _carFotos = Array.isArray(fotos) ? fotos : String(fotos).split(',').filter(Boolean);
+  _carIdx   = startIdx || 0;
+  document.getElementById('carId').textContent = titulo || '';
+  document.getElementById('photoCarousel').classList.remove('hidden');
+  _renderCarrusel();
+}
+
+function cerrarCarrusel() {
+  document.getElementById('photoCarousel').classList.add('hidden');
+  _carFotos = [];
+}
+
+function carruselNav(dir) {
+  if (!_carFotos.length) return;
+  _carIdx = (_carIdx + dir + _carFotos.length) % _carFotos.length;
+  _renderCarrusel();
+}
+
+function carruselGoTo(idx) {
+  _carIdx = idx;
+  _renderCarrusel();
+}
+
+function _renderCarrusel() {
+  document.getElementById('carImg').src        = _carFotos[_carIdx] || '';
+  document.getElementById('carIdx').textContent  = _carIdx + 1;
+  document.getElementById('carTotal').textContent = _carFotos.length;
+  const multi = _carFotos.length > 1;
+  document.getElementById('carPrev').style.display = multi ? '' : 'none';
+  document.getElementById('carNext').style.display = multi ? '' : 'none';
+  document.getElementById('carThumbs').innerHTML = _carFotos.map((url, i) => `
+    <div onclick="carruselGoTo(${i})"
+         class="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer border-2 transition-all"
+         style="border-color:${i === _carIdx ? '#3b82f6' : 'transparent'};background:#1e293b">
+      <img src="${url}" class="w-full h-full object-cover" loading="lazy"/>
+    </div>`).join('');
+}
+
+// ════════════════════════════════════════════════
 // SESSION — Login, bloqueo, cierre de turno
 // ════════════════════════════════════════════════
 const Session = (() => {
   let pinBuffer = '';
   let lockPinBuffer = '';
-  let operadorSeleccionado = null;
   let sesionActual = null;
   let lockTimer = null;
   let lockInterval = null;
@@ -119,68 +232,38 @@ const Session = (() => {
 
   async function mostrarLogin() {
     _ocultarApp();
-    document.getElementById('loginScreen').style.display = 'flex';
-    document.getElementById('loginPaso1').classList.remove('hidden');
-    document.getElementById('loginPaso2').classList.add('hidden');
-
-    const container = document.getElementById('loginOperadores');
-
-    // Cargar personal CON pins para validación local + sin pins para mostrar botones
-    container.innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
-
-    // Siempre intentar red para tener PINs frescos en caché
-    if (navigator.onLine) {
-      const GAS = window.WH_CONFIG.gasUrl;
-      if (GAS) {
-        fetch(`${GAS}?action=getPersonalConPin`)
-          .then(r => r.json())
-          .then(res => { if (res.ok) OfflineManager._guardarPersonalConPin(res.data); })
-          .catch(() => {});
-      }
-    }
-
-    let personal = OfflineManager.getPersonalCache().map(p => { const s={...p}; delete s.pin; return s; });
-    if (!personal.length) {
-      const res = await API.getPersonal().catch(() => ({ ok: false }));
-      personal = res.ok ? res.data : [];
-    }
-
-    if (!personal.length) {
-      container.innerHTML = `
-        <div class="text-center py-4 space-y-4">
-          <p class="text-red-400 text-sm">No se pudo cargar el personal.</p>
-          <p class="text-slate-500 text-xs">Verifica que el Web App de GAS esté desplegado<br>y que la tabla PERSONAL tenga datos.</p>
-          <button onclick="Session.mostrarLogin()" class="btn btn-outline w-full py-3">🔄 Reintentar</button>
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = personal.map(p => `
-      <button onclick="Session.seleccionarOperador('${p.idPersonal}','${p.nombre}','${p.apellido}','${p.rol}','${p.color}')"
-              class="w-full flex items-center gap-4 p-4 rounded-2xl border-2 border-slate-700 active:border-blue-500"
-              style="background:#1e293b;">
-        <div class="w-14 h-14 rounded-full flex items-center justify-center text-white font-black text-xl flex-shrink-0"
-             style="background:${p.color}">${p.nombre[0]}${p.apellido[0]}</div>
-        <div class="text-left">
-          <p class="text-white font-bold text-lg">${p.nombre} ${p.apellido}</p>
-          <p class="text-slate-400 text-sm">${p.rol}</p>
-        </div>
-        <span class="ml-auto text-slate-500 text-2xl">›</span>
-      </button>`).join('');
-  }
-
-  function seleccionarOperador(id, nombre, apellido, rol, color) {
-    operadorSeleccionado = { idPersonal: id, nombre, apellido, rol, color };
     pinBuffer = '';
     _actualizarPuntos('pin', 0);
-    document.getElementById('loginNombreText').textContent = nombre + ' ' + apellido;
-    document.getElementById('loginRolText').textContent = rol;
-    const av = document.getElementById('loginAvatar');
-    av.textContent = nombre[0] + apellido[0];
-    av.style.background = color;
     document.getElementById('loginError').textContent = '';
-    document.getElementById('loginPaso1').classList.add('hidden');
-    document.getElementById('loginPaso2').classList.remove('hidden');
+    document.getElementById('loginScreen').style.display = 'flex';
+
+    const loadingEl = document.getElementById('loginLoading');
+    const padEl     = document.getElementById('pinPadArea');
+
+    // Siempre ocultar el teclado al inicio y mostrar spinner
+    padEl.style.display    = 'none';
+    loadingEl.style.display = 'flex';
+
+    const yaHayCache = OfflineManager.getPersonalCache().length > 0;
+    if (!yaHayCache && navigator.onLine && window.WH_CONFIG.gasUrl) {
+      // Sin caché: esperar descarga antes de mostrar teclado
+      await OfflineManager.precargar().catch(() => {});
+    } else if (navigator.onLine && window.WH_CONFIG.gasUrl) {
+      // Con caché: refrescar en background (no bloquea)
+      OfflineManager.precargar().catch(() => {});
+    }
+
+    // Ocultar spinner, revelar teclado con animación
+    loadingEl.style.display = 'none';
+    padEl.classList.remove('fade-in-up');
+    // Trigger reflow so animation replays even if already had the class
+    void padEl.offsetWidth;
+    padEl.classList.add('fade-in-up');
+    padEl.style.display = 'flex';
+  }
+
+  function _setPinEnabled(on) {
+    document.querySelectorAll('#pinPadArea .pin-btn').forEach(b => b.disabled = !on);
   }
 
   function pinTecla(d) {
@@ -190,13 +273,7 @@ const Session = (() => {
     if (pinBuffer.length === 4) setTimeout(() => _intentarLogin(), 150);
   }
 
-  function pinAtras(volverPaso1 = false) {
-    if (volverPaso1) {
-      pinBuffer = '';
-      document.getElementById('loginPaso1').classList.remove('hidden');
-      document.getElementById('loginPaso2').classList.add('hidden');
-      return;
-    }
+  function pinAtras() {
     if (pinBuffer.length > 0) {
       pinBuffer = pinBuffer.slice(0, -1);
       _actualizarPuntos('pin', pinBuffer.length);
@@ -209,9 +286,13 @@ const Session = (() => {
     _actualizarPuntos('pin', 0);
 
     // 1. Validar PIN localmente (instantáneo si hay caché)
+    const _dbgPersonal = OfflineManager.getPersonalCache();
+    console.log('[Login] PIN ingresado:', pinIntento, '| Personal en caché:', _dbgPersonal.length, 'registros');
+    if (_dbgPersonal.length > 0) console.log('[Login] Primer registro de muestra:', JSON.stringify(_dbgPersonal[0]).substring(0, 200));
     let localOp = OfflineManager.validarPinLocal(pinIntento);
+    console.log('[Login] validarPinLocal result:', localOp ? localOp.nombre : null);
 
-    // Sin caché → validar directo en GAS
+    // Sin caché → validar directo en GAS (solo si hay red)
     if (!localOp && navigator.onLine) {
       const res = await API.loginPersonal(pinIntento);
       if (!res.ok || res.offline) {
@@ -219,12 +300,11 @@ const Session = (() => {
         setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
         return;
       }
-      // Login exitoso vía GAS
       sesionActual = res.data;
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
       _aplicarSesion();
-      toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
+      _postLogin(res.data.sesionAnterior || null);
       return;
     }
 
@@ -234,7 +314,7 @@ const Session = (() => {
       return;
     }
 
-    // 2. Sesión optimista inmediata
+    // 2. Sesión optimista inmediata — entra al instante
     sesionActual = {
       idSesion:   'LOCAL_' + Date.now(),
       idPersonal: localOp.idPersonal,
@@ -247,7 +327,7 @@ const Session = (() => {
     _guardarSesion(sesionActual);
     document.getElementById('loginScreen').style.display = 'none';
     _aplicarSesion();
-    toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
+    _postLogin(null); // aviso de sesión anterior solo si GAS responde
 
     // 3. Confirmar sesión con GAS en segundo plano
     API.loginPersonal(pinIntento).then(res => {
@@ -255,8 +335,29 @@ const Session = (() => {
         sesionActual = { ...sesionActual, ...res.data };
         window.WH_CONFIG.idSesion = sesionActual.idSesion;
         _guardarSesion(sesionActual);
+        if (res.data.sesionAnterior) _mostrarAvisoSesionAnterior(res.data.sesionAnterior);
       }
     }).catch(() => {});
+  }
+
+  // Acciones post-login: toast + aviso sesión anterior + ticket bienvenida
+  function _postLogin(sesionAnterior) {
+    toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
+    if (sesionAnterior) _mostrarAvisoSesionAnterior(sesionAnterior);
+    // Ticket de bienvenida (fire-and-forget, no bloquea)
+    if (navigator.onLine) {
+      API.imprimirBienvenida({
+        nombre:     sesionActual.nombre,
+        apellido:   sesionActual.apellido,
+        rol:        sesionActual.rol,
+        horaInicio: sesionActual.horaInicio
+      }).catch(() => {});
+    }
+  }
+
+  function _mostrarAvisoSesionAnterior(fecha) {
+    // Toast de advertencia + modal breve (igual que MosExpress)
+    toast(`⚠ Sesión anterior del ${fecha} no fue cerrada`, 'warn', 6000);
   }
 
   function _aplicarSesion() {
@@ -365,12 +466,18 @@ const Session = (() => {
     }
   }
 
-  async function _intentarDesbloqueo() {
-    // Verificar contra sesión activa
-    const res = await API.loginPersonal(lockPinBuffer);
+  function _intentarDesbloqueo() {
+    const pin = lockPinBuffer;
     lockPinBuffer = '';
     _actualizarPuntos('lpin', 0);
-    if (res.ok && res.data.idPersonal === sesionActual.idPersonal) {
+
+    // Validación 100% local — solo acepta el PIN del usuario activo
+    const personal = OfflineManager.getPersonalCache();
+    const ok = personal.find(p =>
+      String(p.pin) === String(pin) && p.idPersonal === sesionActual.idPersonal
+    );
+
+    if (ok) {
       clearInterval(lockInterval);
       document.getElementById('lockScreen').style.display = 'none';
       _resetTimerBloqueo();
@@ -509,7 +616,7 @@ const Session = (() => {
   // Verificar cierre forzado cada minuto
   setInterval(_verificarCierreForzado, 60000);
 
-  return { init, mostrarLogin, seleccionarOperador,
+  return { init, mostrarLogin,
            pinTecla, pinAtras, lockTecla, lockAtras,
            bloquear, confirmarCierre, cerrarTurnoFinal,
            getSesion };
@@ -552,7 +659,11 @@ const App = (() => {
   function init() {
     // Restaurar GAS URL si fue guardada localmente
     const gasUrl = localStorage.getItem('wh_gas_url');
-    if (gasUrl) window.WH_CONFIG.gasUrl = gasUrl;
+    if (gasUrl) {
+      console.log('[App] wh_gas_url desde localStorage:', gasUrl);
+      window.WH_CONFIG.gasUrl = gasUrl;
+    }
+    console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
 
     // Ocultar app hasta login
     document.getElementById('topBar').style.display = 'none';
@@ -577,47 +688,68 @@ const App = (() => {
       document.getElementById('audDiferenciaInfo').classList.remove('hidden');
     });
 
-    // Registrar SW
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    }
+    // Cerrar filter dropdowns al tocar fuera
+    document.addEventListener('click', e => {
+      const guiaBtn  = document.getElementById('guiaFilterBtn');
+      const guiaMenu = document.getElementById('guiaFilterMenu');
+      if (guiaMenu && guiaBtn && !guiaBtn.contains(e.target) && !guiaMenu.contains(e.target)) {
+        guiaMenu.style.display = 'none';
+      }
+      const preBtn  = document.getElementById('preFilterBtn');
+      const preMenu = document.getElementById('preFilterMenu');
+      if (preMenu && preBtn && !preBtn.contains(e.target) && !preMenu.contains(e.target)) {
+        preMenu.style.display = 'none';
+      }
+    });
+
+    // Precarga universal en background ANTES del login (30s cycle)
+    OfflineManager.iniciarRefreshOperacional();
+
+    // Escuchar refresh silencioso cada 30s → actualizar vista activa sin flicker
+    window.addEventListener('wh:data-refresh', e => {
+      const changed = e.detail?.changed || [];
+      const guiasChanged       = changed.includes('guias') || changed.includes('detalles');
+      const preingresosChanged = changed.includes('preingresos');
+      const stockChanged       = changed.includes('stock') || changed.includes('ajustes') || changed.includes('auditorias');
+      if (currentView === 'guias'       && guiasChanged)       GuiasView.silentRefresh();
+      if (currentView === 'preingresos' && preingresosChanged) PreingresosView.silentRefresh();
+      if (currentView === 'productos'   && stockChanged)       ProductosView.silentRefresh();
+    });
 
     // Iniciar sesión (muestra login si no hay sesión activa)
     Session.init();
   }
 
   function nav(viewName) {
-    // Si activa modo envasador, redirigir a vista envasador
+    // Si modo envasador activo y va a envasados → redirigir a envasador
     if (modoEnvasador && viewName === 'envasados') {
       viewName = 'envasador';
     }
+
+    closeUserMenu();
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const el = document.getElementById('view-' + viewName);
     if (el) { el.classList.add('active'); el.classList.add('slide-up'); }
 
-    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
-    // 3-button nav: 0=Inicio, 1=Guías, 2=Más (envasador has no nav highlight)
-    const navBtnIdx = viewName === 'dashboard' ? 0
-                    : viewName === 'guias'     ? 1
-                    : viewName === 'envasador' ? -1
-                    : 2;
-    if (navBtnIdx >= 0) {
-      document.querySelectorAll('.nav-btn')[navBtnIdx]?.classList.add('active');
-    }
+    // Marcar botón de nav activo por data-view
+    document.querySelectorAll('.nav-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.view === viewName);
+    });
 
-    document.getElementById('pageTitle').textContent = {
-      dashboard:    'Dashboard',
-      envasador:    'Modo Envasador',
-      guias:        'Guías',
-      envasados:    'Envasados',
-      preingresos:  'Preingresos',
-      mermas:       'Mermas',
-      auditorias:   'Auditorías',
-      productos:    'Productos',
-      proveedores:  'Proveedores',
-      config:       'Configuración'
-    }[viewName] || viewName;
+    const titles = {
+      dashboard:   'Dashboard',
+      envasador:   'Modo Envasador',
+      guias:       'Guías',
+      envasados:   'Envasados',
+      preingresos: 'Pre-Ingresos',
+      mermas:      'Mermas',
+      auditorias:  'Auditorías',
+      productos:   'Productos',
+      proveedores: 'Proveedores',
+      tools:       'Tools',
+    };
+    document.getElementById('pageTitle').textContent = titles[viewName] || viewName;
 
     currentView = viewName;
 
@@ -628,24 +760,87 @@ const App = (() => {
       case 'envasador':   EnvasadorView.cargar(); break;
       case 'preingresos': PreingresosView.cargar(); break;
       case 'mermas':      MermasView.cargar(); break;
-      case 'auditorias':  AuditoriasView.cargar(); break;
       case 'productos':   ProductosView.cargar(); break;
-      case 'proveedores': ProveedoresView.cargar(); break;
+      case 'tools':       _loadTools(); break;
     }
   }
 
   function toggleModoEnvasador() {
     modoEnvasador = !modoEnvasador;
     const ind = document.getElementById('modoIndicador');
+    ind?.classList.toggle('hidden', !modoEnvasador);
+    // Actualizar botón dentro de view-envasados
     const btn = document.getElementById('btnModo');
-    ind.classList.toggle('hidden', !modoEnvasador);
-    btn.textContent = modoEnvasador ? '✕ Salir modo' : '⚡ Modo';
+    if (btn) btn.innerHTML = modoEnvasador
+      ? '✕ Salir modo'
+      : '⚡ Modo Envasador';
     if (modoEnvasador) {
       nav('envasador');
       toast('Modo Envasador activado', 'ok');
     } else {
-      nav('dashboard');
+      nav('envasados');
       toast('Modo normal', 'info');
+    }
+  }
+
+  // ── User menu (avatar dropdown) ───────────────────────────
+  function toggleUserMenu() {
+    const m = document.getElementById('userMenu');
+    if (!m) return;
+    m.classList.toggle('hidden');
+    if (!m.classList.contains('hidden')) {
+      // cerrar al tocar fuera
+      setTimeout(() => document.addEventListener('click', _closeMenuOutside, { once: true }), 10);
+    }
+  }
+  function closeUserMenu() {
+    document.getElementById('userMenu')?.classList.add('hidden');
+  }
+  function _closeMenuOutside(e) {
+    if (!document.getElementById('userMenu')?.contains(e.target)) closeUserMenu();
+  }
+
+  // ── Tools view ────────────────────────────────────────────
+  function _loadTools() {
+    // Versión
+    fetch('./version.json').then(r => r.json()).then(v => {
+      const el = document.getElementById('toolsVersion');
+      if (el) el.textContent = v.version + ' (' + (v.build || '') + ')';
+    }).catch(() => {});
+    // GAS URL
+    const gasEl = document.getElementById('toolsGasUrl');
+    if (gasEl) gasEl.textContent = window.WH_CONFIG?.gasUrl || '—';
+    // Cargar GAS url en input
+    const inp = document.getElementById('cfgGasUrl');
+    if (inp && window.WH_CONFIG?.gasUrl) inp.value = window.WH_CONFIG.gasUrl;
+  }
+
+  async function syncForzado() {
+    const btn = document.getElementById('btnSyncForzado');
+    const st  = document.getElementById('syncStatus');
+    if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando…'; }
+    if (st)  st.textContent = '';
+    try {
+      await OfflineManager.sincronizar();
+      await OfflineManager.precargar();
+      if (st) st.textContent = '✅ Sincronizado ' + new Date().toLocaleTimeString('es-PE');
+      toast('Sincronización completada', 'ok');
+    } catch(e) {
+      if (st) st.textContent = '❌ Error: ' + e.message;
+      toast('Error al sincronizar', 'danger');
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/><path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/></svg> Sincronizar ahora'; }
+    }
+  }
+
+  async function checkUpdate() {
+    const st = document.getElementById('syncStatus');
+    if (st) st.textContent = 'Buscando actualización…';
+    if (window._SWCheck) {
+      await window._SWCheck();
+      if (st) st.textContent = 'Verificado ' + new Date().toLocaleTimeString('es-PE');
+    } else {
+      if (st) st.textContent = 'Service Worker no disponible en este entorno';
     }
   }
 
@@ -680,13 +875,9 @@ const App = (() => {
     document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
     document.getElementById('kpiSalidas').textContent    = contadores.salidasMes ?? '—';
 
-    // Badge navbar
-    const badge = document.getElementById('navAlertaBadge');
+    // Logo alert dot (el badge de nav inferior fue eliminado junto con el botón Inicio)
     const totalAlertas = contadores.alertasTotal ?? 0;
-    if (totalAlertas > 0) {
-      badge.textContent = totalAlertas > 9 ? '9+' : totalAlertas;
-      badge.classList.remove('hidden');
-    }
+    document.getElementById('logoAlertDot')?.classList.toggle('hidden', totalAlertas === 0);
 
     // Panel Vencimientos
     document.getElementById('listVencCrit').innerHTML = criticos.map(v => `
@@ -772,7 +963,6 @@ const App = (() => {
       window.WH_CONFIG.usuario = nombre;
       localStorage.setItem('wh_usuario', nombre);
       document.getElementById('usuarioNombre').textContent = nombre;
-      document.getElementById('cfgUsuario').value = nombre;
     }
   }
 
@@ -782,9 +972,14 @@ const App = (() => {
   function abrirMas() { abrirSheet('sheetMas'); }
   function navMas(viewName) { cerrarSheet('sheetMas'); nav(viewName); }
 
-  return { init, nav, abrirMas, navMas, toggleModoEnvasador, cargarDashboard, showUsuarioDialog,
+  return { init, nav, abrirMas, navMas,
+           toggleModoEnvasador,
+           toggleUserMenu, closeUserMenu,
+           syncForzado, checkUpdate,
+           cargarDashboard, showUsuarioDialog,
            cargarProductosMaestro, cargarProveedoresMaestro,
-           getProductosMaestro, getProveedoresMaestro };
+           getProductosMaestro, getProveedoresMaestro,
+           getView: () => currentView };
 })();
 
 // ════════════════════════════════════════════════
@@ -793,87 +988,956 @@ const App = (() => {
 const GuiasView = (() => {
   let todas = [];
   let filtroActual = '';
+  let _busquedaQ   = '';
+  let _guiaActual  = null;   // guía abierta en el sheet de detalle
+  let _refreshDot  = null;   // indicador visual de refresh
+  // Foto guía (una sola foto por guía)
+  let _fotoGuiaNueva = null; // { file, objectUrl }
+  // Comentario + tags guía (estado del sheet de detalle — se guardan al cerrar)
+  let _tagsGuia    = { comp: null, compl: null };
+  // Tags para CREAR nueva guía
+  let _tagsNueva   = { comp: null, compl: null };
+  // Agregar ítem: estado del scanner+form
+  let _itemProd    = null;   // product object seleccionado
+  let _itemQty     = 1;
+  let _itemVenc    = '';
 
+  const TIPO_LABELS = {
+    INGRESO_PROVEEDOR: '🚚 Proveedor', INGRESO_JEFATURA: '🏢 Jefatura',
+    SALIDA_ZONA: '📍 Zona',  SALIDA_DEVOLUCION: '↩️ Devolución',
+    SALIDA_JEFATURA: '🏢 Jefatura', SALIDA_ENVASADO: '📦 Envasado', SALIDA_MERMA: '⚠️ Merma'
+  };
+
+  // Carga inicial: primero desde caché (instantáneo), luego refresca en bg
   async function cargar() {
-    loading('listGuias', true);
-    const res = await API.getGuias({ limit: 50 }).catch(() => ({ ok: false }));
-    todas = res.ok ? res.data : [];
-    render(todas);
+    const cached = OfflineManager.getGuiasCache();
+    if (cached.length) {
+      todas = cached;
+      render(_filtrarYBuscar());
+    } else {
+      loading('listGuias', true);
+    }
+    // Refresca en background (la precarga operacional ya está corriendo,
+    // pero aquí forzamos un fetch inmediato para la primera entrada a la vista)
+    OfflineManager.precargarOperacional().then(() => {
+      const fresh = OfflineManager.getGuiasCache();
+      if (fresh.length) { todas = fresh; render(_filtrarYBuscar()); }
+    });
   }
 
+  // Refresh silencioso desde el evento 60s — no muestra spinner
+  function silentRefresh() {
+    const fresh = OfflineManager.getGuiasCache();
+    if (!fresh.length) return;
+    todas = fresh;
+    render(_filtrarYBuscar());
+    // Parpadeo sutil del indicador
+    const dot = document.getElementById('guiasRefreshDot');
+    if (dot) { dot.style.opacity = '1'; setTimeout(() => { dot.style.opacity = '0'; }, 1200); }
+  }
+
+  function _filtrar(list, f) {
+    if (!f || f === 'TODAS') return list;
+    if (f === 'INGRESO') return list.filter(g => g.tipo?.startsWith('INGRESO'));
+    if (f === 'SALIDA')  return list.filter(g => g.tipo?.startsWith('SALIDA'));
+    if (f === 'ABIERTA') return list.filter(g => g.estado === 'ABIERTA');
+    return list;
+  }
+
+  function _filtrarYBuscar() {
+    let r = _filtrar(todas, filtroActual);
+    if (_busquedaQ) {
+      const qL = _busquedaQ.toLowerCase();
+      r = r.filter(g =>
+        (g.idGuia         || '').toLowerCase().includes(qL) ||
+        (g.numeroDocumento|| '').toLowerCase().includes(qL) ||
+        (g.comentario     || '').toLowerCase().includes(qL) ||
+        (g.usuario        || '').toLowerCase().includes(qL) ||
+        (g.idProveedor    || '').toLowerCase().includes(qL) ||
+        (TIPO_LABELS[g.tipo] || g.tipo || '').toLowerCase().includes(qL)
+      );
+    }
+    return r;
+  }
+
+  function buscar(q) {
+    _busquedaQ = (q || '').trim();
+    const cl = document.getElementById('clearBuscarGuia');
+    if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
+    render(_filtrarYBuscar());
+  }
+
+  function buscarClear() {
+    _busquedaQ = '';
+    const inp = document.getElementById('inputBuscarGuia');
+    if (inp) inp.value = '';
+    const cl = document.getElementById('clearBuscarGuia');
+    if (cl) cl.style.display = 'none';
+    render(_filtrarYBuscar());
+  }
+
+  function toggleFiltro() {
+    const menu = document.getElementById('guiaFilterMenu');
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+  }
+
+  function _cerrarFiltroMenu() {
+    const menu = document.getElementById('guiaFilterMenu');
+    if (menu) menu.style.display = 'none';
+  }
+
+  const FILTRO_LABELS = { TODAS: 'TODAS', INGRESO: '↓ INGRESOS', SALIDA: '↑ SALIDAS', ABIERTA: '◌ ABIERTAS' };
+
   function filtrar(f) {
-    filtroActual = f;
-    document.querySelectorAll('.guia-tab').forEach(b => b.classList.toggle('active-tab', b.textContent.toLowerCase().includes(f.toLowerCase())));
-    let list = todas;
-    if (f === 'INGRESO') list = todas.filter(g => g.tipo?.startsWith('INGRESO'));
-    else if (f === 'SALIDA') list = todas.filter(g => g.tipo?.startsWith('SALIDA'));
-    else if (f === 'ABIERTA') list = todas.filter(g => g.estado === 'ABIERTA');
-    render(list);
+    filtroActual = f || 'TODAS';
+    // Update label
+    const lbl = document.getElementById('guiaFilterLabel');
+    if (lbl) lbl.textContent = FILTRO_LABELS[filtroActual] || 'TODAS';
+    // Update active state in dropdown
+    document.querySelectorAll('.guia-fopt').forEach(b =>
+      b.classList.toggle('sel', b.dataset.filtro === filtroActual));
+    _cerrarFiltroMenu();
+    render(_filtrarYBuscar());
+  }
+
+  function _getProvNombre(idProveedor) {
+    if (!idProveedor) return '';
+    const p = OfflineManager.getProveedoresCache().find(x => x.idProveedor === idProveedor);
+    return p ? (p.nombre || idProveedor) : idProveedor;
+  }
+
+  function _renderGuiaCard(g) {
+    const isIngreso  = g.tipo?.startsWith('INGRESO');
+    const isAbierta  = g.estado === 'ABIERTA';
+    const borderColor = isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
+    const tipoLabel  = TIPO_LABELS[g.tipo] || g.tipo || '—';
+    const provNombre = _getProvNombre(g.idProveedor) || g.usuario || '—';
+    const hora       = _horaDesdeGuia(g);
+    const fechaCorta = _fmtCorta(g.fecha);
+    const estadoDot  = isAbierta
+      ? `<span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0"></span>`
+      : `<span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>`;
+    const fotoTag = g.foto ? `<span class="pre-qtag pre-qtag-slate">📷</span>` : '';
+    // Icono de preingreso vinculado — al tap navega al preingreso
+    const preTag  = g.idPreingreso
+      ? `<span onclick="event.stopPropagation();GuiasView.irAPreingreso('${escAttr(g.idPreingreso)}')"
+               class="pre-qtag pre-qtag-blue" title="Ver preingreso"
+               style="cursor:pointer;user-select:none">📋</span>`
+      : '';
+    return `
+    <div class="guia-card" style="border-left-color:${borderColor}"
+         onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
+      <div class="flex items-center justify-between gap-1 overflow-hidden">
+        <span class="text-xs font-bold truncate" style="color:${isIngreso ? '#4ade80' : '#60a5fd'}">${tipoLabel}</span>
+        <div class="flex items-center gap-1 flex-shrink-0">${preTag}${fotoTag}${estadoDot}</div>
+      </div>
+      <p class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</p>
+      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}</p>
+    </div>`;
   }
 
   function render(list) {
     const container = document.getElementById('listGuias');
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">No hay guías</p>'; return; }
+    if (!container) return;
+    const optCards = Array.from(container.querySelectorAll('.card-optimistic'));
+    if (!list.length) {
+      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">No hay guías</p>';
+      optCards.forEach(c => container.insertBefore(c, container.firstChild));
+      return;
+    }
 
-    const tipoLabels = {
-      INGRESO_PROVEEDOR: '🚚 Proveedor', INGRESO_JEFATURA: '🏢 Jefatura',
-      SALIDA_ZONA: '📍 Zona', SALIDA_DEVOLUCION: '↩️ Devolución',
-      SALIDA_JEFATURA: '🏢 Jefatura', SALIDA_ENVASADO: '📦 Envasado', SALIDA_MERMA: '⚠️ Merma'
-    };
+    const sorted = [...list].sort((a, b) => {
+      const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
+      const td = db - da;
+      if (td !== 0) return td;
+      const na = parseInt((a.idGuia || '').replace(/\D/g, '')) || 0;
+      const nb = parseInt((b.idGuia || '').replace(/\D/g, '')) || 0;
+      return nb - na;
+    });
 
-    container.innerHTML = list.map(g => `
-      <div class="card-sm cursor-pointer" onclick="GuiasView.verDetalle('${g.idGuia}')">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs ${g.tipo?.startsWith('INGRESO') ? 'tag-ok' : 'tag-blue'}">
-            ${tipoLabels[g.tipo] || g.tipo}
-          </span>
-          <span class="text-xs ${g.estado === 'ABIERTA' ? 'tag-warn' : 'tag-ok'}">${g.estado}</span>
-        </div>
-        <p class="font-semibold text-sm">${g.idGuia}</p>
-        <p class="text-xs text-slate-400">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
-        ${g.comentario ? `<p class="text-xs text-slate-500 mt-1">${g.comentario}</p>` : ''}
-        ${g.montoTotal && parseFloat(g.montoTotal) > 0
-          ? `<p class="text-xs text-emerald-400 mt-1 font-semibold">S/. ${fmt(g.montoTotal, 2)}</p>` : ''}
-      </div>`).join('');
+    const today     = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today.getTime()); yesterday.setDate(today.getDate() - 1);
+    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+    function _gKey(g) {
+      if (!g.fecha) return '0000-00-00';
+      const d = _parseLocalDate(g.fecha);
+      if (isNaN(d)) return '0000-00-00';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function _gLabel(key) {
+      if (!key || key === '0000-00-00') return 'Sin fecha';
+      const d = new Date(key + 'T12:00:00');
+      const dMid = new Date(d); dMid.setHours(0,0,0,0);
+      if (dMid.getTime() === today.getTime())     return 'Hoy';
+      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
+      return d.getFullYear() === today.getFullYear()
+        ? `${d.getDate()} ${months[d.getMonth()]}`
+        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    }
+
+    const groupMap = {};
+    sorted.forEach(g => {
+      const k = _gKey(g);
+      if (!groupMap[k]) groupMap[k] = [];
+      groupMap[k].push(g);
+    });
+
+    container.innerHTML = Object.entries(groupMap)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) =>
+        `<div class="pre-date-hdr">${_gLabel(key)}</div>
+         <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`
+      ).join('');
+
+    optCards.forEach(c => container.insertBefore(c, container.firstChild));
   }
 
-  async function verDetalle(idGuia) {
-    toast('Cargando guía...', 'info');
+  // ── Optimistic guía card ──────────────────────────────────
+  function injectOptimisticGuia({ tempId, idProveedor, provNombre }) {
+    const container = document.getElementById('listGuias');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.id = 'optguia_' + tempId;
+    div.className = 'guia-card card-optimistic';
+    div.style.borderLeftColor = '#22c55e';
+    div.innerHTML = `
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-emerald-400">🚚 Proveedor</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="spinner" style="width:12px;height:12px;border-width:2px"></div>
+        <span class="text-xs text-slate-400 italic">Creando guía…</span>
+      </div>
+      <p class="text-xs text-slate-400 truncate">${escAttr(provNombre || 'Sin proveedor')}</p>`;
+    container.insertBefore(div, container.firstChild);
+  }
+
+  function finalizeOptimisticGuia(tempId) {
+    document.getElementById('optguia_' + tempId)?.remove();
+    setTimeout(() => {
+      OfflineManager.precargarOperacional().then(() => {
+        const fresh = OfflineManager.getGuiasCache();
+        if (fresh.length) { todas = fresh; render(_filtrarYBuscar()); }
+      });
+    }, 800);
+  }
+
+  function removeOptimisticGuia(tempId) {
+    document.getElementById('optguia_' + tempId)?.remove();
+  }
+
+  // Abre el detalle desde caché instantáneamente
+  function verDetalle(idGuia) {
+    // 1. Buscar en caché local (instantáneo)
+    const guias    = OfflineManager.getGuiasCache();
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const prods    = OfflineManager.getProductosCache();
+    const prodMap  = {};
+    prods.forEach(p => { prodMap[p.idProducto] = p.descripcion || p.nombre || p.idProducto; });
+
+    let guia = guias.find(g => g.idGuia === idGuia);
+    if (!guia) {
+      // Fallback: mostrar loading y pedir a GAS
+      _abrirDetalleConGAS(idGuia);
+      return;
+    }
+
+    const detalle = detalles
+      .filter(d => d.idGuia === idGuia)
+      .map(d => ({ ...d, descripcionProducto: prodMap[d.codigoProducto] || d.codigoProducto }));
+
+    _guiaActual = { ...guia, detalle };
+    _mostrarDetalleSheet(_guiaActual);
+
+    // 2. Refrescar desde GAS en background (actualiza si hay cambios)
+    if (navigator.onLine) {
+      API.getGuia(idGuia).then(res => {
+        if (res.ok && !res.offline) {
+          _guiaActual = res.data;
+          _mostrarDetalleSheet(_guiaActual, false); // re-render sin animación
+        }
+      }).catch(() => {});
+    }
+  }
+
+  async function _abrirDetalleConGAS(idGuia) {
+    document.getElementById('guiaDetHeader').innerHTML =
+      '<div class="flex justify-center py-4"><div class="spinner"></div></div>';
+    abrirSheet('sheetGuiaDetalle');
     const res = await API.getGuia(idGuia);
-    if (!res.ok) { toast('Error al cargar guía', 'danger'); return; }
-    const g = res.data;
-    const items = (g.detalle || []).map(d =>
-      `<div class="flex justify-between text-sm py-1 border-b border-slate-700">
-        <span>${d.descripcionProducto || d.codigoProducto}</span>
-        <span class="font-mono">${fmt(d.cantidadRecibida)}</span>
-      </div>`
-    ).join('');
-    toast(`${g.idGuia}: ${g.detalle?.length || 0} ítems — ${g.estado}`, 'info', 4000);
+    if (!res.ok) { toast('Error al cargar guía', 'danger'); cerrarSheet('sheetGuiaDetalle'); return; }
+    _guiaActual = res.data;
+    _mostrarDetalleSheet(_guiaActual, false);
   }
 
-  async function crearGuia() {
-    const tipo = document.getElementById('guiaTipo').value;
-    const params = {
-      tipo,
-      usuario:        window.WH_CONFIG.usuario,
-      idProveedor:    document.getElementById('guiaProveedor').value,
-      idZona:         document.getElementById('guiaZona').value,
-      numeroDocumento:document.getElementById('guiaNumDoc').value,
-      comentario:     document.getElementById('guiaComentario').value
-    };
-    const res = await API.crearGuia(params);
-    if (res.ok) {
-      toast(`Guía ${res.data.idGuia} creada`, 'ok');
-      cerrarSheet('sheetGuia');
-      cargar();
+  // SVG lock icons
+  const SVG_LOCK_OPEN   = `<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M11 1a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h3a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h5V3a3 3 0 0 1 6 0v4a.5.5 0 0 1-1 0V3a2 2 0 0 0-2-2zM5 9a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-5a1 1 0 0 0-1-1H5z"/></svg>`;
+  const SVG_LOCK_CLOSED = `<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6v5H5z"/></svg>`;
+
+  function _mostrarDetalleSheet(g, conAnimacion = true) {
+    const esIngreso = g.tipo?.startsWith('INGRESO');
+    const abierta   = g.estado === 'ABIERTA';
+    const esDiaAnterior = g.fecha && g.fecha < new Date().toISOString().split('T')[0];
+
+    // Lock button
+    const lockBtn = `
+      <button onclick="GuiasView.toggleEstadoGuia()"
+              class="flex items-center gap-1 px-3 py-1 rounded-lg border font-bold text-xs tracking-wide transition-colors
+                     ${abierta ? 'border-amber-700 text-amber-300 bg-amber-900/30 hover:bg-amber-800/40'
+                               : 'border-slate-600 text-slate-400 hover:bg-slate-700'}"
+              title="${abierta ? 'Cerrar guía' : 'Reabrir (admin)'}">
+        ${abierta ? SVG_LOCK_OPEN : SVG_LOCK_CLOSED}
+        ${abierta ? 'ABIERTA' : 'CERRADA'}
+      </button>`;
+
+    document.getElementById('guiaDetHeader').innerHTML = `
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <p class="font-black text-lg text-white">${g.idGuia}</p>
+          <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
+        </div>
+        ${lockBtn}
+      </div>
+      <p class="text-xs text-slate-400 mt-1">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
+      ${g.numeroDocumento ? `<p class="text-xs text-slate-500">Doc: ${g.numeroDocumento}</p>` : ''}
+      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía de día anterior — ciérrala o será autocerrada</p>` : ''}`;
+
+    // ── Foto guía (una foto única) ─────────────────────────
+    const fotoEl = document.getElementById('guiaDetFotoSection');
+    if (fotoEl) {
+      if (g.foto) {
+        fotoEl.innerHTML = `
+          <div class="relative rounded-lg overflow-hidden cursor-pointer mb-3" style="height:110px"
+               onclick="GuiasView.verFotoGuia()">
+            <img src="${escAttr(g.foto)}" class="w-full h-full object-cover" loading="lazy"
+                 onerror="this.style.opacity='.3'"/>
+            ${abierta ? `<label class="absolute top-2 right-2 bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300">
+              <input type="file" accept="image/*" capture="environment" class="hidden"
+                     onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+              ✏️ Cambiar
+            </label>` : ''}
+          </div>`;
+      } else if (abierta) {
+        fotoEl.innerHTML = `
+          <div class="flex gap-2 mb-3">
+            <label class="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer text-slate-400 text-sm" style="height:64px">
+              <input type="file" accept="image/*" capture="environment" class="hidden"
+                     onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+              📷 Agregar foto
+            </label>
+            ${g.idPreingreso ? `<button onclick="GuiasView.copiarFotoDePreingreso()"
+                    class="px-3 rounded-lg border border-slate-600 text-xs text-blue-400" style="height:64px">
+              Copiar de<br>preingreso
+            </button>` : ''}
+          </div>`;
+      } else {
+        fotoEl.innerHTML = '';
+      }
+    }
+
+    // ── Comentario + tags guía ─────────────────────────────
+    _tagsGuia = _tagsFromComentario(g.comentario);
+    const textoLibre = _textoLibreFromComentario(g.comentario);
+    const cEl = document.getElementById('guiaDetComentarioSection');
+    if (cEl) {
+      if (abierta) {
+        const _tb = (id, label, grupo, val, colorA, colorI) =>
+          `<button id="${id}" onclick="GuiasView.toggleTagGuia('${grupo}','${val}')"
+                   class="flex-1 py-2 rounded-lg text-xs font-bold border transition-all
+                          ${_tagsGuia[grupo]===val ? colorA : colorI}">${label}</button>`;
+        cEl.innerHTML = `
+          <div class="space-y-1 mb-2">
+            <div class="flex gap-1">
+              ${_tb('gTagComp1','Comprobante','comp','si',
+                    'bg-blue-900/70 border-blue-500 text-blue-200',
+                    'border-slate-700 text-slate-500')}
+              ${_tb('gTagComp0','Sin comprobante','comp','no',
+                    'bg-amber-900/70 border-amber-500 text-amber-200',
+                    'border-slate-700 text-slate-500')}
+            </div>
+            <div class="flex gap-1">
+              ${_tb('gTagCompl1','Completo','compl','si',
+                    'bg-green-900/70 border-green-500 text-green-200',
+                    'border-slate-700 text-slate-500')}
+              ${_tb('gTagCompl0','Incompleto','compl','no',
+                    'bg-amber-900/70 border-amber-500 text-amber-200',
+                    'border-slate-700 text-slate-500')}
+            </div>
+          </div>
+          <textarea id="guiaComentarioEdit" class="input text-xs" rows="2"
+                    placeholder="Notas adicionales…">${textoLibre}</textarea>
+          <p class="text-xs text-slate-600 mt-1">Se guarda al cerrar.</p>`;
+      } else if (g.comentario) {
+        cEl.innerHTML = `<p class="text-xs text-slate-400 italic mb-3">${escAttr(g.comentario)}</p>`;
+      } else {
+        cEl.innerHTML = '';
+      }
+    }
+
+    const items = (g.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    document.getElementById('guiaDetCount').textContent = `${items.length} ítem${items.length !== 1 ? 's' : ''}`;
+
+    document.getElementById('guiaDetItems').innerHTML = items.length
+      ? items.map((d, idx) => {
+          const pendiente = d._local ? ' opacity-60' : '';
+          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400">Venc: ${d.fechaVencimiento}</span>` : '';
+          return `
+          <div class="det-item-wrap border-b border-slate-700/50${pendiente}">
+            <div class="flex items-center justify-between py-2 gap-2 cursor-pointer active:bg-slate-700/30 rounded"
+                 onclick="GuiasView.toggleDetItem('det-${idx}')">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold truncate">${d.descripcionProducto || d.codigoProducto}</p>
+                <p class="text-xs text-slate-500">${d.codigoProducto}${d._local ? ' · guardando...' : ''}</p>
+                ${venc}
+              </div>
+              <div class="text-right flex-shrink-0">
+                <p class="text-sm font-bold">${fmt(d.cantidadRecibida)}</p>
+                ${parseFloat(d.precioUnitario) > 0
+                  ? `<p class="text-xs text-slate-400">S/. ${fmt(d.precioUnitario, 2)}</p>` : ''}
+              </div>
+            </div>
+            <div id="det-${idx}" style="display:none" class="pb-2 space-y-2">
+              <div class="flex gap-2">
+                <input type="date" id="detVenc_${idx}" value="${d.fechaVencimiento || ''}"
+                       class="input text-xs py-1 flex-1" placeholder="Vencimiento"/>
+                <button onclick="GuiasView.guardarVencimiento(${idx}, '${d.idDetalle}')"
+                        class="btn btn-outline text-xs py-1 px-3">Guardar</button>
+              </div>
+              ${abierta ? `
+              <button onclick="GuiasView.anularItem(${idx}, '${d.idDetalle}')"
+                      class="btn btn-danger text-xs py-2 w-full tracking-wide font-bold">
+                ANULAR ÍTEM
+              </button>` : ''}
+            </div>
+          </div>`;
+        }).join('')
+      : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
+
+    const monto = parseFloat(g.montoTotal) || 0;
+    document.getElementById('guiaDetMontoVal').textContent = monto > 0 ? `S/. ${fmt(monto, 2)}` : '—';
+    document.getElementById('guiaDetMonto').style.display = monto > 0 ? 'block' : 'none';
+
+    const acciones = document.getElementById('guiaDetAcciones');
+    acciones.innerHTML = abierta ? `
+      <button onclick="GuiasView.abrirAgregarItem()"
+              class="btn btn-outline w-full py-3 font-bold tracking-wide text-sm">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style="display:inline">
+          <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/>
+        </svg>
+        AGREGAR ÍTEM
+      </button>` : '';
+
+    if (conAnimacion) abrirSheet('sheetGuiaDetalle');
+  }
+
+  // Toggle item expand/collapse
+  function toggleDetItem(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  }
+
+  // Guardar fecha de vencimiento de un ítem (optimista)
+  function guardarVencimiento(idx, idDetalle) {
+    const venc = document.getElementById(`detVenc_${idx}`)?.value;
+    if (!_guiaActual || !idDetalle) return;
+    const d = _guiaActual.detalle?.[idx];
+    if (d) { d.fechaVencimiento = venc; _mostrarDetalleSheet(_guiaActual, false); }
+    // Sync en background (no hay endpoint específico, usamos observacion o guardamos en lote)
+    // Por ahora: si hay idLote, actualizar lote; sino crear uno
+    API.agregarDetalle({
+      idGuia: _guiaActual.idGuia, codigoProducto: d?.codigoProducto || '',
+      cantidadEsperada: d?.cantidadEsperada || 0, cantidadRecibida: d?.cantidadRecibida || 0,
+      precioUnitario: d?.precioUnitario || 0, fechaVencimiento: venc, idLote: d?.idLote || ''
+    }).catch(() => {});
+    toast('Vencimiento guardado', 'ok', 1500);
+  }
+
+  // Anular un ítem (optimista)
+  function anularItem(idx, idDetalle) {
+    if (!_guiaActual) return;
+    const d = _guiaActual.detalle?.[idx];
+    if (!d) return;
+    d.observacion = 'ANULADO';
+    _mostrarDetalleSheet(_guiaActual, false);
+    toast('Ítem anulado', 'warn', 1500);
+    API.anularDetalle({ idDetalle }).catch(() => {});
+  }
+
+  // Toggle estado guía: abierta → cerrar; cerrada → pedir adminPin
+  function toggleEstadoGuia() {
+    if (!_guiaActual) return;
+    if (_guiaActual.estado === 'ABIERTA') {
+      confirmarCerrarGuia();
+    } else {
+      _pedirAdminPin(_guiaActual.idGuia);
+    }
+  }
+
+  // Local dot-indicator updater for admin PIN (3 dots only)
+  function _updAdminDots(n) {
+    for (let i = 0; i < 3; i++) {
+      const el = document.getElementById('apn' + i);
+      if (el) el.className = i < n
+        ? 'w-4 h-4 rounded-full bg-amber-400'
+        : 'w-4 h-4 rounded-full border-2 border-slate-600';
+    }
+  }
+
+  // Admin PIN dialog para reabrir guía
+  let _pinGuiaTarget = null;
+  let _adminPinBuf   = '';
+
+  function _pedirAdminPin(idGuia) {
+    _pinGuiaTarget = idGuia;
+    _adminPinBuf   = '';
+    _updAdminDots(0);
+    document.getElementById('adminPinError').textContent = '';
+    document.getElementById('adminPinModal').style.display = 'flex';
+  }
+
+  function adminPinTecla(d) {
+    if (_adminPinBuf.length >= 3) return;
+    _adminPinBuf += d;
+    _updAdminDots(_adminPinBuf.length);
+    if (_adminPinBuf.length === 3) setTimeout(_verificarAdminPin, 150);
+  }
+
+  function adminPinAtras() {
+    _adminPinBuf = _adminPinBuf.slice(0, -1);
+    _updAdminDots(_adminPinBuf.length);
+  }
+
+  async function _verificarAdminPin() {
+    const cached = OfflineManager.getAdminPin();
+    if (!cached) {
+      // Sin caché: enviar a GAS de todos modos (GAS verifica desde MOS)
+    } else if (String(_adminPinBuf) !== String(cached)) {
+      document.getElementById('adminPinError').textContent = 'PIN incorrecto';
+      _adminPinBuf = '';
+      _updAdminDots(0);
+      setTimeout(() => { document.getElementById('adminPinError').textContent = ''; }, 1500);
+      return;
+    }
+    document.getElementById('adminPinModal').style.display = 'none';
+    const res = await API.reabrirGuia({ idGuia: _pinGuiaTarget });
+    if (res.ok || res.offline) {
+      if (_guiaActual?.idGuia === _pinGuiaTarget) {
+        _guiaActual.estado = 'ABIERTA';
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+      // Update in list
+      const idx = todas.findIndex(g => g.idGuia === _pinGuiaTarget);
+      if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrar(todas, filtroActual)); }
+      toast('Guía reabierta', 'ok');
     } else {
       toast('Error: ' + res.error, 'danger');
     }
   }
 
-  function nueva() { abrirSheet('sheetGuia'); }
+  // ── Agregar ítem — auto-escanea al abrir ─────────────────
+  function abrirAgregarItem() {
+    if (!_guiaActual) return;
+    _itemProd = null; _itemQty = 1; _itemVenc = '';
+    document.getElementById('itemGuiaId').textContent = _guiaActual.idGuia;
+    _renderItemForm('idle');
+    abrirSheet('sheetAgregarItem');
+    // Auto-abrir cámara después de la animación del sheet
+    setTimeout(() => abrirScanner(cod => _procesarCodigoEscaneado(cod)), 320);
+  }
 
-  return { cargar, filtrar, verDetalle, crearGuia, nueva };
+  function _procesarCodigoEscaneado(cod) {
+    const prods  = OfflineManager.getProductosCache();
+    const codStr = String(cod || '').trim();
+    if (!codStr) { _renderItemForm('idle'); return; }
+
+    // Coincidencia exacta por idProducto o codigoBarra (string)
+    const exacto = prods.find(p =>
+      p.idProducto === codStr ||
+      String(p.codigoBarra || '') === codStr ||
+      p.idProducto.toLowerCase() === codStr.toLowerCase()
+    );
+    if (exacto) { _itemProd = exacto; _renderItemForm('form'); return; }
+
+    // Coincidencia parcial: cualquiera que contenga el código o descripción
+    const parciales = prods.filter(p =>
+      (p.idProducto || '').includes(codStr) ||
+      String(p.codigoBarra || '').includes(codStr) ||
+      (p.descripcion || '').toLowerCase().includes(codStr.toLowerCase())
+    ).slice(0, 8);
+
+    if (!parciales.length) {
+      _renderItemForm('notfound', codStr);
+      toast('Producto no encontrado: ' + codStr, 'warn', 2500);
+    } else {
+      _renderItemForm('matches', parciales);
+    }
+  }
+
+  function _renderItemForm(mode, data) {
+    const areaIdle    = document.getElementById('itemIdleArea');
+    const areaMatches = document.getElementById('itemMatchList');
+    const areaForm    = document.getElementById('itemFormArea');
+    [areaIdle, areaMatches, areaForm].forEach(el => el && (el.style.display = 'none'));
+
+    const esIngreso = _guiaActual?.tipo?.startsWith('INGRESO');
+
+    if (mode === 'idle') {
+      areaIdle.style.display = 'block';
+      areaIdle.innerHTML = `<p class="text-slate-400 text-sm text-center py-8">📷 Abriendo cámara…</p>`;
+    } else if (mode === 'notfound') {
+      areaIdle.style.display = 'block';
+      areaIdle.innerHTML = `
+        <p class="text-amber-400 text-sm text-center py-3">⚠ No encontrado: <span class="font-mono">${escAttr(data)}</span></p>
+        <button onclick="abrirScanner(cod => GuiasView._procesarCodigoEscaneado(cod))"
+                class="btn btn-outline text-xs w-full mt-2 py-2">Volver a escanear</button>`;
+    } else if (mode === 'matches') {
+      areaMatches.style.display = 'block';
+      areaMatches.innerHTML = `<p class="text-xs text-slate-400 mb-2 font-bold">Selecciona el producto:</p>` +
+        data.map(p => `
+          <button onclick="GuiasView.seleccionarItemProd('${escAttr(p.idProducto)}')"
+                  class="w-full text-left p-2 rounded-lg border border-slate-700 mb-1 active:border-blue-500 active:bg-slate-700/50">
+            <p class="text-sm font-bold text-slate-200">${escAttr(p.descripcion || p.idProducto)}</p>
+            <p class="text-xs text-slate-400 font-mono">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
+          </button>`).join('');
+    } else if (mode === 'form') {
+      areaForm.style.display = 'block';
+      const p = _itemProd;
+      const vencBtn = esIngreso ? `
+        <button onclick="GuiasView.abrirPickerVenc()" id="btnItemVenc"
+                class="w-full py-2 rounded-lg border ${_itemVenc ? 'border-amber-500 text-amber-400' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3">
+          ${_itemVenc ? '📅 ' + _itemVenc : '📅 Agregar vencimiento'}
+        </button>` : '';
+      areaForm.innerHTML = `
+        <div class="flex items-center gap-3 p-3 bg-slate-700/40 rounded-xl mb-4">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-bold text-slate-100 truncate">${escAttr(p.descripcion || p.idProducto)}</p>
+            <p class="text-xs text-slate-400 font-mono">${escAttr(p.idProducto)}</p>
+          </div>
+          <button onclick="GuiasView._rescanear()" class="text-xs text-blue-400 flex-shrink-0">Cambiar</button>
+        </div>
+        <div class="flex items-center justify-center gap-6 mb-4">
+          <button onclick="GuiasView.itemQtyChange(-1)"
+                  class="w-14 h-14 rounded-full bg-slate-700 text-3xl font-black text-white flex items-center justify-center active:scale-95">−</button>
+          <span id="itemQtyDisplay" class="text-5xl font-black text-white w-20 text-center select-none">${_itemQty}</span>
+          <button onclick="GuiasView.itemQtyChange(1)"
+                  class="w-14 h-14 rounded-full bg-blue-600 text-3xl font-black text-white flex items-center justify-center active:scale-95">+</button>
+        </div>
+        ${vencBtn}
+        <button onclick="GuiasView.guardarItem()"
+                class="btn btn-primary btn-lg w-full font-black tracking-wide">Agregar ítem</button>`;
+    }
+  }
+
+  function seleccionarItemProd(idProducto) {
+    const prods = OfflineManager.getProductosCache();
+    _itemProd = prods.find(p => p.idProducto === idProducto) || null;
+    if (_itemProd) _renderItemForm('form');
+  }
+
+  function _rescanear() {
+    _itemProd = null; _itemQty = 1; _itemVenc = '';
+    _renderItemForm('idle');
+    setTimeout(() => abrirScanner(cod => _procesarCodigoEscaneado(cod)), 80);
+  }
+
+  function itemQtyChange(delta) {
+    _itemQty = Math.max(1, _itemQty + delta);
+    const el = document.getElementById('itemQtyDisplay');
+    if (el) el.textContent = _itemQty;
+  }
+
+  function abrirPickerVenc() {
+    const el = document.getElementById('itemVencHidden');
+    if (!el) return;
+    el.min = new Date().toISOString().split('T')[0];
+    if (typeof el.showPicker === 'function') { try { el.showPicker(); } catch { el.click(); } }
+    else el.click();
+  }
+
+  function onVencChanged(val) {
+    _itemVenc = val || '';
+    const btn = document.getElementById('btnItemVenc');
+    if (!btn) return;
+    btn.textContent = _itemVenc ? '📅 ' + _itemVenc : '📅 Agregar vencimiento';
+    btn.className = `w-full py-2 rounded-lg border ${_itemVenc ? 'border-amber-500 text-amber-400' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3`;
+  }
+
+  function guardarItem() {
+    if (!_guiaActual || !_itemProd) { toast('Selecciona un producto primero', 'warn'); return; }
+    const cod     = _itemProd.idProducto;
+    const qtyRec  = _itemQty;
+    const venc    = _itemVenc;
+    const localId = 'DL' + Date.now();
+
+    const itemOptimista = {
+      idDetalle: localId, idGuia: _guiaActual.idGuia,
+      codigoProducto: cod,
+      descripcionProducto: _itemProd.descripcion || _itemProd.nombre || cod,
+      cantidadEsperada: 0, cantidadRecibida: qtyRec,
+      precioUnitario: 0, fechaVencimiento: venc, observacion: '',
+      _local: true
+    };
+    if (!_guiaActual.detalle) _guiaActual.detalle = [];
+    _guiaActual.detalle.push(itemOptimista);
+    _mostrarDetalleSheet(_guiaActual, false);
+    cerrarSheet('sheetAgregarItem');
+
+    API.agregarDetalle({
+      idGuia: _guiaActual.idGuia,
+      codigoProducto: cod,
+      cantidadEsperada: 0, cantidadRecibida: qtyRec,
+      precioUnitario: 0, fechaVencimiento: venc
+    }).then(res => {
+      if (res.ok && !res.offline) {
+        const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
+        if (idx >= 0) {
+          _guiaActual.detalle[idx] = { ...res.data, descripcionProducto: _itemProd?.descripcion || cod, _local: false };
+          _mostrarDetalleSheet(_guiaActual, false);
+        }
+      } else if (!res.offline) {
+        _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);
+        _mostrarDetalleSheet(_guiaActual, false);
+        toast(res.error === 'PRODUCTO_NO_ENCONTRADO'
+          ? 'Producto no registrado en el sistema' : 'Error: ' + (res.error || res.mensaje),
+          res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
+      }
+    }).catch(() => {});
+  }
+
+  async function confirmarCerrarGuia() {
+    if (!_guiaActual) return;
+    const det = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    if (!det.length) { toast('Agrega al menos un ítem antes de cerrar', 'warn'); return; }
+
+    // Optimista: actualizar estado en UI inmediatamente
+    _guiaActual.estado = 'CERRADA';
+    _mostrarDetalleSheet(_guiaActual, false);
+    const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+    if (idx >= 0) { todas[idx].estado = 'CERRADA'; render(_filtrar(todas, filtroActual)); }
+
+    const res = await API.cerrarGuia(_guiaActual.idGuia, window.WH_CONFIG.usuario);
+    if (res.ok || res.offline) {
+      const monto = res.data?.montoTotal;
+      toast(`Guía cerrada${monto ? ` · S/. ${fmt(monto, 2)}` : ''}`, 'ok', 3000);
+      if (res.ok && !res.offline) {
+        _guiaActual.montoTotal = monto || 0;
+        if (idx >= 0) todas[idx].montoTotal = monto || 0;
+        _mostrarDetalleSheet(_guiaActual, false);
+        render(_filtrar(todas, filtroActual));
+      }
+    } else {
+      // Revertir si GAS rechazó
+      _guiaActual.estado = 'ABIERTA';
+      if (idx >= 0) todas[idx].estado = 'ABIERTA';
+      _mostrarDetalleSheet(_guiaActual, false);
+      render(_filtrar(todas, filtroActual));
+      toast('Error: ' + res.error, 'danger');
+    }
+  }
+
+  async function crearGuia() {
+    const tipo        = document.getElementById('guiaTipo').value;
+    const idProveedor = document.getElementById('guiaProveedor').value;
+    const textoExtra  = (document.getElementById('guiaComentario').value || '').trim();
+    const comentario  = _buildComentario(_tagsNueva, textoExtra);
+    const params = {
+      tipo,
+      usuario:         window.WH_CONFIG.usuario,
+      idProveedor,
+      idZona:          document.getElementById('guiaZona').value,
+      numeroDocumento: document.getElementById('guiaNumDoc').value,
+      comentario
+    };
+
+    // Optimista con animación pulsante
+    const tempId     = 'G_opt_' + Date.now();
+    const provNombre = _getProvNombre(idProveedor);
+    injectOptimisticGuia({ tempId, idProveedor, provNombre });
+    cerrarSheet('sheetGuia');
+
+    const res = await API.crearGuia(params);
+    if (res.ok) {
+      finalizeOptimisticGuia(tempId);
+      toast(`Guía ${res.data?.idGuia || 'nueva'} creada`, 'ok');
+    } else if (!res.offline) {
+      removeOptimisticGuia(tempId);
+      toast('Error: ' + res.error, 'danger');
+    }
+  }
+
+  function nueva() {
+    // Reset tags de creación
+    _tagsNueva = { comp: null, compl: null };
+    ['nTagComp1','nTagComp0','nTagCompl1','nTagCompl0'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.className = 'flex-1 py-2 rounded-lg text-xs font-bold border transition-all border-slate-700 text-slate-500';
+    });
+    const comInput = document.getElementById('guiaComentario');
+    if (comInput) comInput.value = '';
+    // Poblar proveedor select
+    const provSel = document.getElementById('guiaProveedor');
+    if (provSel && provSel.options.length <= 1) {
+      const provs = OfflineManager.getProveedoresCache();
+      provs.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.idProveedor;
+        opt.textContent = p.nombre || p.idProveedor;
+        provSel.appendChild(opt);
+      });
+    }
+    abrirSheet('sheetGuia');
+  }
+
+  // ── Foto guía (sube foto + actualiza columna en GAS) ─────
+  function onFotoGuiaSeleccionada(event) {
+    const file = event.target.files?.[0];
+    if (!file || !_guiaActual) return;
+    event.target.value = '';
+    const btn = document.getElementById('guiaDetFotoSection');
+    if (btn) btn.innerHTML = '<div class="flex justify-center py-3"><div class="spinner"></div></div>';
+
+    _prepararFotoGuia(file).then(({ b64, mime }) =>
+      API.subirFotoGuia({ idGuia: _guiaActual.idGuia, fotoBase64: b64, mimeType: mime })
+    ).then(res => {
+      if (res.ok && !res.offline && res.data?.url) {
+        _guiaActual.foto = res.data.url;
+        _mostrarDetalleSheet(_guiaActual, false);
+        toast('Foto guardada', 'ok', 1500);
+      } else {
+        toast('Error al subir foto', 'danger');
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    }).catch(() => { toast('Error al subir foto', 'danger'); _mostrarDetalleSheet(_guiaActual, false); });
+  }
+
+  async function copiarFotoDePreingreso() {
+    if (!_guiaActual?.idPreingreso) { toast('Sin preingreso vinculado', 'warn'); return; }
+    const fotoEl = document.getElementById('guiaDetFotoSection');
+    if (fotoEl) fotoEl.innerHTML = '<div class="flex justify-center py-3"><div class="spinner"></div></div>';
+    const res = await API.copiarFotoDePreingreso({ idGuia: _guiaActual.idGuia, idPreingreso: _guiaActual.idPreingreso })
+      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+    if (res.ok && res.data?.url) {
+      _guiaActual.foto = res.data.url;
+      _mostrarDetalleSheet(_guiaActual, false);
+      toast('Foto copiada', 'ok', 1500);
+    } else {
+      toast('Error: ' + (res.error || 'no se pudo copiar'), 'danger');
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+  }
+
+  function _prepararFotoGuia(file) {
+    return new Promise((resolve, reject) => {
+      const MAX = 1280;
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = ev => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+            else        { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ── Comentario + tags guía ────────────────────────────────
+  function toggleTagGuia(grupo, valor) {
+    _tagsGuia[grupo] = (_tagsGuia[grupo] === valor) ? null : valor;
+    // Actualizar clases de los 4 botones sin re-renderizar el sheet
+    const configs = [
+      { id:'gTagComp1',  g:'comp',  v:'si',  a:'bg-blue-900/70 border-blue-500 text-blue-200',   i:'border-slate-700 text-slate-500' },
+      { id:'gTagComp0',  g:'comp',  v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+      { id:'gTagCompl1', g:'compl', v:'si',  a:'bg-green-900/70 border-green-500 text-green-200', i:'border-slate-700 text-slate-500' },
+      { id:'gTagCompl0', g:'compl', v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+    ];
+    const base = 'flex-1 py-2 rounded-lg text-xs font-bold border transition-all';
+    configs.forEach(({ id, g, v, a, i }) => {
+      const el = document.getElementById(id);
+      if (el) el.className = `${base} ${_tagsGuia[g] === v ? a : i}`;
+    });
+  }
+
+  // Tags en NUEVA guía
+  function toggleTagNueva(grupo, valor) {
+    _tagsNueva[grupo] = (_tagsNueva[grupo] === valor) ? null : valor;
+    const cfgs = [
+      { id:'nTagComp1',  g:'comp',  v:'si',  a:'bg-blue-900/70 border-blue-500 text-blue-200',   i:'border-slate-700 text-slate-500' },
+      { id:'nTagComp0',  g:'comp',  v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+      { id:'nTagCompl1', g:'compl', v:'si',  a:'bg-green-900/70 border-green-500 text-green-200', i:'border-slate-700 text-slate-500' },
+      { id:'nTagCompl0', g:'compl', v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+    ];
+    const base = 'flex-1 py-2 rounded-lg text-xs font-bold border transition-all';
+    cfgs.forEach(({ id, g, v, a, i }) => {
+      const el = document.getElementById(id);
+      if (el) el.className = `${base} ${_tagsNueva[g] === v ? a : i}`;
+    });
+  }
+
+  // Auto-guardar comentario al cerrar el sheet de detalle
+  function cerrarGuiaDetalle() {
+    if (_guiaActual && _guiaActual.estado === 'ABIERTA') {
+      const textoExtra = document.getElementById('guiaComentarioEdit')?.value || '';
+      const nuevoComentario = _buildComentario(_tagsGuia, textoExtra);
+      if (nuevoComentario !== (_guiaActual.comentario || '')) {
+        _guiaActual.comentario = nuevoComentario;
+        API.actualizarGuia({ idGuia: _guiaActual.idGuia, comentario: nuevoComentario }).catch(() => {});
+        // Refrescar card en lista
+        const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+        if (idx >= 0) { todas[idx].comentario = nuevoComentario; }
+      }
+    }
+    cerrarSheet('sheetGuiaDetalle');
+  }
+
+  // Navegar al preingreso vinculado
+  function irAPreingreso(idPreingreso) {
+    cerrarGuiaDetalle();
+    App.nav('preingresos');
+    setTimeout(() => {
+      const cached = OfflineManager.getPreingresosCache();
+      if (cached.find(p => p.idPreingreso === idPreingreso)) {
+        PreingresosView.abrirDetalle(idPreingreso);
+      } else {
+        // Cargar y luego abrir
+        PreingresosView.cargar().then(() => PreingresosView.abrirDetalle(idPreingreso)).catch(() => {});
+      }
+    }, 380);
+  }
+
+  // Abrir foto guía en carrusel (usa _guiaActual)
+  function verFotoGuia() {
+    if (!_guiaActual?.foto) { toast('Sin foto', 'info'); return; }
+    abrirCarrusel([_guiaActual.foto], _guiaActual.idGuia);
+  }
+
+  return {
+    cargar, filtrar, toggleFiltro, silentRefresh, verDetalle,
+    buscar, buscarClear,
+    abrirAgregarItem, guardarItem,
+    _procesarCodigoEscaneado, seleccionarItemProd, _rescanear,
+    itemQtyChange, abrirPickerVenc, onVencChanged,
+    toggleDetItem, guardarVencimiento, anularItem,
+    toggleEstadoGuia, adminPinTecla, adminPinAtras,
+    confirmarCerrarGuia, crearGuia, nueva,
+    toggleTagNueva,
+    onFotoGuiaSeleccionada, copiarFotoDePreingreso, verFotoGuia,
+    toggleTagGuia, cerrarGuiaDetalle, irAPreingreso,
+    injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia
+  };
 })();
 
 // ════════════════════════════════════════════════
@@ -1191,52 +2255,641 @@ const EnvasadorView = (() => {
 // PREINGRESOS VIEW
 // ════════════════════════════════════════════════
 const PreingresosView = (() => {
-  async function cargar(estado = '') {
-    loading('listPreingresos', true);
-    const res = await API.getPreingresos(estado ? { estado } : {}).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-    const container = document.getElementById('listPreingresos');
+  let _filtroEstado      = '';
+  let _busquedaQ         = '';
+  let _tags              = { comp: null, compl: null };   // 'si' | 'no' | null
+  let _fotosSeleccionadas = [];                           // [{ file, objectUrl }]
+  // Edit modal state
+  let _editItem          = null;
+  let _tagsEdit          = { comp: null, compl: null };
+  let _fotosEdit         = [];   // [{ url }] existing Drive URLs kept
+  let _fotosNuevas       = [];   // [{ file, objectUrl }] new files to upload
 
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin preingresos</p>'; return; }
+  function silentRefresh() { cargar(_filtroEstado, true); }
 
-    container.innerHTML = list.map(p => `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="font-semibold text-sm">${p.idPreingreso}</span>
-          <span class="tag-${p.estado === 'PENDIENTE' ? 'warn' : p.estado === 'PROCESADO' ? 'ok' : 'blue'}">${p.estado}</span>
-        </div>
-        <p class="text-xs text-slate-400">${fmtFecha(p.fecha)} · ${p.idProveedor}</p>
-        ${p.numeroFactura ? `<p class="text-xs text-slate-300">Fact: ${p.numeroFactura}</p>` : ''}
-        <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(p.monto, 2)}</p>
-        ${p.estado === 'PENDIENTE'
-          ? `<button onclick="PreingresosView.aprobar('${p.idPreingreso}')"
-                     class="btn btn-primary w-full mt-2 text-sm py-2">
-               Aprobar → Crear Guía
-             </button>`
-          : ''}
-      </div>`).join('');
+  function _aplicarBusqueda(list) {
+    if (!_busquedaQ) return list;
+    const qL = _busquedaQ.toLowerCase();
+    return list.filter(p =>
+      (p.idPreingreso  || '').toLowerCase().includes(qL) ||
+      (p.idProveedor   || '').toLowerCase().includes(qL) ||
+      (p.numeroFactura || '').toLowerCase().includes(qL) ||
+      (p.comentario    || '').toLowerCase().includes(qL)
+    );
   }
 
-  function filtrar(estado) { cargar(estado); }
+  function buscar(q) {
+    _busquedaQ = (q || '').trim();
+    const cl = document.getElementById('clearBuscarPre');
+    if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
+    const cached = OfflineManager.getPreingresosCache();
+    const f = _filtroEstado ? cached.filter(p => p.estado === _filtroEstado) : cached;
+    _renderPreingresos(_aplicarBusqueda(f));
+  }
 
-  async function crear() {
-    const params = {
-      idProveedor:    document.getElementById('preProvSelect').value,
-      numeroFactura:  document.getElementById('preNumFact').value,
-      monto:          document.getElementById('preMonto').value,
-      comentario:     document.getElementById('preComentario').value,
-      usuario:        window.WH_CONFIG.usuario
+  function buscarClear() {
+    _busquedaQ = '';
+    const inp = document.getElementById('inputBuscarPre');
+    if (inp) inp.value = '';
+    const cl = document.getElementById('clearBuscarPre');
+    if (cl) cl.style.display = 'none';
+    const cached = OfflineManager.getPreingresosCache();
+    const f = _filtroEstado ? cached.filter(p => p.estado === _filtroEstado) : cached;
+    _renderPreingresos(f);
+  }
+
+  // ── Proveedor nombre desde caché ─────────────────────────
+  function _getProveedorNombre(idProveedor) {
+    if (!idProveedor) return 'Sin proveedor';
+    const prov = OfflineManager.getProveedoresCache().find(p => p.idProveedor === idProveedor);
+    return prov ? (prov.nombre || idProveedor) : idProveedor;
+  }
+
+  // ── Un card individual (altura fija, grid 3 filas) ───────
+  function _renderCard(p) {
+    const tieneGuia   = !!(p.idGuia && String(p.idGuia).trim());
+    const nFotos      = p.fotos ? String(p.fotos).split(',').filter(Boolean).length : 0;
+    const tags        = _tagsFromComentario(p.comentario);
+    const borderColor = tieneGuia ? '#22c55e' : '#f59e0b';
+    const provNombre  = _getProveedorNombre(p.idProveedor);
+    const hora        = _horaDesdeId(p.idPreingreso);
+    const fechaCorta  = _fmtCorta(p.fecha);
+
+    // Tags top-right (compactos)
+    const tagHtml = [
+      tags.compl === 'si' ? '<span class="pre-qtag pre-qtag-green">Completo</span>'   : '',
+      tags.compl === 'no' ? '<span class="pre-qtag pre-qtag-amber">Incompleto</span>' : '',
+      tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comprobante</span>' : '',
+      nFotos > 0          ? `<span class="pre-qtag pre-qtag-slate">📷${nFotos}</span>` : '',
+    ].filter(Boolean).join('');
+
+    // Bottom-right: crear guía OR guía icon
+    const actionHtml = tieneGuia
+      ? `<svg width="14" height="14" viewBox="0 0 16 16" fill="#22c55e" title="${escAttr(p.idGuia)}">
+           <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
+         </svg>`
+      : `<button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(p.idPreingreso)}')"
+                 class="pre-guia-btn">+ Guía</button>`;
+
+    return `
+    <div class="pre-card" style="border-left-color:${borderColor}"
+         onclick="PreingresosView.abrirDetalle('${escAttr(p.idPreingreso)}')">
+      <div class="flex items-center justify-between gap-1 overflow-hidden">
+        <span class="text-sm font-bold text-slate-100 truncate">${provNombre}</span>
+        <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
+      </div>
+      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}</p>
+      <div class="flex items-center justify-between gap-1">
+        <p class="text-sm font-bold ${p.monto ? 'text-emerald-400' : 'opacity-0'} leading-none">${p.monto ? 'S/. ' + fmt(p.monto, 2) : '—'}</p>
+        ${actionHtml}
+      </div>
+    </div>`;
+  }
+
+  function _renderPreingresos(list) {
+    const container = document.getElementById('listPreingresos');
+    if (!container) return;
+    const optCards = Array.from(container.querySelectorAll('.card-optimistic'));
+    if (!list.length) {
+      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin preingresos</p>';
+      optCards.forEach(c => container.insertBefore(c, container.firstChild));
+      return;
+    }
+
+    // Ordenar descendente: por fecha local, luego por timestamp en ID
+    const sorted = [...list].sort((a, b) => {
+      const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
+      const td = db - da;
+      if (td !== 0) return td;
+      const na = parseInt((a.idPreingreso || '').replace(/\D/g, '')) || 0;
+      const nb = parseInt((b.idPreingreso || '').replace(/\D/g, '')) || 0;
+      return nb - na;
+    });
+    const today     = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today.getTime()); yesterday.setDate(today.getDate() - 1);
+    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+    function _dateKey(p) {
+      if (!p.fecha) return '0000-00-00';
+      const d = _parseLocalDate(p.fecha);
+      if (isNaN(d)) return '0000-00-00';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function _dateLabel(key) {
+      if (!key || key === '0000-00-00') return 'Sin fecha';
+      const d = new Date(key + 'T12:00:00');
+      const dMid = new Date(d); dMid.setHours(0,0,0,0);
+      if (dMid.getTime() === today.getTime())     return 'Hoy';
+      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
+      return d.getFullYear() === today.getFullYear()
+        ? `${d.getDate()} ${months[d.getMonth()]}`
+        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    }
+
+    const groupMap = {};
+    sorted.forEach(p => {
+      const k = _dateKey(p);
+      if (!groupMap[k]) groupMap[k] = [];
+      groupMap[k].push(p);
+    });
+
+    container.innerHTML = Object.entries(groupMap)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) =>
+        `<div class="pre-date-hdr">${_dateLabel(key)}</div>
+         <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`
+      ).join('');
+
+    optCards.forEach(c => container.insertBefore(c, container.firstChild));
+  }
+
+  async function cargar(estado = '', silencioso = false) {
+    _filtroEstado = estado;
+    // Mostrar desde caché primero (instantáneo)
+    const cached = OfflineManager.getPreingresosCache();
+    const filtrados = estado ? cached.filter(p => p.estado === estado) : cached;
+    if (filtrados.length) {
+      _renderPreingresos(_aplicarBusqueda(filtrados));
+    } else if (!silencioso) {
+      loading('listPreingresos', true);
+    }
+    // Refrescar en background desde GAS
+    const res = await API.getPreingresos(estado ? { estado } : {}).catch(() => ({ ok: false }));
+    if (res.ok && res.data) _renderPreingresos(_aplicarBusqueda(res.data));
+  }
+
+  function toggleFiltro() {
+    const menu = document.getElementById('preFilterMenu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    if (menu.style.display !== 'none') {
+      setTimeout(() => { document.addEventListener('click', _closeFiltroOutside, { once: true }); }, 0);
+    }
+  }
+
+  function _closeFiltroOutside(e) {
+    if (!e.target.closest('#preFilterMenu') && !e.target.closest('#preFilterBtn')) {
+      const menu = document.getElementById('preFilterMenu');
+      if (menu) menu.style.display = 'none';
+    }
+  }
+
+  function filtrar(estado) {
+    // Actualizar UI del dropdown
+    const menu = document.getElementById('preFilterMenu');
+    if (menu) menu.style.display = 'none';
+    const label = document.getElementById('preFilterLabel');
+    if (label) {
+      const map = { '': 'TODOS', 'PENDIENTE': 'SIN GUÍA', 'PROCESADO': 'CON GUÍA' };
+      label.textContent = map[estado] || 'TODOS';
+    }
+    document.querySelectorAll('.pre-fopt').forEach(b => {
+      b.classList.toggle('sel', b.dataset.pfiltro === estado);
+    });
+    cargar(estado);
+  }
+
+  // ── Panel de preingresos (accesible desde Guías) ────────
+  let _panelFiltro = '';
+
+  function abrirPanel() {
+    _panelFiltro = '';
+    ['preFiltAll','preFiltPend','preFiltProc'].forEach(id =>
+      document.getElementById(id)?.classList.remove('active-tab'));
+    document.getElementById('preFiltAll')?.classList.add('active-tab');
+    _renderPanel('');
+    abrirSheet('sheetPreingresosPanel');
+  }
+
+  function filtrarPanel(estado) {
+    _panelFiltro = estado;
+    ['preFiltAll','preFiltPend','preFiltProc'].forEach(id =>
+      document.getElementById(id)?.classList.remove('active-tab'));
+    const activeId = estado === 'PENDIENTE' ? 'preFiltPend' : estado === 'PROCESADO' ? 'preFiltProc' : 'preFiltAll';
+    document.getElementById(activeId)?.classList.add('active-tab');
+    _renderPanel(estado);
+  }
+
+  function _renderPanel(estado) {
+    const cached = OfflineManager.getPreingresosCache();
+    const list   = estado ? cached.filter(p => p.estado === estado) : cached;
+    const container = document.getElementById('listPreingresosPanel');
+    if (!container) return;
+    const html = (items) => {
+      if (!items.length) return '<p class="text-slate-500 text-sm text-center py-6">Sin preingresos</p>';
+      return items.map(p => `
+        <div class="card-sm">
+          <div class="flex items-center justify-between mb-1">
+            <span class="font-bold text-sm font-mono">${p.idPreingreso}</span>
+            <span class="tag-${p.estado === 'PENDIENTE' ? 'warn' : p.estado === 'PROCESADO' ? 'ok' : 'blue'} text-xs">${p.estado}</span>
+          </div>
+          <p class="text-xs text-slate-400">${fmtFecha(p.fecha)} · ${p.idProveedor || '—'}</p>
+          ${p.numeroFactura ? `<p class="text-xs text-slate-500">Fact. ${p.numeroFactura}</p>` : ''}
+          <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(p.monto, 2)}</p>
+          ${p.estado === 'PENDIENTE'
+            ? `<button onclick="PreingresosView.aprobarDesdePanel('${p.idPreingreso}')"
+                       class="btn btn-primary w-full mt-2 py-2 text-xs font-bold tracking-wide">
+                 APROBAR → CREAR GUÍA
+               </button>` : ''}
+        </div>`).join('');
     };
-    if (!params.idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
+    container.innerHTML = html(list);
+    // Background refresh from GAS
+    if (navigator.onLine) {
+      API.getPreingresos(estado ? { estado } : {}).then(res => {
+        if (res.ok && res.data && container.isConnected)
+          container.innerHTML = html(res.data);
+      }).catch(() => {});
+    }
+  }
 
-    const res = await API.crearPreingreso(params);
+  async function aprobarDesdePanel(id) {
+    const res = await API.aprobarPreingreso({ idPreingreso: id, usuario: window.WH_CONFIG.usuario });
     if (res.ok) {
-      toast('Preingreso registrado', 'ok');
-      cerrarSheet('sheetPreingreso');
-      cargar();
+      toast(`Guía ${res.data.idGuia} creada`, 'ok');
+      filtrarPanel(_panelFiltro);
+      GuiasView.cargar();
     } else {
       toast('Error: ' + res.error, 'danger');
     }
+  }
+
+  // ── Etiquetas toggle (formulario nuevo) ──────────────────
+  function toggleTag(grupo, valor) {
+    _tags[grupo] = (_tags[grupo] === valor) ? null : valor;
+    const map = { comp: { si: 'tagComp1', no: 'tagComp0' }, compl: { si: 'tagCompl1', no: 'tagCompl0' } };
+    ['si','no'].forEach(v => document.getElementById(map[grupo][v])?.classList.toggle('active', _tags[grupo] === v));
+    // Monto solo visible cuando "con comprobante"
+    document.getElementById('preMontoRow')?.classList.toggle('hidden', _tags.comp !== 'si');
+  }
+
+  // ── Etiquetas toggle (modal edición) ─────────────────────
+  function toggleTagModal(grupo, valor) {
+    _tagsEdit[grupo] = (_tagsEdit[grupo] === valor) ? null : valor;
+    const map = { comp: { si: 'piTagComp1', no: 'piTagComp0' }, compl: { si: 'piTagCompl1', no: 'piTagCompl0' } };
+    ['si','no'].forEach(v => document.getElementById(map[grupo][v])?.classList.toggle('active', _tagsEdit[grupo] === v));
+    document.getElementById('piMontoRow')?.classList.toggle('hidden', _tagsEdit.comp !== 'si');
+  }
+
+  // ── Fotos seleccionadas ───────────────────────────────────
+  function onFotosSeleccionadas(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const MAX = 6;
+    const restantes = MAX - _fotosSeleccionadas.length;
+    if (restantes <= 0) { toast(`Máximo ${MAX} fotos por preingreso`, 'warn'); return; }
+    files.slice(0, restantes).forEach(file => {
+      _fotosSeleccionadas.push({ file, objectUrl: URL.createObjectURL(file) });
+    });
+    if (files.length > restantes) toast(`Solo se agregaron ${restantes} fotos (máximo ${MAX})`, 'warn');
+    event.target.value = ''; // reset para poder seleccionar las mismas fotos otra vez
+    _renderFotosPrev();
+  }
+
+  function quitarFoto(idx) {
+    URL.revokeObjectURL(_fotosSeleccionadas[idx]?.objectUrl);
+    _fotosSeleccionadas.splice(idx, 1);
+    _renderFotosPrev();
+  }
+
+  function _renderFotosPrev() {
+    const container = document.getElementById('preFotosPrev');
+    const emptyMsg  = document.getElementById('preFotosEmpty');
+    const countEl   = document.getElementById('preFotosCount');
+    container.querySelectorAll('.foto-thumb').forEach(el => el.remove());
+    if (!_fotosSeleccionadas.length) {
+      emptyMsg.style.display = 'block';
+      countEl.classList.add('hidden');
+      return;
+    }
+    emptyMsg.style.display = 'none';
+    countEl.classList.remove('hidden');
+    countEl.textContent = `${_fotosSeleccionadas.length} foto${_fotosSeleccionadas.length !== 1 ? 's' : ''} seleccionada${_fotosSeleccionadas.length !== 1 ? 's' : ''}`;
+    _fotosSeleccionadas.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'foto-thumb';
+      div.onclick = () => abrirCarrusel(_fotosSeleccionadas.map(x => x.objectUrl), 'Vista previa', i);
+      div.innerHTML = `
+        <img src="${f.objectUrl}" loading="lazy"/>
+        <span class="foto-num">${i + 1}</span>
+        <button class="foto-rm" onclick="event.stopPropagation();PreingresosView.quitarFoto(${i})">×</button>`;
+      container.appendChild(div);
+    });
+  }
+
+  function verFotos(fotosStr, titulo) {
+    const fotos = (fotosStr || '').split(',').filter(Boolean);
+    if (!fotos.length) { toast('Sin fotos registradas', 'info'); return; }
+    abrirCarrusel(fotos, titulo || '');
+  }
+
+  // ── Abrir detalle / edición ───────────────────────────────
+  function abrirDetalle(idPreingreso) {
+    const cached = OfflineManager.getPreingresosCache();
+    const p = cached.find(x => x.idPreingreso === idPreingreso);
+    if (!p) { toast('No encontrado en caché', 'warn'); return; }
+    _editItem = { ...p };
+    _renderModal(p);
+    abrirSheet('sheetDetallePI');
+  }
+
+  function _renderModal(p) {
+    // Proveedor dropdown
+    const provSel = document.getElementById('piEditProv');
+    if (provSel) {
+      const provs = OfflineManager.getProveedoresCache();
+      provSel.innerHTML = '<option value="">— Seleccionar —</option>' +
+        provs.map(pv => `<option value="${escAttr(pv.idProveedor)}"${pv.idProveedor === p.idProveedor ? ' selected' : ''}>${escAttr(pv.nombre || pv.idProveedor)}</option>`).join('');
+    }
+    // Header
+    const idEl = document.getElementById('piDetId');
+    const fEl  = document.getElementById('piDetFecha');
+    const eEl  = document.getElementById('piDetEstado');
+    if (idEl) idEl.textContent = p.idPreingreso;
+    if (fEl)  fEl.textContent  = fmtFecha(p.fecha);
+    if (eEl)  { eEl.textContent = p.estado || 'PENDIENTE'; eEl.className = `tag-${p.estado === 'PENDIENTE' ? 'warn' : p.estado === 'PROCESADO' ? 'ok' : 'blue'} text-xs`; }
+
+    // Tags
+    _tagsEdit = _tagsFromComentario(p.comentario);
+    const mapM = { comp: { si: 'piTagComp1', no: 'piTagComp0' }, compl: { si: 'piTagCompl1', no: 'piTagCompl0' } };
+    ['comp','compl'].forEach(g => ['si','no'].forEach(v => document.getElementById(mapM[g][v])?.classList.toggle('active', _tagsEdit[g] === v)));
+    document.getElementById('piMontoRow')?.classList.toggle('hidden', _tagsEdit.comp !== 'si');
+
+    // Monto
+    const montoInp = document.getElementById('piEditMonto');
+    if (montoInp) montoInp.value = p.monto || '';
+
+    // Comentario libre
+    const comEl = document.getElementById('piEditComentario');
+    if (comEl) comEl.value = _textoLibreFromComentario(p.comentario);
+
+    // Fotos
+    _fotosEdit   = (p.fotos || '').split(',').filter(Boolean).map(url => ({ url }));
+    _fotosNuevas.forEach(f => URL.revokeObjectURL(f.objectUrl));
+    _fotosNuevas = [];
+    _renderFotosEdit();
+
+    // Botón guía
+    document.getElementById('btnCrearGuiaPI')?.classList.toggle('hidden', p.estado !== 'PENDIENTE');
+    const btnG = document.getElementById('btnCrearGuiaPI');
+    if (btnG) { btnG.disabled = false; btnG.textContent = 'Crear Guía de Ingreso'; }
+    const btnS = document.getElementById('btnGuardarPI');
+    if (btnS) { btnS.disabled = false; btnS.textContent = 'Guardar cambios'; }
+  }
+
+  // ── Fotos edit modal ──────────────────────────────────────
+  function _renderFotosEdit() {
+    const container = document.getElementById('piEditFotosPrev');
+    const emptyMsg  = document.getElementById('piEditFotosEmpty');
+    if (!container) return;
+    container.querySelectorAll('.foto-thumb').forEach(el => el.remove());
+    const allUrls = [..._fotosEdit.map(f => f.url), ..._fotosNuevas.map(f => f.objectUrl)];
+    emptyMsg.style.display = allUrls.length ? 'none' : 'block';
+    _fotosEdit.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'foto-thumb';
+      div.onclick = () => abrirCarrusel(allUrls, 'Fotos', i);
+      div.innerHTML = `<img src="${f.url}" loading="lazy"/>
+        <span class="foto-num">${i + 1}</span>
+        <button class="foto-rm" onclick="event.stopPropagation();PreingresosView.quitarFotoEdit('exist',${i})">×</button>`;
+      container.appendChild(div);
+    });
+    _fotosNuevas.forEach((f, i) => {
+      const div = document.createElement('div');
+      div.className = 'foto-thumb';
+      div.onclick = () => abrirCarrusel(allUrls, 'Fotos', _fotosEdit.length + i);
+      div.innerHTML = `<img src="${f.objectUrl}" loading="lazy"/>
+        <span class="foto-num">${_fotosEdit.length + i + 1}</span>
+        <button class="foto-rm" onclick="event.stopPropagation();PreingresosView.quitarFotoEdit('new',${i})">×</button>`;
+      container.appendChild(div);
+    });
+  }
+
+  function onFotosEditSeleccionadas(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const MAX = 6;
+    const restantes = MAX - _fotosEdit.length - _fotosNuevas.length;
+    if (restantes <= 0) { toast(`Máximo ${MAX} fotos`, 'warn'); return; }
+    files.slice(0, restantes).forEach(file => _fotosNuevas.push({ file, objectUrl: URL.createObjectURL(file) }));
+    if (files.length > restantes) toast(`Solo se agregaron ${restantes} fotos (máx. ${MAX})`, 'warn');
+    event.target.value = '';
+    _renderFotosEdit();
+  }
+
+  function quitarFotoEdit(tipo, idx) {
+    if (tipo === 'exist') {
+      const url = _fotosEdit[idx]?.url || '';
+      const match = url.match(/[?&]id=([^&]+)/);
+      if (match) API.eliminarFotoDrive({ fileId: match[1] }).catch(() => {});
+      _fotosEdit.splice(idx, 1);
+    } else {
+      URL.revokeObjectURL(_fotosNuevas[idx]?.objectUrl);
+      _fotosNuevas.splice(idx, 1);
+    }
+    _renderFotosEdit();
+  }
+
+  // ── Guardar edición ───────────────────────────────────────
+  async function guardarEdicion() {
+    if (!_editItem) return;
+    const btn = document.getElementById('btnGuardarPI');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+
+    // Subir fotos nuevas (comprimidas)
+    const idPreingreso = _editItem.idPreingreso;
+    for (let i = 0; i < _fotosNuevas.length; i++) {
+      btn.textContent = `Subiendo foto ${i + 1}/${_fotosNuevas.length}...`;
+      try {
+        const { b64, mime } = await _prepararFoto(_fotosNuevas[i].file);
+        const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: _fotosEdit.length + i + 1 });
+        if (up.ok && !up.offline && up.data?.url) _fotosEdit.push({ url: up.data.url });
+        else console.warn('[FotosEdit] Error', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
+      } catch(e) { console.warn('[FotosEdit]', e); }
+    }
+    _fotosNuevas.forEach(f => URL.revokeObjectURL(f.objectUrl));
+    _fotosNuevas = [];
+
+    // Armar comentario
+    const partes = [];
+    if (_tagsEdit.comp)  partes.push(`Comprobante: ${_tagsEdit.comp === 'si' ? 'Sí' : 'No'}`);
+    if (_tagsEdit.compl) partes.push(`Completo: ${_tagsEdit.compl === 'si' ? 'Sí' : 'No'}`);
+    const textoExtra = (document.getElementById('piEditComentario').value || '').trim();
+    if (textoExtra) partes.push(textoExtra);
+    const comentario = partes.join(' | ');
+    const idProveedor = document.getElementById('piEditProv').value;
+    const monto = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto').value) || 0) : 0;
+    const fotos = _fotosEdit.map(f => f.url).join(',');
+
+    const res = await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
+      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+
+    if (res.ok) {
+      toast('Preingreso actualizado', 'ok');
+      cerrarSheet('sheetDetallePI');
+      cargar(_filtroEstado, true);
+    } else {
+      toast('Error: ' + res.error, 'danger');
+      btn.disabled = false; btn.textContent = 'Guardar cambios';
+    }
+  }
+
+  // ── Crear Guía de Ingreso — optimista (modal) ────────────
+  async function crearGuiaDesde() {
+    if (!_editItem) return;
+    const p = _editItem;
+    const btn = document.getElementById('btnCrearGuiaPI');
+    btn.disabled = true; btn.textContent = 'Creando…';
+    cerrarSheet('sheetDetallePI');
+    _lanzarCrearGuia(p.idPreingreso, p.idProveedor);
+  }
+
+  // ── Crear Guía de Ingreso — optimista (botón en card) ────
+  async function crearGuiaRapido(idPreingreso) {
+    const cached = OfflineManager.getPreingresosCache();
+    const p = cached.find(x => x.idPreingreso === idPreingreso);
+    if (!p) { toast('Preingreso no encontrado', 'warn'); return; }
+    _lanzarCrearGuia(p.idPreingreso, p.idProveedor);
+  }
+
+  async function _lanzarCrearGuia(idPreingreso, idProveedor) {
+    const tempId     = 'G_tmp_' + Date.now();
+    const provNombre = _getProveedorNombre(idProveedor);
+    GuiasView.injectOptimisticGuia({ tempId, idProveedor, provNombre });
+    App.nav('guias');
+
+    const res = await API.aprobarPreingreso({ idPreingreso, usuario: window.WH_CONFIG.usuario })
+      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+
+    if (res.ok) {
+      toast(`Guía ${res.data.idGuia} creada`, 'ok');
+      GuiasView.finalizeOptimisticGuia(tempId);
+    } else {
+      toast('Error al crear guía: ' + res.error, 'danger');
+      GuiasView.removeOptimisticGuia(tempId);
+    }
+    cargar(_filtroEstado, true);
+  }
+
+  // Comprime imagen a max 1280px y quality 0.82 — devuelve {b64, mime}
+  function _prepararFoto(file) {
+    return new Promise((resolve, reject) => {
+      const MAX = 1280;
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = ev => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          if (w > MAX || h > MAX) {
+            if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
+            else        { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ── Helpers tarjeta optimista ─────────────────────────────
+  function _injectOptimisticCard(tempId, idProveedor, monto) {
+    const container = document.getElementById('listPreingresos');
+    if (!container) return;
+    const div = document.createElement('div');
+    div.id = 'optcard_' + tempId;
+    div.className = 'card-sm ca ca-amber card-optimistic';
+    div.innerHTML = `
+      <div class="flex items-center justify-between mb-1">
+        <span class="font-semibold text-sm text-slate-400 italic text-xs">Registrando…</span>
+        <span class="tag-warn">PENDIENTE</span>
+      </div>
+      <p class="text-xs text-slate-400">${idProveedor}</p>
+      ${monto ? `<p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(monto, 2)}</p>` : ''}
+      <div class="flex items-center gap-2 mt-2">
+        <div class="spinner" style="width:13px;height:13px;border-width:2px"></div>
+        <span class="text-xs text-slate-500">Subiendo fotos…</span>
+      </div>`;
+    container.insertBefore(div, container.firstChild);
+  }
+
+  function _updateOptimisticId(tempId, realId) {
+    const el = document.getElementById('optcard_' + tempId);
+    if (el) el.id = 'optcard_' + realId;
+  }
+
+  function _finalizeOptimisticCard(realId) {
+    const el = document.getElementById('optcard_' + realId);
+    if (el) { el.classList.remove('card-optimistic'); el.remove(); }
+    // silent refresh so real data appears
+    setTimeout(() => cargar(_filtroEstado, true), 300);
+  }
+
+  // ── Crear preingreso (optimista) ─────────────────────────
+  async function crear() {
+    const idProveedor = document.getElementById('preProvSelect').value;
+    if (!idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
+    if (!_fotosSeleccionadas.length) { toast('Agrega al menos una foto', 'warn'); return; }
+
+    // Armar comentario: etiquetas + texto libre
+    const partes = [];
+    if (_tags.comp)  partes.push(`Comprobante: ${_tags.comp === 'si' ? 'Sí' : 'No'}`);
+    if (_tags.compl) partes.push(`Completo: ${_tags.compl === 'si' ? 'Sí' : 'No'}`);
+    const textoExtra = (document.getElementById('preComentario').value || '').trim();
+    if (textoExtra) partes.push(textoExtra);
+    const comentario = partes.join(' | ');
+    const monto = _tags.comp === 'si' ? (parseFloat(document.getElementById('preMonto').value) || 0) : 0;
+
+    const btn = document.getElementById('btnCrearPre');
+    btn.disabled = true; btn.textContent = 'Registrando...';
+
+    // OPTIMISTIC: mostrar tarjeta inmediatamente
+    const tempId = 'tmp_' + Date.now();
+    _injectOptimisticCard(tempId, idProveedor, monto);
+    cerrarSheet('sheetPreingreso');
+
+    // 1. Crear preingreso con ID generado en cliente (evita duplicados por retry)
+    const idPreingreso = 'PI' + Date.now();
+    const res = await API.crearPreingreso({ idPreingreso, idProveedor, monto, comentario, usuario: window.WH_CONFIG.usuario })
+      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+
+    if (!res.ok) {
+      document.getElementById('optcard_' + tempId)?.remove();
+      toast('Error: ' + res.error, 'danger');
+      btn.disabled = false; btn.textContent = 'Registrar preingreso';
+      return;
+    }
+
+    const idPreingresoReal = res.data?.idPreingreso || idPreingreso;
+    _updateOptimisticId(tempId, idPreingresoReal);
+
+    // 2. Subir fotos (comprimidas)
+    const urls = [];
+    for (let i = 0; i < _fotosSeleccionadas.length; i++) {
+      try {
+        const { b64, mime } = await _prepararFoto(_fotosSeleccionadas[i].file);
+        const up = await API.subirFotoPreingreso({ idPreingreso: idPreingresoReal, fotoBase64: b64, mimeType: mime, indice: i + 1 });
+        if (up.ok && !up.offline && up.data?.url) urls.push(up.data.url);
+        else console.warn('[Fotos] Error foto', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
+      } catch(e) { console.warn('[Fotos]', i, e); }
+    }
+
+    // 3. Actualizar columna fotos (solo si hay URLs válidas)
+    if (urls.length) {
+      await API.actualizarFotosPreingreso({ idPreingreso: idPreingresoReal, fotos: urls.join(',') }).catch(() => {});
+    } else if (_fotosSeleccionadas.length) {
+      toast('Fotos no pudieron subirse — reintenta desde edición', 'warn', 5000);
+    }
+
+    _finalizeOptimisticCard(idPreingresoReal);
+    toast(`Preingreso ${idPreingreso} registrado${urls.length ? ` · ${urls.length} foto${urls.length !== 1 ? 's' : ''}` : ''}`, 'ok');
+    btn.disabled = false; btn.textContent = 'Registrar preingreso';
   }
 
   async function aprobar(id) {
@@ -1249,9 +2902,34 @@ const PreingresosView = (() => {
     }
   }
 
-  function nuevo() { abrirSheet('sheetPreingreso'); }
+  function nuevo() {
+    // Reset completo del formulario
+    _tags = { comp: null, compl: null };
+    _fotosSeleccionadas.forEach(f => URL.revokeObjectURL(f.objectUrl));
+    _fotosSeleccionadas = [];
+    ['tagComp1','tagComp0','tagCompl1','tagCompl0'].forEach(id =>
+      document.getElementById(id)?.classList.remove('active'));
+    const montoInp = document.getElementById('preMonto');
+    const com      = document.getElementById('preComentario');
+    const fi       = document.getElementById('preFileInput');
+    const btn      = document.getElementById('btnCrearPre');
+    if (montoInp) montoInp.value = '';
+    if (com)      com.value = '';
+    if (fi)       fi.value  = '';
+    if (btn)      { btn.disabled = false; btn.textContent = 'Registrar preingreso'; }
+    document.getElementById('preMontoRow')?.classList.add('hidden');
+    document.getElementById('preFotosEmpty').style.display = 'block';
+    document.getElementById('preFotosPrev')?.querySelectorAll('.foto-thumb').forEach(el => el.remove());
+    document.getElementById('preFotosCount')?.classList.add('hidden');
+    abrirSheet('sheetPreingreso');
+  }
 
-  return { cargar, filtrar, crear, aprobar, nuevo };
+  return { cargar, filtrar, toggleFiltro, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
+           abrirPanel, filtrarPanel, aprobarDesdePanel,
+           toggleTag, toggleTagModal,
+           onFotosSeleccionadas, quitarFoto, verFotos,
+           onFotosEditSeleccionadas, quitarFotoEdit,
+           abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido };
 })();
 
 // ════════════════════════════════════════════════
@@ -1305,193 +2983,898 @@ const MermasView = (() => {
   return { cargar, crear, nueva };
 })();
 
-// ════════════════════════════════════════════════
-// AUDITORIAS VIEW
-// ════════════════════════════════════════════════
-const AuditoriasView = (() => {
-  let auditoriaActiva = null;
-
-  async function cargar(estado = '') {
-    loading('listAuditorias', true);
-    const res = await API.getAuditorias(estado ? { estado } : {}).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-    const container = document.getElementById('listAuditorias');
-
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin auditorías</p>'; return; }
-
-    container.innerHTML = list.map(a => `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="font-semibold text-sm">${a.codigoProducto}</span>
-          <span class="tag-${a.estado === 'EJECUTADA' ? (a.resultado === 'OK' ? 'ok' : 'danger') : 'warn'}">${a.resultado || a.estado}</span>
-        </div>
-        <p class="text-xs text-slate-400">${fmtFecha(a.fechaAsignacion)} · ${a.usuario || '—'}</p>
-        ${a.diferencia !== undefined && a.diferencia !== ''
-          ? `<p class="text-xs ${parseFloat(a.diferencia) === 0 ? 'text-emerald-400' : 'text-red-400'}">
-               Diferencia: ${parseFloat(a.diferencia) >= 0 ? '+' : ''}${fmt(a.diferencia, 2)}
-             </p>` : ''}
-        ${a.estado !== 'EJECUTADA'
-          ? `<button onclick="AuditoriasView.abrirEjecucion('${a.idAuditoria}','${a.codigoProducto}',${a.stockSistema})"
-                     class="btn btn-outline w-full mt-2 text-sm py-2">Contar físico</button>` : ''}
-      </div>`).join('');
-  }
-
-  function filtrar(estado) { cargar(estado); }
-
-  function abrirEjecucion(id, codigo, stockSis) {
-    auditoriaActiva = id;
-    document.getElementById('audModalSubtitle').textContent = `Producto: ${codigo}`;
-    document.getElementById('audStockSis').textContent = fmt(stockSis, 2);
-    document.getElementById('audConteoFisico').value = '';
-    document.getElementById('audDiferenciaInfo').classList.add('hidden');
-    abrirModal('modalAuditoria');
-  }
-
-  async function ejecutar() {
-    const fisico = parseFloat(document.getElementById('audConteoFisico').value);
-    const obs    = document.getElementById('audObservacion').value;
-    if (isNaN(fisico)) { toast('Ingresa el conteo físico', 'warn'); return; }
-
-    const res = await API.ejecutarAuditoria({ idAuditoria: auditoriaActiva, stockFisico: fisico, observacion: obs });
-    if (res.ok) {
-      const d = res.data;
-      const msg = d.resultado === 'OK' ? '✅ Sin diferencias' : `⚠️ Diferencia: ${d.diferencia}`;
-      toast(msg, d.resultado === 'OK' ? 'ok' : 'warn', 4000);
-      cerrarModal('modalAuditoria');
-      cargar();
-    } else {
-      toast('Error: ' + res.error, 'danger');
-    }
-  }
-
-  async function nueva() {
-    const codigo = prompt('Código del producto a auditar:');
-    if (!codigo) return;
-    const res = await API.asignarAuditoria({ codigoProducto: codigo, usuario: window.WH_CONFIG.usuario });
-    if (res.ok) {
-      toast('Auditoría asignada', 'ok');
-      cargar();
-    } else {
-      toast('Error: ' + res.error, 'danger');
-    }
-  }
-
-  return { cargar, filtrar, abrirEjecucion, ejecutar, nueva };
-})();
 
 // ════════════════════════════════════════════════
-// PRODUCTOS VIEW
+// ════════════════════════════════════════════════
+// PRODUCTOS VIEW — catálogo maestro MOS agrupado por SKU
 // ════════════════════════════════════════════════
 const ProductosView = (() => {
-  let todos = [];
+  'use strict';
+  let _grupos       = [];
+  let _filtrados    = [];
+  let _stockMap     = {};
+  let _histTarget   = null;  // { codigo, nombre }
+  let _queryActual  = '';    // búsqueda activa (para sobrevivir bg-refresh)
 
+  // ── Estado de ajuste manual ───────────────────────────────
+  let _ajusteTarget = null; // { codigoBarra, nombre }
+
+  // ── Estado de auditoría diaria ────────────────────────────
+  const _AUDIT_KEY  = 'wh_audit_dia';
+  let _auditDia     = null;  // { fecha, skus:[...30], auditados:{sku:[cods]} }
+  let _auditModo    = false; // modo filtro activo
+  let _auditTarget  = null;  // barcode actualmente en auditoría
+
+  // ── helpers ────────────────────────────────────
+  function _s(id)          { return _stockMap[id] || { cantidadDisponible: 0, stockMinimo: 0, stockMaximo: 0 }; }
+  function _buildMap(list) { list.forEach(s => { _stockMap[s.codigoProducto || s.idProducto] = s; }); }
+
+  // Rotación y último mov sobre un array de códigos (equivalencias del grupo)
+  function _rotacionMulti(codigos) {
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const hace30   = Date.now() - 30 * 86400000;
+    const gMap     = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+    const set = new Set(codigos);
+    const n = detalles.filter(d => set.has(d.codigoProducto) && gMap[d.idGuia] && new Date(gMap[d.idGuia].fecha) >= hace30).length;
+    if (n >= 10) return { nivel: 'ALTA',  color: 'text-emerald-400', dot: 'bg-emerald-400' };
+    if (n >= 4)  return { nivel: 'MEDIA', color: 'text-amber-400',   dot: 'bg-amber-400'   };
+    return             { nivel: 'BAJA',  color: 'text-slate-500',   dot: 'bg-slate-600'   };
+  }
+
+  function _ultimoMovMulti(codigos) {
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const gMap     = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+    const set    = new Set(codigos);
+    const fechas = detalles.filter(d => set.has(d.codigoProducto)).map(d => gMap[d.idGuia]?.fecha).filter(Boolean);
+    return fechas.sort((a, b) => new Date(b) - new Date(a))[0] || null;
+  }
+
+  // ── Agrupar por skuBase ─────────────────────────────────────
+  // Hijos = todos los factor=1 de PRODUCTOS_MASTER con ese skuBase
+  //       + todos los registros de EQUIVALENCIAS con ese skuBase
+  // Stock de cada hijo: lookup por codigoBarra en _stockMap (WH STOCK)
+  function _agrupar(prods, equivs) {
+    // 1. Solo productos base del almacén: factorConversion === 1 (o vacío)
+    // Las presentaciones POS tienen factorConversion ≠ 1 y no se manejan en WH
+    const f1 = prods.filter(p => {
+      if (p.estado === '0' || p.estado === 0) return false;
+      return parseFloat(p.factorConversion || 1) === 1;
+    });
+
+    // 2. Agrupar f1 por skuBase
+    const grp = {};
+    f1.forEach(p => {
+      const key = String(p.skuBase || p.idProducto || '').trim();
+      if (!key) return;
+      if (!grp[key]) grp[key] = { skuBase: key, prods: [] };
+      grp[key].prods.push(p);
+    });
+
+    // 3. Agregar equivalencias a cada grupo
+    equivs.forEach(e => {
+      const key = String(e.skuBase || '').trim();
+      if (!key || !grp[key]) return;
+      grp[key].equivs = grp[key].equivs || [];
+      grp[key].equivs.push(e);
+    });
+
+    // 4. Construir grupos finales
+    return Object.values(grp).map(g => {
+      // Nombre del grupo = descripción del primer producto (todos comparten nombre)
+      const base    = g.prods[0];
+      const equivs2 = g.equivs || [];
+
+      // Hijos unificados: primero los de PRODUCTOS_MASTER, luego los de EQUIVALENCIAS
+      const children = [
+        ...g.prods.map(p => ({
+          codigoBarra: p.codigoBarra || p.idProducto,
+          descripcion: p.descripcion,
+          origen: 'prod'
+        })),
+        ...equivs2.map(e => ({
+          codigoBarra: e.codigoBarra,
+          descripcion: e.descripcion || e.codigoBarra,
+          origen: 'equiv'
+        }))
+      ];
+
+      // Stock total = suma de todos los hijos
+      let stockTotal = 0, bajoMin = false;
+      children.forEach(c => {
+        const s  = _s(c.codigoBarra);
+        const st = s.cantidadDisponible || 0;
+        const mn = parseFloat(s.stockMinimo || base.stockMinimo || 0);
+        stockTotal += st;
+        if (mn > 0 && st <= mn) bajoMin = true;
+      });
+
+      return { skuBase: g.skuBase, base, children, stockTotal, bajoMin };
+    }).sort((a, b) => (a.base.descripcion || '').localeCompare(b.base.descripcion || '', 'es'));
+  }
+
+  // ── Render lista de grupos ──────────────────────
+  function _render(grupos) {
+    const el = document.getElementById('listProductos');
+    if (!grupos.length) { el.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>'; return; }
+    el.innerHTML = grupos.map(_cardGrupo).join('');
+  }
+
+  function _cardGrupo(g) {
+    const codigos = g.children.map(c => c.codigoBarra).filter(Boolean);
+    const rot  = _rotacionMulti(codigos);
+    const ulti = _ultimoMovMulti(codigos);
+    const mn   = parseFloat(g.base.stockMinimo || 0);
+    const mx   = parseFloat(g.base.stockMaximo || 0);
+    const pct  = mx > 0 ? Math.min(100, g.stockTotal / mx * 100) : 0;
+    const barC = g.bajoMin ? 'bg-red-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500';
+    const accentCls = g.bajoMin ? 'ca-red'
+                    : g.stockTotal === 0 ? 'ca-slate'
+                    : (pct < 40 && mx > 0) ? 'ca-amber' : 'ca-green';
+    // Un solo barcode → no hay nada que desplegar
+    const hasChildren = g.children.length > 1;
+    const safe = escAttr(g.base.descripcion);
+    const sid  = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Auditoría
+    const isAudit     = _auditModo && (_auditDia?.skus.includes(g.skuBase));
+    const isAuditDone = isAudit && _esGrupoCompleto(g.skuBase);
+    const auditCls    = isAuditDone ? 'audit-card-done' : isAudit ? 'audit-card' : '';
+
+    return `
+    <div class="prod-card ca ${accentCls} ${auditCls}" id="grp-${sid}">
+      <!-- Cabecera -->
+      <div class="flex items-start gap-2">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <p class="font-bold text-sm leading-snug">${g.base.descripcion || g.skuBase}</p>
+            ${g.bajoMin ? '<span class="tag-danger text-xs flex-shrink-0">⚠️ MÍN</span>' : ''}
+            ${g.stockTotal === 0 ? '<span class="tag-danger text-xs flex-shrink-0">SIN STOCK</span>' : ''}
+          </div>
+          ${hasChildren
+            ? `<button onclick="event.stopPropagation();ProductosView.toggleGrupo('${sid}')"
+                       class="flex items-center gap-1 mt-0.5 text-xs font-mono text-slate-400 hover:text-slate-200 transition-colors">
+                <svg class="transition-transform flex-shrink-0" id="chev-${sid}" width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+                </svg>
+                ${g.children.length} barcodes
+              </button>`
+            : `<p class="text-xs text-slate-500 font-mono mt-0.5">${g.children[0]?.codigoBarra || g.skuBase}</p>`
+          }
+        </div>
+        <span class="font-black text-base flex-shrink-0 pt-0.5 ${g.bajoMin ? 'text-red-400' : g.stockTotal === 0 ? 'text-slate-500' : 'text-emerald-400'}">${fmt(g.stockTotal)}</span>
+      </div>
+
+      <!-- Barra de nivel de stock -->
+      ${mx > 0 ? `
+        <div class="bar-bg mt-2 mb-1"><div class="bar-fill ${barC}" style="width:${pct.toFixed(0)}%"></div></div>
+        <div class="flex justify-between text-xs text-slate-600 mb-1">
+          <span>Mín: ${fmt(mn)}</span><span>Máx: ${fmt(mx)}</span>
+        </div>` : '<div class="mt-1.5"></div>'}
+
+      <!-- Métricas almacenero -->
+      <div class="flex items-center gap-3 text-xs mt-0.5">
+        <span class="flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full flex-shrink-0 ${rot.dot}"></span>
+          <span class="${rot.color} font-semibold">ROT. ${rot.nivel}</span>
+        </span>
+        <span class="text-slate-500">${ulti ? 'Últ: ' + fmtFecha(ulti) : 'Sin movs.'}</span>
+      </div>
+
+      <!-- Acciones -->
+      <div class="flex gap-2 mt-2 pt-2 border-t flex-wrap" style="border-color:#334155">
+        <button onclick="event.stopPropagation();ProductosView.verHistorial('${escAttr(g.children.map(c=>c.codigoBarra).join('|'))}','${safe}')"
+                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+          </svg>
+          Historial
+        </button>
+        ${/* Botón ojo: solo barcode único en modo auditoría */
+          isAudit && !hasChildren ? (() => {
+            const c0   = g.children[0];
+            const cod0 = escAttr(String(c0?.codigoBarra || ''));
+            const nom0 = escAttr(c0?.descripcion || g.base.descripcion || '');
+            const done = _esBarcodeAuditado(g.skuBase, c0?.codigoBarra);
+            return `<button onclick="event.stopPropagation();${done ? '' : `ProductosView.abrirAuditBarcode('${cod0}','${nom0}','${escAttr(g.skuBase)}')`}"
+              class="btn-eye${done ? ' done' : ''} ml-auto">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                ${done
+                  ? '<path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>'
+                  : '<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>'}
+              </svg>
+              ${done ? 'OK' : 'Auditar'}
+            </button>`;
+          })() : ''}
+      </div>
+
+      <!-- Panel hijos (colapsado, solo si hay más de uno) -->
+      ${hasChildren ? `
+      <div id="eqs-${sid}" class="hidden mt-3 space-y-2 border-t pt-3" style="border-color:#334155">
+        ${g.children.map(c => _rowChild(c, g.base, g.skuBase)).join('')}
+      </div>` : ''}
+    </div>`;
+  }
+
+  // c = { codigoBarra, descripcion, origen: 'prod'|'equiv' }
+  // base = producto master, skuBase del grupo padre
+  function _rowChild(c, base, skuBase) {
+    const s   = _s(c.codigoBarra);
+    const st  = s.cantidadDisponible || 0;
+    const mn  = parseFloat(s.stockMinimo  || base.stockMinimo  || 0);
+    const mx  = parseFloat(s.stockMaximo  || base.stockMaximo  || 0);
+    const baj = mn > 0 && st <= mn;
+    const pct = mx > 0 ? Math.min(100, st / mx * 100) : 0;
+    const tagOrigen = c.origen === 'equiv'
+      ? '<span class="tag-blue text-xs flex-shrink-0" style="font-size:9px">EQUIV</span>'
+      : '';
+    // Botón ojo de auditoría
+    const sku    = skuBase || base.skuBase || base.idProducto || '';
+    const isDone = _esBarcodeAuditado(sku, c.codigoBarra);
+    const eyeBtn = _auditModo ? `
+      <button onclick="event.stopPropagation();${isDone ? '' : `ProductosView.abrirAuditBarcode('${escAttr(String(c.codigoBarra))}','${escAttr(c.descripcion)}','${escAttr(sku)}')`}"
+              class="btn-eye${isDone ? ' done' : ''}">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          ${isDone
+            ? '<path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>'
+            : '<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>'}
+        </svg>
+        ${isDone ? 'OK' : 'Auditar'}
+      </button>` : '';
+
+    return `
+    <div class="rounded-lg p-2.5" style="background:#0f172a">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <p class="text-sm font-semibold truncate">${c.descripcion}</p>
+            ${tagOrigen}
+          </div>
+          <p class="text-xs text-slate-500 font-mono mt-0.5">${c.codigoBarra}</p>
+        </div>
+        <div class="text-right flex-shrink-0">
+          <span class="font-black text-base ${baj ? 'text-red-400' : st === 0 ? 'text-slate-500' : 'text-emerald-400'}">${fmt(st)}</span>
+          ${baj ? '<p class="text-xs text-red-500 mt-0.5">⚠️ mín.</p>' : ''}
+        </div>
+      </div>
+      ${mx > 0 ? `
+        <div class="bar-bg mt-1.5 mb-1"><div class="bar-fill ${baj ? 'bg-red-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'}" style="width:${pct.toFixed(0)}%"></div></div>
+        <p class="text-xs text-slate-600">Mín: ${fmt(mn)} · Máx: ${fmt(mx)}</p>` : ''}
+      <div class="flex gap-2 mt-2 flex-wrap">
+        <button onclick="ProductosView.verHistorial('${escAttr(c.codigoBarra)}','${escAttr(c.descripcion)}')"
+                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1">
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+          </svg>
+          Historial
+        </button>
+        ${eyeBtn}
+      </div>
+    </div>`;
+  }
+
+  function toggleGrupo(sid) {
+    const panel = document.getElementById('eqs-' + sid);
+    const chev  = document.getElementById('chev-' + sid);
+    if (!panel) return;
+    const closed = panel.classList.toggle('hidden');
+    if (chev) chev.style.transform = closed ? '' : 'rotate(180deg)';
+  }
+
+  // ── Búsqueda inteligente ─────────────────────────
+  function buscar(q) {
+    const query = (q || '').trim();
+    _queryActual = query;   // persistir para el bg-refresh
+    const cl = document.getElementById('clearBuscarProd');
+    if (cl) cl.style.display = query ? 'flex' : 'none';
+
+    if (!query) {
+      _filtrados = [..._grupos];
+      _render(_filtrados);
+      return;
+    }
+
+    const qL = query.toLowerCase();
+
+    // ── Detectar coincidencia exacta (barcode / SKU / idProducto) ──
+    let exactGrupo = null;
+    for (const g of _grupos) {
+      if (String(g.skuBase || '').toLowerCase() === qL ||
+          String(g.base.idProducto || '').toLowerCase() === qL) {
+        exactGrupo = g; break;
+      }
+      if (g.children.some(c => String(c.codigoBarra || '').toLowerCase() === qL)) {
+        exactGrupo = g; break;
+      }
+    }
+
+    // ── Filtrar coincidencias parciales ─────────────────────────────
+    _filtrados = _grupos.filter(g =>
+      String(g.base.descripcion || '').toLowerCase().includes(qL) ||
+      String(g.skuBase || '').toLowerCase().includes(qL) ||
+      g.children.some(c =>
+        String(c.descripcion  || '').toLowerCase().includes(qL) ||
+        String(c.codigoBarra || '').toLowerCase().includes(qL)
+      )
+    );
+
+    _render(_filtrados);
+
+    // ── Señales visuales post-render ────────────────────────────────
+    requestAnimationFrame(() => {
+      if (exactGrupo) {
+        const sid  = exactGrupo.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const card = document.getElementById('grp-' + sid);
+        if (card) {
+          card.classList.add('card-exact-match');
+          // Auto-expandir si tiene hijos
+          const panel = document.getElementById('eqs-' + sid);
+          const chev  = document.getElementById('chev-' + sid);
+          if (panel && panel.classList.contains('hidden')) {
+            panel.classList.remove('hidden');
+            if (chev) chev.style.transform = 'rotate(180deg)';
+          }
+          // Scroll suave al centro
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        // Atenuar los demás resultados parciales
+        _filtrados.forEach(g => {
+          if (g !== exactGrupo) {
+            const s = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+            const el = document.getElementById('grp-' + s);
+            if (el) el.classList.add('card-dim');
+          }
+        });
+      } else {
+        // Solo coincidencias parciales: leve realce
+        _filtrados.forEach(g => {
+          const sid = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+          const el  = document.getElementById('grp-' + sid);
+          if (el) el.classList.add('card-hi');
+        });
+      }
+    });
+  }
+
+  function buscarClear() {
+    _queryActual = '';
+    const inp = document.getElementById('inputBuscarProd');
+    if (inp) inp.value = '';
+    buscar('');
+  }
+
+  // ── Historial ───────────────────────────────────
+  // codigos = array de barcodes del grupo (puede tener 1 o varios)
+  function _movimientosLocal(codigos) {
+    const set      = new Set(codigos.map(String));
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const gMap     = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+
+    // Movimientos de guías
+    const guiaMovs = detalles
+      .filter(d => set.has(String(d.codigoProducto)))
+      .map(d => {
+        const g    = gMap[d.idGuia] || {};
+        const tipo = (g.tipo || '').toUpperCase();
+        return {
+          idGuia:    d.idGuia,
+          fecha:     g.fecha  || d.fecha || '',
+          tipo:      g.tipo   || '—',
+          esIngreso: tipo.includes('INGRESO') || tipo.includes('ENTRADA') ||
+                     (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0),
+          cantidad:  Math.abs(parseFloat(d.cantidad || d.cantidadReal || 0)),
+          usuario:   g.usuario || d.usuario || '—',
+          origen:    g.idProveedor || g.destino || '',
+          estado:    g.estado || '',
+          fuente:    'guia'
+        };
+      });
+
+    // Ajustes del cache (si están disponibles)
+    let ajusteMovs = [];
+    try {
+      const ajustes = OfflineManager.getAjustesCache ? OfflineManager.getAjustesCache() : [];
+      ajusteMovs = ajustes
+        .filter(a => set.has(String(a.codigoProducto)))
+        .map(a => {
+          const t = (a.tipoAjuste || '').toUpperCase();
+          return {
+            idGuia:    a.idAjuste || '',
+            fecha:     a.fecha || '',
+            tipo:      `Ajuste ${a.tipoAjuste || ''}`,
+            esIngreso: t === 'INC' || t === 'INI',
+            cantidad:  Math.abs(parseFloat(a.cantidadAjuste || 0)),
+            usuario:   a.usuario || '—',
+            origen:    a.motivo  || '',
+            estado:    '',
+            fuente:    'ajuste'
+          };
+        });
+    } catch(e) {}
+
+    return [...guiaMovs, ...ajusteMovs]
+      .filter(m => m.cantidad > 0)
+      .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  }
+
+  async function verHistorial(codigosStr, nombre) {
+    // Acepta barcode único o pipe-separated para grupos multi-barcode
+    const codigos = String(codigosStr).split('|').map(s => s.trim()).filter(Boolean);
+    _histTarget = { codigos, codigo: codigos[0], nombre };
+
+    document.getElementById('histNombre').textContent   = nombre;
+    document.getElementById('histCodigo').textContent   = codigos.length > 1
+      ? `${codigos[0]} +${codigos.length - 1} más`
+      : codigos[0];
+    document.getElementById('histPrintPanel').classList.add('hidden');
+    document.getElementById('histList').innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
+    abrirSheet('sheetHistorial');
+
+    // Stock total del grupo
+    const stockTotal = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
+    const stockMin   = _s(codigos[0]).stockMinimo || 0;
+    document.getElementById('histStockActual').textContent = fmt(stockTotal);
+    document.getElementById('histStockMin').textContent    = fmt(stockMin);
+
+    const local = _movimientosLocal(codigos);
+    if (local.length) _renderHistorial(local, true, stockTotal);
+
+    const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
+    if (res.ok && res.data?.length) {
+      _renderHistorial(res.data, false, stockTotal);
+    } else if (!local.length) {
+      document.getElementById('histList').innerHTML =
+        '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+    }
+  }
+
+  function _renderHistorial(movs, esLocal, stockActual) {
+    if (!movs.length && esLocal) return;
+    const stock = stockActual ?? codigos.reduce((s, c) => s + (_s(c).cantidadDisponible || 0), 0);
+
+    // Balance corriente hacia atrás desde stock actual
+    let bal = stock;
+    const conBal = movs.map(m => {
+      const row = { ...m, bal };
+      bal = m.esIngreso ? bal - m.cantidad : bal + m.cantidad;
+      return row;
+    });
+
+    const fBadge = document.getElementById('histFuenteBadge');
+    fBadge.textContent = esLocal ? '📦 Local' : '☁️ GAS';
+    fBadge.className   = esLocal ? 'tag-blue text-xs' : 'tag-ok text-xs';
+
+    // Tipos de movimiento para colores bancarios
+    const _tipoMov = (m) => {
+      const t = (m.tipo || '').toUpperCase();
+      if (t.includes('INI'))     return 'ini';    // stock inicial
+      if (m.fuente === 'ajuste' || t.includes('AJUSTE')) return m.esIngreso ? 'ajuste_inc' : 'ajuste_dec';
+      return m.esIngreso ? 'ingreso' : 'salida';
+    };
+    const _estilos = {
+      ingreso:    { bg:'bg-emerald-950', fg:'text-emerald-400', icon:'↑', sign:'+', label:'Ingreso'  },
+      salida:     { bg:'bg-red-950',     fg:'text-red-400',     icon:'↓', sign:'−', label:'Salida'   },
+      ajuste_inc: { bg:'bg-blue-950',    fg:'text-blue-400',    icon:'⊕', sign:'+', label:'Ajuste ▲' },
+      ajuste_dec: { bg:'bg-amber-950',   fg:'text-amber-400',   icon:'⊖', sign:'−', label:'Ajuste ▼' },
+      ini:        { bg:'bg-violet-950',  fg:'text-violet-400',  icon:'★', sign:'+', label:'Inicial'  }
+    };
+
+    document.getElementById('histList').innerHTML = conBal.map(m => {
+      const tipo = _tipoMov(m);
+      const e    = _estilos[tipo] || _estilos.ingreso;
+      return `
+      <div class="flex items-start gap-2.5 py-2.5 border-b" style="border-color:#1e293b">
+        <div class="flex flex-col items-center gap-0.5 flex-shrink-0 mt-0.5">
+          <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${e.bg} ${e.fg}">${e.icon}</span>
+          <span class="text-xs ${e.fg} font-semibold" style="font-size:9px">${e.label}</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-baseline justify-between gap-1">
+            <span class="font-black text-base ${e.fg}">${e.sign}${fmt(m.cantidad)}</span>
+            <span class="text-xs text-slate-400 font-mono">${fmtFecha(m.fecha)}</span>
+          </div>
+          <p class="text-xs text-slate-400 truncate">${m.tipo}${m.idGuia ? ' · ' + m.idGuia : ''}</p>
+          ${m.origen ? `<p class="text-xs text-slate-500 truncate">${m.origen}</p>` : ''}
+          <div class="flex items-center gap-1 mt-0.5">
+            <span class="text-xs text-slate-600">Saldo:</span>
+            <span class="text-xs text-slate-200 font-bold">${fmt(m.bal)}</span>
+            <span class="text-slate-700 text-xs">·</span>
+            <span class="text-xs text-slate-500">${m.usuario}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('') || '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+  }
+
+  // ── Imprimir historial ──────────────────────────
+  // 80mm ticket = 48 chars por línea (fuente estándar)
+  async function imprimirHistorial() {
+    if (!_histTarget) return;
+
+    const W       = 48;
+    const SEP     = '='.repeat(W);
+    const SEP2    = '-'.repeat(W);
+    const codigos = _histTarget.codigos || [_histTarget.codigo];
+    const stock   = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
+    const stockMin = _s(_histTarget.codigo).stockMinimo || 0;
+
+    toast('Generando ticket...', 'info', 2500);
+
+    // Siempre pedir al GAS para tener datos completos; cache como fallback offline
+    let movs = [];
+    try {
+      const res = await API.getHistorialStock(codigos.join(','));
+      if (res.ok && res.data?.length) movs = res.data;
+      else movs = _movimientosLocal(codigos);
+    } catch { movs = _movimientosLocal(codigos); }
+
+    const pad2 = n => String(n).padStart(2, '0');
+    const now  = new Date();
+    const fechaImpresion = `${pad2(now.getDate())}/${pad2(now.getMonth()+1)}/${now.getFullYear()}  ${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+
+    function _ddmm(s) {
+      if (!s) return '  /  ';
+      const d = new Date(s);
+      return isNaN(d) ? String(s).slice(0, 5) : `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}`;
+    }
+
+    function _tipoLegible(m) {
+      const t = (m.tipo || '').toUpperCase();
+      if (t.includes('INI'))                                return 'Stock Inicial';
+      if (m.fuente === 'ajuste' || t.includes('AJUSTE'))    return m.esIngreso ? 'Ajuste Ingreso' : 'Ajuste Salida';
+      if (t.includes('INGRESO') || t.includes('ENTRADA'))   return 'Ingreso Guia';
+      if (t.includes('SALIDA'))                             return 'Salida Guia';
+      if (t.includes('ENVASADO'))                           return 'Envasado';
+      if (t.includes('MERMA'))                              return 'Merma';
+      return (m.tipo || '—').slice(0, 20);
+    }
+
+    // Columnas: fecha(5) + 2sp + tipo(padEnd 26) + monto(padStart 15) = 48
+    const COL_TIPO  = 26;
+    const COL_MON   = 15;
+    const header = 'FECHA'.padEnd(7) + 'MOVIMIENTO'.padEnd(COL_TIPO) + 'CANTIDAD'.padStart(COL_MON);
+
+    const movLines = movs.length
+      ? movs.slice(0, 50).map(m => {
+          const fecha  = _ddmm(m.fecha).padEnd(7);
+          const tipo   = _tipoLegible(m).padEnd(COL_TIPO);
+          const monto  = ((m.esIngreso ? '+' : '-') + fmt(m.cantidad, 0)).padStart(COL_MON);
+          return fecha + tipo + monto;
+        })
+      : ['  Sin movimientos registrados.'];
+
+    // Centrar título en W chars
+    const center = s => s.padStart(Math.floor((W + s.length) / 2)).padEnd(W);
+    const nombre = String(_histTarget.nombre || '').slice(0, W);
+
+    const lines = [
+      SEP,
+      center('HISTORIAL DE STOCK'),
+      center('ALMACEN CENTRAL - MOS'),
+      SEP,
+      `Producto : ${nombre}`,
+      `Codigo   : ${_histTarget.codigo}`,
+      `Impreso  : ${fechaImpresion}`,
+      SEP2,
+      header,
+      SEP2,
+      ...movLines,
+      SEP2,
+      `${'Stock actual'.padEnd(W - 10)}:${fmt(stock,    0).padStart(9)}`,
+      `${'Minimo requerido'.padEnd(W - 10)}:${fmt(stockMin, 0).padStart(9)}`,
+      `${'Estado'.padEnd(W - 10)}:${(stock > stockMin ? 'OK' : '! BAJO MINIMO').padStart(9)}`,
+      SEP,
+      ''
+    ];
+    const texto = lines.join('\n');
+
+    const res = await API.imprimirHistorialStock({
+      texto,
+      codigoProducto: _histTarget.codigo
+    }).catch(() => ({ ok: false }));
+    toast(res.ok ? 'Impreso ✓' : 'No se pudo imprimir — revisa config GAS', res.ok ? 'ok' : 'warn');
+  }
+
+  // ── Aplicar query activa ─────────────────────────
+  function _aplicarQuery() {
+    if (_auditModo) {
+      _filtrados = _grupos.filter(g => _auditDia?.skus.includes(g.skuBase));
+      _render(_filtrados);
+    } else if (_queryActual) {
+      buscar(_queryActual);
+    } else {
+      _filtrados = [..._grupos];
+      _render(_filtrados);
+    }
+  }
+
+  // ── Auditoría diaria — helpers ────────────────────────────
+  function _initAuditDia() {
+    const hoy = new Date().toISOString().slice(0, 10);
+    try {
+      const raw = localStorage.getItem(_AUDIT_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        if (d.fecha === hoy) { _auditDia = d; _actualizarBadge(); return; }
+      }
+    } catch(e) {}
+    // Nuevo día → seleccionar 30 al azar
+    const skus = _grupos.map(g => g.skuBase);
+    const n = Math.min(30, skus.length);
+    const shuffled = skus.slice().sort(() => Math.random() - 0.5).slice(0, n);
+    _auditDia = { fecha: hoy, skus: shuffled, auditados: {} };
+    _guardarAuditDia();
+    _actualizarBadge();
+  }
+
+  function _guardarAuditDia() {
+    try { localStorage.setItem(_AUDIT_KEY, JSON.stringify(_auditDia)); } catch(e) {}
+  }
+
+  function _esBarcodeAuditado(sku, cod) {
+    return (_auditDia?.auditados?.[sku] || []).includes(String(cod));
+  }
+
+  function _esGrupoCompleto(sku) {
+    if (!_auditDia) return false;
+    const g = _grupos.find(g => g.skuBase === sku);
+    if (!g) return false;
+    const auditados = _auditDia.auditados?.[sku] || [];
+    return g.children.every(c => auditados.includes(String(c.codigoBarra)));
+  }
+
+  function _pendientesCount() {
+    if (!_auditDia) return 0;
+    return _auditDia.skus.filter(sku => !_esGrupoCompleto(sku)).length;
+  }
+
+  function _actualizarBadge() {
+    const btn = document.getElementById('btnAuditoriaDia');
+    if (!btn || !_auditDia) return;
+    btn.style.display = '';
+    const pend = _pendientesCount();
+    const total = _auditDia.skus.length;
+    if (pend === 0) {
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Listo`;
+      btn.className = 'audit-badge audit-badge-done' + (_auditModo ? ' active' : '');
+    } else {
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 2A3.5 3.5 0 0 0 2 5.5v5A3.5 3.5 0 0 0 5.5 14h5a3.5 3.5 0 0 0 3.5-3.5V8a.5.5 0 0 1 1 0v2.5a4.5 4.5 0 0 1-4.5 4.5h-5A4.5 4.5 0 0 1 1 10.5v-5A4.5 4.5 0 0 1 5.5 1H8a.5.5 0 0 1 0 1H5.5z"/><path d="M16 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></svg> ${pend}&nbsp;<span style="opacity:.6;font-weight:400">/ ${total}</span>`;
+      btn.className = 'audit-badge audit-badge-pending' + (_auditModo ? ' active' : '');
+    }
+  }
+
+  function toggleAuditoriaDia() {
+    if (!_auditDia) return;
+    _auditModo = !_auditModo;
+    // Limpiar búsqueda de texto si entramos en modo auditoría
+    if (_auditModo) {
+      _queryActual = '';
+      const inp = document.getElementById('inputBuscarProd');
+      if (inp) inp.value = '';
+      const cl = document.getElementById('clearBuscarProd');
+      if (cl) cl.style.display = 'none';
+      _filtrados = _grupos.filter(g => _auditDia.skus.includes(g.skuBase));
+    } else {
+      _filtrados = [..._grupos];
+    }
+    _actualizarBadge();
+    _render(_filtrados);
+  }
+
+  function abrirAuditBarcode(codigoBarra, nombre, skuBase) {
+    const cod = String(codigoBarra);
+    const s   = _s(cod);
+    _auditTarget = { codigoBarra: cod, nombre, skuBase };
+    document.getElementById('auditNombre').textContent   = nombre;
+    document.getElementById('auditCodigo').textContent   = cod;
+    document.getElementById('auditStockSis').textContent = fmt(s.cantidadDisponible || 0);
+    document.getElementById('auditConteo').value         = '';
+    document.getElementById('auditObs').value            = '';
+    abrirSheet('sheetAudit');
+  }
+
+  function confirmarAuditoria() {
+    if (!_auditTarget) return;
+    const fisico = parseFloat(document.getElementById('auditConteo').value);
+    if (isNaN(fisico) || fisico < 0) { toast('Ingresa el conteo físico', 'warn'); return; }
+    const obs    = document.getElementById('auditObs').value.trim();
+    const target = { ..._auditTarget };
+
+    // ── Optimistic: calcular diff antes de tocar stockMap ──────
+    const stockSistema = _s(target.codigoBarra).cantidadDisponible || 0;
+    const diff         = fisico - stockSistema;
+
+    // Marcar en localStorage inmediatamente
+    const sku = target.skuBase;
+    if (_auditDia) {
+      if (!_auditDia.auditados[sku]) _auditDia.auditados[sku] = [];
+      const cod = String(target.codigoBarra);
+      if (!_auditDia.auditados[sku].includes(cod)) _auditDia.auditados[sku].push(cod);
+      _guardarAuditDia();
+    }
+
+    // Actualizar stock local optimisticamente
+    _stockMap[target.codigoBarra] = {
+      ...(_stockMap[target.codigoBarra] || {}),
+      cantidadDisponible: fisico
+    };
+
+    // Cerrar y re-render sin esperar al servidor
+    cerrarSheet('sheetAudit');
+    _auditTarget = null;
+    const msg = Math.abs(diff) <= 0.5
+      ? '✅ Sin diferencias'
+      : `⚠️ Diferencia: ${diff > 0 ? '+' : ''}${fmt(diff, 2)}`;
+    toast(msg, Math.abs(diff) <= 0.5 ? 'ok' : 'warn', 4000);
+    _actualizarBadge();
+    _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+    _aplicarQuery();
+
+    // ── Enviar al servidor en segundo plano ────────────────────
+    API.auditarProducto({
+      codigoBarra: String(target.codigoBarra),
+      stockFisico: fisico,
+      observacion: obs,
+      usuario:     window.WH_CONFIG?.usuario || ''
+    }).then(res => {
+      if (!res.ok) toast('Error al guardar en servidor: ' + (res.error || ''), 'danger', 5000);
+    }).catch(() => {
+      toast('Sin conexión — auditoría en cola', 'warn', 4000);
+    });
+  }
+
+  // ── Ajuste manual ───────────────────────────────
+  function abrirAjusteDesdeHistorial() {
+    if (!_histTarget) return;
+    cerrarSheet('sheetHistorial');
+    abrirAjuste(_histTarget.codigo, _histTarget.nombre);
+  }
+
+  function abrirAjuste(codigoBarra, nombre) {
+    _ajusteTarget = { codigoBarra: String(codigoBarra), nombre };
+    document.getElementById('ajusteNombre').textContent   = nombre;
+    document.getElementById('ajusteCodigo').textContent   = String(codigoBarra);
+    const s = _s(String(codigoBarra));
+    document.getElementById('ajusteStockSis').textContent = fmt(s.cantidadDisponible || 0);
+    document.getElementById('ajusteCant').value           = '';
+    document.getElementById('ajusteMotivo').value         = '';
+    document.getElementById('ajustePreview').textContent  = '';
+    abrirSheet('sheetAjuste');
+  }
+
+  function previewAjuste() {
+    if (!_ajusteTarget) return;
+    const stockReal = parseFloat(document.getElementById('ajusteCant').value);
+    const el        = document.getElementById('ajustePreview');
+    if (isNaN(stockReal) || document.getElementById('ajusteCant').value === '') {
+      el.textContent = ''; return;
+    }
+    const stockActual = _s(_ajusteTarget.codigoBarra).cantidadDisponible || 0;
+    const diff        = stockReal - stockActual;
+    if (Math.abs(diff) < 0.01) {
+      el.className   = 'text-xs text-center mb-3 h-5 text-slate-400';
+      el.textContent = 'Sin diferencia';
+    } else if (diff > 0) {
+      el.className   = 'text-xs text-center mb-3 h-5 text-emerald-400 font-bold';
+      el.textContent = `▲ +${fmt(diff, 2)} unidades`;
+    } else {
+      el.className   = 'text-xs text-center mb-3 h-5 text-red-400 font-bold';
+      el.textContent = `▼ ${fmt(diff, 2)} unidades`;
+    }
+  }
+
+  function confirmarAjuste() {
+    if (!_ajusteTarget) return;
+    const stockReal = parseFloat(document.getElementById('ajusteCant').value);
+    if (isNaN(stockReal) || stockReal < 0) { toast('Ingresa el stock real', 'warn'); return; }
+    const motivo      = document.getElementById('ajusteMotivo').value.trim();
+    const target      = { ..._ajusteTarget };
+    const stockActual = _s(target.codigoBarra).cantidadDisponible || 0;
+    const diff        = stockReal - stockActual;
+
+    if (Math.abs(diff) < 0.01) {
+      toast('El stock real coincide con el sistema, no hay cambio', 'info', 3000);
+      cerrarSheet('sheetAjuste');
+      return;
+    }
+
+    const tipo = diff > 0 ? 'INC' : 'DEC';
+
+    // Optimistic
+    _stockMap[target.codigoBarra] = {
+      ...(_stockMap[target.codigoBarra] || {}),
+      cantidadDisponible: stockReal
+    };
+    cerrarSheet('sheetAjuste');
+    _ajusteTarget = null;
+    toast(`${diff > 0 ? '▲' : '▼'} Ajuste ${diff > 0 ? '+' : ''}${fmt(diff, 2)} — stock: ${fmt(stockReal)}`, 'ok', 3000);
+    _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+    _aplicarQuery();
+
+    // Background sync
+    API.crearAjuste({
+      codigoProducto: target.codigoBarra,
+      tipoAjuste:     tipo,
+      cantidadAjuste: Math.abs(diff),
+      motivo:         motivo || 'Ajuste manual',
+      usuario:        window.WH_CONFIG?.usuario || ''
+    }).then(res => {
+      if (!res.ok) toast('Error al guardar ajuste: ' + (res.error || ''), 'danger', 5000);
+    }).catch(() => {
+      toast('Sin conexión — ajuste en cola', 'warn', 4000);
+    });
+  }
+
+  // ── Cargar ──────────────────────────────────────
   async function cargar() {
     loading('listProductos', true);
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    _buildMap(OfflineManager.getStockCache());
+    _grupos = _agrupar(prods, equivs);
+    _initAuditDia();
+    _aplicarQuery();
+
+    // Actualizar stock en background — respeta búsqueda activa
     const res = await API.getStock().catch(() => ({ ok: false }));
-    todos = res.ok ? res.data : [];
-    renderLista(todos);
+    if (res.ok && res.data) {
+      _buildMap(res.data);
+      _grupos = _agrupar(prods, equivs);
+      _actualizarBadge();
+      _aplicarQuery();
+    }
   }
 
-  function buscar(q) {
-    if (!q) { renderLista(todos); return; }
-    const qL = q.toLowerCase();
-    renderLista(todos.filter(p =>
-      (p.descripcion || '').toLowerCase().includes(qL) ||
-      (p.codigoProducto || '').toLowerCase().includes(qL)
-    ));
+  // Re-render desde caché sin spinner ni API call (llamado por wh:data-refresh)
+  function silentRefresh() {
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    _buildMap(OfflineManager.getStockCache());
+    _grupos = _agrupar(prods, equivs);
+    _aplicarQuery();
   }
 
-  function renderLista(list) {
-    const container = document.getElementById('listProductos');
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin resultados</p>'; return; }
-
-    container.innerHTML = list.map(p => {
-      const pct = p.stockMaximo > 0 ? Math.min(100, p.cantidadDisponible / p.stockMaximo * 100) : 0;
-      const barColor = p.alertaMinimo ? 'bg-red-500' : pct < 50 ? 'bg-amber-500' : 'bg-emerald-500';
-      return `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <p class="font-semibold text-sm">${p.descripcion}</p>
-          <span class="font-mono font-bold ${p.alertaMinimo ? 'text-red-400' : 'text-emerald-400'}">
-            ${fmt(p.cantidadDisponible)}
-          </span>
-        </div>
-        <p class="text-xs text-slate-400 mb-1">${p.codigoProducto} · ${p.unidad}</p>
-        <div class="bar-bg"><div class="bar-fill ${barColor}" style="width:${pct.toFixed(0)}%"></div></div>
-        <p class="text-xs text-slate-500 mt-1">Mín: ${p.stockMinimo} · Máx: ${p.stockMaximo}</p>
-        ${p.alertaMinimo ? '<span class="tag-danger text-xs mt-1 inline-block">⚠️ BAJO MÍNIMO</span>' : ''}
-      </div>`;
-    }).join('');
-  }
-
-  return { cargar, buscar };
+  return { cargar, silentRefresh, buscar, buscarClear, toggleGrupo, toggleAuditoriaDia,
+           abrirAuditBarcode, confirmarAuditoria,
+           abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
+           verHistorial, imprimirHistorial };
 })();
 
-// ════════════════════════════════════════════════
-// PROVEEDORES VIEW
-// ════════════════════════════════════════════════
-const ProveedoresView = (() => {
-  async function cargar() {
-    loading('listProveedores', true);
-    const res = await API.getProveedores({ estado: '1' }).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-    const container = document.getElementById('listProveedores');
-
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin proveedores</p>'; return; }
-
-    const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-    container.innerHTML = list.map(p => `
-      <div class="card-sm">
-        <p class="font-bold text-sm">${p.nombre}</p>
-        <p class="text-xs text-slate-400">RUC: ${p.ruc || '—'} · ${p.telefono || ''}</p>
-        <div class="flex gap-3 mt-2 text-xs text-slate-300">
-          <span>📋 Pedido: ${dias[p.diaPedido] || p.diaPedido || '—'}</span>
-          <span>💳 Pago: ${dias[p.diaPago] || p.diaPago || '—'}</span>
-          <span>🚚 Entrega: ${dias[p.diaEntrega] || p.diaEntrega || '—'}</span>
-        </div>
-        <p class="text-xs text-slate-400 mt-1">
-          ${p.formaPago} ${p.plazoCredito > 0 ? '· Crédito ' + p.plazoCredito + 'd' : ''}
-          ${p.responsable ? '· ' + p.responsable : ''}
-        </p>
-      </div>`).join('');
-  }
-
-  function nuevo() { toast('Formulario proveedor próximamente', 'info'); }
-  return { cargar, nuevo };
-})();
 
 // ════════════════════════════════════════════════
 // CONFIG VIEW
 // ════════════════════════════════════════════════
 const ConfigView = (() => {
-  async function guardar() {
+  // Guardar solo la URL GAS (sección Conexión en Tools)
+  function guardar() {
     const gasUrl = document.getElementById('cfgGasUrl').value.trim();
-    const printKey = document.getElementById('cfgPrintKey').value.trim();
-    const printId = document.getElementById('cfgPrintId').value.trim();
+    if (!gasUrl) { toast('Ingresa la URL del GAS', 'warn'); return; }
+    window.WH_CONFIG.gasUrl = gasUrl;
+    localStorage.setItem('wh_gas_url', gasUrl);
+    const el = document.getElementById('toolsGasUrl');
+    if (el) el.textContent = gasUrl;
+    toast('URL guardada', 'ok');
+  }
+
+  // Guardar configuración de impresión (PrintNode + días alerta)
+  async function guardarImpresion() {
+    const printKey   = document.getElementById('cfgPrintKey').value.trim();
+    const printId    = document.getElementById('cfgPrintId').value.trim();
     const diasAlerta = document.getElementById('cfgDiasAlerta').value;
-
-    if (gasUrl) {
-      window.WH_CONFIG.gasUrl = gasUrl;
-      localStorage.setItem('wh_gas_url', gasUrl);
-    }
-
-    if (printKey) await API.setConfig('PRINTNODE_API_KEY', printKey);
-    if (printId)  await API.setConfig('PRINTNODE_PRINTER_ID', printId);
-    if (diasAlerta) await API.setConfig('DIAS_ALERTA_VENC', diasAlerta);
-
-    toast('Configuración guardada', 'ok');
+    if (printKey)   await API.setConfig('PRINTNODE_API_KEY',   printKey);
+    if (printId)    await API.setConfig('PRINTNODE_PRINTER_ID', printId);
+    if (diasAlerta) await API.setConfig('DIAS_ALERTA_VENC',    diasAlerta);
+    toast('Configuración de impresión guardada', 'ok');
   }
 
-  function guardarUsuario() {
-    const nombre = document.getElementById('cfgUsuario').value.trim();
-    if (!nombre) return;
-    window.WH_CONFIG.usuario = nombre;
-    localStorage.setItem('wh_usuario', nombre);
-    document.getElementById('usuarioNombre').textContent = nombre;
-    toast('Usuario actualizado', 'ok');
-  }
-
-  return { guardar, guardarUsuario };
+  return { guardar, guardarImpresion };
 })();
 
 // ════════════════════════════════════════════════

@@ -72,9 +72,16 @@ function agregarDetalleGuia(params) {
   var sheet     = getSheet('GUIA_DETALLE');
   var idDetalle = _generateId('DET');
 
+  // Forzar codigoBarra a string para preservar ceros a la izquierda
+  var codigoBuscado = String(params.codigoProducto || '').trim();
+
   // Validar que el código de producto existe
   var productos = _sheetToObjects(getProductosSheet());
-  var prod = productos.find(function(p){ return p.idProducto === params.codigoProducto || p.codigoBarra === params.codigoProducto; });
+  var prod = productos.find(function(p) {
+    return p.idProducto === codigoBuscado ||
+           String(p.codigoBarra) === codigoBuscado ||
+           String(p.idProducto).toLowerCase() === codigoBuscado.toLowerCase();
+  });
 
   // Si no existe → sugerir ProductoNuevo
   if (!prod) {
@@ -82,13 +89,27 @@ function agregarDetalleGuia(params) {
       ok: false,
       error: 'PRODUCTO_NO_ENCONTRADO',
       mensaje: 'Código no registrado. ¿Deseas registrarlo como producto nuevo?',
-      codigoBuscado: params.codigoProducto
+      codigoBuscado: codigoBuscado
     };
   }
 
   var cantEsperada  = parseFloat(params.cantidadEsperada)  || 0;
   var cantRecibida  = parseFloat(params.cantidadRecibida !== undefined ? params.cantidadRecibida : cantEsperada);
   var precioUnit    = parseFloat(params.precioUnitario)    || 0;
+
+  // Lote: si viene fechaVencimiento, crear lote inmediatamente
+  var idLote = params.idLote || '';
+  var fechaVenc = params.fechaVencimiento || '';
+  if (fechaVenc && fechaVenc !== '') {
+    if (!idLote) idLote = _generateId('LOT');
+    var loteSheet = getSheet('LOTES_VENCIMIENTO');
+    if (loteSheet) {
+      loteSheet.appendRow([
+        idLote, prod.idProducto, fechaVenc, cantRecibida, cantRecibida,
+        params.idGuia, 'ACTIVO', new Date()
+      ]);
+    }
+  }
 
   sheet.appendRow([
     idDetalle,
@@ -97,11 +118,96 @@ function agregarDetalleGuia(params) {
     cantEsperada,
     cantRecibida,
     precioUnit,
-    params.idLote    || '',
+    idLote,
     params.observacion || ''
   ]);
 
-  return { ok: true, data: { idDetalle: idDetalle, codigoProducto: prod.idProducto } };
+  return {
+    ok: true,
+    data: {
+      idDetalle:          idDetalle,
+      codigoProducto:     prod.idProducto,
+      descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
+      cantidadEsperada:   cantEsperada,
+      cantidadRecibida:   cantRecibida,
+      precioUnitario:     precioUnit,
+      idLote:             idLote,
+      fechaVencimiento:   fechaVenc
+    }
+  };
+}
+
+// ── Anular un ítem de detalle ────────────────────────────
+function anularDetalle(params) {
+  var idDetalle = params.idDetalle;
+  if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
+
+  var sheet = getSheet('GUIA_DETALLE');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId = hdrs.indexOf('idDetalle');
+  var idxObs = hdrs.indexOf('observacion');
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][idxId] === idDetalle) {
+      // Marcar como anulado en observacion
+      sheet.getRange(i + 1, idxObs + 1).setValue('ANULADO');
+      // Poner cantidadRecibida = 0
+      var idxRec = hdrs.indexOf('cantidadRecibida');
+      if (idxRec >= 0) sheet.getRange(i + 1, idxRec + 1).setValue(0);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Detalle no encontrado' };
+}
+
+// ── Reabrir una guía cerrada (requiere adminPin en el cliente) ──
+function reabrirGuia(params) {
+  var idGuia = params.idGuia;
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+
+  var sheet = getSheet('GUIAS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId  = hdrs.indexOf('idGuia');
+  var idxEst = hdrs.indexOf('estado');
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === String(idGuia)) {
+      sheet.getRange(i + 1, idxEst + 1).setValue('ABIERTA');
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Guía no encontrada' };
+}
+
+// ── Auto-cerrar guías abiertas de días anteriores ────────────
+function autoCloseDayGuias() {
+  var sheet   = getSheet('GUIAS');
+  var data    = sheet.getDataRange().getValues();
+  var hdrs    = data[0];
+  var idxId   = hdrs.indexOf('idGuia');
+  var idxFec  = hdrs.indexOf('fecha');
+  var idxEst  = hdrs.indexOf('estado');
+  var tz      = Session.getScriptTimeZone();
+  var hoy     = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var cerradas = 0;
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][idxEst] !== 'ABIERTA') continue;
+    var fechaGuia = '';
+    var fv = data[i][idxFec];
+    if (fv instanceof Date) {
+      fechaGuia = Utilities.formatDate(fv, tz, 'yyyy-MM-dd');
+    } else {
+      fechaGuia = String(fv || '').substring(0, 10);
+    }
+    if (fechaGuia && fechaGuia < hoy) {
+      sheet.getRange(i + 1, idxEst + 1).setValue('AUTOCERRADA');
+      cerradas++;
+    }
+  }
+  return { ok: true, data: { cerradas: cerradas } };
 }
 
 function cerrarGuia(idGuia, usuario, idSesion) {

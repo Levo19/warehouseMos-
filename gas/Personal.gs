@@ -8,14 +8,15 @@ function loginPersonal(params) {
   var pin = String(params.pin || '').trim();
   if (!pin) return { ok: false, error: 'PIN requerido' };
 
-  var personal = _sheetToObjects(getPersonalSheet());
+  // Solo operadores de warehouseMos activos (appOrigen=warehouseMos, estado=1)
+  var personal = _getPersonalWH();
   var operador = personal.find(function(p) {
-    return String(p.pin) === pin && String(p.estado) === '1';
+    return String(p.pin) === pin;
   });
   if (!operador) return { ok: false, error: 'PIN incorrecto' };
 
-  // Verificar si ya tiene sesión activa y cerrarla primero
-  _cerrarSesionesHuerfanas(operador.idPersonal);
+  // Cerrar sesiones anteriores y capturar si había una de otro día
+  var huerfanas = _cerrarSesionesHuerfanas(operador.idPersonal);
 
   // Crear sesión
   var idSesion  = _generateId('SES');
@@ -50,13 +51,14 @@ function loginPersonal(params) {
   return {
     ok: true,
     data: {
-      idSesion:   idSesion,
-      idPersonal: operador.idPersonal,
-      nombre:     operador.nombre,
-      apellido:   operador.apellido,
-      rol:        operador.rol,
-      color:      operador.color,
-      horaInicio: horaStr
+      idSesion:       idSesion,
+      idPersonal:     operador.idPersonal,
+      nombre:         operador.nombre,
+      apellido:       operador.apellido,
+      rol:            operador.rol,
+      color:          operador.color,
+      horaInicio:     horaStr,
+      sesionAnterior: huerfanas.ultimaFecha || null   // fecha si había sesión de otro día
     }
   };
 }
@@ -191,7 +193,7 @@ function _calcularYCerrarDesempeno(idSesion, minutos, horas) {
 
     // Construir reporte para mostrar al operador
     var idPersonal = row[hdrs.indexOf('idPersonal')];
-    var personal   = _sheetToObjects(getPersonalSheet());
+    var personal   = _getPersonalWH();
     var operador   = personal.find(function(p){ return p.idPersonal === idPersonal; }) || {};
 
     return {
@@ -222,9 +224,7 @@ function _calcularYCerrarDesempeno(idSesion, minutos, horas) {
 
 // ── Getters ──────────────────────────────────────────────────
 function getPersonal(params) {
-  var rows = _sheetToObjects(getPersonalSheet());
-  // Solo activos (comparación flexible: 1, '1', true)
-  rows = rows.filter(function(r) { return String(r.estado) === '1'; });
+  var rows = _getPersonalWH();
   // No enviar el PIN al frontend
   rows = rows.map(function(r) {
     var safe = Object.assign({}, r);
@@ -235,10 +235,9 @@ function getPersonal(params) {
 }
 
 // Solo para precarga offline — incluye PIN para validación local
+// Ahora servido por descargarMaestros(); mantenemos este endpoint por compatibilidad
 function getPersonalConPin(params) {
-  var rows = _sheetToObjects(getPersonalSheet());
-  rows = rows.filter(function(r) { return String(r.estado) === '1'; });
-  return { ok: true, data: rows }; // PIN incluido intencionalmente para caché local
+  return { ok: true, data: _getPersonalWH() }; // PIN incluido intencionalmente para caché local
 }
 
 function getSesionActiva(params) {
@@ -261,8 +260,8 @@ function getResumenPersonal(params) {
   var hoy  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
   var fecha = params.fecha || hoy;
   var desempeno = _sheetToObjects(getSheet('DESEMPENO')).filter(function(r){ return r.fecha === fecha; });
-  var personal  = _sheetToObjects(getPersonalSheet());
-  var resumen   = personal.filter(function(p){ return p.estado === '1'; }).map(function(p) {
+  var personal  = _getPersonalWH();
+  var resumen   = personal.map(function(p) {
     var des = desempeno.find(function(d){ return d.idPersonal === p.idPersonal; }) || {};
     return {
       idPersonal:      p.idPersonal,
@@ -280,16 +279,28 @@ function getResumenPersonal(params) {
 }
 
 // ── Helpers internos ─────────────────────────────────────────
+// Cierra sesiones ACTIVA del operador. Retorna { count, ultimaFecha }
+// donde ultimaFecha es la fecha de inicio si era de un día anterior (para aviso al usuario).
 function _cerrarSesionesHuerfanas(idPersonal) {
-  var sheet = getSheet('SESIONES');
-  var data  = sheet.getDataRange().getValues();
-  var hdrs  = data[0];
+  var sheet   = getSheet('SESIONES');
+  var data    = sheet.getDataRange().getValues();
+  var hdrs    = data[0];
   var idxIdP  = hdrs.indexOf('idPersonal');
   var idxEst  = hdrs.indexOf('estado');
-  var ahora   = new Date();
+  var idxFec  = hdrs.indexOf('fechaInicio');
+  var tz      = Session.getScriptTimeZone();
+  var hoy     = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var count   = 0;
+  var ultimaFecha = null;
+
   for (var i = 1; i < data.length; i++) {
     if (data[i][idxIdP] === idPersonal && data[i][idxEst] === 'ACTIVA') {
       sheet.getRange(i + 1, idxEst + 1).setValue('HUERFANA');
+      count++;
+      var fec = String(data[i][idxFec] || '').substring(0, 10);
+      // Solo reportar si la sesión huérfana era de otro día (no de hoy)
+      if (fec && fec !== hoy) ultimaFecha = fec;
     }
   }
+  return { count: count, ultimaFecha: ultimaFecha };
 }

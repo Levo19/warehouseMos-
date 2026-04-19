@@ -27,6 +27,21 @@ const API = (() => {
     if (action === 'getProveedores') return { ok: true, data: OfflineManager.getProveedoresCache() };
     if (action === 'getPersonal')    return { ok: true, data: OfflineManager.getPersonalCache().map(p => { const s = {...p}; delete s.pin; return s; }) };
     if (action === 'getConfig')      return { ok: true, data: OfflineManager.getConfigCache() };
+    if (action === 'getGuias')       return { ok: true, data: OfflineManager.getGuiasCache() };
+    if (action === 'getPreingresos') return { ok: true, data: OfflineManager.getPreingresosCache() };
+    if (action === 'getGuia') {
+      const guias    = OfflineManager.getGuiasCache();
+      const detalles = OfflineManager.getGuiaDetalleCache();
+      const prods    = OfflineManager.getProductosCache();
+      const guia     = guias.find(g => g.idGuia === params.idGuia);
+      if (!guia) return { ok: false, error: 'Guía no en caché' };
+      const prodMap = {};
+      prods.forEach(p => { prodMap[p.idProducto] = p.descripcion || p.nombre || p.idProducto; });
+      const detalle = detalles
+        .filter(d => d.idGuia === params.idGuia)
+        .map(d => ({ ...d, descripcionProducto: prodMap[d.codigoProducto] || d.codigoProducto }));
+      return { ok: true, data: { ...guia, detalle } };
+    }
     return { ok: false, error: 'Sin conexión y sin caché disponible' };
   }
 
@@ -57,6 +72,10 @@ const API = (() => {
   }
 
   return {
+    // Descarga maestros MOS → localStorage
+    descargarMaestros:    ()     => call({ action: 'descargarMaestros' }),
+    descargarOperacional: ()     => call({ action: 'descargarOperacional' }),
+
     // Dashboard
     getDashboard:       ()       => call({ action: 'getDashboard' }),
 
@@ -77,9 +96,18 @@ const API = (() => {
     cerrarGuia:         (id, u)  => post({ action: 'cerrarGuia', idGuia: id, usuario: u }),
 
     // Preingresos
-    getPreingresos:     (p={})   => call({ action: 'getPreingresos', ...p }),
-    crearPreingreso:    (p)      => post({ action: 'crearPreingreso', ...p }),
-    aprobarPreingreso:  (p)      => post({ action: 'aprobarPreingreso', ...p }),
+    getPreingresos:           (p={}) => call({ action: 'getPreingresos', ...p }),
+    crearPreingreso:          (p)    => post({ action: 'crearPreingreso', ...p }),
+    aprobarPreingreso:        (p)    => post({ action: 'aprobarPreingreso', ...p }),
+    subirFotoPreingreso:      (p)    => post({ action: 'subirFotoPreingreso', ...p }),
+    actualizarFotosPreingreso:(p)    => post({ action: 'actualizarFotosPreingreso', ...p }),
+    actualizarPreingreso:     (p)    => post({ action: 'actualizarPreingreso', ...p }),
+    eliminarFotoDrive:        (p)    => post({ action: 'eliminarFotoDrive', ...p }),
+
+    // Guías — foto + comentario
+    subirFotoGuia:        (p)    => post({ action: 'subirFotoGuia',        ...p }),
+    actualizarGuia:       (p)    => post({ action: 'actualizarGuia',       ...p }),
+    copiarFotoDePreingreso:(p)   => post({ action: 'copiarFotoDePreingreso',...p }),
 
     // Envasados
     getEnvasados:       (p={})   => call({ action: 'getEnvasados', ...p }),
@@ -110,10 +138,17 @@ const API = (() => {
     aprobarPN:          (p)      => post({ action: 'aprobarProductoNuevo', ...p }),
 
     // Config
-    getConfig:          ()       => call({ action: 'getConfig' }),
+    getConfig:          ()                  => call({ action: 'getConfig' }),
+    setConfig:          (clave, valor)      => post({ action: 'setConfigValue', clave, valor }),
 
-    // Etiquetas
+    // Etiquetas / Tickets
     imprimirEtiqueta:   (p)      => post({ action: 'imprimirEtiqueta', ...p }),
+    imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
+
+    // Guías — acciones extra
+    reabrirGuia:        (p)      => post({ action: 'reabrirGuia', ...p }),
+    anularDetalle:      (p)      => post({ action: 'anularDetalle', ...p }),
+    autoCloseDayGuias:  ()       => post({ action: 'autoCloseDayGuias' }),
 
     // Personal / Sesiones
     loginPersonal:      (pin)    => post({ action: 'loginPersonal', pin }),
@@ -121,6 +156,13 @@ const API = (() => {
     getPersonal:        ()       => call({ action: 'getPersonal' }),
     getSesionActiva:    (id)     => call({ action: 'getSesionActiva', idSesion: id }),
     getDesempenoDia:    (p={})   => call({ action: 'getDesempenoDia', ...p }),
-    getResumenPersonal: (fecha)  => call({ action: 'getResumenPersonal', fecha: fecha || '' })
+    getResumenPersonal: (fecha)  => call({ action: 'getResumenPersonal', fecha: fecha || '' }),
+
+    // Stock — historial de movimientos por producto
+    getHistorialStock:    (cod)  => call({ action: 'getHistorialStock', codigoProducto: cod }),
+    imprimirHistorialStock: (p)  => post({ action: 'imprimirHistorialStock', ...p }),
+
+    // Auditoría diaria de stock (desde módulo Productos)
+    auditarProducto:      (p)   => post({ action: 'auditarProducto', ...p })
   };
 })();

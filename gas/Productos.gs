@@ -252,6 +252,138 @@ function aprobarProductoNuevo(params) {
   return { ok: true, data: { idProducto: resultCrear.data.idProducto } };
 }
 
+// ── Historial de stock por producto ─────────────────────────
+// Devuelve los movimientos (GUIA_DETALLE JOIN GUIAS) del producto,
+// enriquecidos con balance corriente, ordenados DESC por fecha.
+function getHistorialStock(params) {
+  var raw = String(params.codigoProducto || '');
+  if (!raw) return { ok: false, error: 'codigoProducto requerido' };
+
+  // Acepta barcode único o comma-separated para grupos multi-barcode
+  var codigos = raw.split(',').map(function(c){ return c.trim(); }).filter(Boolean);
+  var codSet  = {};
+  codigos.forEach(function(c){ codSet[c] = true; });
+
+  var guias    = _sheetToObjects(getSheet('GUIAS'));
+  var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
+  var guiaMap  = {};
+  guias.forEach(function(g) { guiaMap[g.idGuia] = g; });
+
+  // Movimientos de guías
+  var guiaMovs = detalles
+    .filter(function(d) { return codSet[String(d.codigoProducto)]; })
+    .map(function(d) {
+      var g    = guiaMap[d.idGuia] || {};
+      var tipo = String(g.tipo || '').toUpperCase();
+      return {
+        idGuia:    d.idGuia,
+        fecha:     g.fecha  || d.fecha || '',
+        tipo:      g.tipo   || '—',
+        esIngreso: tipo.indexOf('INGRESO') >= 0 || tipo.indexOf('ENTRADA') >= 0 ||
+                   (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0),
+        cantidad:  Math.abs(parseFloat(d.cantidadReal || d.cantidadEsperada || d.cantidad || 0)),
+        usuario:   g.usuario || d.usuario || '—',
+        origen:    g.idProveedor || g.destino || '',
+        estado:    g.estado || '',
+        fuente:    'guia'
+      };
+    })
+    .filter(function(m){ return m.cantidad > 0; });
+
+  // Ajustes
+  var ajusteMovs = [];
+  try {
+    var ajSheet = getSheet('AJUSTES');
+    if (ajSheet) {
+      _sheetToObjects(ajSheet)
+        .filter(function(a){ return codSet[String(a.codigoProducto)]; })
+        .forEach(function(a){
+          var cant = Math.abs(parseFloat(a.cantidadAjuste || 0));
+          var tAj  = String(a.tipoAjuste || '').toUpperCase();
+          if (cant > 0) ajusteMovs.push({
+            idGuia:    a.idAjuste || '',
+            fecha:     a.fecha   || '',
+            tipo:      'Ajuste ' + (a.tipoAjuste || ''),
+            esIngreso: tAj === 'INC' || tAj === 'INI',
+            cantidad:  cant,
+            usuario:   a.usuario || '—',
+            origen:    a.motivo  || '',
+            estado:    '',
+            fuente:    'ajuste'
+          });
+        });
+    }
+  } catch(e) {}
+
+  var todos = guiaMovs.concat(ajusteMovs)
+    .sort(function(a, b){ return new Date(b.fecha) - new Date(a.fecha); });
+
+  return { ok: true, data: todos };
+}
+
+// ── Imprimir historial de stock (ticket ESC/POS via PrintNode) ─
+function imprimirHistorialStock(params) {
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  // Siempre resuelve la impresora TICKET de ALMACEN desde MOS — no depende del frontend
+  var printerId;
+  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+  catch(e) { return { ok: false, error: e.message }; }
+
+  var tz     = Session.getScriptTimeZone();
+  var ahora  = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm:ss');
+  var nombre = String(params.codigoProducto || '');
+  var texto  = String(params.texto || '');
+
+  // Si no vino texto pre-formateado, armar uno básico
+  if (!texto) {
+    texto = [
+      '================================',
+      '      HISTORIAL DE STOCK',
+      '   ALMACEN CENTRAL - MOS',
+      '================================',
+      'Codigo   : ' + nombre,
+      'Generado : ' + ahora,
+      '================================',
+      ''
+    ].join('\n');
+  }
+
+  // ESC/POS: init + buzzer (1 beep) + texto + 3 avances + corte automático
+  var esc    = '\x1b\x40';              // ESC @ — init impresora
+  var buzzer = '\x1b\x42\x01\x01';     // ESC B 1 1 — 1 beep, 100 ms
+  var feed   = '\n\n\n';               // 3 avances de papel
+  var corte  = '\x1d\x56\x00';        // GS V 0 — corte automático completo
+  var rawText = esc + buzzer + texto + feed + corte;
+
+  var payload = {
+    printerId:   parseInt(printerId),
+    title:       'Historial Stock ' + nombre,
+    contentType: 'raw_base64',
+    content:     Utilities.base64Encode(rawText),
+    source:      'warehouseMos'
+  };
+
+  try {
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method:  'post',
+      headers: {
+        'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+        'Content-Type':  'application/json'
+      },
+      payload:            JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    return code === 201
+      ? { ok: true }
+      : { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // ── Mermas ──────────────────────────────────────────────────
 function getMermas(params) {
   var rows = _sheetToObjects(getSheet('MERMAS'));
@@ -352,6 +484,84 @@ function ejecutarAuditoria(params) {
   return { ok: false, error: 'Auditoría no encontrada' };
 }
 
+// ── Auditoría directa desde módulo Productos ────────────────
+// Registra conteo físico, crea STOCK si no existe (texto),
+// crea AJUSTE si hay diferencia (texto). Todo preserva codigoBarra como texto.
+function auditarProducto(params) {
+  var codigoBarra = String(params.codigoBarra || '').trim();
+  if (!codigoBarra) return { ok: false, error: 'codigoBarra requerido' };
+
+  var stockFisico = parseFloat(params.stockFisico);
+  if (isNaN(stockFisico) || stockFisico < 0)
+    return { ok: false, error: 'stockFisico inválido' };
+
+  // ── 1. Stock sistema actual ────────────────────────────────
+  var stockInfo    = _getStockProducto(codigoBarra);
+  var stockSistema = stockInfo.cantidad;
+  var diff         = stockFisico - stockSistema;
+  var resultado    = Math.abs(diff) <= 0.5 ? 'OK' : 'DIFERENCIA';
+
+  // ── 2. Registrar en AUDITORIAS (codigoBarra como texto) ───
+  var audSheet  = getSheet('AUDITORIAS');
+  var audHdrs   = audSheet.getRange(1, 1, 1, audSheet.getLastColumn()).getValues()[0];
+  var audColCod = audHdrs.indexOf('codigoProducto') + 1; // 1-based
+  var audId     = _generateId('AUD');
+  var audVals   = [audId, new Date(), codigoBarra, String(params.usuario || ''),
+                   stockSistema, stockFisico, diff, resultado,
+                   String(params.observacion || ''), 'EJECUTADA', new Date()];
+  var audNext   = audSheet.getLastRow() + 1;
+  var audRange  = audSheet.getRange(audNext, 1, 1, audVals.length);
+  if (audColCod > 0) audSheet.getRange(audNext, audColCod).setNumberFormat('@');
+  // Cols 2 (fechaAsignacion) y 11 (fechaEjecucion) con hora
+  audSheet.getRange(audNext, 2).setNumberFormat('dd/MM/yyyy HH:mm');
+  audSheet.getRange(audNext, 11).setNumberFormat('dd/MM/yyyy HH:mm');
+  audRange.setValues([audVals]);
+
+  // ── 3. STOCK: crear si no existe, actualizar si hay diferencia ──
+  var ajSheet  = getSheet('AJUSTES');
+  var ajHdrs   = ajSheet.getRange(1, 1, 1, ajSheet.getLastColumn()).getValues()[0];
+  var ajColCod = ajHdrs.indexOf('codigoProducto') + 1;
+
+  function _writeAjuste(tipo, cant, motivo) {
+    var ajId   = _generateId('AJ');
+    var ajVals = [ajId, codigoBarra, tipo, cant, motivo,
+                  String(params.usuario || ''), audId, new Date()];
+    var ajNext = ajSheet.getLastRow() + 1;
+    if (ajColCod > 0) ajSheet.getRange(ajNext, ajColCod).setNumberFormat('@');
+    ajSheet.getRange(ajNext, 8).setNumberFormat('dd/MM/yyyy HH:mm');
+    ajSheet.getRange(ajNext, 1, 1, ajVals.length).setValues([ajVals]);
+    return ajId;
+  }
+
+  if (stockInfo.fila < 0) {
+    // Sin registro previo → stock inicial, siempre registrar en AJUSTES como INI
+    if (stockFisico > 0) _writeAjuste('INI', stockFisico, 'Stock inicial (auditoria)');
+    // Crear fila STOCK
+    var stSheet = getSheet('STOCK');
+    var stNext  = stSheet.getLastRow() + 1;
+    var stVals  = ['STK' + new Date().getTime(), codigoBarra, stockFisico, new Date()];
+    stSheet.getRange(stNext, 2).setNumberFormat('@');
+    stSheet.getRange(stNext, 4).setNumberFormat('dd/MM/yyyy HH:mm');
+    stSheet.getRange(stNext, 1, 1, stVals.length).setValues([stVals]);
+  } else if (Math.abs(diff) > 0.5) {
+    // Diferencia real → AJUSTE INC/DEC + actualizar STOCK
+    _writeAjuste(diff > 0 ? 'INC' : 'DEC', Math.abs(diff), 'Auditoria diaria');
+    _actualizarStock(codigoBarra, diff);
+  }
+  // Si diff ≤ 0.5: stock cuadra, solo queda en AUDITORIAS, sin tocar AJUSTES
+
+  return {
+    ok: true,
+    data: {
+      idAuditoria:  audId,
+      stockSistema: stockSistema,
+      stockFisico:  stockFisico,
+      diferencia:   diff,
+      resultado:    resultado
+    }
+  };
+}
+
 // ── Ajustes ─────────────────────────────────────────────────
 function getAjustes(params) {
   var rows = _sheetToObjects(getSheet('AJUSTES'));
@@ -360,21 +570,25 @@ function getAjustes(params) {
 }
 
 function crearAjuste(params) {
-  var sheet  = getSheet('AJUSTES');
-  var id     = _generateId('AJ');
-  var tipo   = params.tipoAjuste === 'INC' ? 'INC' : 'DEC';
-  var cant   = parseFloat(params.cantidadAjuste) || 0;
-  var delta  = tipo === 'INC' ? cant : -cant;
+  var sheet     = getSheet('AJUSTES');
+  var hdrs      = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var colCod    = hdrs.indexOf('codigoProducto') + 1;
+  var id        = _generateId('AJ');
+  var tipo      = params.tipoAjuste === 'INC' ? 'INC' : 'DEC';
+  var cant      = parseFloat(params.cantidadAjuste) || 0;
+  var delta     = tipo === 'INC' ? cant : -cant;
+  var codigoBarra = String(params.codigoProducto || '');
+  var ajVals    = [id, codigoBarra, tipo, cant,
+                   String(params.motivo || ''), String(params.usuario || ''),
+                   String(params.idAuditoria || ''), new Date()];
+  var nextRow   = sheet.getLastRow() + 1;
+  if (colCod > 0) sheet.getRange(nextRow, colCod).setNumberFormat('@');
+  sheet.getRange(nextRow, 8).setNumberFormat('dd/MM/yyyy HH:mm');
+  sheet.getRange(nextRow, 1, 1, ajVals.length).setValues([ajVals]);
 
-  sheet.appendRow([
-    id, params.codigoProducto, tipo, cant,
-    params.motivo || '', params.usuario || '',
-    params.idAuditoria || '', new Date()
-  ]);
+  _actualizarStock(codigoBarra, delta);
 
-  _actualizarStock(params.codigoProducto, delta);
-
-  return { ok: true, data: { idAjuste: id, stockNuevo: _getStockProducto(params.codigoProducto).cantidad } };
+  return { ok: true, data: { idAjuste: id, stockNuevo: _getStockProducto(codigoBarra).cantidad } };
 }
 
 // ── Proveedores ─────────────────────────────────────────────
@@ -436,7 +650,15 @@ function getPreingresos(params) {
 
 function crearPreingreso(params) {
   var sheet = getSheet('PREINGRESOS');
-  var id    = _generateId('PI');
+  // Usar ID del cliente si viene (previene duplicados por retry)
+  var id = params.idPreingreso || _generateId('PI');
+
+  // Idempotencia: si ya existe la fila, devolver OK sin insertar
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === id) return { ok: true, data: { idPreingreso: id } };
+  }
+
   sheet.appendRow([
     id, new Date(), params.idProveedor || '', params.usuario || '',
     params.numeroFactura || '', parseFloat(params.monto) || 0,
@@ -444,6 +666,157 @@ function crearPreingreso(params) {
     params.etiqueta || '', 'PENDIENTE', ''
   ]);
   return { ok: true, data: { idPreingreso: id } };
+}
+
+// ── Subir foto de preingreso a Drive ────────────────────────
+function _getOrCreateFolder(parent, name) {
+  var iter = parent.getFoldersByName(name);
+  if (iter.hasNext()) return iter.next();
+  return parent.createFolder(name);
+}
+
+/**
+ * Ejecutar una vez desde el editor de GAS:
+ * 1. Crea carpetas imagenes/preingresos junto al Spreadsheet
+ * 2. Las comparte como ANYONE_WITH_LINK VIEW
+ * 3. Guarda los IDs en Script Properties para uso rápido
+ */
+function setupPreingresosFolders() {
+  var ssId     = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  var ssFile   = DriveApp.getFileById(ssId);
+  var parent   = ssFile.getParents().next();
+
+  var imgFolder = _getOrCreateFolder(parent, 'imagenes');
+  var preFolder = _getOrCreateFolder(imgFolder, 'preingresos');
+
+  imgFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  preFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+  PropertiesService.getScriptProperties().setProperties({
+    'FOTOS_IMG_FOLDER_ID': imgFolder.getId(),
+    'FOTOS_PRE_FOLDER_ID': preFolder.getId()
+  });
+
+  Logger.log('setupPreingresosFolders OK. preFolder ID: ' + preFolder.getId());
+  return { ok: true, preFolderId: preFolder.getId() };
+}
+
+function subirFotoPreingreso(params) {
+  var idPreingreso = String(params.idPreingreso || '');
+  var fotoBase64   = String(params.fotoBase64   || '');
+  var mimeType     = String(params.mimeType     || 'image/jpeg');
+  var indice       = parseInt(params.indice)    || 1;
+
+  if (!idPreingreso || !fotoBase64) return { ok: false, error: 'idPreingreso y fotoBase64 son requeridos' };
+
+  try {
+    // Usar carpeta guardada en Properties (más rápido y sin permisos adicionales)
+    var preFolderId = PropertiesService.getScriptProperties().getProperty('FOTOS_PRE_FOLDER_ID');
+    var preFolder;
+    if (preFolderId) {
+      preFolder = DriveApp.getFolderById(preFolderId);
+    } else {
+      // Fallback: recorrer desde el Spreadsheet (requiere que setupPreingresosFolders se haya ejecutado al menos una vez)
+      var ssId   = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      var parent = DriveApp.getFileById(ssId).getParents().next();
+      preFolder  = _getOrCreateFolder(_getOrCreateFolder(parent, 'imagenes'), 'preingresos');
+      preFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+
+    var piFolder = _getOrCreateFolder(preFolder, idPreingreso);
+    piFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    var ext      = mimeType === 'image/png' ? 'png' : 'jpg';
+    var fileName = idPreingreso + '_' + indice + '.' + ext;
+    var blob     = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, fileName);
+    var file     = piFolder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1280';
+    return { ok: true, data: { url: url, fileId: file.getId() } };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function eliminarFotoDrive(params) {
+  var fileId = String(params.fileId || '');
+  if (!fileId) return { ok: false, error: 'fileId requerido' };
+  try {
+    DriveApp.getFileById(fileId).setTrashed(true);
+    return { ok: true };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function actualizarPreingreso(params) {
+  var sheet        = getSheet('PREINGRESOS');
+  var idPreingreso = String(params.idPreingreso || '');
+  if (!idPreingreso) return { ok: false, error: 'idPreingreso requerido' };
+
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0];
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] !== idPreingreso) continue;
+
+    // Campos editables
+    var editable = { idProveedor: true, monto: true, comentario: true, fotos: true };
+    Object.keys(editable).forEach(function(key) {
+      if (params[key] === undefined) return;
+      var col = hdrs.indexOf(key);
+      if (col < 0) return;
+      var val = key === 'monto' ? (parseFloat(params[key]) || 0) : String(params[key]);
+      sheet.getRange(i + 1, col + 1).setValue(val);
+    });
+
+    // Propagar a guía de ingreso vinculada (si existe)
+    var colGuia = hdrs.indexOf('idGuia');
+    var idGuia  = colGuia >= 0 ? String(data[i][colGuia] || '') : '';
+    if (idGuia) {
+      try {
+        var gs    = getSheet('GUIAS');
+        var gData = gs.getDataRange().getValues();
+        var gHdrs = gData[0];
+        for (var j = 1; j < gData.length; j++) {
+          if (gData[j][0] !== idGuia) continue;
+          if (params.idProveedor !== undefined) {
+            var cP = gHdrs.indexOf('idProveedor');
+            if (cP >= 0) gs.getRange(j + 1, cP + 1).setValue(String(params.idProveedor));
+          }
+          if (params.comentario !== undefined) {
+            var cC = gHdrs.indexOf('comentario');
+            if (cC >= 0) gs.getRange(j + 1, cC + 1).setValue(String(params.comentario));
+          }
+          break;
+        }
+      } catch(e) { /* non-fatal */ }
+    }
+    return { ok: true };
+  }
+  return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
+}
+
+function actualizarFotosPreingreso(params) {
+  var sheet        = getSheet('PREINGRESOS');
+  var idPreingreso = String(params.idPreingreso || '');
+  var fotos        = String(params.fotos        || '');
+
+  if (!idPreingreso) return { ok: false, error: 'idPreingreso requerido' };
+
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0];
+  var colFotos = hdrs.indexOf('fotos');
+  if (colFotos < 0) return { ok: false, error: 'Columna fotos no encontrada' };
+
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === idPreingreso) {
+      sheet.getRange(i + 1, colFotos + 1).setValue(fotos);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
 }
 
 function aprobarPreingreso(params) {
@@ -471,4 +844,135 @@ function aprobarPreingreso(params) {
     }
   }
   return { ok: false, error: 'Preingreso no encontrado' };
+}
+
+// ============================================================
+// Fotos + comentario de GUÍAS
+// ============================================================
+
+/**
+ * Crea carpeta imagenes/guias y guarda ID en Script Properties.
+ * Ejecutar una vez desde el editor de GAS.
+ */
+function setupGuiasFolders() {
+  var ssId      = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  var parent    = DriveApp.getFileById(ssId).getParents().next();
+  var imgFolder = _getOrCreateFolder(parent, 'imagenes');
+  var gFolder   = _getOrCreateFolder(imgFolder, 'guias');
+  imgFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  gFolder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  PropertiesService.getScriptProperties().setProperty('FOTOS_GUIA_FOLDER_ID', gFolder.getId());
+  Logger.log('setupGuiasFolders OK. gFolder ID: ' + gFolder.getId());
+  return { ok: true, guiaFolderId: gFolder.getId() };
+}
+
+function _actualizarColumnaGuia(idGuia, campo, valor) {
+  var sheet = getSheet('GUIAS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var col   = hdrs.indexOf(campo);
+  if (col < 0) return;
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] === idGuia) {
+      sheet.getRange(i + 1, col + 1).setValue(valor);
+      return;
+    }
+  }
+}
+
+function subirFotoGuia(params) {
+  var idGuia     = String(params.idGuia     || '');
+  var fotoBase64 = String(params.fotoBase64 || '');
+  var mimeType   = String(params.mimeType   || 'image/jpeg');
+  if (!idGuia || !fotoBase64) return { ok: false, error: 'idGuia y fotoBase64 requeridos' };
+  try {
+    var folderId = PropertiesService.getScriptProperties().getProperty('FOTOS_GUIA_FOLDER_ID');
+    var folder;
+    if (folderId) {
+      folder = DriveApp.getFolderById(folderId);
+    } else {
+      var ssId   = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      var parent = DriveApp.getFileById(ssId).getParents().next();
+      folder = _getOrCreateFolder(_getOrCreateFolder(parent, 'imagenes'), 'guias');
+      folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    }
+    var ext  = mimeType === 'image/png' ? 'png' : 'jpg';
+    var name = idGuia + '.' + ext;
+    // Borrar foto anterior si existe
+    var existing = folder.getFilesByName(name);
+    while (existing.hasNext()) { existing.next().setTrashed(true); }
+    var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, name);
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1280';
+    _actualizarColumnaGuia(idGuia, 'foto', url);
+    return { ok: true, data: { url: url, fileId: file.getId() } };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function copiarFotoDePreingreso(params) {
+  var idGuia       = String(params.idGuia       || '');
+  var idPreingreso = String(params.idPreingreso || '');
+  if (!idGuia || !idPreingreso) return { ok: false, error: 'idGuia e idPreingreso requeridos' };
+  try {
+    var preFolderId  = PropertiesService.getScriptProperties().getProperty('FOTOS_PRE_FOLDER_ID');
+    var guiaFolderId = PropertiesService.getScriptProperties().getProperty('FOTOS_GUIA_FOLDER_ID');
+    if (!preFolderId || !guiaFolderId) return { ok: false, error: 'Carpetas no configuradas. Ejecuta setupPreingresosFolders() y setupGuiasFolders()' };
+    var piFolder = DriveApp.getFolderById(preFolderId).getFoldersByName(idPreingreso);
+    if (!piFolder.hasNext()) return { ok: false, error: 'Carpeta del preingreso no encontrada' };
+    var files = piFolder.next().getFiles();
+    if (!files.hasNext()) return { ok: false, error: 'Sin fotos en el preingreso' };
+    var srcFile    = files.next();
+    var guiaFolder = DriveApp.getFolderById(guiaFolderId);
+    var copyName   = idGuia + '.jpg';
+    // Borrar copia anterior si existe
+    var existentes = guiaFolder.getFilesByName(copyName);
+    while (existentes.hasNext()) { existentes.next().setTrashed(true); }
+    var copy = srcFile.makeCopy(copyName, guiaFolder);
+    copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    var url = 'https://drive.google.com/thumbnail?id=' + copy.getId() + '&sz=w1280';
+    _actualizarColumnaGuia(idGuia, 'foto', url);
+    return { ok: true, data: { url: url, fileId: copy.getId() } };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+function actualizarGuia(params) {
+  var idGuia = String(params.idGuia || '');
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+  var sheet = getSheet('GUIAS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0] !== idGuia) continue;
+    ['comentario', 'foto'].forEach(function(key) {
+      if (params[key] === undefined) return;
+      var col = hdrs.indexOf(key);
+      if (col >= 0) sheet.getRange(i + 1, col + 1).setValue(String(params[key]));
+    });
+    // Propagar comentario al preingreso vinculado
+    if (params.comentario !== undefined) {
+      var colPre = hdrs.indexOf('idPreingreso');
+      var idPre  = colPre >= 0 ? String(data[i][colPre] || '') : '';
+      if (idPre) {
+        try {
+          var ps    = getSheet('PREINGRESOS');
+          var pData = ps.getDataRange().getValues();
+          var pHdrs = pData[0];
+          var cC    = pHdrs.indexOf('comentario');
+          for (var j = 1; j < pData.length; j++) {
+            if (pData[j][0] === idPre && cC >= 0) {
+              ps.getRange(j + 1, cC + 1).setValue(String(params.comentario));
+              break;
+            }
+          }
+        } catch(e) { /* non-fatal */ }
+      }
+    }
+    return { ok: true };
+  }
+  return { ok: false, error: 'Guía no encontrada: ' + idGuia };
 }
