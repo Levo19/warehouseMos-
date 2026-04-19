@@ -74,7 +74,7 @@ function _route(method, e) {
       if (dup) return dup;
     }
 
-    var result = (function() { switch (action) {
+    result = (function() { switch (action) {
       // ── Descarga maestros (precarga localStorage) ──────────
       case 'descargarMaestros':    return descargarMaestros();
       case 'descargarOperacional': return descargarOperacional();
@@ -98,11 +98,10 @@ function _route(method, e) {
       case 'getGuias':           return getGuias(params);
       case 'getGuia':            return getGuia(params.idGuia);
       case 'crearGuia':          return crearGuia(params);
-      case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
-      case 'actualizarFechaVencimiento':return actualizarFechaVencimiento(params);
-      case 'cerrarGuia':                return cerrarGuia(params.idGuia, params.usuario, params.idSesion);
-      case 'reabrirGuia':               return reabrirGuia(params);
-      case 'anularDetalle':             return anularDetalle(params);
+      case 'agregarDetalleGuia': return agregarDetalleGuia(params);
+      case 'cerrarGuia':         return cerrarGuia(params.idGuia, params.usuario, params.idSesion);
+      case 'reabrirGuia':        return reabrirGuia(params);
+      case 'anularDetalle':      return anularDetalle(params);
       case 'autoCloseDayGuias':  return autoCloseDayGuias();
 
       // ── Preingresos ────────────────────────────────────────

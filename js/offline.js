@@ -204,7 +204,7 @@ const OfflineManager = (() => {
     localStorage.setItem(KEYS.LAST_MASTER, String(Date.now()));
   }
 
-  // Inicia el refresh automático cada 60s (llamar desde App.init, antes del login)
+  // Inicia el refresh automático cada 30s (llamar desde App.init, antes del login)
   function iniciarRefreshOperacional() {
     if (_opRefreshTimer) return;
     // Carga inmediata: maestros (si no hay caché) + operacional
@@ -217,7 +217,7 @@ const OfflineManager = (() => {
     _opRefreshTimer = setInterval(() => {
       _precargarMaestrosThrottled();
       precargarOperacional();
-    }, 60000);
+    }, 30000);
   }
 
   function detenerRefreshOperacional() {
