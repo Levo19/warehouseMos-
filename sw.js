@@ -2,7 +2,7 @@
 // warehouseMos — Service Worker
 // Cambia VERSION en cada deploy para invalidar caché
 // ============================================================
-const VERSION = '1.0.33';
+const VERSION = '1.0.34';
 const CACHE   = 'warehouse-v' + VERSION;
 const ASSETS  = [
   './',
@@ -13,8 +13,9 @@ const ASSETS  = [
   './js/api.js',
   './js/offline.js',
   './js/scanner.js',
+  './assets/icon.svg',
   'https://cdn.tailwindcss.com',
-  'https://unpkg.com/@zxing/library@latest/umd/index.min.js'
+  'https://unpkg.com/@zxing/library@0.20.0/umd/index.min.js'
 ];
 
 // ── Instalar: cachear assets con no-store (ignora CDN) ──────

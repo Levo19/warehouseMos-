@@ -976,6 +976,7 @@ const App = (() => {
            toggleModoEnvasador,
            toggleUserMenu, closeUserMenu,
            syncForzado, checkUpdate,
+           instalarPWA: () => window._installPWA?.(),
            cargarDashboard, showUsuarioDialog,
            cargarProductosMaestro, cargarProveedoresMaestro,
            getProductosMaestro, getProveedoresMaestro,
@@ -1312,19 +1313,27 @@ const GuiasView = (() => {
                onclick="GuiasView.verFotoGuia()">
             <img src="${escAttr(g.foto)}" class="w-full h-full object-cover" loading="lazy"
                  onerror="this.style.opacity='.3'"/>
-            ${abierta ? `<label class="absolute top-2 right-2 bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300">
-              <input type="file" accept="image/*" capture="environment" class="hidden"
-                     onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
-              ✏️ Cambiar
-            </label>` : ''}
+            ${abierta ? `<div class="absolute top-2 right-2 flex gap-1">
+              <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Galería">
+                <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+                🖼
+              </label>
+              <label class="bg-blue-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-blue-200" title="Cámara">
+                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+                📷
+              </label>
+            </div>` : ''}
           </div>`;
       } else if (abierta) {
         fotoEl.innerHTML = `
           <div class="flex gap-2 mb-3">
-            <label class="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer text-slate-400 text-sm" style="height:64px">
-              <input type="file" accept="image/*" capture="environment" class="hidden"
-                     onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
-              📷 Agregar foto
+            <label class="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer text-slate-400 text-sm" style="height:64px" title="Galería">
+              <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+              🖼 Galería
+            </label>
+            <label class="flex items-center justify-center gap-1 border-2 border-dashed border-blue-700 rounded-lg cursor-pointer text-blue-400 text-sm px-3" style="height:64px" title="Cámara">
+              <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
+              📷 Cámara
             </label>
             ${g.idPreingreso ? `<button onclick="GuiasView.copiarFotoDePreingreso()"
                     class="px-3 rounded-lg border border-slate-600 text-xs text-blue-400" style="height:64px">

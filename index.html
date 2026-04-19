@@ -107,7 +107,30 @@
     /* Scanner overlay */
     #scannerModal { position:fixed;inset:0;background:#000;z-index:70;display:none; }
     #scannerModal.open { display:flex;flex-direction:column; }
-    #scanVideo { width:100%;height:100%;object-fit:cover;flex:1; }
+    #scanVideo { width:100%;height:100%;object-fit:cover;flex:1;min-height:0; }
+    /* Guía de puntería del scanner */
+    .scan-guide-wrap { position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center; }
+    .scan-guide-box {
+      width:72%;max-width:280px;height:160px;
+      border:2px solid rgba(59,130,246,.8);border-radius:12px;
+      box-shadow:0 0 0 2000px rgba(0,0,0,.45);
+      position:relative;
+    }
+    .scan-guide-box::before,.scan-guide-box::after,
+    .scan-guide-box > span::before,.scan-guide-box > span::after {
+      content:'';position:absolute;width:20px;height:20px;border-color:#3b82f6;border-style:solid;
+    }
+    .scan-guide-box::before  { top:-2px;left:-2px;  border-width:3px 0 0 3px;border-radius:10px 0 0 0; }
+    .scan-guide-box::after   { top:-2px;right:-2px; border-width:3px 3px 0 0;border-radius:0 10px 0 0; }
+    .scan-guide-box > span::before { bottom:-2px;left:-2px;  border-width:0 0 3px 3px;border-radius:0 0 0 10px; }
+    .scan-guide-box > span::after  { bottom:-2px;right:-2px; border-width:0 3px 3px 0;border-radius:0 0 10px 0; }
+    .scan-line {
+      position:absolute;left:0;right:0;height:2px;
+      background:linear-gradient(90deg,transparent,#3b82f6,transparent);
+      animation:scanAnim 2s ease-in-out infinite;
+      top:0;
+    }
+    @keyframes scanAnim { 0%{top:0} 50%{top:calc(100% - 2px)} 100%{top:0} }
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
                   border-radius:6px;padding:3px 8px;letter-spacing:.5px; }
@@ -369,6 +392,32 @@
       40%        { opacity:1;transform:scale(1.2); }
     }
   </style>
+  <!-- ── PWA Install prompt ── -->
+  <script>
+  (function() {
+    let _prompt = null;
+    function _toggleCard(visible) {
+      const c = document.getElementById('cardInstalar');
+      if (c) c.style.display = visible ? '' : 'none';
+    }
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      _prompt = e;
+      _toggleCard(true);
+    });
+    window.addEventListener('appinstalled', () => {
+      _prompt = null;
+      _toggleCard(false);
+    });
+    window._installPWA = async function() {
+      if (!_prompt) return;
+      _prompt.prompt();
+      const { outcome } = await _prompt.userChoice;
+      if (outcome === 'accepted') { _prompt = null; _toggleCard(false); }
+    };
+  })();
+  </script>
+
   <script>
   (function() {
     if (!('serviceWorker' in navigator)) return;
@@ -407,6 +456,7 @@
         window.location.reload();
       });
       _reg.update().catch(() => {});
+      setInterval(() => _reg?.update().catch(() => {}), 5 * 60 * 1000);
     }).catch(e => console.warn('[SW]', e));
   })();
   </script>
@@ -641,12 +691,8 @@
       <div class="smart-srch-actions">
         <button id="clearBuscarGuia" class="smart-srch-clear" onclick="GuiasView.buscarClear()">✕</button>
         <button class="smart-srch-btn" title="Escanear código"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarGuia').value=c;GuiasView.buscar(c);});abrirScanner()">
+                onclick="abrirScanner(c=>{document.getElementById('inputBuscarGuia').value=c;GuiasView.buscar(c);})">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
-        </button>
-        <button class="smart-srch-btn" title="Cámara"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarGuia').value=c;GuiasView.buscar(c);});abrirScanner()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/><path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/></svg>
         </button>
       </div>
     </div>
@@ -724,12 +770,8 @@
       <div class="smart-srch-actions">
         <button id="clearBuscarPre" class="smart-srch-clear" onclick="PreingresosView.buscarClear()">✕</button>
         <button class="smart-srch-btn" title="Escanear código"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarPre').value=c;PreingresosView.buscar(c);});abrirScanner()">
+                onclick="abrirScanner(c=>{document.getElementById('inputBuscarPre').value=c;PreingresosView.buscar(c);})">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
-        </button>
-        <button class="smart-srch-btn" title="Cámara"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarPre').value=c;PreingresosView.buscar(c);});abrirScanner()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/><path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/></svg>
         </button>
       </div>
     </div>
@@ -782,12 +824,8 @@
       <div class="smart-srch-actions">
         <button id="clearBuscarProd" class="smart-srch-clear" onclick="ProductosView.buscarClear()">✕</button>
         <button class="smart-srch-btn" title="Escanear barcode"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarProd').value=c;ProductosView.buscar(c);});abrirScanner()">
+                onclick="abrirScanner(c=>{document.getElementById('inputBuscarProd').value=c;ProductosView.buscar(c);})">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
-        </button>
-        <button class="smart-srch-btn" title="Cámara"
-                onclick="Scanner.start('scanVideo',c=>{document.getElementById('inputBuscarProd').value=c;ProductosView.buscar(c);});abrirScanner()">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/><path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/></svg>
         </button>
       </div>
     </div>
@@ -800,6 +838,20 @@
 
   <!-- ── TOOLS ─────────────────────────────────── -->
   <section id="view-tools" class="view slide-up">
+
+    <!-- Instalar PWA -->
+    <div id="cardInstalar" class="card mb-3" style="display:none">
+      <p class="font-semibold mb-1">📲 Instalar app</p>
+      <p class="text-xs text-slate-400 mb-3">Agregar warehouseMos a la pantalla de inicio para usarla sin navegador.</p>
+      <button onclick="window._installPWA()"
+              class="btn btn-primary w-full flex items-center justify-center gap-2">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+          <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+        </svg>
+        Instalar en este dispositivo
+      </button>
+    </div>
 
     <!-- Sync -->
     <div class="card mb-3">
@@ -919,13 +971,21 @@
      SCANNER OVERLAY
 ═══════════════════════════════════════════════════ -->
 <div id="scannerModal">
-  <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.8)">
-    <span class="text-white font-bold">📷 Escanear código</span>
-    <button onclick="cerrarScanner()" class="text-white text-2xl leading-none">✕</button>
+  <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
+    <span class="text-white font-bold text-sm">📷 Escanear código de barras</span>
+    <button onclick="cerrarScanner()" class="text-white text-2xl leading-none px-2">✕</button>
   </div>
-  <video id="scanVideo" playsinline autoplay muted></video>
-  <div class="flex items-center justify-center px-4 py-3" style="background:rgba(0,0,0,.8)">
-    <span class="text-slate-300 text-sm">Apunta la cámara al código de barras</span>
+  <div style="position:relative;flex:1;min-height:0;overflow:hidden">
+    <video id="scanVideo" playsinline autoplay muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
+    <div class="scan-guide-wrap">
+      <div class="scan-guide-box">
+        <span></span>
+        <div class="scan-line"></div>
+      </div>
+    </div>
+  </div>
+  <div class="flex items-center justify-center px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
+    <span class="text-slate-400 text-xs">Centra el código dentro del recuadro azul</span>
   </div>
 </div>
 
@@ -1270,15 +1330,26 @@
     <div>
       <div class="flex items-center justify-between mb-2">
         <label class="text-xs text-slate-400">Fotos <span class="text-amber-400 text-xs">(mín. 1)</span></label>
-        <label for="preFileInput" class="btn btn-outline text-xs px-3 py-1.5 cursor-pointer flex items-center gap-1">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6zM2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2z"/>
-            <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 6.5a.5.5 0 1 1-1 0 .5.5 0 0 1 1 0z"/>
-          </svg>
-          Agregar foto
-        </label>
-        <input id="preFileInput" type="file" accept="image/*" multiple class="hidden"
-               onchange="PreingresosView.onFotosSeleccionadas(event)"/>
+        <div class="flex gap-1">
+          <label class="btn btn-outline text-xs px-2 py-1.5 cursor-pointer flex items-center gap-1" title="Abrir galería">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
+              <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"/>
+            </svg>
+            Galería
+            <input id="preFileInput" type="file" accept="image/*" multiple class="hidden"
+                   onchange="PreingresosView.onFotosSeleccionadas(event)"/>
+          </label>
+          <label class="btn btn-outline text-xs px-2 py-1.5 cursor-pointer flex items-center gap-1 text-blue-400 border-blue-700" title="Tomar foto">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6z"/>
+              <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/>
+            </svg>
+            Cámara
+            <input id="preCamInput" type="file" accept="image/*" capture="environment" multiple class="hidden"
+                   onchange="PreingresosView.onFotosSeleccionadas(event)"/>
+          </label>
+        </div>
       </div>
       <div id="preFotosPrev" class="flex gap-2 flex-wrap p-2 rounded-xl min-h-[88px] items-start"
            style="background:#0f172a;border:1.5px dashed #334155">
@@ -1346,14 +1417,26 @@
     <div>
       <div class="flex items-center justify-between mb-2">
         <label class="text-xs text-slate-400">Fotos</label>
-        <label for="piEditFileInput" class="btn btn-outline text-xs px-3 py-1.5 cursor-pointer flex items-center gap-1">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/>
-          </svg>
-          Agregar
-        </label>
-        <input id="piEditFileInput" type="file" accept="image/*" multiple class="hidden"
-               onchange="PreingresosView.onFotosEditSeleccionadas(event)"/>
+        <div class="flex gap-1">
+          <label class="btn btn-outline text-xs px-2 py-1.5 cursor-pointer flex items-center gap-1" title="Galería">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
+              <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"/>
+            </svg>
+            Galería
+            <input id="piEditFileInput" type="file" accept="image/*" multiple class="hidden"
+                   onchange="PreingresosView.onFotosEditSeleccionadas(event)"/>
+          </label>
+          <label class="btn btn-outline text-xs px-2 py-1.5 cursor-pointer flex items-center gap-1 text-blue-400 border-blue-700" title="Cámara">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M15 12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h1.172a3 3 0 0 0 2.12-.879l.83-.828A1 1 0 0 1 6.827 3h2.344a1 1 0 0 1 .707.293l.828.828A3 3 0 0 0 12.828 5H14a1 1 0 0 1 1 1v6z"/>
+              <path d="M8 11a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5zm0 1a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/>
+            </svg>
+            Cámara
+            <input id="piEditCamInput" type="file" accept="image/*" capture="environment" multiple class="hidden"
+                   onchange="PreingresosView.onFotosEditSeleccionadas(event)"/>
+          </label>
+        </div>
       </div>
       <div id="piEditFotosPrev" class="flex gap-2 flex-wrap p-2 rounded-xl min-h-[72px] items-start"
            style="background:#0f172a;border:1.5px dashed #334155">
