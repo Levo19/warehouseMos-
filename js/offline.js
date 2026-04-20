@@ -217,7 +217,7 @@ const OfflineManager = (() => {
     _opRefreshTimer = setInterval(() => {
       _precargarMaestrosThrottled();
       precargarOperacional();
-    }, 30000);
+    }, 60000);
   }
 
   function detenerRefreshOperacional() {

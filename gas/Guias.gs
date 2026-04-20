@@ -137,6 +137,29 @@ function agregarDetalleGuia(params) {
   };
 }
 
+// ── Actualizar solo la fecha de vencimiento de un detalle existente ─
+function actualizarFechaVencimiento(params) {
+  var idDetalle = String(params.idDetalle || '');
+  var fechaVenc = params.fechaVencimiento || '';
+  if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
+
+  var sheet  = getSheet('GUIA_DETALLE');
+  var data   = sheet.getDataRange().getValues();
+  var hdrs   = data[0];
+  var idxId  = hdrs.indexOf('idDetalle');
+  var idxVenc= hdrs.indexOf('fechaVencimiento');
+  if (idxId < 0 || idxVenc < 0) return { ok: false, error: 'Columnas no encontradas' };
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === idDetalle) {
+      var val = fechaVenc ? new Date(fechaVenc + 'T12:00:00') : '';
+      sheet.getRange(i + 1, idxVenc + 1).setValue(val);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Detalle no encontrado: ' + idDetalle };
+}
+
 // ── Anular un ítem de detalle ────────────────────────────
 function anularDetalle(params) {
   var idDetalle = params.idDetalle;
