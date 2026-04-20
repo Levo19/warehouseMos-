@@ -2061,7 +2061,6 @@ const GuiasView = (() => {
     abrirAgregarItem, guardarItem,
     _procesarCodigoEscaneado, seleccionarItemProd, _rescanear,
     itemQtyChange, abrirPickerVenc, onVencChanged,
-    toggleDetItem, guardarVencimiento, anularItem,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
     confirmarCerrarGuia, crearGuia, nueva,
     toggleTagNueva,
