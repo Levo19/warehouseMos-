@@ -1130,6 +1130,10 @@
 
   <!-- Acciones (cerrar / agregar ítem) -->
   <div id="guiaDetAcciones" class="space-y-2 pb-2"></div>
+
+  <!-- Date picker oculto para edición inline de vencimiento -->
+  <input type="date" id="inlineVencHidden" class="sr-only"
+         onchange="GuiasView.inlineVencChanged(this.value)"/>
 </div>
 
 <!-- ════════════════════════════════════════════════
@@ -1161,17 +1165,6 @@
   <!-- Input date oculto — se dispara desde abrirPickerVenc() -->
   <input type="date" id="itemVencHidden" class="sr-only"
          onchange="GuiasView.onVencChanged(this.value)"/>
-</div>
-
-<!-- ════════════════════════════════════════════════
-     SHEET: EDITAR ÍTEM DE GUÍA (edición inline)
-═══════════════════════════════════════════════════ -->
-<div class="sheet-overlay" id="overlayEditItem" onclick="GuiasView.cerrarEditItem()"></div>
-<div class="bottom-sheet" id="sheetEditItem">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <div id="editItemContent"></div>
-  <input type="date" id="editItemVencHidden" class="sr-only"
-         onchange="GuiasView.itemEditOnVencChanged(this.value)"/>
 </div>
 
 <!-- ════════════════════════════════════════════════

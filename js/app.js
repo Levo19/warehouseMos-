@@ -1319,12 +1319,12 @@ const GuiasView = (() => {
     })();
 
     document.getElementById('guiaDetHeader').innerHTML = `
-      <div class="flex items-start justify-between gap-2 mb-1">
+      <div class="flex items-start justify-between gap-2 mb-1" onclick="GuiasView.deselectItem()">
         <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
-        ${lockBtn}
+        <span onclick="event.stopPropagation()">${lockBtn}</span>
       </div>
-      <p class="font-black text-lg text-white leading-tight truncate">${escAttr(provNombreHdr)}</p>
-      <p class="text-xs text-slate-500 mt-0.5">${fmtFecha(g.fecha)} · ${g.usuario || '—'}${g.numeroDocumento ? ' · Doc: ' + escAttr(g.numeroDocumento) : ''}</p>
+      <p class="font-black text-lg text-white leading-tight truncate" onclick="GuiasView.deselectItem()">${escAttr(provNombreHdr)}</p>
+      <p class="text-xs text-slate-500 mt-0.5 mb-1" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}${g.numeroDocumento ? ' · Doc: ' + escAttr(g.numeroDocumento) : ''}</p>
       ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}`;
 
     // ── Foto guía (una foto única) ─────────────────────────
@@ -1410,26 +1410,64 @@ const GuiasView = (() => {
     const items = (g.detalle || []).filter(d => d.observacion !== 'ANULADO');
     document.getElementById('guiaDetCount').textContent = `${items.length} ítem${items.length !== 1 ? 's' : ''}`;
 
+    // Resetear selección si la guía cambió
+    if (_selGuiaId !== g.idGuia) { _selIdx = -1; _selGuiaId = g.idGuia; }
+
     document.getElementById('guiaDetItems').innerHTML = items.length
       ? items.map((d, idx) => {
-          const pendiente = d._local ? ' opacity-50' : '';
-          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block">Venc: ${d.fechaVencimiento}</span>` : '';
+          const isSelected = abierta && idx === _selIdx;
+          const pendiente  = d._local ? ' opacity-50' : '';
+          const vencTxt    = isSelected ? _selVenc : (d.fechaVencimiento || '');
+
+          if (isSelected) {
+            // ── Tarjeta expandida ──────────────────────────────
+            return `
+            <div class="rounded-xl bg-slate-700/35 ring-1 ring-blue-500/30 shadow-lg px-3 pt-3 pb-3 mb-1.5${pendiente}"
+                 onclick="event.stopPropagation()">
+              <div class="flex items-start gap-3 mb-2.5">
+                <div class="flex-1">
+                  <p class="text-base font-bold text-white leading-snug">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
+                  <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}</p>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                  <button onclick="GuiasView.inlineQtyDelta(-1)"
+                          class="text-slate-300 text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md active:bg-slate-600 select-none">−</button>
+                  <input id="inlineQtyInput" type="number" step="any" inputmode="decimal"
+                         value="${_selQty}"
+                         class="text-base font-black text-white bg-transparent border-b border-slate-500 text-center w-14 focus:outline-none focus:border-blue-400"
+                         oninput="GuiasView.inlineQtyInput(this.value)"
+                         onblur="GuiasView.inlineQtyBlur(this.value)"
+                         onfocus="this.select()"/>
+                  <button onclick="GuiasView.inlineQtyDelta(1)"
+                          class="text-blue-400 text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md active:bg-slate-600 select-none">+</button>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                ${esIngreso ? `
+                <button onclick="GuiasView.inlinePickVenc()" id="inlineVencBtn"
+                        class="flex-1 py-2 rounded-lg border ${vencTxt ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-xs flex items-center justify-center gap-1.5">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg>
+                  ${escAttr(vencTxt || 'Vencimiento')}
+                </button>` : ''}
+                <button onclick="GuiasView.inlineDelete(${idx})"
+                        class="py-2 px-3 rounded-lg border border-red-800/60 text-red-400 text-xs flex items-center justify-center">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/><path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11z"/></svg>
+                </button>
+              </div>
+            </div>`;
+          }
+
+          // ── Tarjeta colapsada ──────────────────────────────
+          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block mt-0.5">Venc: ${d.fechaVencimiento}</span>` : '';
           return `
-          <div class="flex items-center justify-between py-2.5 gap-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/30 rounded-lg px-1${pendiente}"
-               onclick="GuiasView.abrirEditarItem(${idx})">
+          <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
+               onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold truncate">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
-              <p class="text-xs text-slate-500 font-mono">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
+              <p class="text-sm font-semibold text-slate-100 leading-snug">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
+              <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
               ${venc}
             </div>
-            <div class="text-right flex-shrink-0">
-              <p class="text-base font-black text-white">${fmt(d.cantidadRecibida)}</p>
-              ${parseFloat(d.precioUnitario) > 0
-                ? `<p class="text-xs text-slate-400">S/. ${fmt(d.precioUnitario, 2)}</p>` : ''}
-            </div>
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" class="text-slate-600 flex-shrink-0">
-              <path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-            </svg>
+            <span class="text-base font-black text-white flex-shrink-0">${fmt(d.cantidadRecibida)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -1451,14 +1489,120 @@ const GuiasView = (() => {
     if (conAnimacion) abrirSheet('sheetGuiaDetalle');
   }
 
-  // ── Sheet edición ítem ────────────────────────────────────
-  let _editItemIdx     = -1;
-  let _editItemQty     = 0;
-  let _editItemVenc    = '';
-  let _editItemId      = '';
-  let _editItemOrigQty = 0;
-  let _editItemOrigVenc = '';
+  // ── Edición inline de ítems ──────────────────────────────
+  let _selIdx     = -1;   // índice del ítem seleccionado (-1 = ninguno)
+  let _selQty     = 0;
+  let _selVenc    = '';
+  let _selOrigQty = 0;
+  let _selOrigVenc = '';
+  let _selGuiaId  = '';
 
+  function selectItem(newIdx) {
+    if (_selIdx === newIdx) {
+      // Doble-tap: guardar y colapsar
+      _commitInline();
+      _selIdx = -1;
+      _mostrarDetalleSheet(_guiaActual, false);
+      return;
+    }
+    _commitInline(); // guardar anterior si cambió
+    const items = (_guiaActual?.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const d = items[newIdx];
+    if (!d) return;
+    _selIdx      = newIdx;
+    _selQty      = parseFloat(d.cantidadRecibida) || 0;
+    _selVenc     = d.fechaVencimiento || '';
+    _selOrigQty  = _selQty;
+    _selOrigVenc = _selVenc;
+    _mostrarDetalleSheet(_guiaActual, false);
+    setTimeout(() => {
+      const el = document.getElementById('inlineQtyInput');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el?.focus();
+    }, 60);
+  }
+
+  function deselectItem() {
+    if (_selIdx < 0) return;
+    _commitInline();
+    _selIdx = -1;
+    _mostrarDetalleSheet(_guiaActual, false);
+  }
+
+  function _commitInline() {
+    if (_selIdx < 0 || !_guiaActual) return;
+    // Leer qty del DOM por si el usuario escribió sin disparar oninput
+    const inputEl = document.getElementById('inlineQtyInput');
+    if (inputEl) _selQty = parseFloat(inputEl.value) || _selQty;
+
+    const items = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const d = items[_selIdx];
+    if (!d) return;
+
+    const qtyChanged  = _selQty !== _selOrigQty;
+    const vencChanged = _selVenc !== _selOrigVenc;
+    if (!qtyChanged && !vencChanged) return;
+
+    const idDetalle = d.idDetalle;
+    if (_selQty <= 0) {
+      d.observacion = 'ANULADO';
+      API.anularDetalle({ idDetalle }).catch(() => {});
+      toast('Ítem eliminado', 'warn', 1200);
+      return;
+    }
+    d.cantidadRecibida = _selQty;
+    d.fechaVencimiento = _selVenc;
+    if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }).catch(() => {});
+    if (vencChanged) API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }).catch(() => {});
+    toast('Guardado', 'ok', 1000);
+  }
+
+  function inlineQtyDelta(delta) {
+    _selQty = Math.max(0, parseFloat(_selQty || 0) + delta);
+    const el = document.getElementById('inlineQtyInput');
+    if (el) el.value = _selQty;
+  }
+
+  function inlineQtyInput(val) {
+    const n = parseFloat(val);
+    _selQty = isNaN(n) ? 0 : Math.max(0, n);
+  }
+
+  function inlineQtyBlur(val) {
+    const n = parseFloat(val);
+    if (!isNaN(n)) _selQty = Math.max(0, n);
+  }
+
+  function inlinePickVenc() {
+    const el = document.getElementById('inlineVencHidden');
+    if (!el) return;
+    el.value = _selVenc;
+    el.min = new Date().toISOString().split('T')[0];
+    if (typeof el.showPicker === 'function') { try { el.showPicker(); } catch { el.click(); } }
+    else el.click();
+  }
+
+  function inlineVencChanged(val) {
+    _selVenc = val || '';
+    const btn = document.getElementById('inlineVencBtn');
+    if (btn) {
+      btn.className = `flex-1 py-2 rounded-lg border ${_selVenc ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-xs flex items-center justify-center gap-1.5`;
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg> ${_selVenc ? escAttr(_selVenc) : 'Vencimiento'}`;
+    }
+  }
+
+  function inlineDelete(idx) {
+    const items = (_guiaActual?.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const d = items[idx];
+    if (!d) return;
+    d.observacion = 'ANULADO';
+    _selIdx = -1;
+    _mostrarDetalleSheet(_guiaActual, false);
+    API.anularDetalle({ idDetalle: d.idDetalle }).catch(() => {});
+    toast('Ítem eliminado', 'warn', 1200);
+  }
+
+  // (funciones antiguas del sheet — eliminadas en v1.0.40)
   function abrirEditarItem(idx) {
     if (!_guiaActual) return;
     const items = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
@@ -2067,8 +2211,9 @@ const GuiasView = (() => {
     onFotoGuiaSeleccionada, copiarFotoDePreingreso, verFotoGuia,
     toggleTagGuia, cerrarGuiaDetalle, irAPreingreso,
     injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia,
-    abrirEditarItem, cerrarEditItem,
-    itemEditQtyChange, itemEditSetQty, itemEditPickVenc, itemEditOnVencChanged, eliminarItemEdit
+    selectItem, deselectItem,
+    inlineQtyDelta, inlineQtyInput, inlineQtyBlur,
+    inlinePickVenc, inlineVencChanged, inlineDelete
   };
 })();
 
