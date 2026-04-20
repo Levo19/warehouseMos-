@@ -709,6 +709,12 @@ const App = (() => {
       if (preMenu && preBtn && !preBtn.contains(e.target) && !preMenu.contains(e.target)) {
         preMenu.style.display = 'none';
       }
+      // Cerrar dropdown de proveedores al hacer click fuera
+      const provDrop  = document.getElementById('preProvDrop');
+      const provInput = document.getElementById('preProvInput');
+      if (provDrop && provInput && !provInput.contains(e.target) && !provDrop.contains(e.target)) {
+        provDrop.classList.add('hidden');
+      }
     });
 
     // Precarga universal en background ANTES del login (30s cycle)
@@ -3388,6 +3394,79 @@ const PreingresosView = (() => {
     }).catch(() => {});
   }
 
+  // ── Búsqueda/filtrado de proveedores (excluye cargadores) ───
+  function filtrarProveedores(q) {
+    const drop = document.getElementById('preProvDrop');
+    if (!drop) return;
+    const provs = OfflineManager.getProveedoresCache()
+      .filter(p => !(p.nombre || '').toLowerCase().startsWith('cargador'));
+    const ql = (q || '').trim().toLowerCase();
+    const matches = ql
+      ? provs.filter(p => (p.nombre || '').toLowerCase().includes(ql) || (p.idProveedor || '').toLowerCase().includes(ql))
+      : provs.slice(0, 12);
+    if (!matches.length) { drop.classList.add('hidden'); return; }
+    drop.innerHTML = matches.map(p =>
+      `<div class="px-3 py-2 text-sm text-slate-200 hover:bg-slate-700 cursor-pointer"
+            onclick="PreingresosView.seleccionarProveedor('${p.idProveedor}','${escAttr(p.nombre || p.idProveedor)}')"
+       >${p.nombre || p.idProveedor}</div>`
+    ).join('');
+    drop.classList.remove('hidden');
+  }
+
+  function seleccionarProveedor(id, nombre) {
+    document.getElementById('preProvSelect').value    = id;
+    document.getElementById('preProvInput').value     = '';
+    document.getElementById('preProvSelNombre').textContent = nombre;
+    document.getElementById('preProvSelBox').classList.remove('hidden');
+    document.getElementById('preProvDrop').classList.add('hidden');
+  }
+
+  function limpiarProveedor() {
+    document.getElementById('preProvSelect').value = '';
+    document.getElementById('preProvInput').value  = '';
+    document.getElementById('preProvSelBox').classList.add('hidden');
+  }
+
+  // ── Picker de cargadores ─────────────────────────────────
+  function abrirPickerCargador() {
+    const cargadores = OfflineManager.getProveedoresCache()
+      .filter(p => (p.nombre || '').toLowerCase().startsWith('cargador'));
+    if (!cargadores.length) { toast('No hay cargadores registrados', 'warn'); return; }
+    // Usar un sheet simple inline
+    const existing = document.getElementById('sheetCargadores');
+    if (existing) existing.remove();
+    const sheet = document.createElement('div');
+    sheet.id = 'sheetCargadores';
+    sheet.className = 'bottom-sheet open';
+    sheet.style.cssText = 'max-height:60vh;z-index:9999;position:fixed;bottom:0;left:0;right:0;padding:1.25rem;background:#0f172a;border-top:1px solid #1e293b;border-radius:1rem 1rem 0 0';
+    sheet.innerHTML = `
+      <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+      <p class="font-bold text-sm mb-3 text-amber-300">🛺 Seleccionar Cargador</p>
+      <div class="space-y-2 overflow-y-auto" style="max-height:calc(60vh - 80px)">
+        ${cargadores.map(c => `
+          <button onclick="PreingresosView.seleccionarCargador('${c.idProveedor}','${escAttr(c.nombre)}')"
+                  class="w-full text-left px-3 py-2.5 rounded-lg text-sm text-slate-200 hover:bg-slate-700 transition-colors"
+                  style="background:#1e293b;border:1px solid #334155">
+            ${c.nombre}
+          </button>`).join('')}
+      </div>
+      <button onclick="document.getElementById('sheetCargadores').remove()"
+              class="mt-3 w-full text-xs text-slate-500 py-2">Cancelar</button>`;
+    document.body.appendChild(sheet);
+  }
+
+  function seleccionarCargador(id, nombre) {
+    document.getElementById('preCargadorId').value = id;
+    document.getElementById('preCargadorNombre').textContent = nombre;
+    document.getElementById('preCargadorBox').classList.remove('hidden');
+    document.getElementById('sheetCargadores')?.remove();
+  }
+
+  function limpiarCargador() {
+    document.getElementById('preCargadorId').value = '';
+    document.getElementById('preCargadorBox').classList.add('hidden');
+  }
+
   // ── Crear preingreso (optimista) ─────────────────────────
   async function crear() {
     const idProveedor = document.getElementById('preProvSelect').value;
@@ -3412,8 +3491,9 @@ const PreingresosView = (() => {
     cerrarSheet('sheetPreingreso');
 
     // 1. Crear preingreso con ID generado en cliente (evita duplicados por retry)
+    const idCargador  = document.getElementById('preCargadorId')?.value || '';
     const idPreingreso = 'PI' + Date.now();
-    const res = await API.crearPreingreso({ idPreingreso, idProveedor, monto, comentario, usuario: window.WH_CONFIG.usuario })
+    const res = await API.crearPreingreso({ idPreingreso, idProveedor, idCargador, monto, comentario, usuario: window.WH_CONFIG.usuario })
       .catch(() => ({ ok: false, error: 'Sin conexión' }));
 
     if (!res.ok) {
@@ -3485,6 +3565,12 @@ const PreingresosView = (() => {
     document.getElementById('preFotosEmpty').style.display = 'block';
     document.getElementById('preFotosPrev')?.querySelectorAll('.foto-thumb').forEach(el => el.remove());
     document.getElementById('preFotosCount')?.classList.add('hidden');
+    // Reset proveedor/cargador
+    limpiarProveedor();
+    limpiarCargador();
+    document.getElementById('sheetCargadores')?.remove();
+    // Cerrar dropdown si quedó abierto
+    document.getElementById('preProvDrop')?.classList.add('hidden');
     abrirSheet('sheetPreingreso');
   }
 
@@ -3493,7 +3579,9 @@ const PreingresosView = (() => {
            toggleTag, toggleTagModal,
            onFotosSeleccionadas, quitarFoto, verFotos,
            onFotosEditSeleccionadas, quitarFotoEdit,
-           abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido };
+           abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido,
+           filtrarProveedores, seleccionarProveedor, limpiarProveedor,
+           abrirPickerCargador, seleccionarCargador, limpiarCargador };
 })();
 
 // ════════════════════════════════════════════════

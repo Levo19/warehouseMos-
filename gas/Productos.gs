@@ -665,11 +665,12 @@ function crearPreingreso(params) {
   function _set(col, val) { var i = hdrs.indexOf(col); if (i >= 0) row[i] = val; }
   _set('idPreingreso', id);
   _set('fecha',        new Date());
-  _set('idProveedor',  params.idProveedor || '');
-  _set('usuario',      params.usuario     || '');
+  _set('idProveedor',  params.idProveedor  || '');
+  _set('idCargador',   params.idCargador   || '');
+  _set('usuario',      params.usuario      || '');
   _set('monto',        parseFloat(params.monto) || 0);
-  _set('fotos',        params.fotos       || '');
-  _set('comentario',   params.comentario  || '');
+  _set('fotos',        params.fotos        || '');
+  _set('comentario',   params.comentario   || '');
   _set('estado',       'PENDIENTE');
   _set('idGuia',       '');
   sheet.appendRow(row);
