@@ -302,11 +302,37 @@
       43%,100%{ left:140%; opacity:0; }
     }
     /* Nav sibling buttons (PRE-ING ↔ GUÍAS cross-nav) */
-    .nav-sibling-btn { display:flex;align-items:center;gap:6px;background:transparent;
-      color:#94a3b8;border:1px solid #334155;border-radius:8px;padding:8px 12px;
+    @property --sib-angle {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+    @keyframes sib-border-spin { to { --sib-angle: 360deg; } }
+    @keyframes arrow-slide-r {
+      0%,55%,100% { transform:translateX(0);   opacity:1; }
+      30%          { transform:translateX(6px); opacity:.5; }
+    }
+    @keyframes arrow-slide-l {
+      0%,55%,100% { transform:translateX(0);    opacity:1; }
+      30%          { transform:translateX(-6px); opacity:.5; }
+    }
+    .nav-sibling-btn {
+      display:flex;align-items:center;gap:6px;
+      color:#94a3b8;border-radius:8px;padding:8px 12px;
       font-size:12px;font-weight:700;letter-spacing:.04em;cursor:pointer;
-      transition:background .15s,color .15s; }
-    .nav-sibling-btn:active { background:#1e293b;color:#fff; }
+      transition:color .15s,opacity .15s;
+      border:2px solid transparent;
+      background:
+        linear-gradient(#0f172a,#0f172a) padding-box,
+        conic-gradient(from var(--sib-angle),
+          #38bdf8 0deg,#818cf8 55deg,
+          #1e3a5f 105deg,#1e3a5f 260deg,
+          #38bdf8 310deg) border-box;
+      animation:sib-border-spin 3.5s linear infinite;
+    }
+    .nav-sibling-btn:active { opacity:.65;color:#fff; }
+    .arrow-slide-r { display:inline-flex;animation:arrow-slide-r 1.6s ease-in-out infinite; }
+    .arrow-slide-l { display:inline-flex;animation:arrow-slide-l 1.6s ease-in-out infinite; }
     /* KPI cards */
     .kpi-card { background:#1e293b;border-radius:12px;padding:14px;text-align:center; }
     .kpi-num { font-size:28px;font-weight:800;line-height:1; }
@@ -699,10 +725,11 @@
       <!-- Botón Pre-ingresos → navega a la vista completa -->
       <button onclick="App.nav('preingresos')" class="nav-sibling-btn">
         PRE-ING
-        <!-- Chevron right -->
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-          <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-        </svg>
+        <span class="arrow-slide-r">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+          </svg>
+        </span>
       </button>
     </div>
 
@@ -776,10 +803,11 @@
 
       <!-- Botón GUÍAS ← (espejo del PRE-ING → en guías) -->
       <button onclick="App.nav('guias')" class="nav-sibling-btn">
-        <!-- Chevron left -->
-        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-          <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-        </svg>
+        <span class="arrow-slide-l">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+          </svg>
+        </span>
         GUÍAS
       </button>
 
