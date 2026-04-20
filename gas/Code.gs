@@ -99,7 +99,8 @@ function _route(method, e) {
       case 'getGuia':            return getGuia(params.idGuia);
       case 'crearGuia':          return crearGuia(params);
       case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
-      case 'actualizarFechaVencimiento':return actualizarFechaVencimiento(params);
+      case 'actualizarFechaVencimiento':  return actualizarFechaVencimiento(params);
+      case 'actualizarCantidadDetalle':   return actualizarCantidadDetalle(params);
       case 'cerrarGuia':                return cerrarGuia(params.idGuia, params.usuario, params.idSesion);
       case 'reabrirGuia':               return reabrirGuia(params);
       case 'anularDetalle':             return anularDetalle(params);

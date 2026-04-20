@@ -93,7 +93,8 @@ const API = (() => {
     getGuia:            (id)     => call({ action: 'getGuia', idGuia: id }),
     crearGuia:          (p)      => post({ action: 'crearGuia', ...p }),
     agregarDetalle:           (p) => post({ action: 'agregarDetalleGuia',        ...p }),
-    actualizarFechaVencimiento:(p)=> post({ action: 'actualizarFechaVencimiento', ...p }),
+    actualizarFechaVencimiento: (p) => post({ action: 'actualizarFechaVencimiento',  ...p }),
+    actualizarCantidadDetalle:  (p) => post({ action: 'actualizarCantidadDetalle',   ...p }),
     cerrarGuia:         (id, u)  => post({ action: 'cerrarGuia', idGuia: id, usuario: u }),
 
     // Preingresos

@@ -1190,7 +1190,13 @@ const GuiasView = (() => {
          <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`
       ).join('');
 
-    optCards.forEach(c => container.insertBefore(c, container.firstChild));
+    // Preservar solo cards optimistas cuyo ID aún no está en la lista real
+    optCards.forEach(c => {
+      const rid = c.getAttribute('data-real-id') || c.id.replace('optguia_', '');
+      if (!sorted.find(g => g.idGuia === rid)) {
+        container.insertBefore(c, container.firstChild);
+      }
+    });
   }
 
   // ── Optimistic guía card ──────────────────────────────────
@@ -1213,8 +1219,23 @@ const GuiasView = (() => {
     container.insertBefore(div, container.firstChild);
   }
 
-  function finalizeOptimisticGuia(tempId) {
-    document.getElementById('optguia_' + tempId)?.remove();
+  function finalizeOptimisticGuia(tempId, idGuia, tipo, provNombre) {
+    const el = document.getElementById('optguia_' + tempId);
+    if (el) {
+      el.setAttribute('data-real-id', idGuia || tempId);
+      el.style.animation = 'none';
+      el.style.borderLeftColor = '#22c55e';
+      const esI = (tipo || '').startsWith('INGRESO');
+      const label = TIPO_LABELS[tipo] || tipo || '';
+      el.innerHTML = `
+        <div class="flex items-center justify-between gap-1">
+          <span class="text-xs ${esI ? 'tag-ok' : 'tag-blue'}">${escAttr(label)}</span>
+          <span class="text-xs text-emerald-400 font-bold">ABIERTA</span>
+        </div>
+        <p class="text-sm font-bold text-slate-100 truncate mt-1">${escAttr(provNombre || 'Sin proveedor')}</p>
+        <p class="text-xs text-slate-500 font-mono">${escAttr(idGuia || '')}</p>`;
+    }
+    // Refrescar en background — render() descartará el opt card cuando el ID real llegue
     setTimeout(() => {
       OfflineManager.precargarOperacional().then(() => {
         const fresh = OfflineManager.getGuiasCache();
@@ -1291,17 +1312,20 @@ const GuiasView = (() => {
         ${abierta ? 'ABIERTA' : 'CERRADA'}
       </button>`;
 
+    const provNombreHdr = (() => {
+      if (!g.idProveedor) return 'Sin proveedor';
+      const pv = OfflineManager.getProveedoresCache().find(p => p.idProveedor === g.idProveedor);
+      return pv ? (pv.nombre || g.idProveedor) : g.idProveedor;
+    })();
+
     document.getElementById('guiaDetHeader').innerHTML = `
-      <div class="flex items-start justify-between gap-2">
-        <div>
-          <p class="font-black text-lg text-white">${g.idGuia}</p>
-          <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
-        </div>
+      <div class="flex items-start justify-between gap-2 mb-1">
+        <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
         ${lockBtn}
       </div>
-      <p class="text-xs text-slate-400 mt-1">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
-      ${g.numeroDocumento ? `<p class="text-xs text-slate-500">Doc: ${g.numeroDocumento}</p>` : ''}
-      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía de día anterior — ciérrala o será autocerrada</p>` : ''}`;
+      <p class="font-black text-lg text-white leading-tight truncate">${escAttr(provNombreHdr)}</p>
+      <p class="text-xs text-slate-500 mt-0.5">${fmtFecha(g.fecha)} · ${g.usuario || '—'}${g.numeroDocumento ? ' · Doc: ' + escAttr(g.numeroDocumento) : ''}</p>
+      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}`;
 
     // ── Foto guía (una foto única) ─────────────────────────
     const fotoEl = document.getElementById('guiaDetFotoSection');
@@ -1388,36 +1412,24 @@ const GuiasView = (() => {
 
     document.getElementById('guiaDetItems').innerHTML = items.length
       ? items.map((d, idx) => {
-          const pendiente = d._local ? ' opacity-60' : '';
-          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400">Venc: ${d.fechaVencimiento}</span>` : '';
+          const pendiente = d._local ? ' opacity-50' : '';
+          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block">Venc: ${d.fechaVencimiento}</span>` : '';
           return `
-          <div class="det-item-wrap border-b border-slate-700/50${pendiente}">
-            <div class="flex items-center justify-between py-2 gap-2 cursor-pointer active:bg-slate-700/30 rounded"
-                 onclick="GuiasView.toggleDetItem('det-${idx}')">
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold truncate">${d.descripcionProducto || d.codigoProducto}</p>
-                <p class="text-xs text-slate-500">${d.codigoProducto}${d._local ? ' · guardando...' : ''}</p>
-                ${venc}
-              </div>
-              <div class="text-right flex-shrink-0">
-                <p class="text-sm font-bold">${fmt(d.cantidadRecibida)}</p>
-                ${parseFloat(d.precioUnitario) > 0
-                  ? `<p class="text-xs text-slate-400">S/. ${fmt(d.precioUnitario, 2)}</p>` : ''}
-              </div>
+          <div class="flex items-center justify-between py-2.5 gap-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/30 rounded-lg px-1${pendiente}"
+               onclick="GuiasView.abrirEditarItem(${idx})">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-semibold truncate">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
+              <p class="text-xs text-slate-500 font-mono">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
+              ${venc}
             </div>
-            <div id="det-${idx}" style="display:none" class="pb-2 space-y-2">
-              <div class="flex gap-2">
-                <input type="date" id="detVenc_${idx}" value="${d.fechaVencimiento || ''}"
-                       class="input text-xs py-1 flex-1" placeholder="Vencimiento"/>
-                <button onclick="GuiasView.guardarVencimiento(${idx}, '${d.idDetalle}')"
-                        class="btn btn-outline text-xs py-1 px-3">Guardar</button>
-              </div>
-              ${abierta ? `
-              <button onclick="GuiasView.anularItem(${idx}, '${d.idDetalle}')"
-                      class="btn btn-danger text-xs py-2 w-full tracking-wide font-bold">
-                ANULAR ÍTEM
-              </button>` : ''}
+            <div class="text-right flex-shrink-0">
+              <p class="text-base font-black text-white">${fmt(d.cantidadRecibida)}</p>
+              ${parseFloat(d.precioUnitario) > 0
+                ? `<p class="text-xs text-slate-400">S/. ${fmt(d.precioUnitario, 2)}</p>` : ''}
             </div>
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" class="text-slate-600 flex-shrink-0">
+              <path d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+            </svg>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -1439,33 +1451,144 @@ const GuiasView = (() => {
     if (conAnimacion) abrirSheet('sheetGuiaDetalle');
   }
 
-  // Toggle item expand/collapse
-  function toggleDetItem(id) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-  }
+  // ── Sheet edición ítem ────────────────────────────────────
+  let _editItemIdx     = -1;
+  let _editItemQty     = 0;
+  let _editItemVenc    = '';
+  let _editItemId      = '';
+  let _editItemOrigQty = 0;
+  let _editItemOrigVenc = '';
 
-  // Guardar fecha de vencimiento de un ítem (optimista)
-  function guardarVencimiento(idx, idDetalle) {
-    const venc = document.getElementById(`detVenc_${idx}`)?.value;
-    if (!_guiaActual || !idDetalle) return;
-    const d = _guiaActual.detalle?.[idx];
-    if (d) { d.fechaVencimiento = venc; _mostrarDetalleSheet(_guiaActual, false); }
-    // Endpoint dedicado — evita crear fila duplicada en GUIA_DETALLE
-    API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: venc }).catch(() => {});
-    toast('Vencimiento guardado', 'ok', 1500);
-  }
-
-  // Anular un ítem (optimista)
-  function anularItem(idx, idDetalle) {
+  function abrirEditarItem(idx) {
     if (!_guiaActual) return;
-    const d = _guiaActual.detalle?.[idx];
+    const items = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const d = items[idx];
+    if (!d) return;
+    _editItemIdx      = idx;
+    _editItemQty      = parseFloat(d.cantidadRecibida) || 0;
+    _editItemVenc     = d.fechaVencimiento || '';
+    _editItemId       = d.idDetalle;
+    _editItemOrigQty  = _editItemQty;
+    _editItemOrigVenc = _editItemVenc;
+
+    const abierta   = _guiaActual.estado === 'ABIERTA';
+    const esIngreso = (_guiaActual.tipo || '').startsWith('INGRESO');
+    const qtyDisplay = Number.isInteger(_editItemQty) ? String(_editItemQty) : String(_editItemQty);
+
+    document.getElementById('editItemContent').innerHTML = `
+      <div class="mb-5">
+        <p class="font-bold text-white text-base">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
+        <p class="text-xs text-slate-500 font-mono">${escAttr(d.codigoProducto)}</p>
+      </div>
+      ${abierta ? `
+      <div class="flex items-center justify-center gap-5 mb-5">
+        <button onclick="GuiasView.itemEditQtyChange(-1)"
+                class="w-14 h-14 rounded-full bg-slate-700 text-3xl font-black text-white active:scale-95 select-none">−</button>
+        <input id="editItemQtyInput" type="number" step="any" inputmode="decimal"
+               value="${qtyDisplay}"
+               class="text-4xl font-black text-white bg-transparent border-b-2 border-slate-500 text-center w-28 focus:outline-none focus:border-blue-400"
+               onchange="GuiasView.itemEditSetQty(this.value)"
+               onfocus="this.select()"/>
+        <button onclick="GuiasView.itemEditQtyChange(1)"
+                class="w-14 h-14 rounded-full bg-blue-600 text-3xl font-black text-white active:scale-95 select-none">+</button>
+      </div>
+      ${esIngreso ? `
+      <button onclick="GuiasView.itemEditPickVenc()" id="editItemVencBtn"
+              class="w-full py-3 rounded-xl border ${_editItemVenc ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3 flex items-center justify-center gap-2">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+        </svg>
+        ${_editItemVenc ? _editItemVenc : 'Agregar vencimiento'}
+      </button>` : ''}
+      <button onclick="GuiasView.eliminarItemEdit()"
+              class="w-full py-3 rounded-xl border border-red-800/60 text-red-400 text-sm font-bold flex items-center justify-center gap-2">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5m3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0z"/>
+          <path d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3h11V2h-11z"/>
+        </svg>
+        Eliminar ítem
+      </button>` : `<p class="text-center text-sm text-slate-500 py-4">Guía cerrada — solo lectura</p>`}`;
+
+    // Inicializar hidden date input
+    const hiddenInp = document.getElementById('editItemVencHidden');
+    if (hiddenInp) {
+      hiddenInp.value = _editItemVenc;
+      hiddenInp.min   = new Date().toISOString().split('T')[0];
+    }
+    abrirSheet('sheetEditItem');
+  }
+
+  function cerrarEditItem() {
+    cerrarSheet('sheetEditItem');
+    if (!_guiaActual || _editItemIdx < 0) return;
+    const items = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const d = items[_editItemIdx];
+    if (!d) return;
+
+    // Leer qty del input en caso de edición manual directa sin onchange
+    const inputEl = document.getElementById('editItemQtyInput');
+    if (inputEl) _editItemQty = parseFloat(inputEl.value) || _editItemQty;
+    const qtyFinal = _editItemQty;
+    const qtyChanged  = qtyFinal !== _editItemOrigQty;
+    const vencChanged = _editItemVenc !== _editItemOrigVenc;
+    if (!qtyChanged && !vencChanged) return;
+
+    if (qtyFinal <= 0) {
+      // Eliminar
+      d.observacion = 'ANULADO';
+      _mostrarDetalleSheet(_guiaActual, false);
+      API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
+      toast('Ítem eliminado', 'warn', 1500);
+      return;
+    }
+
+    d.cantidadRecibida = qtyFinal;
+    d.fechaVencimiento = _editItemVenc;
+    _mostrarDetalleSheet(_guiaActual, false);
+
+    if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal }).catch(() => {});
+    if (vencChanged) API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc }).catch(() => {});
+    toast('Ítem guardado', 'ok', 1500);
+  }
+
+  function itemEditQtyChange(delta) {
+    _editItemQty = Math.max(0, (_editItemQty || 0) + delta);
+    const el = document.getElementById('editItemQtyInput');
+    if (el) { el.value = _editItemQty; }
+  }
+
+  function itemEditSetQty(val) {
+    const n = parseFloat(val);
+    _editItemQty = isNaN(n) ? 0 : Math.max(0, n);
+  }
+
+  function itemEditPickVenc() {
+    const el = document.getElementById('editItemVencHidden');
+    if (!el) return;
+    if (typeof el.showPicker === 'function') { try { el.showPicker(); } catch { el.click(); } }
+    else el.click();
+  }
+
+  function itemEditOnVencChanged(val) {
+    _editItemVenc = val || '';
+    const btn = document.getElementById('editItemVencBtn');
+    if (btn) {
+      btn.textContent = '';
+      btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+      </svg> ${val ? escAttr(val) : 'Agregar vencimiento'}`;
+      btn.className = `w-full py-3 rounded-xl border ${val ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3 flex items-center justify-center gap-2`;
+    }
+  }
+
+  function eliminarItemEdit() {
+    const d = (_guiaActual?.detalle || []).filter(x => x.observacion !== 'ANULADO')[_editItemIdx];
     if (!d) return;
     d.observacion = 'ANULADO';
+    cerrarSheet('sheetEditItem');
     _mostrarDetalleSheet(_guiaActual, false);
-    toast('Ítem anulado', 'warn', 1500);
-    API.anularDetalle({ idDetalle }).catch(() => {});
+    API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
+    toast('Ítem eliminado', 'warn', 1500);
   }
 
   // Toggle estado guía: abierta → cerrar; cerrada → pedir adminPin
@@ -1669,23 +1792,24 @@ const GuiasView = (() => {
 
   function guardarItem() {
     if (!_guiaActual || !_itemProd) { toast('Selecciona un producto primero', 'warn'); return; }
-    const cod     = _itemProd.idProducto;
-    const qtyRec  = _itemQty;
-    const venc    = _itemVenc;
-    const localId = 'DL' + Date.now();
+    const cod          = _itemProd.idProducto;
+    const descCapturada = _itemProd.descripcion || _itemProd.nombre || cod; // captura antes de async
+    const qtyRec       = _itemQty;
+    const venc         = _itemVenc;
+    const localId      = 'DL' + Date.now();
 
     const itemOptimista = {
       idDetalle: localId, idGuia: _guiaActual.idGuia,
       codigoProducto: cod,
-      descripcionProducto: _itemProd.descripcion || _itemProd.nombre || cod,
+      descripcionProducto: descCapturada,
       cantidadEsperada: 0, cantidadRecibida: qtyRec,
       precioUnitario: 0, fechaVencimiento: venc, observacion: '',
       _local: true
     };
     if (!_guiaActual.detalle) _guiaActual.detalle = [];
     _guiaActual.detalle.push(itemOptimista);
-    _mostrarDetalleSheet(_guiaActual, false);
     cerrarSheet('sheetAgregarItem');
+    _mostrarDetalleSheet(_guiaActual, false);
 
     API.agregarDetalle({
       idGuia: _guiaActual.idGuia,
@@ -1696,7 +1820,11 @@ const GuiasView = (() => {
       if (res.ok && !res.offline) {
         const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
         if (idx >= 0) {
-          _guiaActual.detalle[idx] = { ...res.data, descripcionProducto: _itemProd?.descripcion || cod, _local: false };
+          _guiaActual.detalle[idx] = {
+            ...res.data,
+            descripcionProducto: res.data.descripcionProducto || descCapturada,
+            _local: false
+          };
           _mostrarDetalleSheet(_guiaActual, false);
         }
       } else if (!res.offline) {
@@ -1762,7 +1890,7 @@ const GuiasView = (() => {
 
     const res = await API.crearGuia(params);
     if (res.ok) {
-      finalizeOptimisticGuia(tempId);
+      finalizeOptimisticGuia(tempId, res.data?.idGuia, tipo, provNombre);
       toast(`Guía ${res.data?.idGuia || 'nueva'} creada`, 'ok');
     } else if (!res.offline) {
       removeOptimisticGuia(tempId);
@@ -1939,7 +2067,9 @@ const GuiasView = (() => {
     toggleTagNueva,
     onFotoGuiaSeleccionada, copiarFotoDePreingreso, verFotoGuia,
     toggleTagGuia, cerrarGuiaDetalle, irAPreingreso,
-    injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia
+    injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia,
+    abrirEditarItem, cerrarEditItem,
+    itemEditQtyChange, itemEditSetQty, itemEditPickVenc, itemEditOnVencChanged, eliminarItemEdit
   };
 })();
 
@@ -2402,7 +2532,13 @@ const PreingresosView = (() => {
          <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`
       ).join('');
 
-    optCards.forEach(c => container.insertBefore(c, container.firstChild));
+    // Preservar solo cards optimistas cuyo ID aún no está en la lista real
+    optCards.forEach(c => {
+      const rid = c.getAttribute('data-real-id') || c.id.replace('optcard_', '');
+      if (!sorted.find(p => p.idPreingreso === rid)) {
+        container.insertBefore(c, container.firstChild);
+      }
+    });
   }
 
   async function cargar(estado = '', silencioso = false) {
@@ -2828,22 +2964,27 @@ const PreingresosView = (() => {
   function _finalizeOptimisticCard(realId, data = {}) {
     const el = document.getElementById('optcard_' + realId);
     if (el) {
-      // Actualizar el card in-place → sin flash visual
-      el.classList.remove('card-optimistic');
+      // Parar animación — mantener clase para que renders no destruyan el card
+      el.style.animation = 'none';
+      el.setAttribute('data-real-id', realId);
+      const provNombre = _getProveedorNombre(data.idProveedor || '');
       el.innerHTML = `
-        <div class="flex items-center justify-between mb-1">
-          <span class="font-bold text-sm font-mono">${escAttr(realId)}</span>
-          <span class="tag-warn text-xs">PENDIENTE</span>
+        <div class="flex items-center justify-between gap-1 overflow-hidden">
+          <span class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</span>
+          <span class="pre-qtag pre-qtag-amber">PENDIENTE</span>
         </div>
-        <p class="text-xs text-slate-400">${fmtFecha(new Date())} · ${escAttr(data.idProveedor || '—')}</p>
-        <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(data.monto ?? 0, 2)}</p>
-        <button onclick="PreingresosView.aprobarDesdePanel('${escAttr(realId)}')"
-                class="btn btn-primary w-full mt-2 py-2 text-xs font-bold tracking-wide">
-          APROBAR → CREAR GUÍA
-        </button>`;
+        <p class="text-xs text-slate-400">${fmtFecha(new Date())}</p>
+        <div class="flex items-center justify-between gap-1 mt-1">
+          <p class="text-sm font-bold text-emerald-400">S/. ${fmt(data.monto ?? 0, 2)}</p>
+          <button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(realId)}')"
+                  class="pre-guia-btn">+ Guía</button>
+        </div>`;
     }
-    // Refrescar lista en segundo plano sin eliminar el card
-    setTimeout(() => cargar(_filtroEstado, true), 2000);
+    // Refrescar en background — cuando GAS responda, _renderPreingresos descartará
+    // el card optimista porque el ID ya estará en la lista real
+    API.getPreingresos(_filtroEstado ? { estado: _filtroEstado } : {}).then(res => {
+      if (res.ok && res.data) _renderPreingresos(_aplicarBusqueda(res.data));
+    }).catch(() => {});
   }
 
   // ── Crear preingreso (optimista) ─────────────────────────

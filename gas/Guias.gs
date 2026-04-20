@@ -137,6 +137,28 @@ function agregarDetalleGuia(params) {
   };
 }
 
+// ── Actualizar cantidad recibida de un detalle existente ────────────
+function actualizarCantidadDetalle(params) {
+  var idDetalle = String(params.idDetalle || '');
+  var cantidad  = parseFloat(params.cantidadRecibida);
+  if (!idDetalle || isNaN(cantidad)) return { ok: false, error: 'idDetalle y cantidadRecibida requeridos' };
+
+  var sheet  = getSheet('GUIA_DETALLE');
+  var data   = sheet.getDataRange().getValues();
+  var hdrs   = data[0];
+  var idxId  = hdrs.indexOf('idDetalle');
+  var idxRec = hdrs.indexOf('cantidadRecibida');
+  if (idxId < 0 || idxRec < 0) return { ok: false, error: 'Columnas no encontradas' };
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === idDetalle) {
+      sheet.getRange(i + 1, idxRec + 1).setValue(cantidad);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Detalle no encontrado: ' + idDetalle };
+}
+
 // ── Actualizar solo la fecha de vencimiento de un detalle existente ─
 function actualizarFechaVencimiento(params) {
   var idDetalle = String(params.idDetalle || '');
