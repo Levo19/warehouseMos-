@@ -3044,7 +3044,7 @@ const PreingresosView = (() => {
 
     if (res.ok) {
       toast(`Guía ${res.data.idGuia} creada`, 'ok');
-      GuiasView.finalizeOptimisticGuia(tempId);
+      GuiasView.finalizeOptimisticGuia(tempId, res.data.idGuia, 'INGRESO_PROVEEDOR', provNombre);
     } else {
       toast('Error al crear guía: ' + res.error, 'danger');
       GuiasView.removeOptimisticGuia(tempId);
