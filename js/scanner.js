@@ -2,12 +2,17 @@
 // Escáner de códigos de barra (cámara)
 // Estrategia: BarcodeDetector nativo (Chrome/Android rápido) → ZXing fallback
 const Scanner = (() => {
-  let _active   = false;
-  let _stream   = null;
-  let _videoEl  = null;
-  let _raf      = null;
-  let _zxReader = null;
-  let _detector = null;
+  let _active     = false;
+  let _stream     = null;
+  let _videoEl    = null;
+  let _raf        = null;
+  let _zxReader   = null;
+  let _detector   = null;
+  // Continuous mode
+  let _continuous  = false;
+  let _cooldown    = 1200;
+  let _lastCode    = null;
+  let _lastCodeTs  = 0;
 
   // ── Carga ZXing solo si lo necesitamos ─────────────────
   function _loadZXing() {
@@ -56,8 +61,18 @@ const Scanner = (() => {
       if (!_active) return;
       if (codes.length > 0) {
         const code = codes[0].rawValue;
-        stop();
-        onResult(code);
+        if (_continuous) {
+          const now = Date.now();
+          if (code !== _lastCode || now - _lastCodeTs > _cooldown) {
+            _lastCode = code; _lastCodeTs = now;
+            onResult(code);
+          }
+          // Pause before next detection to avoid flooding
+          setTimeout(() => { if (_active) _raf = requestAnimationFrame(() => _rafLoop(onResult)); }, 300);
+        } else {
+          stop();
+          onResult(code);
+        }
       } else {
         _raf = requestAnimationFrame(() => _rafLoop(onResult));
       }
@@ -116,8 +131,16 @@ const Scanner = (() => {
       await _zxReader.decodeFromVideoDevice(deviceId, _videoEl.id, (result, err) => {
         if (result && _active) {
           const text = result.getText();
-          stop();
-          onResult(text);
+          if (_continuous) {
+            const now = Date.now();
+            if (text !== _lastCode || now - _lastCodeTs > _cooldown) {
+              _lastCode = text; _lastCodeTs = now;
+              onResult(text);
+            }
+          } else {
+            stop();
+            onResult(text);
+          }
         }
         // NotFoundException es normal (cada frame sin código), ignorar
         if (err && err.name && !err.name.includes('NotFoundException')) {
@@ -131,9 +154,13 @@ const Scanner = (() => {
   }
 
   // ── API pública ───────────────────────────────────────────────
-  async function start(videoElementId, onResult, onError) {
+  async function start(videoElementId, onResult, onError, options) {
     // Si ya hay uno activo, detenerlo primero
     if (_active) stop();
+    _continuous = options?.continuous || false;
+    _cooldown   = options?.cooldown   || 1200;
+    _lastCode   = null;
+    _lastCodeTs = 0;
 
     _videoEl = document.getElementById(videoElementId);
     if (!_videoEl) { if (onError) onError('Elemento video no encontrado'); return; }

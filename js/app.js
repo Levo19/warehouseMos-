@@ -107,6 +107,7 @@ function _horaDesdeId(id) {
 
 // Escapa para insertar en atributos onclick="..." (evita romper comillas)
 function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
+function escHtml(s)  { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // Hora desde campo fecha de guía — solo si tiene componente de hora explícito
 function _horaDesdeGuia(g) {
@@ -1563,7 +1564,7 @@ const GuiasView = (() => {
             : '';
           return `
           <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
-               onclick="GuiasView.selectItem(${idx})">
+               data-det-id="${d.idDetalle || ''}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
               <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
@@ -1580,13 +1581,33 @@ const GuiasView = (() => {
 
     const acciones = document.getElementById('guiaDetAcciones');
     acciones.innerHTML = abierta ? `
-      <button onclick="GuiasView.abrirAgregarItem()"
-              class="btn btn-outline w-full py-3 font-bold tracking-wide text-sm">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" style="display:inline">
-          <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/>
-        </svg>
-        AGREGAR ÍTEM
-      </button>` : '';
+      <div style="display:flex;gap:0;border-radius:14px;overflow:hidden;border:1px solid rgba(124,58,237,.25);width:100%">
+        <button onclick="GuiasView.abrirCamaraItem()"
+                style="flex:3;min-height:52px;background:rgba(124,58,237,.12);
+                       border:none;border-right:1px solid rgba(124,58,237,.2);cursor:pointer;
+                       display:flex;align-items:center;justify-content:center;gap:8px;
+                       color:#c4b5fd;font-weight:800;font-size:.82em;letter-spacing:.04em;
+                       -webkit-tap-highlight-color:transparent"
+                ontouchstart="this.style.background='rgba(124,58,237,.25)'" ontouchend="this.style.background='rgba(124,58,237,.12)'">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.8">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+            <circle cx="12" cy="13" r="4"/>
+          </svg>
+          CÁMARA
+        </button>
+        <button onclick="GuiasView.abrirScannerItem()"
+                style="flex:1;min-height:52px;background:rgba(251,191,36,.06);
+                       border:none;cursor:pointer;
+                       display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;
+                       color:#fbbf24;
+                       -webkit-tap-highlight-color:transparent"
+                ontouchstart="this.style.background='rgba(251,191,36,.18)'" ontouchend="this.style.background='rgba(251,191,36,.06)'">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2 6h2v12H2zm4 0h1v12H6zm3 0h2v12H9zm4 0h1v12h-1zm3 0h2v12h-2zm3 0h1v12h-1z"/>
+          </svg>
+          <span style="font-size:.55em;font-weight:700;letter-spacing:.05em">SCANNER</span>
+        </button>
+      </div>` : '';
 
     if (conAnimacion) abrirSheet('sheetGuiaDetalle');
   }
@@ -1908,88 +1929,298 @@ const GuiasView = (() => {
     }
   }
 
-  // ── Agregar ítem — abre cámara directamente ──────────────
-  function abrirAgregarItem() {
+  // ════════════════════════════════════════════════════════════
+  // AGREGAR ÍTEM — modo cámara (continua) y modo scanner HID
+  // ════════════════════════════════════════════════════════════
+
+  // Compat: abrirAgregarItem legacy → usa cámara
+  function abrirAgregarItem() { abrirCamaraItem(); }
+
+  // ── MODO CÁMARA ──────────────────────────────────────────────
+  function abrirCamaraItem() {
     if (!_guiaActual) return;
-    abrirScanner(cod => _procesarCodigoEscaneado(cod));
+    // Recargar productos antes de abrir (para búsqueda fresca)
+    OfflineManager.precargar().catch(() => {});
+    document.getElementById('scannerModal').classList.add('open');
+    // Ocultar picker y toast previos
+    document.getElementById('camPicker').style.display = 'none';
+    document.getElementById('camToast').style.display  = 'none';
+    // Iniciar scanner en modo continuo
+    Scanner.start('scanVideo', _onCamResult, err => {
+      toast('Error cámara: ' + err, 'danger');
+      document.getElementById('scannerModal').classList.remove('open');
+    }, { continuous: true, cooldown: 1500 });
   }
 
-  function _procesarCodigoEscaneado(cod) {
-    const prods  = OfflineManager.getProductosCache();
+  function cerrarCamara() {
+    Scanner.stop();
+    document.getElementById('scannerModal').classList.remove('open');
+    document.getElementById('camPicker').style.display = 'none';
+    document.getElementById('camToast').style.display  = 'none';
+  }
+
+  // Callback del scanner continuo — procesa código sin cerrar cámara
+  function _onCamResult(cod) {
     const codStr = String(cod || '').trim();
     if (!codStr) return;
 
-    // 1. Coincidencia exacta por idProducto o codigoBarra
-    const exacto = prods.find(p =>
-      p.idProducto === codStr ||
-      String(p.codigoBarra || '') === codStr ||
-      p.idProducto.toLowerCase() === codStr.toLowerCase() ||
-      String(p.codigoBarra || '').toLowerCase() === codStr.toLowerCase()
-    );
-    if (exacto) {
-      _agregarProductoDirecto(exacto, false);
-      // Reabrir cámara para escanear siguiente ítem en cadena
-      setTimeout(() => abrirScanner(cod2 => _procesarCodigoEscaneado(cod2)), 600);
+    // Ocultar picker anterior
+    document.getElementById('camPicker').style.display = 'none';
+
+    const candidatos = _buscarCandidatos(codStr);
+
+    if (!candidatos.length) {
+      _camToast('⚠ No encontrado: ' + codStr, '', '#ef4444', '#fca5a5');
+      return;
+    }
+    if (candidatos.length === 1 || candidatos[0]._exacto) {
+      _agregarProductoDirecto(candidatos[0], false);
+      _camToast('✓ ' + String(candidatos[0].descripcion || candidatos[0].idProducto),
+                candidatos[0].idProducto, 'rgba(16,185,129,.94)', '#fff');
+      return;
+    }
+    // Múltiples → mostrar picker (cámara sigue activa detrás)
+    _mostrarCamPicker(candidatos, codStr);
+  }
+
+  function _camToast(desc, id, bg, col) {
+    const t = document.getElementById('camToast');
+    const d = document.getElementById('camToastDesc');
+    const i = document.getElementById('camToastId');
+    if (!t) return;
+    d.textContent = desc;
+    i.textContent = id;
+    t.style.background = bg;
+    d.style.color = col;
+    t.style.display = 'flex';
+    clearTimeout(_camToastTimer);
+    _camToastTimer = setTimeout(() => { if (t) t.style.display = 'none'; }, 2500);
+  }
+  let _camToastTimer = null;
+
+  function _mostrarCamPicker(candidatos, codStr) {
+    document.getElementById('camPickerCod').textContent = codStr;
+    document.getElementById('camPickerList').innerHTML = candidatos.map(p => `
+      <button onclick="GuiasView.seleccionarItemCamara('${escAttr(p.idProducto)}')"
+              style="width:100%;text-align:left;padding:9px 11px;border-radius:10px;
+                     border:1px solid rgba(100,116,139,.3);margin-bottom:6px;
+                     background:rgba(15,23,42,.8);display:flex;align-items:center;gap:8px;
+                     cursor:pointer;-webkit-tap-highlight-color:transparent"
+              ontouchstart="this.style.borderColor='#a78bfa'" ontouchend="this.style.borderColor='rgba(100,116,139,.3)'">
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || p.idProducto))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
+        </div>
+      </button>`).join('');
+    document.getElementById('camPicker').style.display = 'block';
+  }
+
+  function cerrarCamPicker() {
+    document.getElementById('camPicker').style.display = 'none';
+    // Scanner ya está corriendo — no hace falta reiniciar
+  }
+
+  function seleccionarItemCamara(idProducto) {
+    document.getElementById('camPicker').style.display = 'none';
+    const prod = OfflineManager.getProductosCache().find(p => p.idProducto === idProducto);
+    if (!prod) return;
+    _agregarProductoDirecto(prod, true);
+    _camToast('✓ ' + String(prod.descripcion || prod.idProducto), prod.idProducto, 'rgba(16,185,129,.94)', '#fff');
+  }
+
+  // ── MODO SCANNER HID ─────────────────────────────────────────
+  let _hidBuffer   = '';
+  let _hidBufTs    = 0;
+  let _hidTimer    = null;
+
+  function abrirScannerItem() {
+    if (!_guiaActual) return;
+    OfflineManager.precargar().catch(() => {});
+    _hidBuffer = '';
+    abrirSheet('sheetScanInput');
+    // Limpiar estado visual
+    const disp = document.getElementById('hidCodeText');
+    if (disp) disp.textContent = '— listo para escanear —';
+    document.getElementById('hidPicker').style.display   = 'none';
+    document.getElementById('hidProductList').innerHTML  = '';
+    document.getElementById('hidReadingDot').style.display = 'inline-block';
+    setTimeout(() => _enfocarHid(), 260);
+  }
+
+  function cerrarScannerItem() {
+    clearTimeout(_hidTimer);
+    _hidBuffer = '';
+    document.getElementById('hidReadingDot').style.display = 'none';
+    cerrarSheet('sheetScanInput');
+  }
+
+  function _enfocarHid() {
+    const inp = document.getElementById('hidScanInput');
+    if (!inp) return;
+    inp.value = '';
+    // Registrar listener de teclado (una sola vez)
+    if (!inp._hidListenerSet) {
+      inp._hidListenerSet = true;
+      inp.addEventListener('keydown', _hidKeydown);
+    }
+    inp.focus();
+  }
+
+  function _hidKeydown(e) {
+    const now = Date.now();
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      clearTimeout(_hidTimer);
+      const buf = _hidBuffer.trim();
+      _hidBuffer = '';
+      _updateHidDisplay('— listo para escanear —');
+      if (buf) _procesarCodigoHid(buf);
       return;
     }
 
-    // 2. Coincidencia por prefijo: "12345" → "12345A", "12345B" (códigos de fábrica duplicados)
-    const cUp = codStr.toUpperCase();
+    if (e.key === 'Backspace' || e.key === 'Delete') {
+      _hidBuffer = _hidBuffer.slice(0, -1);
+      _updateHidDisplay(_hidBuffer || '— listo para escanear —');
+      e.preventDefault();
+      return;
+    }
+
+    // Solo aceptar caracteres imprimibles
+    if (e.key.length !== 1) { e.preventDefault(); return; }
+
+    // Detección de velocidad: si el buffer no está vacío y el intervalo
+    // es > 80 ms → probable escritura humana → rechazar y limpiar
+    if (_hidBuffer.length > 0 && (now - _hidBufTs) > 80) {
+      _hidBuffer = '';
+      _updateHidDisplay('— listo para escanear —');
+      // No retornar: aceptar este primer carácter del scanner
+    }
+
+    _hidBufTs = now;
+    _hidBuffer += e.key;
+    _updateHidDisplay(_hidBuffer);
+    e.preventDefault(); // no alterar input.value
+
+    // Auto-procesar si el scanner no envía Enter (fallback 400ms)
+    clearTimeout(_hidTimer);
+    _hidTimer = setTimeout(() => {
+      const buf = _hidBuffer.trim();
+      _hidBuffer = '';
+      _updateHidDisplay('— listo para escanear —');
+      if (buf) _procesarCodigoHid(buf);
+    }, 400);
+  }
+
+  function _updateHidDisplay(text) {
+    const el = document.getElementById('hidCodeText');
+    if (el) el.textContent = text || '— listo para escanear —';
+  }
+
+  function _procesarCodigoHid(codStr) {
+    const candidatos = _buscarCandidatos(codStr);
+
+    document.getElementById('hidPicker').style.display = 'none';
+
+    if (!candidatos.length) {
+      _updateHidDisplay('⚠ No encontrado: ' + codStr);
+      toast('No encontrado: ' + codStr, 'warn', 2500);
+      setTimeout(() => {
+        _updateHidDisplay('— listo para escanear —');
+        _enfocarHid();
+      }, 1500);
+      return;
+    }
+
+    if (candidatos.length === 1 || candidatos[0]._exacto) {
+      const prod = candidatos[0];
+      _agregarProductoDirecto(prod, false);
+      _agregarItemHidList(prod);
+      _updateHidDisplay('— listo para escanear —');
+      setTimeout(() => _enfocarHid(), 100);
+      return;
+    }
+
+    // Múltiples → picker dentro del sheet
+    document.getElementById('hidPickerCod').textContent = codStr;
+    document.getElementById('hidPickerList').innerHTML = candidatos.map(p => `
+      <button onclick="GuiasView.seleccionarItemHid('${escAttr(p.idProducto)}')"
+              style="width:100%;text-align:left;padding:8px 10px;border-radius:9px;
+                     border:1px solid rgba(124,58,237,.2);margin-bottom:5px;
+                     background:rgba(124,58,237,.06);display:flex;align-items:center;gap:8px;
+                     cursor:pointer;-webkit-tap-highlight-color:transparent">
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || p.idProducto))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
+        </div>
+      </button>`).join('');
+    document.getElementById('hidPicker').style.display = 'block';
+  }
+
+  function seleccionarItemHid(idProducto) {
+    const prod = OfflineManager.getProductosCache().find(p => p.idProducto === idProducto);
+    document.getElementById('hidPicker').style.display = 'none';
+    if (!prod) return;
+    _agregarProductoDirecto(prod, true);
+    _agregarItemHidList(prod);
+    _updateHidDisplay('— listo para escanear —');
+    setTimeout(() => _enfocarHid(), 100);
+  }
+
+  // Muestra card del producto agregado en la lista del sheet HID
+  function _agregarItemHidList(prod) {
+    const list = document.getElementById('hidProductList');
+    if (!list) return;
+    const div = document.createElement('div');
+    div.className = 'item-slide-in';
+    div.style.cssText = 'display:flex;align-items:center;gap:9px;padding:9px 11px;' +
+      'border-radius:11px;background:#1e293b;border:1px solid #334155;margin-bottom:6px';
+    div.innerHTML = `<span style="color:#10b981;font-size:1.1em;flex-shrink:0">✓</span>
+      <div style="flex:1;min-width:0">
+        <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(prod.descripcion || prod.idProducto))}</p>
+        <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(prod.idProducto)}</p>
+      </div>`;
+    list.insertBefore(div, list.firstChild);
+  }
+
+  // ── Búsqueda de candidatos (shared entre cámara y HID) ───────
+  function _buscarCandidatos(codStr) {
+    const prods = OfflineManager.getProductosCache();
+    const cLow  = codStr.toLowerCase();
+    const cUp   = codStr.toUpperCase();
+
+    // 1. Exacta
+    const exacto = prods.find(p =>
+      p.idProducto === codStr ||
+      String(p.codigoBarra || '') === codStr ||
+      (p.idProducto || '').toLowerCase() === cLow ||
+      String(p.codigoBarra || '').toLowerCase() === cLow
+    );
+    if (exacto) { exacto._exacto = true; return [exacto]; }
+
+    // 2. Prefijo (ej: "12345" → "12345A","12345B")
     const porPrefijo = prods.filter(p =>
       (p.idProducto || '').toUpperCase().startsWith(cUp) ||
       String(p.codigoBarra || '').startsWith(codStr)
     );
 
-    // 3. Coincidencia parcial general (descripción, código)
+    // 3. Parcial (descripción / código)
     const porParcial = prods.filter(p =>
       !porPrefijo.includes(p) && (
-        (p.idProducto || '').toLowerCase().includes(codStr.toLowerCase()) ||
-        String(p.codigoBarra || '').includes(codStr) ||
-        (p.descripcion || '').toLowerCase().includes(codStr.toLowerCase())
+        (p.idProducto || '').toLowerCase().includes(cLow) ||
+        String(p.codigoBarra || '').toLowerCase().includes(cLow) ||
+        String(p.descripcion || '').toLowerCase().includes(cLow)
       )
     ).slice(0, 6);
 
-    const candidatos = [...porPrefijo, ...porParcial].slice(0, 10);
-
-    if (!candidatos.length) {
-      toast(`No encontrado: ${codStr}`, 'warn', 3000);
-      setTimeout(() => abrirScanner(cod2 => _procesarCodigoEscaneado(cod2)), 400);
-      return;
-    }
-
-    // Mostrar picker compacto (sin modal de formulario, solo elección)
-    _mostrarPickerItem(candidatos, codStr);
+    return [...porPrefijo, ...porParcial].slice(0, 10);
   }
 
-  function _mostrarPickerItem(candidatos, codEscaneado) {
-    const codEl = document.getElementById('itemCodEscaneado');
-    if (codEl) codEl.textContent = codEscaneado;
-    const list = document.getElementById('itemMatchList');
-    if (list) {
-      list.innerHTML = candidatos.map(p => `
-        <button onclick="GuiasView.seleccionarItemProd('${escAttr(p.idProducto)}')"
-                class="w-full text-left p-2.5 rounded-xl border border-slate-700 mb-1.5 active:border-violet-500 active:bg-slate-700/50 flex items-center gap-2.5">
-          <span style="font-size:10px;font-weight:800;padding:2px 5px;border-radius:4px;
-                       background:rgba(124,58,237,.18);color:#a78bfa;
-                       border:1px solid rgba(124,58,237,.4);flex-shrink:0">i</span>
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-bold text-slate-100 truncate">${escAttr(p.descripcion || p.idProducto)}</p>
-            <p class="text-xs text-slate-500 font-mono">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
-          </div>
-        </button>`).join('') +
-        `<button onclick="cerrarSheet('sheetAgregarItem');setTimeout(()=>GuiasView.abrirAgregarItem(),120)"
-                 class="btn btn-outline text-xs w-full mt-2 py-2.5 font-bold">📷 Seguir escaneando</button>`;
-    }
-    abrirSheet('sheetAgregarItem');
-  }
-
-  function seleccionarItemProd(idProducto) {
-    const prods = OfflineManager.getProductosCache();
-    const prod  = prods.find(p => p.idProducto === idProducto) || null;
-    if (!prod) return;
-    cerrarSheet('sheetAgregarItem');
-    _agregarProductoDirecto(prod, true); // indirecto → badge "i"
-  }
+  // ── Legacy: procesarHidInput (compat con sheetScanInput anterior) ─
+  function procesarHidInput() { /* obsoleto, no se usa */ }
+  function onHidKey(e) { /* obsoleto */ }
+  function usarCamara() { cerrarScannerItem(); setTimeout(abrirCamaraItem, 220); }
+  function cerrarScanInput() { cerrarScannerItem(); }
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
@@ -2009,6 +2240,11 @@ const GuiasView = (() => {
     if (!_guiaActual.detalle) _guiaActual.detalle = [];
     _guiaActual.detalle.push(itemOptimista);
     _mostrarDetalleSheet(_guiaActual, false);
+    // Animar el nuevo ítem en la lista
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-det-id="${localId}"]`);
+      if (el) el.classList.add('item-slide-in');
+    });
     toast((indirecto ? '↕ ' : '✓ ') + descCapturada, 'ok', 1500);
 
     const _idGuiaParaDetalle = _guiaActual.idGuia;
@@ -2044,7 +2280,7 @@ const GuiasView = (() => {
   }
 
   function _rescanear() {
-    abrirScanner(cod => _procesarCodigoEscaneado(cod));
+    abrirCamaraItem();
   }
 
   async function confirmarCerrarGuia() {
@@ -2445,8 +2681,13 @@ const GuiasView = (() => {
   return {
     cargar, filtrar, toggleFiltro, silentRefresh, verDetalle,
     buscar, buscarClear,
-    abrirAgregarItem,
-    _procesarCodigoEscaneado, seleccionarItemProd, _rescanear,
+    abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
+    cerrarCamara, cerrarCamPicker, seleccionarItemCamara,
+    cerrarScannerItem, _enfocarHid,
+    seleccionarItemHid,
+    // compat stubs
+    cerrarScanInput, onHidKey, procesarHidInput, usarCamara,
+    _procesarCodigoEscaneado: _buscarCandidatos, _rescanear,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
     confirmarCerrarGuia, crearGuia, nueva,
     toggleTagNueva,

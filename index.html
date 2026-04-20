@@ -133,6 +133,9 @@
       top:0;
     }
     @keyframes scanAnim { 0%{top:0} 50%{top:calc(100% - 2px)} 100%{top:0} }
+    /* Slide-in para nuevos ítems */
+    @keyframes slideInItem { from{opacity:0;transform:translateY(-8px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+    .item-slide-in { animation:slideInItem .22s ease-out both; }
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
                   border-radius:6px;padding:3px 8px;letter-spacing:.5px; }
@@ -1043,7 +1046,8 @@
 <div id="scannerModal">
   <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
     <span class="text-white font-bold text-sm">📷 Escanear código de barras</span>
-    <button onclick="cerrarScanner()" class="text-white text-2xl leading-none px-2">✕</button>
+    <button onclick="if(typeof GuiasView!=='undefined'&&GuiasView.cerrarCamara)GuiasView.cerrarCamara();else cerrarScanner();"
+            class="text-white text-2xl leading-none px-2">✕</button>
   </div>
   <div style="position:relative;flex:1;min-height:0;overflow:hidden">
     <video id="scanVideo" playsinline autoplay muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
@@ -1052,6 +1056,26 @@
         <span></span>
         <div class="scan-line"></div>
       </div>
+    </div>
+    <!-- Toast: último ítem agregado (aparece encima del video) -->
+    <div id="camToast" style="display:none;position:absolute;top:12px;left:12px;right:12px;
+         z-index:5;border-radius:14px;padding:11px 14px;
+         background:linear-gradient(135deg,rgba(16,185,129,.94),rgba(5,150,105,.94));
+         box-shadow:0 4px 20px rgba(0,0,0,.5);align-items:center;gap:10px">
+      <span style="font-size:1.35em;flex-shrink:0">✓</span>
+      <div style="flex:1;min-width:0">
+        <p id="camToastDesc" style="font-weight:800;font-size:.84em;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>
+        <p id="camToastId"   style="font-size:.7em;color:rgba(255,255,255,.75);font-family:monospace"></p>
+      </div>
+    </div>
+    <!-- Picker: múltiples coincidencias (cámara sigue activa detrás) -->
+    <div id="camPicker" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:4;
+         background:rgba(2,6,23,.97);border-top:1px solid rgba(124,58,237,.4);padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <p style="font-size:.75em;color:#a78bfa;font-weight:700">Elige el producto (código: <span id="camPickerCod" style="color:#fbbf24;font-family:monospace"></span>):</p>
+        <button onclick="GuiasView.cerrarCamPicker()" style="color:#64748b;font-size:.75em;background:none;border:none;cursor:pointer;padding:2px 6px">✕</button>
+      </div>
+      <div id="camPickerList" style="max-height:220px;overflow-y:auto"></div>
     </div>
   </div>
   <div class="flex items-center justify-center px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
@@ -1203,7 +1227,56 @@
 </div>
 
 <!-- ════════════════════════════════════════════════
-     SHEET: AGREGAR ÍTEM A GUÍA
+     SHEET: SCANNER HID (lector físico USB/Bluetooth)
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayScanInput" onclick="GuiasView.cerrarScannerItem()"></div>
+<div class="bottom-sheet" id="sheetScanInput">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div>
+      <p class="font-bold text-sm">Lector de scanner</p>
+      <p class="text-xs text-slate-500">Apunta el scanner al código de barras</p>
+    </div>
+    <button onclick="GuiasView.cerrarScannerItem()" class="text-slate-500 text-xs px-2 py-1">✕ Cerrar</button>
+  </div>
+
+  <!-- Display del código (solo scanner puede llenarlo — inputmode none) -->
+  <div style="position:relative;margin-bottom:12px;cursor:default"
+       onclick="GuiasView._enfocarHid()">
+    <div id="hidCodeDisplay"
+         style="padding:12px 16px;border-radius:12px;min-height:52px;
+                border:2px solid rgba(251,191,36,.25);background:rgba(251,191,36,.06);
+                display:flex;align-items:center;gap:10px">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" stroke-width="2" style="flex-shrink:0;opacity:.7">
+        <path d="M2 6h2v12H2zm4 0h1v12H6zm3 0h2v12H9zm4 0h1v12h-1zm3 0h2v12h-2zm3 0h1v12h-1z"/>
+      </svg>
+      <span id="hidCodeText" style="font-family:monospace;font-size:1.15em;color:#fbbf24;font-weight:700;
+            letter-spacing:.12em;flex:1">— listo para escanear —</span>
+      <span id="hidReadingDot" style="display:none;width:10px;height:10px;border-radius:50%;
+            background:#10b981;flex-shrink:0;animation:logoPulse 1s ease-in-out infinite"></span>
+    </div>
+    <!-- Input oculto: recibe el scanner (inputmode=none → sin teclado virtual en tablet) -->
+    <input id="hidScanInput" inputmode="none"
+           style="position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;z-index:2;
+                  font-size:16px;background:transparent;border:none;outline:none"
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+  </div>
+
+  <!-- Picker de coincidencias múltiples -->
+  <div id="hidPicker" style="display:none;margin-bottom:10px;padding:10px 12px;
+       border-radius:12px;border:1px solid rgba(124,58,237,.3);background:rgba(124,58,237,.06)">
+    <p style="font-size:.73em;color:#a78bfa;font-weight:700;margin-bottom:8px">
+      Elige el producto — código: <span id="hidPickerCod" style="color:#fbbf24;font-family:monospace"></span>
+    </p>
+    <div id="hidPickerList" style="max-height:180px;overflow-y:auto"></div>
+  </div>
+
+  <!-- Lista de productos agregados en esta sesión -->
+  <div id="hidProductList" style="max-height:260px;overflow-y:auto"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: AGREGAR ÍTEM A GUÍA (picker de coincidencias)
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayAgregarItem" onclick="cerrarSheet('sheetAgregarItem')"></div>
 <div class="bottom-sheet" id="sheetAgregarItem">
@@ -1213,8 +1286,8 @@
       <p class="font-bold text-sm">Seleccionar producto</p>
       <p class="text-xs text-slate-400">Código escaneado: <span id="itemCodEscaneado" class="text-amber-400 font-mono">—</span></p>
     </div>
-    <button onclick="cerrarSheet('sheetAgregarItem');setTimeout(()=>GuiasView.abrirAgregarItem(),120)"
-            class="btn btn-outline text-xs px-3 py-2 font-bold">📷 Rescanear</button>
+    <button onclick="cerrarSheet('sheetAgregarItem');GuiasView.abrirAgregarItem()"
+            class="btn btn-outline text-xs px-3 py-2 font-bold">↩ Volver</button>
   </div>
   <!-- Lista de coincidencias para elegir -->
   <div id="itemMatchList" class="max-h-80 overflow-y-auto"></div>
