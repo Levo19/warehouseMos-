@@ -846,12 +846,17 @@ const App = (() => {
     if (!m) return;
     const isOpen = m.classList.contains('open');
     m.classList.toggle('open', !isOpen);
+    // Girar el chevron: ↑ cuando cerrado, ↓ cuando abierto
+    const ch = document.getElementById('sideChevron');
+    if (ch) ch.style.transform = !isOpen ? 'rotate(180deg)' : '';
     if (!isOpen) {
       setTimeout(() => document.addEventListener('click', _closeSideMenuOutside, { once: true }), 10);
     }
   }
   function closeSideUserMenu() {
     document.getElementById('sideUserMenu')?.classList.remove('open');
+    const ch = document.getElementById('sideChevron');
+    if (ch) ch.style.transform = '';
   }
   function _closeSideMenuOutside(e) {
     const card = document.getElementById('sideUserCard');
@@ -928,9 +933,13 @@ const App = (() => {
     document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
     document.getElementById('kpiSalidas').textContent    = kpis.salidasUltimos30dias ?? '—';
 
-    // Logo alert dot (el badge de nav inferior fue eliminado junto con el botón Inicio)
+    // Logo alert dot (topbar + sidebar)
     const totalAlertas = contadores.alertasTotal ?? 0;
     document.getElementById('logoAlertDot')?.classList.toggle('hidden', totalAlertas === 0);
+    const sideLogoAlert = document.getElementById('sideLogoAlertDot');
+    const sideArrow     = document.getElementById('sideAlertArrow');
+    if (sideLogoAlert) sideLogoAlert.classList.toggle('visible', totalAlertas > 0);
+    if (sideArrow)     sideArrow.classList.toggle('visible',     totalAlertas > 0);
 
     // Panel Vencimientos
     document.getElementById('listVencCrit').innerHTML = criticos.map(v => `

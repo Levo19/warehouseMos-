@@ -445,99 +445,134 @@
     /* ═══════════════════════════════════════════════════════
        SIDEBAR — barra lateral izquierda para tablet landscape
     ═══════════════════════════════════════════════════════ */
-    /* Sidebar width token — cambiar aquí para ajustar todo */
-    :root { --sidebar-w: 186px; }
+    /* ─── Sidebar width token ─────────────────────────── */
+    :root { --sidebar-w: 192px; }
 
+    /* ─── Grid de 7 sectores iguales ──────────────────── */
     #sideNav {
       display: none;
       position: fixed; left:0; top:0; bottom:0; width:var(--sidebar-w); z-index:40;
-      background:#0b1120;
-      border-right:1px solid #1e293b;
-      flex-direction:column;
+      background:#0b1120; border-right:1px solid #1e293b;
+      grid-template-rows: repeat(7, 1fr);  /* 7 sectores iguales */
       align-items:stretch;
     }
-    /* Logo area */
+
+    /* ─── Sector 1: Logo ──────────────────────────────── */
     .side-logo-area {
-      display:flex; align-items:center; justify-content:center;
-      padding:16px 10px 14px;
-      border-bottom:1px solid #1e293b;
-      flex-shrink:0;
+      grid-row: 1;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:8px; border-bottom:1px solid #1e293b; position:relative;
     }
     .side-logo-btn {
-      background:none;border:none;cursor:pointer;padding:0;
-      font-size:22px;font-weight:900;line-height:1;
+      background:none; border:none; cursor:pointer; padding:0;
+      font-size:22px; font-weight:900; line-height:1;
       -webkit-tap-highlight-color:transparent;
       transition:opacity .12s; position:relative;
     }
     .side-logo-btn:active { opacity:.6; }
-    /* Nav items */
-    .side-items {
-      flex:1; display:flex; flex-direction:column;
-      padding:16px 10px; gap:10px; overflow-y:auto;
+    /* Punto rojo en logo del sidebar */
+    #sideLogoAlertDot {
+      display:none; width:9px; height:9px; border-radius:50%;
+      background:#ef4444; border:2px solid #0b1120;
+      position:absolute; top:-3px; right:-6px;
+      animation:logoPulse 1.9s ease-in-out infinite;
     }
-    /* Botón de módulo: icono a la izq + nombre a la der */
+    #sideLogoAlertDot.visible { display:block; }
+    /* Flecha "haz click" debajo del logo cuando hay alerta */
+    #sideAlertArrow {
+      display:none; flex-direction:column; align-items:center; gap:2px;
+      font-size:9px; font-weight:700; color:#ef4444; letter-spacing:.04em;
+    }
+    #sideAlertArrow.visible { display:flex; }
+    @keyframes arrowBounce {
+      0%,100% { transform:translateY(0); }
+      50%      { transform:translateY(4px); }
+    }
+    #sideAlertArrow svg { animation:arrowBounce .9s ease-in-out infinite; }
+
+    /* ─── Sectores 2-4: Módulos ───────────────────────── */
+    .side-mod-row {
+      display:flex; align-items:center; justify-content:center;
+      padding:0 12px;
+    }
+    /* grid-row set inline on each element */
+
     .side-btn {
       display:flex; flex-direction:row; align-items:center;
-      gap:12px; padding:15px 14px; border-radius:13px;
+      gap:12px; padding:14px 16px; border-radius:14px;
       border:none; background:none; cursor:pointer;
       color:#64748b;
-      font-size:12.5px; font-weight:700; letter-spacing:.03em; text-align:left;
+      font-size:13px; font-weight:700; letter-spacing:.03em; text-align:left;
       transition:background .13s,color .13s; width:100%;
       -webkit-tap-highlight-color:transparent; position:relative;
     }
     .side-btn:active { background:rgba(255,255,255,.05); }
     .side-btn.nav-btn.active {
-      background:rgba(96,165,250,.13);
+      background:rgba(96,165,250,.14);
       color:#60a5fa;
-      box-shadow:inset 0 0 0 1px rgba(96,165,250,.18);
+      box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
     }
     .side-btn-label { line-height:1; flex:1; }
     .side-btn svg { flex-shrink:0; }
-    /* User card (bottom of sidebar) */
+
+    /* ─── Sectores 5-6: Vacíos (reservados para menú) ─── */
+    .side-spacer { grid-row: 5 / 7; }  /* ocupa filas 5 y 6 */
+
+    /* ─── Sector 7: Tarjeta de usuario ───────────────── */
     #sideUserCard {
-      flex-shrink:0;
+      grid-row: 7;
       border-top:1px solid #1e293b;
-      padding:12px 10px 14px;
-      display:flex; flex-direction:row; align-items:center; gap:9px;
+      padding:0 14px;
+      display:flex; flex-direction:row; align-items:center; gap:10px;
       cursor:pointer; position:relative;
       transition:background .12s;
       -webkit-tap-highlight-color:transparent;
     }
     #sideUserCard:active { background:rgba(255,255,255,.04); }
     #sideAvatar {
-      width:34px; height:34px; border-radius:50%;
+      width:36px; height:36px; border-radius:50%;
       display:flex; align-items:center; justify-content:center;
-      font-size:12px; font-weight:900; color:#fff; background:#475569; flex-shrink:0;
+      font-size:13px; font-weight:900; color:#fff; background:#475569; flex-shrink:0;
     }
     .side-user-info {
-      flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;
+      flex:1; min-width:0; display:flex; flex-direction:column; gap:2px;
     }
     #sideUserName {
-      font-size:11px; font-weight:700; color:#cbd5e1;
+      font-size:12px; font-weight:800; color:#e2e8f0;
       overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     }
-    .side-user-role {
-      font-size:9px; color:#475569; font-weight:500;
-    }
-    /* User popup menu — flota arriba a la derecha del sidebar */
+    .side-user-role { font-size:10px; color:#475569; font-weight:500; }
+
+    /* ─── Popup menú de usuario ───────────────────────── */
+    /* Ocupa los sectores vacíos 5-6 justo encima del user card */
     #sideUserMenu {
-      display:none; position:absolute; bottom:calc(100% + 6px);
-      left:calc(var(--sidebar-w) + 6px);
-      min-width:176px; background:#1e293b; border:1px solid #334155;
-      border-radius:14px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.7);
+      display:none; position:absolute;
+      bottom:100%; left:0; right:0;
+      height:calc(2 * 100vh / 7);   /* exactamente 2 sectores */
+      background:linear-gradient(180deg,#0d1626 0%,#111827 100%);
+      border:1px solid #1e3a5f;
+      border-bottom:none;
+      border-radius:16px 16px 0 0;
+      overflow:hidden;
+      box-shadow:0 -6px 28px rgba(0,0,0,.55);
       z-index:50;
+      display:none;
+      flex-direction:column; justify-content:center;
+      padding:18px 16px;
+      gap:6px;
     }
-    #sideUserMenu.open { display:block; }
+    #sideUserMenu.open { display:flex; }
     .side-user-menu-hdr {
-      padding:10px 14px 8px; border-bottom:1px solid #334155;
+      margin-bottom:10px; padding-bottom:12px;
+      border-bottom:1px solid #1e293b;
     }
 
     /* ═══════════════════════════════════════════════════════
        TABLET LANDSCAPE — 768px+ en horizontal
     ═══════════════════════════════════════════════════════ */
     @media (min-width:768px) and (orientation:landscape) {
-      /* Mostrar sidebar, ocultar bottom nav */
-      #sideNav   { display:flex; }
+      /* Mostrar sidebar (grid), ocultar bottom nav */
+      #sideNav   { display:grid; }
       #bottomNav { display:none !important; }
 
       /* Topbar: desplazar a la derecha del sidebar, ocultar logo y avatar */
@@ -1127,66 +1162,85 @@
 ═══════════════════════════════════════════════════ -->
 <nav id="sideNav">
 
-  <!-- Logo completo -->
+  <!-- ── Sector 1: Logo ── -->
   <div class="side-logo-area">
     <button class="side-logo-btn" onclick="App.nav('dashboard')" title="Dashboard">
       <span class="wh-w">W</span><span class="wh-mid" style="max-width:60px;opacity:1;letter-spacing:-.2px">are</span><span class="wh-h">H</span><span class="wh-mid" style="max-width:60px;opacity:1;letter-spacing:-.2px">ouse</span>
       <span class="wh-glare" aria-hidden="true"></span>
+      <span id="sideLogoAlertDot"></span>
     </button>
+    <!-- Indicador "click aquí" cuando hay alertas -->
+    <div id="sideAlertArrow">
+      <span>alertas</span>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M7.646 11.354a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 9.293V2.5a.5.5 0 0 0-1 0v6.793L5.354 7.646a.5.5 0 1 0-.708.708l3 3z"/>
+      </svg>
+    </div>
   </div>
 
-  <!-- Items de navegación -->
-  <div class="side-items">
-
-    <!-- Guías -->
+  <!-- ── Sector 2: Guías ── -->
+  <div class="side-mod-row" style="grid-row:2">
     <button class="nav-btn side-btn" data-view="guias" onclick="App.nav('guias')">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
       </svg>
       <span class="side-btn-label">Guías</span>
     </button>
+  </div>
 
-    <!-- Productos -->
-    <button class="nav-btn side-btn" data-view="productos" onclick="App.nav('productos')" style="position:relative">
-      <span style="position:relative;display:inline-flex">
+  <!-- ── Sector 3: Productos ── -->
+  <div class="side-mod-row" style="grid-row:3">
+    <button class="nav-btn side-btn" data-view="productos" onclick="App.nav('productos')">
+      <span style="position:relative;display:inline-flex;flex-shrink:0">
         <span id="sideNavDotAudit"
               style="display:none;position:absolute;top:-3px;right:-5px;
                      width:8px;height:8px;border-radius:50%;
                      background:#f97316;border:2px solid #0b1120;z-index:2;
                      box-shadow:0 0 5px rgba(249,115,22,.8)"></span>
-        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+        <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
         </svg>
       </span>
       <span class="side-btn-label" id="sideNavLblProductos">Productos</span>
     </button>
+  </div>
 
-    <!-- Tools -->
+  <!-- ── Sector 4: Tools ── -->
+  <div class="side-mod-row" style="grid-row:4">
     <button class="nav-btn side-btn" data-view="tools" onclick="App.nav('tools')">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
       </svg>
       <span class="side-btn-label">Tools</span>
     </button>
-
   </div>
 
-  <!-- Tarjeta de usuario (bottom) -->
+  <!-- ── Sectores 5-6: Vacíos (reservados para menú de usuario) ── -->
+  <div class="side-spacer" style="grid-row:5/7"></div>
+
+  <!-- ── Sector 7: Tarjeta de usuario ── -->
   <div id="sideUserCard" onclick="App.toggleSideUserMenu()">
-    <!-- Popup menú (aparece arriba del card) -->
+
+    <!-- Popup menú: ocupa el espacio vacío de los sectores 5-6 -->
     <div id="sideUserMenu">
       <div class="side-user-menu-hdr">
-        <p style="font-size:12px;font-weight:800;color:#f1f5f9" id="sideUserMenuName">—</p>
-        <p style="font-size:11px;color:#64748b;margin-top:2px">Operador activo</p>
+        <p style="font-size:13px;font-weight:800;color:#f1f5f9" id="sideUserMenuName">—</p>
+        <p style="font-size:11px;color:#64748b;margin-top:3px">Operador activo</p>
       </div>
       <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.bloquear()"
-              style="width:100%;text-align:left;padding:10px 14px;font-size:13px;color:#cbd5e1;
-                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:8px">
-        🔒 Bloquear
+              style="width:100%;text-align:left;padding:13px 16px;font-size:13.5px;color:#cbd5e1;
+                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:10px;
+                     border-radius:10px;transition:background .12s"
+              onmouseenter="this.style.background='rgba(255,255,255,.06)'" onmouseleave="this.style.background='none'"
+              ontouchstart="this.style.background='rgba(255,255,255,.06)'" ontouchend="this.style.background='none'">
+        🔒 Bloquear sesión
       </button>
       <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.confirmarCierre()"
-              style="width:100%;text-align:left;padding:10px 14px;font-size:13px;color:#f87171;
-                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:8px">
+              style="width:100%;text-align:left;padding:13px 16px;font-size:13.5px;color:#f87171;
+                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:10px;
+                     border-radius:10px;transition:background .12s"
+              onmouseenter="this.style.background='rgba(248,113,113,.08)'" onmouseleave="this.style.background='none'"
+              ontouchstart="this.style.background='rgba(248,113,113,.08)'" ontouchend="this.style.background='none'">
         🚪 Cerrar sesión
       </button>
     </div>
@@ -1196,8 +1250,9 @@
       <span id="sideUserName">—</span>
       <span class="side-user-role">Operador</span>
     </div>
-    <!-- Chevron up -->
-    <svg width="10" height="10" viewBox="0 0 16 16" fill="#475569" style="flex-shrink:0">
+    <!-- Chevron up (animado cuando menú abierto) -->
+    <svg id="sideChevron" width="11" height="11" viewBox="0 0 16 16" fill="#475569"
+         style="flex-shrink:0;transition:transform .2s">
       <path d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"/>
     </svg>
   </div>
