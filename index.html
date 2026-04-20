@@ -441,6 +441,129 @@
       0%,80%,100%{ opacity:.2;transform:scale(.8); }
       40%        { opacity:1;transform:scale(1.2); }
     }
+
+    /* ═══════════════════════════════════════════════════════
+       SIDEBAR — barra lateral izquierda para tablet landscape
+    ═══════════════════════════════════════════════════════ */
+    #sideNav {
+      display: none;
+      position: fixed; left:0; top:0; bottom:0; width:80px; z-index:40;
+      background:#0b1120;
+      border-right:1px solid #1e293b;
+      flex-direction:column;
+      align-items:stretch;
+    }
+    /* Logo area */
+    .side-logo-area {
+      display:flex; align-items:center; justify-content:center;
+      padding:14px 0 12px;
+      border-bottom:1px solid #1e293b;
+      flex-shrink:0;
+    }
+    .side-logo-btn {
+      background:none;border:none;cursor:pointer;padding:0;
+      font-size:19px;font-weight:900;line-height:1;
+      -webkit-tap-highlight-color:transparent;
+      transition:opacity .12s;
+    }
+    .side-logo-btn:active { opacity:.6; }
+    /* Nav items */
+    .side-items {
+      flex:1; display:flex; flex-direction:column;
+      padding:10px 6px; gap:3px; overflow-y:auto;
+    }
+    .side-btn {
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:5px; padding:11px 4px 10px; border-radius:12px;
+      border:none; background:none; cursor:pointer;
+      color:#64748b;
+      font-size:9.5px; font-weight:700; letter-spacing:.04em; text-align:center;
+      transition:background .13s,color .13s; width:100%;
+      -webkit-tap-highlight-color:transparent; position:relative;
+    }
+    .side-btn:active { background:rgba(255,255,255,.05); }
+    .side-btn.nav-btn.active {
+      background:rgba(96,165,250,.13);
+      color:#60a5fa;
+      box-shadow:inset 0 0 0 1px rgba(96,165,250,.18);
+    }
+    .side-btn-label { line-height:1; }
+    /* User card (bottom of sidebar) */
+    #sideUserCard {
+      flex-shrink:0;
+      border-top:1px solid #1e293b;
+      padding:10px 8px 12px;
+      display:flex; flex-direction:column; align-items:center; gap:6px;
+      cursor:pointer; position:relative;
+      transition:background .12s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    #sideUserCard:active { background:rgba(255,255,255,.04); }
+    #sideAvatar {
+      width:36px; height:36px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      font-size:13px; font-weight:900; color:#fff; background:#475569; flex-shrink:0;
+    }
+    .side-user-name-row {
+      display:flex; align-items:center; gap:4px; width:100%; justify-content:center;
+    }
+    #sideUserName {
+      font-size:9px; font-weight:700; color:#94a3b8;
+      max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    }
+    /* User popup menu — aparece arriba y a la derecha del sidebar */
+    #sideUserMenu {
+      display:none; position:absolute; bottom:calc(100% + 6px); left:88px;
+      min-width:172px; background:#1e293b; border:1px solid #334155;
+      border-radius:14px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.7);
+      z-index:50;
+    }
+    #sideUserMenu.open { display:block; }
+    .side-user-menu-hdr {
+      padding:10px 14px 8px; border-bottom:1px solid #334155;
+    }
+
+    /* ═══════════════════════════════════════════════════════
+       TABLET LANDSCAPE — 768px+ en horizontal
+    ═══════════════════════════════════════════════════════ */
+    @media (min-width:768px) and (orientation:landscape) {
+      /* Mostrar sidebar, ocultar bottom nav */
+      #sideNav   { display:flex; }
+      #bottomNav { display:none !important; }
+
+      /* Topbar: desplazar a la derecha del sidebar, ocultar logo y avatar */
+      #topBar    { margin-left:80px; }
+      #whLogo, #topBarSep, #topBarRight { display:none !important; }
+
+      /* Contenido principal: margen izquierdo + sin padding-bottom para bottom-nav */
+      #mainContent { margin-left:80px; padding-bottom:20px; padding-left:16px; padding-right:16px; padding-top:16px; }
+
+      /* FAB de pre-ingreso: sube porque no hay bottom nav */
+      .pre-fab-ico { bottom:20px; right:20px; }
+
+      /* Cards un poco más grandes */
+      .pre-card { padding:14px 16px; grid-template-rows:28px 20px 28px; row-gap:6px; font-size:13px; }
+      .guia-card { padding:14px 16px; grid-template-rows:20px 26px 20px; row-gap:6px; font-size:13px; }
+      .pre-date-hdr { font-size:11px; padding:12px 2px 6px; }
+
+      /* Grid de cards: 2 columnas en tablet (más espaciosas) */
+      #listPreingresos, #listGuias { gap:10px; }
+
+      /* Textos base más grandes en vistas */
+      .view .text-sm  { font-size:14px !important; }
+      .view .text-xs  { font-size:12px !important; }
+      .view .text-base{ font-size:15px !important; }
+
+      /* KPIs del dashboard: 4 columnas */
+      #view-dashboard > div:first-child { grid-template-columns:repeat(4,1fr) !important; }
+
+      /* Sheets más altas en tablet */
+      .bottom-sheet { max-height:88vh; }
+
+      /* Input y btn un toque más grandes */
+      .input { font-size:15px !important; padding:10px 13px !important; }
+      .btn   { font-size:14px !important; padding:11px 16px !important; }
+    }
   </style>
   <!-- ── PWA Install prompt ── -->
   <script>
@@ -534,13 +657,13 @@
       <span id="logoAlertDot" class="hidden"></span>
     </button>
     <!-- Separador visual -->
-    <span class="text-slate-700 flex-shrink-0" style="font-size:16px;line-height:1">|</span>
+    <span id="topBarSep" class="text-slate-700 flex-shrink-0" style="font-size:16px;line-height:1">|</span>
     <span id="modoIndicador" class="hidden modo-badge flex-shrink-0">⚡ENV</span>
     <h1 id="pageTitle" class="font-semibold text-xs text-slate-400 truncate">Dashboard</h1>
   </div>
 
   <!-- Derecha: estado + avatar con dropdown -->
-  <div class="flex items-center gap-2">
+  <div id="topBarRight" class="flex items-center gap-2">
     <div class="flex items-center gap-1.5">
       <span id="statusDot" class="w-2 h-2 rounded-full bg-slate-500"></span>
       <span id="statusLabel" class="text-xs text-slate-400 hidden sm:block">—</span>
@@ -989,6 +1112,86 @@
   </section>
 
 </main>
+
+<!-- ════════════════════════════════════════════════
+     SIDEBAR — barra lateral (tablet landscape)
+═══════════════════════════════════════════════════ -->
+<nav id="sideNav">
+
+  <!-- Logo -->
+  <div class="side-logo-area">
+    <button class="side-logo-btn" onclick="App.nav('dashboard')" title="Dashboard">
+      <span class="wh-w">W</span><span class="wh-h">H</span>
+    </button>
+  </div>
+
+  <!-- Items de navegación -->
+  <div class="side-items">
+
+    <!-- Guías -->
+    <button class="nav-btn side-btn" data-view="guias" onclick="App.nav('guias')">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
+      </svg>
+      <span class="side-btn-label">Guías</span>
+    </button>
+
+    <!-- Productos -->
+    <button class="nav-btn side-btn" data-view="productos" onclick="App.nav('productos')" style="position:relative">
+      <span style="position:relative;display:inline-flex">
+        <span id="sideNavDotAudit"
+              style="display:none;position:absolute;top:-3px;right:-5px;
+                     width:8px;height:8px;border-radius:50%;
+                     background:#f97316;border:2px solid #0b1120;z-index:2;
+                     box-shadow:0 0 5px rgba(249,115,22,.8)"></span>
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
+        </svg>
+      </span>
+      <span class="side-btn-label" id="sideNavLblProductos">Productos</span>
+    </button>
+
+    <!-- Tools -->
+    <button class="nav-btn side-btn" data-view="tools" onclick="App.nav('tools')">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
+      </svg>
+      <span class="side-btn-label">Tools</span>
+    </button>
+
+  </div>
+
+  <!-- Tarjeta de usuario (bottom) -->
+  <div id="sideUserCard" onclick="App.toggleSideUserMenu()">
+    <!-- Popup menú (aparece arriba del card) -->
+    <div id="sideUserMenu">
+      <div class="side-user-menu-hdr">
+        <p style="font-size:12px;font-weight:800;color:#f1f5f9" id="sideUserMenuName">—</p>
+        <p style="font-size:11px;color:#64748b;margin-top:2px">Operador activo</p>
+      </div>
+      <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.bloquear()"
+              style="width:100%;text-align:left;padding:10px 14px;font-size:13px;color:#cbd5e1;
+                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:8px">
+        🔒 Bloquear
+      </button>
+      <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.confirmarCierre()"
+              style="width:100%;text-align:left;padding:10px 14px;font-size:13px;color:#f87171;
+                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:8px">
+        🚪 Cerrar sesión
+      </button>
+    </div>
+
+    <div id="sideAvatar">?</div>
+    <div class="side-user-name-row">
+      <span id="sideUserName">—</span>
+      <!-- Chevron up -->
+      <svg width="9" height="9" viewBox="0 0 16 16" fill="#475569" style="flex-shrink:0">
+        <path d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"/>
+      </svg>
+    </div>
+  </div>
+
+</nav>
 
 <!-- ════════════════════════════════════════════════
      NAVBAR INFERIOR — 3 módulos uniformes

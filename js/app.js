@@ -388,11 +388,22 @@ const Session = (() => {
     window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
     window.WH_CONFIG.idSesion  = sesionActual.idSesion;
 
-    // Avatar header
+    // Avatar header (top bar)
     const av = document.getElementById('topAvatar');
     av.textContent   = sesionActual.nombre[0] + sesionActual.apellido[0];
     av.style.background = sesionActual.color;
     document.getElementById('usuarioNombre').textContent = sesionActual.nombre;
+
+    // Avatar sidebar (tablet)
+    const sideAv = document.getElementById('sideAvatar');
+    if (sideAv) {
+      sideAv.textContent   = sesionActual.nombre[0] + sesionActual.apellido[0];
+      sideAv.style.background = sesionActual.color;
+    }
+    const sideNm = document.getElementById('sideUserName');
+    if (sideNm) sideNm.textContent = sesionActual.nombre;
+    const sideMnNm = document.getElementById('sideUserMenuName');
+    if (sideMnNm) sideMnNm.textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
 
     _mostrarApp();
     _iniciarTimerBloqueo();
@@ -819,7 +830,6 @@ const App = (() => {
     if (!m) return;
     m.classList.toggle('hidden');
     if (!m.classList.contains('hidden')) {
-      // cerrar al tocar fuera
       setTimeout(() => document.addEventListener('click', _closeMenuOutside, { once: true }), 10);
     }
   }
@@ -828,6 +838,24 @@ const App = (() => {
   }
   function _closeMenuOutside(e) {
     if (!document.getElementById('userMenu')?.contains(e.target)) closeUserMenu();
+  }
+
+  // ── Menú de usuario del sidebar (tablet) ─────────────────
+  function toggleSideUserMenu() {
+    const m = document.getElementById('sideUserMenu');
+    if (!m) return;
+    const isOpen = m.classList.contains('open');
+    m.classList.toggle('open', !isOpen);
+    if (!isOpen) {
+      setTimeout(() => document.addEventListener('click', _closeSideMenuOutside, { once: true }), 10);
+    }
+  }
+  function closeSideUserMenu() {
+    document.getElementById('sideUserMenu')?.classList.remove('open');
+  }
+  function _closeSideMenuOutside(e) {
+    const card = document.getElementById('sideUserCard');
+    if (card && !card.contains(e.target)) closeSideUserMenu();
   }
 
   // ── Tools view ────────────────────────────────────────────
@@ -1000,6 +1028,7 @@ const App = (() => {
   return { init, nav, abrirMas, navMas,
            toggleModoEnvasador,
            toggleUserMenu, closeUserMenu,
+           toggleSideUserMenu, closeSideUserMenu,
            syncForzado, checkUpdate,
            instalarPWA: () => window._installPWA?.(),
            cargarDashboard, showUsuarioDialog,
@@ -4712,9 +4741,11 @@ const ProductosView = (() => {
       btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 2A3.5 3.5 0 0 0 2 5.5v5A3.5 3.5 0 0 0 5.5 14h5a3.5 3.5 0 0 0 3.5-3.5V8a.5.5 0 0 1 1 0v2.5a4.5 4.5 0 0 1-4.5 4.5h-5A4.5 4.5 0 0 1 1 10.5v-5A4.5 4.5 0 0 1 5.5 1H8a.5.5 0 0 1 0 1H5.5z"/><path d="M16 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></svg> ${pend}&nbsp;<span style="opacity:.6;font-weight:400">/ ${total}</span>`;
       btn.className = 'audit-badge audit-badge-pending' + (_auditModo ? ' active' : '');
     }
-    // Punto naranja en el nav: visible mientras haya pendientes
+    // Punto naranja en el nav (bottom + sidebar)
     const dot = document.getElementById('navDotAudit');
     if (dot) dot.style.display = pend > 0 ? '' : 'none';
+    const sideDot = document.getElementById('sideNavDotAudit');
+    if (sideDot) sideDot.style.display = pend > 0 ? '' : 'none';
   }
 
   function toggleAuditoriaDia() {
