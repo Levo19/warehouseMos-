@@ -2092,17 +2092,23 @@ const GuiasView = (() => {
     });
     const comInput = document.getElementById('guiaComentario');
     if (comInput) comInput.value = '';
-    // Poblar proveedor select
+    // Poblar proveedor select (solo la primera vez)
     const provSel = document.getElementById('guiaProveedor');
-    if (provSel && provSel.options.length <= 1) {
-      const provs = OfflineManager.getProveedoresCache();
-      provs.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.idProveedor;
-        opt.textContent = p.nombre || p.idProveedor;
-        provSel.appendChild(opt);
-      });
+    if (provSel) {
+      if (provSel.options.length <= 1) {
+        const provs = OfflineManager.getProveedoresCache();
+        provs.forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.idProveedor;
+          opt.textContent = p.nombre || p.idProveedor;
+          provSel.appendChild(opt);
+        });
+      }
+      provSel.value = ''; // siempre limpiar selección
     }
+    // Reset zona
+    const zonaEl = document.getElementById('guiaZona');
+    if (zonaEl) zonaEl.value = '';
     // Reset tipo/prov/zona rows
     const tipoEl = document.getElementById('guiaTipo');
     if (tipoEl) {
