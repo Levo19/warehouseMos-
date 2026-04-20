@@ -2868,11 +2868,14 @@ const PreingresosView = (() => {
     const fechaCorta  = _fmtCorta(p.fecha);
 
     // Tags top-right (compactos)
+    let nCargadores = 0;
+    try { const c = JSON.parse(p.cargadores || '[]'); nCargadores = Array.isArray(c) ? c.length : 0; } catch {}
     const tagHtml = [
       tags.compl === 'si' ? '<span class="pre-qtag pre-qtag-green">Completo</span>'   : '',
       tags.compl === 'no' ? '<span class="pre-qtag pre-qtag-amber">Incompleto</span>' : '',
       tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comprobante</span>' : '',
       nFotos > 0          ? `<span class="pre-qtag pre-qtag-slate">📷${nFotos}</span>` : '',
+      nCargadores > 0     ? `<span class="pre-qtag" style="background:#451a03;color:#fbbf24">🛺${nCargadores}</span>` : '',
     ].filter(Boolean).join('');
 
     // Bottom-right: crear guía OR guía icon
