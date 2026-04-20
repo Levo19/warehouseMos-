@@ -40,7 +40,15 @@
     body { font-family: 'Segoe UI', system-ui, sans-serif; background:#0f172a; color:#f1f5f9; }
     .view { display:none; }
     .view.active { display:block; }
-    .nav-btn.active { color:#3b82f6; border-top:2px solid #3b82f6; }
+    /* Nav bar */
+    .nav-btn.active { color:#3b82f6; }
+    #navBtnProductos { transition:background .2s, box-shadow .2s; }
+    #navBtnProductos.active {
+      background:linear-gradient(145deg,#1d4ed8,#1e40af) !important;
+      color:#fff !important;
+      box-shadow:0 -4px 20px rgba(59,130,246,.45),0 2px 8px rgba(0,0,0,.5) !important;
+    }
+    #navBtnProductos.active ~ #navLblProductos { color:#60a5fa !important; }
     .badge { display:inline-flex;align-items:center;justify-content:center;
              min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700; }
     .card { background:#1e293b;border-radius:12px;padding:16px; }
@@ -79,7 +87,7 @@
     .filter-menu button:hover, .filter-menu button.sel { background:#0f172a;color:#fff; }
     .filter-menu button.sel { color:#60a5fa; }
     /* Fab pill */
-    .fab-pill { position:fixed;bottom:76px;right:16px;display:flex;align-items:center;gap:8px;
+    .fab-pill { position:fixed;bottom:88px;right:16px;display:flex;align-items:center;gap:8px;
                 background:#1d4ed8;color:#fff;padding:12px 20px;border-radius:12px;
                 font-weight:700;font-size:13px;letter-spacing:.06em;border:none;cursor:pointer;
                 box-shadow:0 4px 20px rgba(29,78,216,.5);transition:transform .1s; }
@@ -226,7 +234,7 @@
     .card-optimistic { animation:pulse-border 1.1s ease-in-out infinite; background:#0e1e33 !important; }
     /* FAB icon — preingresos */
     .pre-fab-ico {
-      position:fixed; bottom:76px; right:16px;
+      position:fixed; bottom:88px; right:16px;
       width:40px; height:40px; border-radius:50%;
       background:#1d4ed8; color:#fff; border:none; cursor:pointer;
       box-shadow:0 4px 20px rgba(29,78,216,.5);
@@ -367,11 +375,30 @@
     .card-hi  { background:#1e2a3a !important; }
     /* Auditoría diaria */
     .audit-badge { display:inline-flex;align-items:center;gap:5px;padding:5px 11px;
-      border-radius:20px;border:none;cursor:pointer;font-weight:700;font-size:12px;
-      letter-spacing:.02em;transition:all .15s; }
-    .audit-badge-pending { background:#78350f;color:#fde68a;box-shadow:0 0 0 1px #92400e; }
-    .audit-badge-pending:active,.audit-badge-pending.active { box-shadow:0 0 0 2px #f59e0b; }
-    .audit-badge-done    { background:#14532d;color:#86efac;box-shadow:0 0 0 1px #166534; }
+      border-radius:20px;cursor:pointer;font-weight:700;font-size:12px;
+      letter-spacing:.02em;transition:opacity .15s;
+      border:2px solid transparent; }
+    /* Rotating golden border for pending audits */
+    @property --aud-angle {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+    @keyframes aud-border-spin {
+      to { --aud-angle: 360deg; }
+    }
+    .audit-badge-pending {
+      color:#fde68a;
+      background:
+        linear-gradient(#78350f,#78350f) padding-box,
+        conic-gradient(from var(--aud-angle),
+          #fbbf24 0deg, #f97316 55deg,
+          #92400e 105deg, #92400e 255deg,
+          #fbbf24 305deg) border-box;
+      animation: aud-border-spin 2.2s linear infinite;
+    }
+    .audit-badge-pending:active,.audit-badge-pending.active { opacity:.82; }
+    .audit-badge-done { background:#14532d;color:#86efac;border-color:#166534; }
     .audit-card { border-left-color:#f59e0b !important;
       box-shadow:0 0 0 1px rgba(245,158,11,.25),0 2px 8px rgba(0,0,0,.3) !important; }
     .audit-card-done { border-left-color:#22c55e !important;opacity:.5; }
@@ -919,51 +946,62 @@
 </main>
 
 <!-- ════════════════════════════════════════════════
-     NAVBAR INFERIOR
+     NAVBAR INFERIOR — 3 módulos, Productos destacado
 ═══════════════════════════════════════════════════ -->
-<nav class="fixed bottom-0 left-0 right-0 flex border-t z-30"
-     style="background:#0f172a;border-color:#1e293b;">
+<nav id="bottomNav"
+     style="position:fixed;bottom:0;left:0;right:0;z-index:30;height:66px;
+            background:#0f172a;border-top:1px solid #1e293b;overflow:visible;">
+  <div style="display:flex;height:100%;overflow:visible;">
 
-  <button data-view="guias" onclick="App.nav('guias')"
-          class="nav-btn flex-1 flex flex-col items-center py-2 gap-0.5 text-slate-400" style="font-size:10px">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
-    </svg>
-    Guías
-  </button>
+    <!-- Guías -->
+    <button data-view="guias" onclick="App.nav('guias')"
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1.5 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;padding-bottom:6px">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
+      </svg>
+      Guías
+    </button>
 
-  <button data-view="envasados" onclick="App.nav('envasados')"
-          class="nav-btn flex-1 flex flex-col items-center py-2 gap-0.5 text-slate-400" style="font-size:10px">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5 8 5.961 14.154 3.5 8.186 1.113zM15 4.239l-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
-    </svg>
-    Envasados
-  </button>
+    <!-- Productos — módulo central elevado -->
+    <div class="flex-1 flex flex-col items-center" style="position:relative;overflow:visible;">
+      <!-- Círculo elevado -->
+      <button id="navBtnProductos" data-view="productos" onclick="App.nav('productos')"
+              class="nav-btn"
+              style="position:absolute;bottom:8px;width:58px;height:58px;border-radius:50%;
+                     background:linear-gradient(145deg,#1e3a5f,#0f2748);
+                     border:3px solid #0f172a;
+                     box-shadow:0 -4px 16px rgba(59,130,246,.2),0 2px 8px rgba(0,0,0,.5);
+                     display:flex;align-items:center;justify-content:center;
+                     color:#94a3b8;padding:0;">
+        <!-- Punto naranja de auditoría pendiente -->
+        <span id="navDotAudit"
+              style="display:none;position:absolute;top:6px;right:5px;
+                     width:10px;height:10px;border-radius:50%;
+                     background:#f97316;border:2px solid #0f172a;z-index:2;
+                     box-shadow:0 0 6px rgba(249,115,22,.7)"></span>
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
+        </svg>
+      </button>
+      <!-- Label en la parte baja del nav -->
+      <span id="navLblProductos"
+            style="position:absolute;bottom:5px;font-size:9px;font-weight:600;
+                   color:#64748b;letter-spacing:.05em;pointer-events:none;
+                   transition:color .2s;">Productos</span>
+    </div>
 
-  <button data-view="mermas" onclick="App.nav('mermas')"
-          class="nav-btn flex-1 flex flex-col items-center py-2 gap-0.5 text-slate-400" style="font-size:10px">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
-    </svg>
-    Mermas
-  </button>
+    <!-- Tools -->
+    <button data-view="tools" onclick="App.nav('tools')"
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1.5 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;padding-bottom:6px">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
+      </svg>
+      Tools
+    </button>
 
-  <button data-view="productos" onclick="App.nav('productos')"
-          class="nav-btn flex-1 flex flex-col items-center py-2 gap-0.5 text-slate-400" style="font-size:10px">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
-    </svg>
-    Productos
-  </button>
-
-  <button data-view="tools" onclick="App.nav('tools')"
-          class="nav-btn flex-1 flex flex-col items-center py-2 gap-0.5 text-slate-400" style="font-size:10px">
-    <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
-    </svg>
-    Tools
-  </button>
-
+  </div>
 </nav>
 
 
