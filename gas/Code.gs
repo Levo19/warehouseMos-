@@ -366,10 +366,9 @@ function descargarMaestros() {
     }) : [];
   } catch(e) { errores.push('impresoras: ' + e.message); }
 
-  // ZONAS (hoja local en warehouseMos)
+  // ZONAS — desde MOS master (puntos de venta activos)
   try {
-    var whSS = SpreadsheetApp.getActiveSpreadsheet();
-    var zonasSheet = whSS.getSheetByName('ZONAS');
+    var zonasSheet = mosSS.getSheetByName('ZONAS');
     result.zonas = zonasSheet ? _sheetToObjects(zonasSheet).filter(function(z) {
       return String(z.estado) === '1';
     }) : [];
