@@ -666,7 +666,7 @@ function crearPreingreso(params) {
   _set('idPreingreso', id);
   _set('fecha',        new Date());
   _set('idProveedor',  params.idProveedor  || '');
-  _set('idCargador',   params.idCargador   || '');
+  _set('cargadores',   params.cargadores   || '');
   _set('usuario',      params.usuario      || '');
   _set('monto',        parseFloat(params.monto) || 0);
   _set('fotos',        params.fotos        || '');

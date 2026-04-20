@@ -3427,44 +3427,81 @@ const PreingresosView = (() => {
     document.getElementById('preProvSelBox').classList.add('hidden');
   }
 
-  // ── Picker de cargadores ─────────────────────────────────
+  // ── Cargadores: lista con contador de carretas ───────────
+  let _cargadores = []; // [{ id, nombre, carretas }]
+
+  function _renderCargadores() {
+    const list = document.getElementById('preCargadoresList');
+    if (!list) return;
+    if (!_cargadores.length) { list.innerHTML = ''; return; }
+    list.innerHTML = _cargadores.map((c, i) => `
+      <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
+        <span class="text-amber-400 text-xs">🛺</span>
+        <span class="text-amber-200 text-xs flex-1">${escAttr(c.nombre)}</span>
+        <div class="flex items-center gap-1">
+          <button onclick="PreingresosView.cambiarCarretas(${i},-1)"
+                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
+                  style="background:#334155">−</button>
+          <span class="text-amber-300 text-xs font-bold min-w-[1.2rem] text-center">${c.carretas}</span>
+          <button onclick="PreingresosView.cambiarCarretas(${i},1)"
+                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
+                  style="background:#334155">+</button>
+        </div>
+        <button onclick="PreingresosView.quitarCargador(${i})"
+                class="text-slate-500 hover:text-red-400 text-sm leading-none ml-1">×</button>
+      </div>`).join('');
+  }
+
   function abrirPickerCargador() {
-    const cargadores = OfflineManager.getProveedoresCache()
+    const todos = OfflineManager.getProveedoresCache()
       .filter(p => (p.nombre || '').toLowerCase().startsWith('cargador'));
-    if (!cargadores.length) { toast('No hay cargadores registrados', 'warn'); return; }
-    // Usar un sheet simple inline
+    if (!todos.length) { toast('No hay cargadores registrados', 'warn'); return; }
+    // Excluir los ya agregados
+    const yaIds = _cargadores.map(c => c.id);
+    const disponibles = todos.filter(p => !yaIds.includes(p.idProveedor));
+    if (!disponibles.length) { toast('Ya agregaste todos los cargadores disponibles', 'info'); return; }
     const existing = document.getElementById('sheetCargadores');
     if (existing) existing.remove();
     const sheet = document.createElement('div');
     sheet.id = 'sheetCargadores';
-    sheet.className = 'bottom-sheet open';
-    sheet.style.cssText = 'max-height:60vh;z-index:9999;position:fixed;bottom:0;left:0;right:0;padding:1.25rem;background:#0f172a;border-top:1px solid #1e293b;border-radius:1rem 1rem 0 0';
+    sheet.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:1.25rem;background:#0f172a;border-top:1px solid #1e293b;border-radius:1rem 1rem 0 0;max-height:60vh;overflow-y:auto';
     sheet.innerHTML = `
       <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-      <p class="font-bold text-sm mb-3 text-amber-300">🛺 Seleccionar Cargador</p>
-      <div class="space-y-2 overflow-y-auto" style="max-height:calc(60vh - 80px)">
-        ${cargadores.map(c => `
-          <button onclick="PreingresosView.seleccionarCargador('${c.idProveedor}','${escAttr(c.nombre)}')"
-                  class="w-full text-left px-3 py-2.5 rounded-lg text-sm text-slate-200 hover:bg-slate-700 transition-colors"
+      <p class="font-bold text-sm mb-3 text-amber-300">🛺 Agregar Cargador</p>
+      <div class="space-y-2">
+        ${disponibles.map(c => `
+          <button onclick="PreingresosView.agregarCargador('${c.idProveedor}','${escAttr(c.nombre)}')"
+                  class="w-full text-left px-3 py-2.5 rounded-lg text-sm text-slate-200 transition-colors"
                   style="background:#1e293b;border:1px solid #334155">
             ${c.nombre}
           </button>`).join('')}
       </div>
       <button onclick="document.getElementById('sheetCargadores').remove()"
-              class="mt-3 w-full text-xs text-slate-500 py-2">Cancelar</button>`;
+              class="mt-4 w-full text-xs text-slate-500 py-2">Cancelar</button>`;
     document.body.appendChild(sheet);
   }
 
-  function seleccionarCargador(id, nombre) {
-    document.getElementById('preCargadorId').value = id;
-    document.getElementById('preCargadorNombre').textContent = nombre;
-    document.getElementById('preCargadorBox').classList.remove('hidden');
+  function agregarCargador(id, nombre) {
+    if (_cargadores.find(c => c.id === id)) return; // evitar duplicado
+    _cargadores.push({ id, nombre, carretas: 1 });
+    _renderCargadores();
     document.getElementById('sheetCargadores')?.remove();
   }
 
+  function cambiarCarretas(idx, delta) {
+    if (!_cargadores[idx]) return;
+    _cargadores[idx].carretas = Math.max(1, _cargadores[idx].carretas + delta);
+    _renderCargadores();
+  }
+
+  function quitarCargador(idx) {
+    _cargadores.splice(idx, 1);
+    _renderCargadores();
+  }
+
   function limpiarCargador() {
-    document.getElementById('preCargadorId').value = '';
-    document.getElementById('preCargadorBox').classList.add('hidden');
+    _cargadores = [];
+    _renderCargadores();
   }
 
   // ── Crear preingreso (optimista) ─────────────────────────
@@ -3491,9 +3528,9 @@ const PreingresosView = (() => {
     cerrarSheet('sheetPreingreso');
 
     // 1. Crear preingreso con ID generado en cliente (evita duplicados por retry)
-    const idCargador  = document.getElementById('preCargadorId')?.value || '';
     const idPreingreso = 'PI' + Date.now();
-    const res = await API.crearPreingreso({ idPreingreso, idProveedor, idCargador, monto, comentario, usuario: window.WH_CONFIG.usuario })
+    const cargadores   = _cargadores.length ? JSON.stringify(_cargadores) : '';
+    const res = await API.crearPreingreso({ idPreingreso, idProveedor, cargadores, monto, comentario, usuario: window.WH_CONFIG.usuario })
       .catch(() => ({ ok: false, error: 'Sin conexión' }));
 
     if (!res.ok) {
@@ -3581,7 +3618,7 @@ const PreingresosView = (() => {
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
-           abrirPickerCargador, seleccionarCargador, limpiarCargador };
+           abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador };
 })();
 
 // ════════════════════════════════════════════════

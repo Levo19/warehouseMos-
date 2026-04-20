@@ -1375,13 +1375,8 @@
         <span class="text-emerald-400 text-xs flex-1" id="preProvSelNombre"></span>
         <button onclick="PreingresosView.limpiarProveedor()" class="text-slate-500 hover:text-red-400 text-sm leading-none">×</button>
       </div>
-      <!-- Cargador seleccionado -->
-      <div id="preCargadorBox" class="hidden mt-1.5 flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1a0a;border:1px solid #854d0e">
-        <span class="text-amber-400 text-xs">🛺</span>
-        <span class="text-amber-300 text-xs flex-1" id="preCargadorNombre"></span>
-        <input type="hidden" id="preCargadorId"/>
-        <button onclick="PreingresosView.limpiarCargador()" class="text-slate-500 hover:text-red-400 text-sm leading-none">×</button>
-      </div>
+      <!-- Lista de cargadores seleccionados -->
+      <div id="preCargadoresList" class="mt-1.5 space-y-1"></div>
     </div>
 
     <!-- Monto (visible solo si tag "con comprobante") -->
