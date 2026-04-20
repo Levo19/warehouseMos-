@@ -326,7 +326,7 @@ function descargarMaestros() {
   try { mosSS = _getMosSS(); }
   catch(e) { return { ok: false, error: e.message }; }
 
-  var result = { productos: [], equivalencias: [], proveedores: [], personal: [], impresoras: [] };
+  var result = { productos: [], equivalencias: [], proveedores: [], personal: [], impresoras: [], zonas: [] };
   var errores = [];
 
   // PRODUCTOS_MASTER
@@ -365,6 +365,15 @@ function descargarMaestros() {
              String(r.activo) === '1';
     }) : [];
   } catch(e) { errores.push('impresoras: ' + e.message); }
+
+  // ZONAS (hoja local en warehouseMos)
+  try {
+    var whSS = SpreadsheetApp.getActiveSpreadsheet();
+    var zonasSheet = whSS.getSheetByName('ZONAS');
+    result.zonas = zonasSheet ? _sheetToObjects(zonasSheet).filter(function(z) {
+      return String(z.estado) === '1';
+    }) : [];
+  } catch(e) { errores.push('zonas: ' + e.message); }
 
   // ESTACIONES — adminPin de ALMACEN (para reabrir guías)
   try {

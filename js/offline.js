@@ -10,6 +10,7 @@ const OfflineManager = (() => {
     STOCK:         'wh_stock',
     PROVEEDORES:   'wh_proveedores',
     IMPRESORAS:    'wh_impresoras',
+    ZONAS:         'wh_zonas',
     CONFIG:      'wh_config',
     QUEUE:       'wh_queue',
     LAST_SYNC:   'wh_last_sync',
@@ -79,6 +80,7 @@ const OfflineManager = (() => {
         if (d.equivalencias != null) { guardar(KEYS.EQUIVALENCIAS, d.equivalencias); maestrosChanged.push('equivalencias'); }
         if (d.proveedores   != null) guardar(KEYS.PROVEEDORES,   d.proveedores);
         if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,    d.impresoras);
+        if (d.zonas         != null) guardar(KEYS.ZONAS,         d.zonas);
         if (d.adminPin)            localStorage.setItem(KEYS.ADMIN_PIN, d.adminPin);
         if (maestros.errores?.length) console.warn('[Offline] descargarMaestros errores:', maestros.errores);
       } else {
@@ -238,6 +240,7 @@ const OfflineManager = (() => {
   const getStockCache         = () => cargar(KEYS.STOCK)         || [];
   const getProveedoresCache   = () => cargar(KEYS.PROVEEDORES)   || [];
   const getImpresorasCache    = () => cargar(KEYS.IMPRESORAS)    || [];
+  const getZonasCache         = () => cargar(KEYS.ZONAS)         || [];
   const getConfigCache        = () => cargar(KEYS.CONFIG)        || {};
   const getGuiasCache         = () => cargar(KEYS.GUIAS)         || [];
   const getGuiaDetalleCache   = () => cargar(KEYS.GUIA_DETALLE)  || [];
@@ -270,7 +273,7 @@ const OfflineManager = (() => {
     _guardarPersonalConPin,
     getPersonalCache, getProductosCache, getEquivalenciasCache,
     getStockCache, getProveedoresCache,
-    getImpresorasCache, getConfigCache,
+    getImpresorasCache, getZonasCache, getConfigCache,
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     getAdminPin,

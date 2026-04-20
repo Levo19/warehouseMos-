@@ -2119,9 +2119,20 @@ const GuiasView = (() => {
       }
       provSel.value = ''; // siempre limpiar selección
     }
-    // Reset zona
+    // Poblar zonas select (dinámico desde caché)
     const zonaEl = document.getElementById('guiaZona');
-    if (zonaEl) zonaEl.value = '';
+    if (zonaEl) {
+      const zonas = OfflineManager.getZonasCache();
+      // Reconstruir siempre para reflejar cambios en Sheets
+      zonaEl.innerHTML = '<option value="">— Seleccionar —</option>';
+      zonas.forEach(z => {
+        const opt = document.createElement('option');
+        opt.value = z.idZona;
+        opt.textContent = z.nombre || z.idZona;
+        zonaEl.appendChild(opt);
+      });
+      zonaEl.value = '';
+    }
     // Reset tipo/prov/zona rows
     const tipoEl = document.getElementById('guiaTipo');
     if (tipoEl) {
@@ -2289,7 +2300,17 @@ const GuiasView = (() => {
     }
     if (provSel) provSel.value = g.idProveedor || '';
     const zonaEl = document.getElementById('guiaZona');
-    if (zonaEl) zonaEl.value = g.idZona || '';
+    if (zonaEl) {
+      const zonas = OfflineManager.getZonasCache();
+      zonaEl.innerHTML = '<option value="">— Seleccionar —</option>';
+      zonas.forEach(z => {
+        const opt = document.createElement('option');
+        opt.value = z.idZona;
+        opt.textContent = z.nombre || z.idZona;
+        zonaEl.appendChild(opt);
+      });
+      zonaEl.value = g.idZona || '';
+    }
     const numDocEl = document.getElementById('guiaNumDoc');
     if (numDocEl) numDocEl.value = g.numeroDocumento || '';
 
