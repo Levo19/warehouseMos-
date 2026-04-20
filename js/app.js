@@ -3906,7 +3906,7 @@ const ProductosView = (() => {
     document.getElementById('histCodigo').textContent   = codigos.length > 1
       ? `${codigos[0]} +${codigos.length - 1} más`
       : codigos[0];
-    document.getElementById('histPrintPanel').classList.add('hidden');
+    document.getElementById('histPrintPanel')?.classList.add('hidden');
     document.getElementById('histList').innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
     abrirSheet('sheetHistorial');
 
