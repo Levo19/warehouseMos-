@@ -445,9 +445,12 @@
     /* ═══════════════════════════════════════════════════════
        SIDEBAR — barra lateral izquierda para tablet landscape
     ═══════════════════════════════════════════════════════ */
+    /* Sidebar width token — cambiar aquí para ajustar todo */
+    :root { --sidebar-w: 130px; }
+
     #sideNav {
       display: none;
-      position: fixed; left:0; top:0; bottom:0; width:80px; z-index:40;
+      position: fixed; left:0; top:0; bottom:0; width:var(--sidebar-w); z-index:40;
       background:#0b1120;
       border-right:1px solid #1e293b;
       flex-direction:column;
@@ -456,28 +459,29 @@
     /* Logo area */
     .side-logo-area {
       display:flex; align-items:center; justify-content:center;
-      padding:14px 0 12px;
+      padding:16px 10px 14px;
       border-bottom:1px solid #1e293b;
       flex-shrink:0;
     }
     .side-logo-btn {
       background:none;border:none;cursor:pointer;padding:0;
-      font-size:19px;font-weight:900;line-height:1;
+      font-size:20px;font-weight:900;line-height:1;
       -webkit-tap-highlight-color:transparent;
-      transition:opacity .12s;
+      transition:opacity .12s; position:relative;
     }
     .side-logo-btn:active { opacity:.6; }
     /* Nav items */
     .side-items {
       flex:1; display:flex; flex-direction:column;
-      padding:10px 6px; gap:3px; overflow-y:auto;
+      padding:14px 8px; gap:6px; overflow-y:auto;
     }
+    /* Botón de módulo: icono a la izq + nombre a la der */
     .side-btn {
-      display:flex; flex-direction:column; align-items:center; justify-content:center;
-      gap:5px; padding:11px 4px 10px; border-radius:12px;
+      display:flex; flex-direction:row; align-items:center;
+      gap:10px; padding:13px 12px; border-radius:12px;
       border:none; background:none; cursor:pointer;
       color:#64748b;
-      font-size:9.5px; font-weight:700; letter-spacing:.04em; text-align:center;
+      font-size:11.5px; font-weight:700; letter-spacing:.03em; text-align:left;
       transition:background .13s,color .13s; width:100%;
       -webkit-tap-highlight-color:transparent; position:relative;
     }
@@ -487,34 +491,39 @@
       color:#60a5fa;
       box-shadow:inset 0 0 0 1px rgba(96,165,250,.18);
     }
-    .side-btn-label { line-height:1; }
+    .side-btn-label { line-height:1; flex:1; }
+    .side-btn svg { flex-shrink:0; }
     /* User card (bottom of sidebar) */
     #sideUserCard {
       flex-shrink:0;
       border-top:1px solid #1e293b;
-      padding:10px 8px 12px;
-      display:flex; flex-direction:column; align-items:center; gap:6px;
+      padding:12px 10px 14px;
+      display:flex; flex-direction:row; align-items:center; gap:9px;
       cursor:pointer; position:relative;
       transition:background .12s;
       -webkit-tap-highlight-color:transparent;
     }
     #sideUserCard:active { background:rgba(255,255,255,.04); }
     #sideAvatar {
-      width:36px; height:36px; border-radius:50%;
+      width:34px; height:34px; border-radius:50%;
       display:flex; align-items:center; justify-content:center;
-      font-size:13px; font-weight:900; color:#fff; background:#475569; flex-shrink:0;
+      font-size:12px; font-weight:900; color:#fff; background:#475569; flex-shrink:0;
     }
-    .side-user-name-row {
-      display:flex; align-items:center; gap:4px; width:100%; justify-content:center;
+    .side-user-info {
+      flex:1; min-width:0; display:flex; flex-direction:column; gap:1px;
     }
     #sideUserName {
-      font-size:9px; font-weight:700; color:#94a3b8;
-      max-width:52px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      font-size:11px; font-weight:700; color:#cbd5e1;
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
     }
-    /* User popup menu — aparece arriba y a la derecha del sidebar */
+    .side-user-role {
+      font-size:9px; color:#475569; font-weight:500;
+    }
+    /* User popup menu — flota arriba a la derecha del sidebar */
     #sideUserMenu {
-      display:none; position:absolute; bottom:calc(100% + 6px); left:88px;
-      min-width:172px; background:#1e293b; border:1px solid #334155;
+      display:none; position:absolute; bottom:calc(100% + 6px);
+      left:calc(var(--sidebar-w) + 6px);
+      min-width:176px; background:#1e293b; border:1px solid #334155;
       border-radius:14px; overflow:hidden; box-shadow:0 8px 32px rgba(0,0,0,.7);
       z-index:50;
     }
@@ -532,11 +541,11 @@
       #bottomNav { display:none !important; }
 
       /* Topbar: desplazar a la derecha del sidebar, ocultar logo y avatar */
-      #topBar    { margin-left:80px; }
+      #topBar    { margin-left:var(--sidebar-w); }
       #whLogo, #topBarSep, #topBarRight { display:none !important; }
 
       /* Contenido principal: margen izquierdo + sin padding-bottom para bottom-nav */
-      #mainContent { margin-left:80px; padding-bottom:20px; padding-left:16px; padding-right:16px; padding-top:16px; }
+      #mainContent { margin-left:var(--sidebar-w); padding-bottom:20px; padding-left:16px; padding-right:16px; padding-top:16px; }
 
       /* FAB de pre-ingreso: sube porque no hay bottom nav */
       .pre-fab-ico { bottom:20px; right:20px; }
@@ -1118,10 +1127,11 @@
 ═══════════════════════════════════════════════════ -->
 <nav id="sideNav">
 
-  <!-- Logo -->
+  <!-- Logo completo -->
   <div class="side-logo-area">
     <button class="side-logo-btn" onclick="App.nav('dashboard')" title="Dashboard">
-      <span class="wh-w">W</span><span class="wh-h">H</span>
+      <span class="wh-w">W</span><span class="wh-mid" style="max-width:60px;opacity:1;letter-spacing:-.2px">are</span><span class="wh-h">H</span><span class="wh-mid" style="max-width:60px;opacity:1;letter-spacing:-.2px">ouse</span>
+      <span class="wh-glare" aria-hidden="true"></span>
     </button>
   </div>
 
@@ -1182,13 +1192,14 @@
     </div>
 
     <div id="sideAvatar">?</div>
-    <div class="side-user-name-row">
+    <div class="side-user-info">
       <span id="sideUserName">—</span>
-      <!-- Chevron up -->
-      <svg width="9" height="9" viewBox="0 0 16 16" fill="#475569" style="flex-shrink:0">
-        <path d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"/>
-      </svg>
+      <span class="side-user-role">Operador</span>
     </div>
+    <!-- Chevron up -->
+    <svg width="10" height="10" viewBox="0 0 16 16" fill="#475569" style="flex-shrink:0">
+      <path d="M7.646 4.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1-.708.708L8 5.707l-5.646 5.647a.5.5 0 0 1-.708-.708l6-6z"/>
+    </svg>
   </div>
 
 </nav>
