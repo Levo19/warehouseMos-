@@ -714,15 +714,16 @@ const App = (() => {
     // Precarga universal en background ANTES del login (30s cycle)
     OfflineManager.iniciarRefreshOperacional();
 
-    // Escuchar refresh silencioso cada 30s → actualizar vista activa sin flicker
+    // Escuchar refresh silencioso → actualizar vista activa sin flicker
     window.addEventListener('wh:data-refresh', e => {
       const changed = e.detail?.changed || [];
       const guiasChanged       = changed.includes('guias') || changed.includes('detalles');
       const preingresosChanged = changed.includes('preingresos');
       const stockChanged       = changed.includes('stock') || changed.includes('ajustes') || changed.includes('auditorias');
-      if (currentView === 'guias'       && guiasChanged)       GuiasView.silentRefresh();
+      const productosChanged   = changed.includes('productos') || changed.includes('equivalencias') || stockChanged;
+      if (currentView === 'guias'       && guiasChanged)     GuiasView.silentRefresh();
       if (currentView === 'preingresos' && preingresosChanged) PreingresosView.silentRefresh();
-      if (currentView === 'productos'   && stockChanged)       ProductosView.silentRefresh();
+      if (currentView === 'productos'   && productosChanged) ProductosView.silentRefresh();
     });
 
     // Iniciar sesión (muestra login si no hay sesión activa)
@@ -3821,7 +3822,8 @@ const ProductosView = (() => {
       return;
     }
 
-    const qL = query.toLowerCase();
+    const qL     = query.toLowerCase();
+    const tokens = qL.split(/\s+/).filter(Boolean);
 
     // ── Detectar coincidencia exacta (barcode / SKU / idProducto) ──
     let exactGrupo = null;
@@ -3835,15 +3837,16 @@ const ProductosView = (() => {
       }
     }
 
-    // ── Filtrar coincidencias parciales ─────────────────────────────
-    _filtrados = _grupos.filter(g =>
-      String(g.base.descripcion || '').toLowerCase().includes(qL) ||
-      String(g.skuBase || '').toLowerCase().includes(qL) ||
-      g.children.some(c =>
-        String(c.descripcion  || '').toLowerCase().includes(qL) ||
-        String(c.codigoBarra || '').toLowerCase().includes(qL)
-      )
-    );
+    // ── Filtrar: todos los tokens deben aparecer en algún campo ─────
+    _filtrados = _grupos.filter(g => {
+      const haystack = [
+        String(g.base.descripcion || ''),
+        String(g.skuBase || ''),
+        String(g.base.idProducto || ''),
+        ...g.children.map(c => String(c.descripcion  || '') + ' ' + String(c.codigoBarra || ''))
+      ].join(' ').toLowerCase();
+      return tokens.every(t => haystack.includes(t));
+    });
 
     _render(_filtrados);
 

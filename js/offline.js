@@ -69,13 +69,14 @@ const OfflineManager = (() => {
       ]);
 
       console.log('[Offline] descargarMaestros respuesta:', maestros);
+      const maestrosChanged = [];
       if (maestros?.ok) {
         // GAS nuevo — recibe las 4 tablas de MOS
         const d = maestros.data;
         console.log('[Offline] personal recibido:', d?.personal?.length, 'registros');
         if (d.personal      != null) guardar(KEYS.PERSONAL,      d.personal);
-        if (d.productos     != null) guardar(KEYS.PRODUCTOS,     d.productos);
-        if (d.equivalencias != null) guardar(KEYS.EQUIVALENCIAS, d.equivalencias);
+        if (d.productos     != null) { guardar(KEYS.PRODUCTOS,     d.productos);     maestrosChanged.push('productos'); }
+        if (d.equivalencias != null) { guardar(KEYS.EQUIVALENCIAS, d.equivalencias); maestrosChanged.push('equivalencias'); }
         if (d.proveedores   != null) guardar(KEYS.PROVEEDORES,   d.proveedores);
         if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,    d.impresoras);
         if (d.adminPin)            localStorage.setItem(KEYS.ADMIN_PIN, d.adminPin);
@@ -90,7 +91,7 @@ const OfflineManager = (() => {
         ]);
         console.log('[Offline] legacy getPersonalConPin:', personal);
         if (personal?.ok)    guardar(KEYS.PERSONAL,    personal.data);
-        if (productos?.ok)   guardar(KEYS.PRODUCTOS,   productos.data);
+        if (productos?.ok)   { guardar(KEYS.PRODUCTOS,   productos.data);   maestrosChanged.push('productos'); }
         if (proveedores?.ok) guardar(KEYS.PROVEEDORES, proveedores.data);
       }
 
@@ -98,6 +99,9 @@ const OfflineManager = (() => {
       if (config?.ok) guardar(KEYS.CONFIG, config.data);
 
       localStorage.setItem(KEYS.LAST_SYNC, new Date().toLocaleTimeString('es-PE'));
+      if (maestrosChanged.length) {
+        window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: maestrosChanged } }));
+      }
       _notificar();
     } catch(e) {
       console.warn('[Offline] Error en precarga:', e);
@@ -196,12 +200,12 @@ const OfflineManager = (() => {
     } catch(e) { console.warn('[Offline] Error en precarga operacional:', e); }
   }
 
-  // ── Precarga maestros con throttle 5 min ─────────────────
+  // ── Precarga maestros con throttle 55s (1 ciclo del intervalo) ──
   async function _precargarMaestrosThrottled() {
     const last = parseInt(localStorage.getItem(KEYS.LAST_MASTER) || '0', 10);
-    if (Date.now() - last < 5 * 60 * 1000) return; // menos de 5 min → skip
+    if (Date.now() - last < 55 * 1000) return; // menos de 55s → skip
+    localStorage.setItem(KEYS.LAST_MASTER, String(Date.now())); // reservar antes de fetch para evitar solapamiento
     await precargar().catch(() => {});
-    localStorage.setItem(KEYS.LAST_MASTER, String(Date.now()));
   }
 
   // Inicia el refresh automático cada 30s (llamar desde App.init, antes del login)
