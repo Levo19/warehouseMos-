@@ -659,11 +659,20 @@ function crearPreingreso(params) {
     if (data[i][0] === id) return { ok: true, data: { idPreingreso: id } };
   }
 
-  sheet.appendRow([
-    id, new Date(), params.idProveedor || '', params.usuario || '',
-    parseFloat(params.monto) || 0, params.fotos || '', params.comentario || '',
-    'PENDIENTE', ''
-  ]);
+  // Escribir por nombre de columna — funciona con 9 o 12 cols (schema viejo/nuevo)
+  var hdrs = data[0];
+  var row  = new Array(hdrs.length).fill('');
+  function _set(col, val) { var i = hdrs.indexOf(col); if (i >= 0) row[i] = val; }
+  _set('idPreingreso', id);
+  _set('fecha',        new Date());
+  _set('idProveedor',  params.idProveedor || '');
+  _set('usuario',      params.usuario     || '');
+  _set('monto',        parseFloat(params.monto) || 0);
+  _set('fotos',        params.fotos       || '');
+  _set('comentario',   params.comentario  || '');
+  _set('estado',       'PENDIENTE');
+  _set('idGuia',       '');
+  sheet.appendRow(row);
   return { ok: true, data: { idPreingreso: id } };
 }
 

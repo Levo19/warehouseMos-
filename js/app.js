@@ -2691,48 +2691,48 @@ const PreingresosView = (() => {
     _renderFotosEdit();
   }
 
-  // ── Guardar edición ───────────────────────────────────────
+  // ── Guardar edición (optimista) ──────────────────────────
   async function guardarEdicion() {
     if (!_editItem) return;
-    const btn = document.getElementById('btnGuardarPI');
-    btn.disabled = true; btn.textContent = 'Guardando...';
 
-    // Subir fotos nuevas (comprimidas)
-    const idPreingreso = _editItem.idPreingreso;
-    for (let i = 0; i < _fotosNuevas.length; i++) {
-      btn.textContent = `Subiendo foto ${i + 1}/${_fotosNuevas.length}...`;
-      try {
-        const { b64, mime } = await _prepararFoto(_fotosNuevas[i].file);
-        const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: _fotosEdit.length + i + 1 });
-        if (up.ok && !up.offline && up.data?.url) _fotosEdit.push({ url: up.data.url });
-        else console.warn('[FotosEdit] Error', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
-      } catch(e) { console.warn('[FotosEdit]', e); }
-    }
-    _fotosNuevas.forEach(f => URL.revokeObjectURL(f.objectUrl));
-    _fotosNuevas = [];
-
-    // Armar comentario
+    // Capturar datos y estado antes de cerrar
+    const idPreingreso  = _editItem.idPreingreso;
+    const idProveedor   = document.getElementById('piEditProv').value;
+    const textoExtra    = (document.getElementById('piEditComentario').value || '').trim();
     const partes = [];
     if (_tagsEdit.comp)  partes.push(`Comprobante: ${_tagsEdit.comp === 'si' ? 'Sí' : 'No'}`);
     if (_tagsEdit.compl) partes.push(`Completo: ${_tagsEdit.compl === 'si' ? 'Sí' : 'No'}`);
-    const textoExtra = (document.getElementById('piEditComentario').value || '').trim();
     if (textoExtra) partes.push(textoExtra);
-    const comentario = partes.join(' | ');
-    const idProveedor = document.getElementById('piEditProv').value;
-    const monto = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto').value) || 0) : 0;
-    const fotos = _fotosEdit.map(f => f.url).join(',');
+    const comentario    = partes.join(' | ');
+    const monto         = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto').value) || 0) : 0;
+    const fotosExistentes = [..._fotosEdit];
+    const fotosNuevasCaptura = [..._fotosNuevas];
 
-    const res = await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
-      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+    // Cerrar sheet y mostrar toast inmediatamente — sin esperar red
+    cerrarSheet('sheetDetallePI');
+    toast('Preingreso actualizado', 'ok');
+    cargar(_filtroEstado, true);
 
-    if (res.ok) {
-      toast('Preingreso actualizado', 'ok');
-      cerrarSheet('sheetDetallePI');
-      cargar(_filtroEstado, true);
-    } else {
-      toast('Error: ' + res.error, 'danger');
-      btn.disabled = false; btn.textContent = 'Guardar cambios';
-    }
+    // Limpiar estado de edición
+    _fotosNuevas = [];
+    _fotosEdit   = [];
+
+    // Subir fotos nuevas + actualizar en segundo plano
+    (async () => {
+      const todasFotos = [...fotosExistentes];
+      for (let i = 0; i < fotosNuevasCaptura.length; i++) {
+        try {
+          const { b64, mime } = await _prepararFoto(fotosNuevasCaptura[i].file);
+          const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: fotosExistentes.length + i + 1 });
+          if (up.ok && !up.offline && up.data?.url) todasFotos.push({ url: up.data.url });
+          else console.warn('[FotosEdit] Error', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
+        } catch(e) { console.warn('[FotosEdit]', e); }
+      }
+      fotosNuevasCaptura.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+      const fotos = todasFotos.map(f => f.url).join(',');
+      await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
+        .catch(e => console.warn('[EditPreingreso]', e));
+    })();
   }
 
   // ── Crear Guía de Ingreso — optimista (modal) ────────────
@@ -2825,11 +2825,25 @@ const PreingresosView = (() => {
     if (el) el.id = 'optcard_' + realId;
   }
 
-  function _finalizeOptimisticCard(realId) {
+  function _finalizeOptimisticCard(realId, data = {}) {
     const el = document.getElementById('optcard_' + realId);
-    if (el) { el.classList.remove('card-optimistic'); el.remove(); }
-    // silent refresh so real data appears
-    setTimeout(() => cargar(_filtroEstado, true), 300);
+    if (el) {
+      // Actualizar el card in-place → sin flash visual
+      el.classList.remove('card-optimistic');
+      el.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="font-bold text-sm font-mono">${escAttr(realId)}</span>
+          <span class="tag-warn text-xs">PENDIENTE</span>
+        </div>
+        <p class="text-xs text-slate-400">${fmtFecha(new Date())} · ${escAttr(data.idProveedor || '—')}</p>
+        <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(data.monto ?? 0, 2)}</p>
+        <button onclick="PreingresosView.aprobarDesdePanel('${escAttr(realId)}')"
+                class="btn btn-primary w-full mt-2 py-2 text-xs font-bold tracking-wide">
+          APROBAR → CREAR GUÍA
+        </button>`;
+    }
+    // Refrescar lista en segundo plano sin eliminar el card
+    setTimeout(() => cargar(_filtroEstado, true), 2000);
   }
 
   // ── Crear preingreso (optimista) ─────────────────────────
@@ -2870,27 +2884,34 @@ const PreingresosView = (() => {
     const idPreingresoReal = res.data?.idPreingreso || idPreingreso;
     _updateOptimisticId(tempId, idPreingresoReal);
 
-    // 2. Subir fotos (comprimidas)
+    // 2. Finalizar card inmediatamente — el usuario ya puede ver y usar el preingreso
+    _finalizeOptimisticCard(idPreingresoReal, { idProveedor, monto });
+    toast(`Preingreso ${idPreingresoReal} registrado`, 'ok');
+    btn.disabled = false; btn.textContent = 'Registrar preingreso';
+
+    // 3. Subir fotos en segundo plano (no bloquea UI)
+    const fotosCaptura = [..._fotosSeleccionadas];
+    _fotosSeleccionadas = [];
+    _subirFotosEnBackground(idPreingresoReal, fotosCaptura);
+  }
+
+  async function _subirFotosEnBackground(idPreingreso, fotos) {
+    if (!fotos.length) return;
     const urls = [];
-    for (let i = 0; i < _fotosSeleccionadas.length; i++) {
+    for (let i = 0; i < fotos.length; i++) {
       try {
-        const { b64, mime } = await _prepararFoto(_fotosSeleccionadas[i].file);
-        const up = await API.subirFotoPreingreso({ idPreingreso: idPreingresoReal, fotoBase64: b64, mimeType: mime, indice: i + 1 });
+        const { b64, mime } = await _prepararFoto(fotos[i].file);
+        const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: i + 1 });
         if (up.ok && !up.offline && up.data?.url) urls.push(up.data.url);
         else console.warn('[Fotos] Error foto', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
       } catch(e) { console.warn('[Fotos]', i, e); }
     }
-
-    // 3. Actualizar columna fotos (solo si hay URLs válidas)
     if (urls.length) {
-      await API.actualizarFotosPreingreso({ idPreingreso: idPreingresoReal, fotos: urls.join(',') }).catch(() => {});
-    } else if (_fotosSeleccionadas.length) {
+      await API.actualizarFotosPreingreso({ idPreingreso, fotos: urls.join(',') }).catch(() => {});
+      fotos.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+    } else {
       toast('Fotos no pudieron subirse — reintenta desde edición', 'warn', 5000);
     }
-
-    _finalizeOptimisticCard(idPreingresoReal);
-    toast(`Preingreso ${idPreingreso} registrado${urls.length ? ` · ${urls.length} foto${urls.length !== 1 ? 's' : ''}` : ''}`, 'ok');
-    btn.disabled = false; btn.textContent = 'Registrar preingreso';
   }
 
   async function aprobar(id) {
