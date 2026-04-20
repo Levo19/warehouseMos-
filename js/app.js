@@ -1053,14 +1053,14 @@ const GuiasView = (() => {
     let r = _filtrar(todas, filtroActual);
     if (_busquedaQ) {
       const qL = _busquedaQ.toLowerCase();
-      r = r.filter(g =>
-        (g.idGuia         || '').toLowerCase().includes(qL) ||
-        (g.numeroDocumento|| '').toLowerCase().includes(qL) ||
-        (g.comentario     || '').toLowerCase().includes(qL) ||
-        (g.usuario        || '').toLowerCase().includes(qL) ||
-        (g.idProveedor    || '').toLowerCase().includes(qL) ||
-        (TIPO_LABELS[g.tipo] || g.tipo || '').toLowerCase().includes(qL)
-      );
+      r = r.filter(g => {
+        const provNombre = _getProvNombre(g.idProveedor).toLowerCase();
+        return (g.idGuia         || '').toLowerCase().includes(qL) ||
+               (g.idProveedor    || '').toLowerCase().includes(qL) ||
+               provNombre.includes(qL) ||
+               (g.numeroDocumento|| '').toLowerCase().includes(qL) ||
+               (TIPO_LABELS[g.tipo] || g.tipo || '').toLowerCase().includes(qL);
+      });
     }
     return r;
   }
@@ -1069,7 +1069,40 @@ const GuiasView = (() => {
     _busquedaQ = (q || '').trim();
     const cl = document.getElementById('clearBuscarGuia');
     if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
-    render(_filtrarYBuscar());
+    const lista = _filtrarYBuscar();
+    render(lista);
+
+    if (!_busquedaQ) return;
+    const qL = _busquedaQ.toLowerCase();
+
+    // Detectar coincidencia exacta: idGuia, idProveedor o nombre exacto de proveedor
+    const exacto = lista.find(g =>
+      (g.idGuia      || '').toLowerCase() === qL ||
+      (g.idProveedor || '').toLowerCase() === qL ||
+      _getProvNombre(g.idProveedor).toLowerCase() === qL
+    );
+
+    requestAnimationFrame(() => {
+      if (exacto) {
+        const cardId = 'guia-' + (exacto.idGuia || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const card   = document.getElementById(cardId);
+        if (card) {
+          card.classList.add('card-exact-match');
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        lista.forEach(g => {
+          if (g !== exacto) {
+            const el = document.getElementById('guia-' + (g.idGuia || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+            if (el) el.classList.add('card-dim');
+          }
+        });
+      } else {
+        lista.forEach(g => {
+          const el = document.getElementById('guia-' + (g.idGuia || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+          if (el) el.classList.add('card-hi');
+        });
+      }
+    });
   }
 
   function buscarClear() {
@@ -1134,7 +1167,8 @@ const GuiasView = (() => {
     const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
     const itemsTag = numItems > 0 ? ` <span class="text-slate-500">[${numItems}]</span>` : '';
     return `
-    <div class="guia-card" style="border-left-color:${borderColor}"
+    <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
+         style="border-left-color:${borderColor}"
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
       <div class="flex items-center justify-between gap-1 overflow-hidden">
         <span class="text-xs font-bold truncate" style="color:${isIngreso ? '#4ade80' : '#60a5fd'}">${tipoLabel}</span>
@@ -2739,11 +2773,11 @@ const PreingresosView = (() => {
   function _aplicarBusqueda(list) {
     if (!_busquedaQ) return list;
     const qL = _busquedaQ.toLowerCase();
-    return list.filter(p =>
-      (p.idPreingreso || '').toLowerCase().includes(qL) ||
-      (p.idProveedor  || '').toLowerCase().includes(qL) ||
-      (p.comentario   || '').toLowerCase().includes(qL)
-    );
+    return list.filter(p => {
+      const provNombre = _getProveedorNombre(p.idProveedor).toLowerCase();
+      return (p.idProveedor  || '').toLowerCase().includes(qL) ||
+             provNombre.includes(qL);
+    });
   }
 
   function buscar(q) {
@@ -2752,7 +2786,38 @@ const PreingresosView = (() => {
     if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
     const cached = OfflineManager.getPreingresosCache();
     const f = _filtroEstado ? cached.filter(p => p.estado === _filtroEstado) : cached;
-    _renderPreingresos(_aplicarBusqueda(f));
+    const lista = _aplicarBusqueda(f);
+    _renderPreingresos(lista);
+
+    if (!_busquedaQ) return;
+    const qL = _busquedaQ.toLowerCase();
+
+    const exacto = lista.find(p =>
+      (p.idProveedor || '').toLowerCase() === qL ||
+      _getProveedorNombre(p.idProveedor).toLowerCase() === qL
+    );
+
+    requestAnimationFrame(() => {
+      if (exacto) {
+        const cardId = 'pre-' + (exacto.idPreingreso || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+        const card   = document.getElementById(cardId);
+        if (card) {
+          card.classList.add('card-exact-match');
+          card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        lista.forEach(p => {
+          if (p !== exacto) {
+            const el = document.getElementById('pre-' + (p.idPreingreso || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+            if (el) el.classList.add('card-dim');
+          }
+        });
+      } else {
+        lista.forEach(p => {
+          const el = document.getElementById('pre-' + (p.idPreingreso || '').replace(/[^a-zA-Z0-9_-]/g, '_'));
+          if (el) el.classList.add('card-hi');
+        });
+      }
+    });
   }
 
   function buscarClear() {
@@ -2800,7 +2865,8 @@ const PreingresosView = (() => {
                  class="pre-guia-btn">+ Guía</button>`;
 
     return `
-    <div class="pre-card" style="border-left-color:${borderColor}"
+    <div class="pre-card" id="pre-${(p.idPreingreso||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
+         style="border-left-color:${borderColor}"
          onclick="PreingresosView.abrirDetalle('${escAttr(p.idPreingreso)}')">
       <div class="flex items-center justify-between gap-1 overflow-hidden">
         <span class="text-sm font-bold text-slate-100 truncate">${provNombre}</span>
