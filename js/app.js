@@ -163,15 +163,25 @@ let _carFotos = [];
 let _carIdx   = 0;
 
 // Convierte URLs de Drive al formato de embed público con tamaño
+// Extrae el fileId de cualquier formato de URL de Drive
+function _driveFileId(url) {
+  if (!url) return null;
+  // lh3.googleusercontent.com/d/FILE_ID o FILE_ID=wXXX
+  const lh3 = url.match(/lh3\.googleusercontent\.com\/d\/([^=?&/\s]+)/);
+  if (lh3) return lh3[1];
+  // ?id= o &id= (thumbnail, uc, etc.)
+  const qid = url.match(/[?&]id=([^&\s]+)/);
+  if (qid) return qid[1];
+  // /file/d/FILE_ID/
+  const fid = url.match(/\/file\/d\/([^/?&\s]+)/);
+  if (fid) return fid[1];
+  return null;
+}
+
 function _normalizeDriveUrl(url) {
   if (!url) return url;
-  // Ya es lh3 → solo asegura el sufijo de tamaño para carga correcta
-  if (url.includes('lh3.googleusercontent.com/d/')) {
-    return url.includes('=w') ? url : url + '=w800';
-  }
-  // thumbnail o uc con parámetro id → convertir
-  const m = url.match(/[?&]id=([^&]+)/);
-  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w800';
+  const id = _driveFileId(url);
+  if (id) return `https://drive.google.com/thumbnail?id=${id}&sz=w800`;
   return url;
 }
 

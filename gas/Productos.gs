@@ -741,7 +741,7 @@ function subirFotoPreingreso(params) {
     var file     = piFolder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-    var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
     return { ok: false, error: e.message };
@@ -913,7 +913,7 @@ function subirFotoGuia(params) {
     var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, name);
     var file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
@@ -941,7 +941,7 @@ function copiarFotoDePreingreso(params) {
     while (existentes.hasNext()) { existentes.next().setTrashed(true); }
     var copy = srcFile.makeCopy(copyName, guiaFolder);
     copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://lh3.googleusercontent.com/d/' + copy.getId();
+    var url = 'https://drive.google.com/thumbnail?id=' + copy.getId() + '&sz=w800';
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: copy.getId() } };
   } catch(e) {
