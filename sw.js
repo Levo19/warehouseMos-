@@ -2,7 +2,7 @@
 // warehouseMos — Service Worker
 // Cambia VERSION en cada deploy para invalidar caché
 // ============================================================
-const VERSION = '1.0.68';
+const VERSION = '1.0.69';
 const CACHE   = 'warehouse-v' + VERSION;
 const ASSETS  = [
   './',
