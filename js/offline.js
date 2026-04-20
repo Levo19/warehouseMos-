@@ -242,6 +242,24 @@ const OfflineManager = (() => {
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;
 
+  // ── Actualizar cache de detalle para una guía específica ─────
+  // Reemplaza todas las entradas de idGuia con los nuevos detalles
+  function actualizarDetallesGuia(idGuia, nuevosDetalles) {
+    const cache = getGuiaDetalleCache();
+    const otros = cache.filter(d => d.idGuia !== idGuia);
+    const estos = nuevosDetalles.map(d => ({ ...d, idGuia: d.idGuia || idGuia }));
+    guardar(KEYS.GUIA_DETALLE, [...otros, ...estos]);
+  }
+
+  // ── Agregar o reemplazar una entrada en cache de detalle ─────
+  function addDetalleCache(detalle) {
+    const cache = getGuiaDetalleCache();
+    const idx = cache.findIndex(d => d.idDetalle === detalle.idDetalle);
+    if (idx >= 0) cache[idx] = detalle;
+    else cache.push(detalle);
+    guardar(KEYS.GUIA_DETALLE, cache);
+  }
+
   return {
     precargar, sincronizar, encolar, getQueue,
     validarPinLocal, onStatusChange,
@@ -252,6 +270,7 @@ const OfflineManager = (() => {
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     getAdminPin,
+    actualizarDetallesGuia, addDetalleCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
   };

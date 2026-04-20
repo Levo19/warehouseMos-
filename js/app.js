@@ -1320,6 +1320,10 @@ const GuiasView = (() => {
         if (res.ok && !res.offline) {
           _guiaActual = res.data;
           _mostrarDetalleSheet(_guiaActual, false); // re-render sin animación
+          // Mantener cache local en sync para reaperturas rápidas
+          if (Array.isArray(_guiaActual.detalle)) {
+            OfflineManager.actualizarDetallesGuia(idGuia, _guiaActual.detalle);
+          }
         }
       }).catch(() => {});
     }
@@ -1982,8 +1986,9 @@ const GuiasView = (() => {
     _mostrarDetalleSheet(_guiaActual, false);
     toast((indirecto ? '↕ ' : '✓ ') + descCapturada, 'ok', 1500);
 
+    const _idGuiaParaDetalle = _guiaActual.idGuia;
     API.agregarDetalle({
-      idGuia: _guiaActual.idGuia,
+      idGuia: _idGuiaParaDetalle,
       codigoProducto: cod,
       cantidadEsperada: 0, cantidadRecibida: 1,
       precioUnitario: 0, fechaVencimiento: ''
@@ -1991,13 +1996,17 @@ const GuiasView = (() => {
       if (res.ok && !res.offline) {
         const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
         if (idx >= 0) {
-          _guiaActual.detalle[idx] = {
+          const itemFinal = {
             ...res.data,
+            idGuia: res.data.idGuia || _idGuiaParaDetalle,
             descripcionProducto: res.data.descripcionProducto || descCapturada,
             _local: false,
             _indirect: !!indirecto
           };
+          _guiaActual.detalle[idx] = itemFinal;
           _mostrarDetalleSheet(_guiaActual, false);
+          // Guardar en cache local para reaperturas rápidas
+          OfflineManager.addDetalleCache(itemFinal);
         }
       } else if (!res.offline) {
         _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);

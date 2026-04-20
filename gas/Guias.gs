@@ -126,6 +126,7 @@ function agregarDetalleGuia(params) {
     ok: true,
     data: {
       idDetalle:          idDetalle,
+      idGuia:             params.idGuia,
       codigoProducto:     prod.idProducto,
       descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
       cantidadEsperada:   cantEsperada,
