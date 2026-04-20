@@ -1142,29 +1142,16 @@
 <div class="sheet-overlay" id="overlayAgregarItem" onclick="cerrarSheet('sheetAgregarItem')"></div>
 <div class="bottom-sheet" id="sheetAgregarItem">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-3">
     <div>
-      <p class="font-bold text-base">📦 Agregar ítem</p>
-      <p class="text-xs text-slate-400">Guía: <span id="itemGuiaId" class="text-blue-400 font-mono"></span></p>
+      <p class="font-bold text-sm">Seleccionar producto</p>
+      <p class="text-xs text-slate-400">Código escaneado: <span id="itemCodEscaneado" class="text-amber-400 font-mono">—</span></p>
     </div>
-    <button onclick="abrirScanner(cod => GuiasView._procesarCodigoEscaneado(cod))"
-            class="btn btn-outline text-xs px-3 py-2 font-bold">📷 Escanear</button>
+    <button onclick="cerrarSheet('sheetAgregarItem');setTimeout(()=>GuiasView.abrirAgregarItem(),120)"
+            class="btn btn-outline text-xs px-3 py-2 font-bold">📷 Rescanear</button>
   </div>
-
-  <!-- Estado: idle / no encontrado -->
-  <div id="itemIdleArea">
-    <p class="text-slate-400 text-sm text-center py-8">📷 Abriendo cámara…</p>
-  </div>
-
-  <!-- Coincidencias parciales -->
-  <div id="itemMatchList" style="display:none" class="max-h-72 overflow-y-auto"></div>
-
-  <!-- Formulario: product seleccionado + qty +/- + vencimiento -->
-  <div id="itemFormArea" style="display:none"></div>
-
-  <!-- Input date oculto — se dispara desde abrirPickerVenc() -->
-  <input type="date" id="itemVencHidden" class="sr-only"
-         onchange="GuiasView.onVencChanged(this.value)"/>
+  <!-- Lista de coincidencias para elegir -->
+  <div id="itemMatchList" class="max-h-80 overflow-y-auto"></div>
 </div>
 
 <!-- ════════════════════════════════════════════════

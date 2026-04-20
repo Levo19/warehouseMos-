@@ -1526,12 +1526,17 @@ const GuiasView = (() => {
           }
 
           // ── Tarjeta colapsada ──────────────────────────────
-          const venc = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block mt-0.5">Venc: ${d.fechaVencimiento}</span>` : '';
+          const venc  = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block mt-0.5">Venc: ${d.fechaVencimiento}</span>` : '';
+          const iTag  = d._indirect
+            ? `<span style="font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;
+                            background:rgba(124,58,237,.18);color:#a78bfa;
+                            border:1px solid rgba(124,58,237,.4);margin-right:4px;flex-shrink:0;vertical-align:middle">i</span>`
+            : '';
           return `
           <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
                onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-100 leading-snug">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
+              <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
               <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
               ${venc}
             </div>
@@ -1874,160 +1879,114 @@ const GuiasView = (() => {
     }
   }
 
-  // ── Agregar ítem — auto-escanea al abrir ─────────────────
+  // ── Agregar ítem — abre cámara directamente ──────────────
   function abrirAgregarItem() {
     if (!_guiaActual) return;
-    _itemProd = null; _itemQty = 1; _itemVenc = '';
-    document.getElementById('itemGuiaId').textContent = _guiaActual.idGuia;
-    _renderItemForm('idle');
-    abrirSheet('sheetAgregarItem');
-    // Auto-abrir cámara después de la animación del sheet
-    setTimeout(() => abrirScanner(cod => _procesarCodigoEscaneado(cod)), 320);
+    abrirScanner(cod => _procesarCodigoEscaneado(cod));
   }
 
   function _procesarCodigoEscaneado(cod) {
     const prods  = OfflineManager.getProductosCache();
     const codStr = String(cod || '').trim();
-    if (!codStr) { _renderItemForm('idle'); return; }
+    if (!codStr) return;
 
-    // Coincidencia exacta por idProducto o codigoBarra (string)
+    // 1. Coincidencia exacta por idProducto o codigoBarra
     const exacto = prods.find(p =>
       p.idProducto === codStr ||
       String(p.codigoBarra || '') === codStr ||
-      p.idProducto.toLowerCase() === codStr.toLowerCase()
+      p.idProducto.toLowerCase() === codStr.toLowerCase() ||
+      String(p.codigoBarra || '').toLowerCase() === codStr.toLowerCase()
     );
-    if (exacto) { _itemProd = exacto; _renderItemForm('form'); return; }
-
-    // Coincidencia parcial: cualquiera que contenga el código o descripción
-    const parciales = prods.filter(p =>
-      (p.idProducto || '').includes(codStr) ||
-      String(p.codigoBarra || '').includes(codStr) ||
-      (p.descripcion || '').toLowerCase().includes(codStr.toLowerCase())
-    ).slice(0, 8);
-
-    if (!parciales.length) {
-      _renderItemForm('notfound', codStr);
-      toast('Producto no encontrado: ' + codStr, 'warn', 2500);
-    } else {
-      _renderItemForm('matches', parciales);
+    if (exacto) {
+      _agregarProductoDirecto(exacto, false);
+      // Reabrir cámara para escanear siguiente ítem en cadena
+      setTimeout(() => abrirScanner(cod2 => _procesarCodigoEscaneado(cod2)), 600);
+      return;
     }
+
+    // 2. Coincidencia por prefijo: "12345" → "12345A", "12345B" (códigos de fábrica duplicados)
+    const cUp = codStr.toUpperCase();
+    const porPrefijo = prods.filter(p =>
+      (p.idProducto || '').toUpperCase().startsWith(cUp) ||
+      String(p.codigoBarra || '').startsWith(codStr)
+    );
+
+    // 3. Coincidencia parcial general (descripción, código)
+    const porParcial = prods.filter(p =>
+      !porPrefijo.includes(p) && (
+        (p.idProducto || '').toLowerCase().includes(codStr.toLowerCase()) ||
+        String(p.codigoBarra || '').includes(codStr) ||
+        (p.descripcion || '').toLowerCase().includes(codStr.toLowerCase())
+      )
+    ).slice(0, 6);
+
+    const candidatos = [...porPrefijo, ...porParcial].slice(0, 10);
+
+    if (!candidatos.length) {
+      toast(`No encontrado: ${codStr}`, 'warn', 3000);
+      setTimeout(() => abrirScanner(cod2 => _procesarCodigoEscaneado(cod2)), 400);
+      return;
+    }
+
+    // Mostrar picker compacto (sin modal de formulario, solo elección)
+    _mostrarPickerItem(candidatos, codStr);
   }
 
-  function _renderItemForm(mode, data) {
-    const areaIdle    = document.getElementById('itemIdleArea');
-    const areaMatches = document.getElementById('itemMatchList');
-    const areaForm    = document.getElementById('itemFormArea');
-    [areaIdle, areaMatches, areaForm].forEach(el => el && (el.style.display = 'none'));
-
-    const esIngreso = _guiaActual?.tipo?.startsWith('INGRESO');
-
-    if (mode === 'idle') {
-      areaIdle.style.display = 'block';
-      areaIdle.innerHTML = `<p class="text-slate-400 text-sm text-center py-8">📷 Abriendo cámara…</p>`;
-    } else if (mode === 'notfound') {
-      areaIdle.style.display = 'block';
-      areaIdle.innerHTML = `
-        <p class="text-amber-400 text-sm text-center py-3">⚠ No encontrado: <span class="font-mono">${escAttr(data)}</span></p>
-        <button onclick="abrirScanner(cod => GuiasView._procesarCodigoEscaneado(cod))"
-                class="btn btn-outline text-xs w-full mt-2 py-2">Volver a escanear</button>`;
-    } else if (mode === 'matches') {
-      areaMatches.style.display = 'block';
-      areaMatches.innerHTML = `<p class="text-xs text-slate-400 mb-2 font-bold">Selecciona el producto:</p>` +
-        data.map(p => `
-          <button onclick="GuiasView.seleccionarItemProd('${escAttr(p.idProducto)}')"
-                  class="w-full text-left p-2 rounded-lg border border-slate-700 mb-1 active:border-blue-500 active:bg-slate-700/50">
-            <p class="text-sm font-bold text-slate-200">${escAttr(p.descripcion || p.idProducto)}</p>
-            <p class="text-xs text-slate-400 font-mono">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
-          </button>`).join('');
-    } else if (mode === 'form') {
-      areaForm.style.display = 'block';
-      const p = _itemProd;
-      const vencBtn = esIngreso ? `
-        <button onclick="GuiasView.abrirPickerVenc()" id="btnItemVenc"
-                class="w-full py-2 rounded-lg border ${_itemVenc ? 'border-amber-500 text-amber-400' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3">
-          ${_itemVenc ? '📅 ' + _itemVenc : '📅 Agregar vencimiento'}
-        </button>` : '';
-      areaForm.innerHTML = `
-        <div class="flex items-center gap-3 p-3 bg-slate-700/40 rounded-xl mb-4">
+  function _mostrarPickerItem(candidatos, codEscaneado) {
+    const codEl = document.getElementById('itemCodEscaneado');
+    if (codEl) codEl.textContent = codEscaneado;
+    const list = document.getElementById('itemMatchList');
+    if (list) {
+      list.innerHTML = candidatos.map(p => `
+        <button onclick="GuiasView.seleccionarItemProd('${escAttr(p.idProducto)}')"
+                class="w-full text-left p-2.5 rounded-xl border border-slate-700 mb-1.5 active:border-violet-500 active:bg-slate-700/50 flex items-center gap-2.5">
+          <span style="font-size:10px;font-weight:800;padding:2px 5px;border-radius:4px;
+                       background:rgba(124,58,237,.18);color:#a78bfa;
+                       border:1px solid rgba(124,58,237,.4);flex-shrink:0">i</span>
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold text-slate-100 truncate">${escAttr(p.descripcion || p.idProducto)}</p>
-            <p class="text-xs text-slate-400 font-mono">${escAttr(p.idProducto)}</p>
+            <p class="text-xs text-slate-500 font-mono">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
           </div>
-          <button onclick="GuiasView._rescanear()" class="text-xs text-blue-400 flex-shrink-0">Cambiar</button>
-        </div>
-        <div class="flex items-center justify-center gap-6 mb-4">
-          <button onclick="GuiasView.itemQtyChange(-1)"
-                  class="w-14 h-14 rounded-full bg-slate-700 text-3xl font-black text-white flex items-center justify-center active:scale-95">−</button>
-          <span id="itemQtyDisplay" class="text-5xl font-black text-white w-20 text-center select-none">${_itemQty}</span>
-          <button onclick="GuiasView.itemQtyChange(1)"
-                  class="w-14 h-14 rounded-full bg-blue-600 text-3xl font-black text-white flex items-center justify-center active:scale-95">+</button>
-        </div>
-        ${vencBtn}
-        <button onclick="GuiasView.guardarItem()"
-                class="btn btn-primary btn-lg w-full font-black tracking-wide">Agregar ítem</button>`;
+        </button>`).join('') +
+        `<button onclick="cerrarSheet('sheetAgregarItem');setTimeout(()=>GuiasView.abrirAgregarItem(),120)"
+                 class="btn btn-outline text-xs w-full mt-2 py-2.5 font-bold">📷 Seguir escaneando</button>`;
     }
+    abrirSheet('sheetAgregarItem');
   }
 
   function seleccionarItemProd(idProducto) {
     const prods = OfflineManager.getProductosCache();
-    _itemProd = prods.find(p => p.idProducto === idProducto) || null;
-    if (_itemProd) _renderItemForm('form');
+    const prod  = prods.find(p => p.idProducto === idProducto) || null;
+    if (!prod) return;
+    cerrarSheet('sheetAgregarItem');
+    _agregarProductoDirecto(prod, true); // indirecto → badge "i"
   }
 
-  function _rescanear() {
-    _itemProd = null; _itemQty = 1; _itemVenc = '';
-    _renderItemForm('idle');
-    setTimeout(() => abrirScanner(cod => _procesarCodigoEscaneado(cod)), 80);
-  }
-
-  function itemQtyChange(delta) {
-    _itemQty = Math.max(1, _itemQty + delta);
-    const el = document.getElementById('itemQtyDisplay');
-    if (el) el.textContent = _itemQty;
-  }
-
-  function abrirPickerVenc() {
-    const el = document.getElementById('itemVencHidden');
-    if (!el) return;
-    el.min = new Date().toISOString().split('T')[0];
-    if (typeof el.showPicker === 'function') { try { el.showPicker(); } catch { el.click(); } }
-    else el.click();
-  }
-
-  function onVencChanged(val) {
-    _itemVenc = val || '';
-    const btn = document.getElementById('btnItemVenc');
-    if (!btn) return;
-    btn.textContent = _itemVenc ? '📅 ' + _itemVenc : '📅 Agregar vencimiento';
-    btn.className = `w-full py-2 rounded-lg border ${_itemVenc ? 'border-amber-500 text-amber-400' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3`;
-  }
-
-  function guardarItem() {
-    if (!_guiaActual || !_itemProd) { toast('Selecciona un producto primero', 'warn'); return; }
-    const cod          = _itemProd.idProducto;
-    const descCapturada = _itemProd.descripcion || _itemProd.nombre || cod; // captura antes de async
-    const qtyRec       = _itemQty;
-    const venc         = _itemVenc;
+  function _agregarProductoDirecto(prod, indirecto) {
+    if (!_guiaActual) return;
+    const cod          = prod.idProducto;
+    const descCapturada = prod.descripcion || prod.nombre || cod;
     const localId      = 'DL' + Date.now();
 
     const itemOptimista = {
       idDetalle: localId, idGuia: _guiaActual.idGuia,
       codigoProducto: cod,
       descripcionProducto: descCapturada,
-      cantidadEsperada: 0, cantidadRecibida: qtyRec,
-      precioUnitario: 0, fechaVencimiento: venc, observacion: '',
-      _local: true
+      cantidadEsperada: 0, cantidadRecibida: 1,
+      precioUnitario: 0, fechaVencimiento: '', observacion: '',
+      _local: true,
+      _indirect: !!indirecto
     };
     if (!_guiaActual.detalle) _guiaActual.detalle = [];
     _guiaActual.detalle.push(itemOptimista);
-    cerrarSheet('sheetAgregarItem');
     _mostrarDetalleSheet(_guiaActual, false);
+    toast((indirecto ? '↕ ' : '✓ ') + descCapturada, 'ok', 1500);
 
     API.agregarDetalle({
       idGuia: _guiaActual.idGuia,
       codigoProducto: cod,
-      cantidadEsperada: 0, cantidadRecibida: qtyRec,
-      precioUnitario: 0, fechaVencimiento: venc
+      cantidadEsperada: 0, cantidadRecibida: 1,
+      precioUnitario: 0, fechaVencimiento: ''
     }).then(res => {
       if (res.ok && !res.offline) {
         const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
@@ -2035,7 +1994,8 @@ const GuiasView = (() => {
           _guiaActual.detalle[idx] = {
             ...res.data,
             descripcionProducto: res.data.descripcionProducto || descCapturada,
-            _local: false
+            _local: false,
+            _indirect: !!indirecto
           };
           _mostrarDetalleSheet(_guiaActual, false);
         }
@@ -2047,6 +2007,10 @@ const GuiasView = (() => {
           res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
       }
     }).catch(() => {});
+  }
+
+  function _rescanear() {
+    abrirScanner(cod => _procesarCodigoEscaneado(cod));
   }
 
   async function confirmarCerrarGuia() {
@@ -2426,9 +2390,8 @@ const GuiasView = (() => {
   return {
     cargar, filtrar, toggleFiltro, silentRefresh, verDetalle,
     buscar, buscarClear,
-    abrirAgregarItem, guardarItem,
+    abrirAgregarItem,
     _procesarCodigoEscaneado, seleccionarItemProd, _rescanear,
-    itemQtyChange, abrirPickerVenc, onVencChanged,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
     confirmarCerrarGuia, crearGuia, nueva,
     toggleTagNueva,
