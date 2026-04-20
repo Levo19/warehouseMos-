@@ -1129,6 +1129,10 @@ const GuiasView = (() => {
                class="pre-qtag pre-qtag-blue" title="Ver preingreso"
                style="cursor:pointer;user-select:none">📋</span>`
       : '';
+    // Cantidad de ítems desde la caché de detalle
+    const detCache = OfflineManager.getGuiaDetalleCache();
+    const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
+    const itemsTag = numItems > 0 ? ` <span class="text-slate-500">[${numItems}]</span>` : '';
     return `
     <div class="guia-card" style="border-left-color:${borderColor}"
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
@@ -1137,7 +1141,7 @@ const GuiasView = (() => {
         <div class="flex items-center gap-1 flex-shrink-0">${preTag}${fotoTag}${estadoDot}</div>
       </div>
       <p class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</p>
-      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}</p>
+      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}${itemsTag}</p>
     </div>`;
   }
 
@@ -1363,17 +1367,18 @@ const GuiasView = (() => {
         fotoEl.innerHTML = '';
       } else if (g.foto) {
         fotoEl.innerHTML = `
-          <div class="relative rounded-lg overflow-hidden cursor-pointer mb-3" style="height:110px"
-               onclick="GuiasView.verFotoGuia()">
-            <img src="${escAttr(g.foto)}" class="w-full h-full object-cover" loading="lazy"
-                 onerror="this.style.opacity='.3'"/>
+          <div class="relative rounded-lg overflow-hidden mb-3" style="height:110px">
+            <img src="${escAttr(g.foto)}" class="w-full h-full object-cover cursor-pointer" loading="lazy"
+                 onclick="GuiasView.verFotoGuia()" onerror="this.style.opacity='.3'"/>
             ${abierta ? `<div class="absolute top-2 right-2 flex gap-1">
-              <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Galería">
+              <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Cambiar - Galería">
                 <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>🖼
               </label>
-              <label class="bg-blue-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-blue-200" title="Cámara">
+              <label class="bg-blue-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-blue-200" title="Cambiar - Cámara">
                 <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>📷
               </label>
+              <button onclick="GuiasView.eliminarFotoGuia()" title="Eliminar foto"
+                      class="bg-red-900/80 rounded-lg px-2 py-1 text-xs text-red-300 font-bold">✕</button>
             </div>` : ''}
           </div>`;
       } else {
@@ -2073,6 +2078,7 @@ const GuiasView = (() => {
 
   function nueva() {
     _guiaModoEdicion = false;
+    _resetSheetGuiaZIndex();
     // Reset título y botón a modo creación
     const titleEl = document.getElementById('guiaFormTitle');
     if (titleEl) titleEl.textContent = '📋 Nueva Guía';
@@ -2217,6 +2223,23 @@ const GuiasView = (() => {
     _mostrarDetalleSheet(_guiaActual, false);
   }
 
+  // ── Eliminar foto de guía ─────────────────────────────────
+  async function eliminarFotoGuia() {
+    if (!_guiaActual?.foto) return;
+    const url = _guiaActual.foto;
+    // Extraer fileId de la URL de Drive (ej. ?id=FILE_ID&...)
+    const match = url.match(/[?&]id=([^&]+)/);
+    // Optimista: limpiar foto localmente
+    _guiaActual.foto = '';
+    const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+    if (idx >= 0) todas[idx].foto = '';
+    _mostrarDetalleSheet(_guiaActual, false);
+    toast('Foto eliminada', 'warn', 1500);
+    // Background: eliminar archivo + limpiar columna en sheet
+    if (match) API.eliminarFotoDrive({ fileId: match[1] }).catch(() => {});
+    API.actualizarGuia({ idGuia: _guiaActual.idGuia, foto: '' }).catch(() => {});
+  }
+
   // ── Editar guía existente ────────────────────────────────
   function editarGuia() {
     if (!_guiaActual) return;
@@ -2276,7 +2299,22 @@ const GuiasView = (() => {
     const btnEl = document.getElementById('btnGuiaSubmit');
     if (btnEl) { btnEl.textContent = 'GUARDAR CAMBIOS'; btnEl.onclick = () => GuiasView.guardarCambiosGuia(); }
 
+    // Elevar z-index para aparecer encima del sheet de detalle
+    const shG  = document.getElementById('sheetGuia');
+    const ovG  = document.getElementById('overlayGuia');
+    if (shG)  shG.style.zIndex  = '60';
+    if (ovG) {
+      ovG.style.zIndex = '59';
+      ovG.onclick = () => { _resetSheetGuiaZIndex(); cerrarSheet('sheetGuia'); };
+    }
     abrirSheet('sheetGuia');
+  }
+
+  function _resetSheetGuiaZIndex() {
+    const shG = document.getElementById('sheetGuia');
+    const ovG = document.getElementById('overlayGuia');
+    if (shG) shG.style.zIndex  = '';
+    if (ovG) { ovG.style.zIndex = ''; ovG.onclick = () => cerrarSheet('sheetGuia'); }
   }
 
   async function guardarCambiosGuia() {
@@ -2295,6 +2333,7 @@ const GuiasView = (() => {
     _guiaActual.numeroDocumento = numDoc;
     _guiaActual.comentario      = comentario;
 
+    _resetSheetGuiaZIndex();
     cerrarSheet('sheetGuia');
     _mostrarDetalleSheet(_guiaActual, false);
 
@@ -2359,7 +2398,8 @@ const GuiasView = (() => {
     selectItem, deselectItem,
     inlineQtyDelta, inlineQtyInput, inlineQtyBlur,
     inlinePickVenc, inlineVencChanged, inlineDelete,
-    toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia
+    toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia,
+    eliminarFotoGuia
   };
 })();
 
