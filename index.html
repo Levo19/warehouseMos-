@@ -41,14 +41,8 @@
     .view { display:none; }
     .view.active { display:block; }
     /* Nav bar */
-    .nav-btn.active { color:#3b82f6; }
-    #navBtnProductos { transition:background .2s, box-shadow .2s; }
-    #navBtnProductos.active {
-      background:linear-gradient(145deg,#1d4ed8,#1e40af) !important;
-      color:#fff !important;
-      box-shadow:0 -4px 20px rgba(59,130,246,.45),0 2px 8px rgba(0,0,0,.5) !important;
-    }
-    #navBtnProductos.active ~ #navLblProductos { color:#60a5fa !important; }
+    .nav-btn.active { color:#60a5fa; }
+    #navBtnProductos.active #navLblProductos { color:#60a5fa; }
     .badge { display:inline-flex;align-items:center;justify-content:center;
              min-width:18px;height:18px;border-radius:9px;font-size:10px;font-weight:700; }
     .card { background:#1e293b;border-radius:12px;padding:16px; }
@@ -87,7 +81,7 @@
     .filter-menu button:hover, .filter-menu button.sel { background:#0f172a;color:#fff; }
     .filter-menu button.sel { color:#60a5fa; }
     /* Fab pill */
-    .fab-pill { position:fixed;bottom:88px;right:16px;display:flex;align-items:center;gap:8px;
+    .fab-pill { position:fixed;bottom:80px;right:16px;display:flex;align-items:center;gap:8px;
                 background:#1d4ed8;color:#fff;padding:12px 20px;border-radius:12px;
                 font-weight:700;font-size:13px;letter-spacing:.06em;border:none;cursor:pointer;
                 box-shadow:0 4px 20px rgba(29,78,216,.5);transition:transform .1s; }
@@ -234,7 +228,7 @@
     .card-optimistic { animation:pulse-border 1.1s ease-in-out infinite; background:#0e1e33 !important; }
     /* FAB icon — preingresos */
     .pre-fab-ico {
-      position:fixed; bottom:88px; right:16px;
+      position:fixed; bottom:80px; right:16px;
       width:40px; height:40px; border-radius:50%;
       background:#1d4ed8; color:#fff; border:none; cursor:pointer;
       box-shadow:0 4px 20px rgba(29,78,216,.5);
@@ -894,23 +888,76 @@
   <!-- ── TOOLS ─────────────────────────────────── -->
   <section id="view-tools" class="view slide-up">
 
-    <!-- Instalar PWA -->
+    <!-- ── Herramientas ───────────────────────── -->
+    <div class="pre-date-hdr">Herramientas</div>
+
+    <!-- Membretes -->
+    <div class="card mb-3">
+      <p class="font-semibold mb-3 flex items-center gap-2">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" class="text-slate-400">
+          <path d="M2 2a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H2zm0 1h12a1 1 0 0 1 1 1v.5H1V4a1 1 0 0 1 1-1zM1 7.5h14v4.5a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7.5zm3 2a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H4z"/>
+        </svg>
+        Membretes
+      </p>
+      <!-- Buscador -->
+      <div class="smart-srch mb-2">
+        <span class="smart-srch-ico">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.099zm-5.242 1.656a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z"/>
+          </svg>
+        </span>
+        <input id="memBuscar" class="smart-srch-input" type="text"
+               placeholder="Escanear código o buscar producto…"
+               oninput="MembreteView.buscar(this.value)"
+               autocomplete="off" autocorrect="off" spellcheck="false"/>
+        <div class="smart-srch-actions">
+          <button class="smart-srch-btn" onclick="MembreteView.abrirScanner()" title="Escanear">
+            <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM11 .5a.5.5 0 0 1 .5-.5h3A1.5 1.5 0 0 1 16 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5h-3a.5.5 0 0 1-.5-.5zM.5 11a.5.5 0 0 1 .5.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 .5-.5zm15 0a.5.5 0 0 1 .5.5v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5v-3a.5.5 0 0 1 .5-.5zM3 4.5a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0v-7zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0v-7zm2 0a.5.5 0 0 1 1 0v7a.5.5 0 0 1-1 0v-7zm2 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 0 1h-1a.5.5 0 0 1-.5-.5zm2.5-.5a.5.5 0 0 1 .5.5v7a.5.5 0 0 1-1 0v-7a.5.5 0 0 1 .5-.5z"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <!-- Sugerencias -->
+      <div id="memSugerencias" style="display:none;max-height:200px;overflow-y:auto;"
+           class="rounded-lg border border-slate-700 mb-2 overflow-hidden"></div>
+      <!-- Producto seleccionado -->
+      <div id="memProductoSel" style="display:none" class="card-sm mb-3 relative">
+        <button onclick="MembreteView.limpiar()"
+                class="absolute top-2 right-2 text-slate-500 hover:text-slate-300"
+                style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;">×</button>
+        <p id="memNombre" class="font-semibold text-sm pr-5 mb-1 leading-snug"></p>
+        <p id="memCodigos" class="text-xs text-slate-400 font-mono whitespace-pre-wrap"></p>
+      </div>
+      <!-- Botón imprimir -->
+      <button id="btnImprimirMembrete" onclick="MembreteView.imprimir()"
+              class="btn btn-primary w-full flex items-center justify-center gap-2" disabled>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+          <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+        </svg>
+        Imprimir membrete
+      </button>
+      <p id="memStatus" class="text-xs text-center mt-2" style="display:none;color:#94a3b8"></p>
+    </div>
+
+    <!-- ── Config ─────────────────────────────── -->
+    <div class="pre-date-hdr">Config</div>
+
+    <!-- Instalar PWA (solo si disponible) -->
     <div id="cardInstalar" class="card mb-3" style="display:none">
-      <p class="font-semibold mb-1">📲 Instalar app</p>
-      <p class="text-xs text-slate-400 mb-3">Agregar warehouseMos a la pantalla de inicio para usarla sin navegador.</p>
       <button onclick="window._installPWA()"
               class="btn btn-primary w-full flex items-center justify-center gap-2">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
           <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
         </svg>
-        Instalar en este dispositivo
+        📲 Instalar en este dispositivo
       </button>
     </div>
 
-    <!-- Sync -->
+    <!-- Sync + actualización -->
     <div class="card mb-3">
-      <p class="font-semibold mb-3">🔄 Sincronización</p>
       <div class="space-y-2">
         <button onclick="App.syncForzado()" id="btnSyncForzado"
                 class="btn btn-primary w-full flex items-center justify-center gap-2">
@@ -918,7 +965,7 @@
             <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
             <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
           </svg>
-          Sincronizar ahora
+          Sync forzado
         </button>
         <button onclick="App.checkUpdate()"
                 class="btn btn-outline w-full flex items-center justify-center gap-2 text-sm">
@@ -928,44 +975,11 @@
       </div>
     </div>
 
-    <!-- Configuración GAS -->
-    <div class="card mb-3">
-      <p class="font-semibold mb-3">⚙️ Conexión GAS</p>
-      <div class="space-y-3">
-        <div>
-          <label class="text-xs text-slate-400">URL del Web App GAS</label>
-          <input id="cfgGasUrl" class="input mt-1" type="url" placeholder="https://script.google.com/..."/>
-        </div>
-        <button onclick="ConfigView.guardar()" class="btn btn-primary w-full mt-1">Guardar URL</button>
-      </div>
-    </div>
-
-    <!-- Configuración impresión -->
-    <div class="card mb-3">
-      <p class="font-semibold mb-3">🖨 Impresión</p>
-      <div class="space-y-3">
-        <div>
-          <label class="text-xs text-slate-400">PrintNode API Key</label>
-          <input id="cfgPrintKey" class="input mt-1" type="text" placeholder="sk_live_..."/>
-        </div>
-        <div>
-          <label class="text-xs text-slate-400">PrintNode Printer ID</label>
-          <input id="cfgPrintId" class="input mt-1" type="text" placeholder="12345"/>
-        </div>
-        <div>
-          <label class="text-xs text-slate-400">Días alerta vencimiento</label>
-          <input id="cfgDiasAlerta" class="input mt-1" type="number" value="30"/>
-        </div>
-        <button onclick="ConfigView.guardarImpresion()" class="btn btn-primary w-full mt-1">Guardar</button>
-      </div>
-    </div>
-
-    <!-- Versión -->
+    <!-- Info -->
     <div class="card">
-      <p class="font-semibold mb-2">ℹ️ Información</p>
-      <div class="space-y-1 text-xs text-slate-400">
-        <p>App: <span id="toolsVersion" class="text-slate-300 font-mono">—</span></p>
-        <p>GAS: <span id="toolsGasUrl" class="text-slate-300 break-all text-xs">—</span></p>
+      <div class="space-y-1 text-xs text-slate-500">
+        <p>Versión: <span id="toolsVersion" class="text-slate-300 font-mono">—</span></p>
+        <p>GAS: <span id="toolsGasUrl" class="text-slate-400 break-all">—</span></p>
       </div>
     </div>
 
@@ -974,56 +988,46 @@
 </main>
 
 <!-- ════════════════════════════════════════════════
-     NAVBAR INFERIOR — 3 módulos, Productos destacado
+     NAVBAR INFERIOR — 3 módulos uniformes
 ═══════════════════════════════════════════════════ -->
 <nav id="bottomNav"
-     style="position:fixed;bottom:0;left:0;right:0;z-index:30;height:66px;
-            background:#0f172a;border-top:1px solid #1e293b;overflow:visible;">
-  <div style="display:flex;height:100%;overflow:visible;">
+     style="position:fixed;bottom:0;left:0;right:0;z-index:30;height:62px;
+            background:#0f172a;border-top:1px solid #1e293b;">
+  <div style="display:flex;height:100%;">
 
     <!-- Guías -->
     <button data-view="guias" onclick="App.nav('guias')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1.5 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;padding-bottom:6px">
-      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;">
+      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
         <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
       </svg>
       Guías
     </button>
 
-    <!-- Productos — módulo central elevado -->
-    <div class="flex-1 flex flex-col items-center" style="position:relative;overflow:visible;">
-      <!-- Círculo elevado -->
-      <button id="navBtnProductos" data-view="productos" onclick="App.nav('productos')"
-              class="nav-btn"
-              style="position:absolute;bottom:8px;width:58px;height:58px;border-radius:50%;
-                     background:linear-gradient(145deg,#1e3a5f,#0f2748);
-                     border:3px solid #0f172a;
-                     box-shadow:0 -4px 16px rgba(59,130,246,.2),0 2px 8px rgba(0,0,0,.5);
-                     display:flex;align-items:center;justify-content:center;
-                     color:#94a3b8;padding:0;">
-        <!-- Punto naranja de auditoría pendiente -->
+    <!-- Productos — módulo central, icono más grande -->
+    <button id="navBtnProductos" data-view="productos" onclick="App.nav('productos')"
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;position:relative;">
+      <!-- Punto naranja de auditoría pendiente -->
+      <span style="position:relative;display:inline-block;">
         <span id="navDotAudit"
-              style="display:none;position:absolute;top:6px;right:5px;
-                     width:10px;height:10px;border-radius:50%;
+              style="display:none;position:absolute;top:-3px;right:-5px;
+                     width:8px;height:8px;border-radius:50%;
                      background:#f97316;border:2px solid #0f172a;z-index:2;
-                     box-shadow:0 0 6px rgba(249,115,22,.7)"></span>
-        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+                     box-shadow:0 0 5px rgba(249,115,22,.8)"></span>
+        <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
         </svg>
-      </button>
-      <!-- Label en la parte baja del nav -->
-      <span id="navLblProductos"
-            style="position:absolute;bottom:5px;font-size:9px;font-weight:600;
-                   color:#64748b;letter-spacing:.05em;pointer-events:none;
-                   transition:color .2s;">Productos</span>
-    </div>
+      </span>
+      <span id="navLblProductos">Productos</span>
+    </button>
 
     <!-- Tools -->
     <button data-view="tools" onclick="App.nav('tools')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1.5 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;padding-bottom:6px">
-      <svg width="20" height="20" viewBox="0 0 16 16" fill="currentColor">
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;">
+      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
         <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
       </svg>
       Tools

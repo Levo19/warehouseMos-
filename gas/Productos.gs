@@ -125,8 +125,8 @@ function actualizarProducto(params) {
     if (data[i][0] === params.idProducto || data[i][1] === params.codigoBarra) {
       var campos = ['codigoBarra','descripcion','marca','idCategoria','unidad',
                     'stockMinimo','stockMaximo','precioCompra','esEnvasable',
-                    'codigoProductoBase','factorConversion','mermaEsperadaPct',
-                    'foto','estado'];
+                    'codigoProductoBase','factorConversion','factorConversionBase',
+                    'mermaEsperadaPct','foto','estado'];
       campos.forEach(function(campo) {
         if (params[campo] !== undefined) {
           var col = headers.indexOf(campo);
@@ -740,7 +740,7 @@ function subirFotoPreingreso(params) {
     var file     = piFolder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1280';
+    var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
     return { ok: false, error: e.message };
@@ -912,7 +912,7 @@ function subirFotoGuia(params) {
     var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, name);
     var file = folder.createFile(blob);
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1280';
+    var url = 'https://lh3.googleusercontent.com/d/' + file.getId();
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
@@ -940,7 +940,7 @@ function copiarFotoDePreingreso(params) {
     while (existentes.hasNext()) { existentes.next().setTrashed(true); }
     var copy = srcFile.makeCopy(copyName, guiaFolder);
     copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://drive.google.com/thumbnail?id=' + copy.getId() + '&sz=w1280';
+    var url = 'https://lh3.googleusercontent.com/d/' + copy.getId();
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: copy.getId() } };
   } catch(e) {
@@ -983,4 +983,141 @@ function actualizarGuia(params) {
     return { ok: true };
   }
   return { ok: false, error: 'Guía no encontrada: ' + idGuia };
+}
+
+// ============================================================
+// imprimirMembrete — ticket ESC/POS 80mm para membrete de producto
+// Barcode CODE128 del código principal + nombre + lista de EAN
+// ============================================================
+function imprimirMembrete(params) {
+  var idProducto = String(params.idProducto || '');
+  if (!idProducto) return { ok: false, error: 'idProducto requerido' };
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  var printerId;
+  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+  catch(e) { return { ok: false, error: e.message }; }
+
+  // Buscar producto
+  var productos = _sheetToObjects(getProductosSheet());
+  var prod = productos.find(function(p) {
+    return p.idProducto === idProducto || String(p.codigoBarra) === idProducto;
+  });
+  if (!prod) return { ok: false, error: 'Producto no encontrado: ' + idProducto };
+
+  // Barcodes alternativos (EQUIVALENCIAS)
+  var altCodes = [];
+  try {
+    var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+    if (equivSheet) {
+      var equivRows = _sheetToObjects(equivSheet);
+      altCodes = equivRows
+        .filter(function(e) {
+          return String(e.idProducto) === String(prod.idProducto) &&
+                 String(e.activo) === '1' && e.codigoBarra;
+        })
+        .map(function(e) { return String(e.codigoBarra); });
+    }
+  } catch(e) { /* no equivalencias — no fatal */ }
+
+  // Todos los códigos EAN del producto (sin el SKU)
+  var allEan = [];
+  if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
+  altCodes.forEach(function(c) { if (allEan.indexOf(c) < 0) allEan.push(c); });
+
+  var hasMultiple  = allEan.length > 1;
+  // Barcode a imprimir: SKU si hay múltiples EAN, sino el único EAN (o el SKU como fallback)
+  var mainCode = hasMultiple
+    ? String(prod.idProducto)
+    : (allEan.length === 1 ? allEan[0] : String(prod.idProducto));
+
+  var descripcion = String(prod.descripcion || prod.idProducto).toUpperCase();
+  // Smart wrap a 32 chars (bold font A en 80mm — máx real ~48, 32 da margen para centrado)
+  var nameLines = _membWrap(descripcion, 32);
+
+  // ── Construir ESC/POS ───────────────────────────────────────
+  var ESC = '\x1b';
+  var GS  = '\x1d';
+  var LF  = '\x0a';
+
+  var t = '';
+  t += ESC + '\x40';              // init impresora
+  t += ESC + '\x61\x01';         // centrar
+
+  // Barcode CODE128
+  t += GS  + '\x68\x78';         // altura 120 dots ≈ 15 mm
+  t += GS  + '\x77\x02';         // módulo ancho 2
+  t += GS  + '\x48\x02';         // HRI debajo del código
+  t += GS  + '\x66\x00';         // HRI fuente A
+  var barData = '{B' + mainCode;
+  t += GS + '\x6b\x49' + String.fromCharCode(barData.length) + barData;
+  t += LF;
+
+  // Nombre del producto — negrita
+  t += ESC + '\x21\x08';         // bold on
+  for (var i = 0; i < Math.min(nameLines.length, 2); i++) {
+    t += nameLines[i] + LF;
+  }
+  t += ESC + '\x21\x00';         // bold off
+
+  // Si hay múltiples EAN → listar como texto en fuente pequeña
+  if (hasMultiple) {
+    t += ESC + '\x21\x01';       // font B (más pequeña)
+    t += 'SKU: ' + String(prod.idProducto) + LF;
+    for (var j = 0; j < Math.min(allEan.length, 4); j++) {
+      t += allEan[j] + LF;
+    }
+    t += ESC + '\x21\x00';       // volver a font A
+  }
+
+  t += LF + LF;
+  t += GS + '\x56\x00';          // corte completo
+
+  var payload = {
+    printerId:   parseInt(printerId),
+    title:       'Membrete ' + String(prod.idProducto),
+    contentType: 'raw_base64',
+    content:     Utilities.base64Encode(t),
+    source:      'warehouseMos'
+  };
+
+  try {
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method:  'post',
+      headers: {
+        'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+        'Content-Type':  'application/json'
+      },
+      payload:            JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    return code === 201
+      ? { ok: true }
+      : { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Word-wrap sin cortar palabras — para nombre en membrete
+function _membWrap(text, maxLen) {
+  var words = String(text || '').trim().split(/\s+/);
+  var lines = [];
+  var cur   = '';
+  for (var i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (!cur) {
+      cur = w;
+    } else if ((cur + ' ' + w).length <= maxLen) {
+      cur += ' ' + w;
+    } else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines;
 }

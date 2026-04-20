@@ -157,34 +157,48 @@ function _calcularPendientesEnvasado(productos, stockMap) {
     // No — buscamos productos derivados con stock bajo
   });
 
-  // Productos derivados con stock bajo + hay base disponible
+  // Productos WH envasados: codigoBarra empieza con WH + tienen codigoProductoBase
   productos.forEach(function(p) {
     if (!p.codigoProductoBase || p.codigoProductoBase === '') return;
     if (p.estado !== '1') return;
+    // Solo productos envasados en almacén (prefijo WH en barcode o idProducto)
+    var esWH = String(p.codigoBarra || p.idProducto || '').toUpperCase().indexOf('WH') === 0;
+    if (!esWH) return;
 
     var stockDerivado = stockMap[p.idProducto] || 0;
     var minDerivado   = parseFloat(p.stockMinimo) || 0;
-    if (stockDerivado >= minDerivado) return; // No hace falta envasar
+    var maxDerivado   = parseFloat(p.stockMaximo) || 0;
+    // Incluir siempre que esté bajo el máximo (objetivo es llegar al max, mínimo es alerta)
+    if (maxDerivado > 0 && stockDerivado >= maxDerivado) return;
 
     var stockBase = stockMap[p.codigoProductoBase] || 0;
-    var factor    = parseFloat(p.factorConversion) || 1;
-    var merma     = parseFloat(p.mermaEsperadaPct) || 0;
+    // factorConversionBase: unidades WH por 1 unidad de granel
+    // factorConversion: fallback si aún no se migró el campo
+    var factor = parseFloat(p.factorConversionBase) || parseFloat(p.factorConversion) || 1;
+    var merma  = parseFloat(p.mermaEsperadaPct) || 0;
     var maxProducibles = Math.floor(stockBase * factor * (1 - merma / 100));
 
     if (stockBase <= 0) return; // Sin base, no se puede envasar
 
+    var necesita = maxDerivado > 0
+      ? Math.max(0, maxDerivado - stockDerivado)
+      : Math.max(0, minDerivado - stockDerivado);
+
     pendientes.push({
-      codigoDerivado:   p.idProducto,
-      descripcion:      p.descripcion,
-      codigoBase:       p.codigoProductoBase,
-      stockDerivado:    stockDerivado,
-      stockMinimoDerivado: minDerivado,
-      faltan:           minDerivado - stockDerivado,
-      stockBase:        stockBase,
-      factorConversion: factor,
-      mermaEsperadaPct: merma,
-      maxProducibles:   maxProducibles,
-      urgencia:         stockDerivado === 0 ? 'CRITICA' : 'ALTA'
+      codigoDerivado:       p.idProducto,
+      descripcion:          p.descripcion,
+      codigoBase:           p.codigoProductoBase,
+      stockDerivado:        stockDerivado,
+      stockMinimo:          minDerivado,
+      stockMaximo:          maxDerivado,
+      necesitaProducir:     necesita,
+      stockBase:            stockBase,
+      factorConversionBase: factor,
+      mermaEsperadaPct:     merma,
+      maxProducibles:       maxProducibles,
+      // Granel necesario para llenar hasta max
+      granelNecesario:      maxDerivado > 0 ? Math.ceil(necesita / factor) : null,
+      urgencia:             stockDerivado === 0 ? 'CRITICA' : (stockDerivado < minDerivado ? 'ALTA' : 'MEDIA')
     });
   });
 

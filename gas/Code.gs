@@ -159,6 +159,7 @@ function _route(method, e) {
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
+      case 'imprimirMembrete':    return imprimirMembrete(params);
 
       // ── Personal ───────────────────────────────────────────
       case 'loginPersonal':      return loginPersonal(params);

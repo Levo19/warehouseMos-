@@ -162,6 +162,16 @@ function diasColor(dias) {
 let _carFotos = [];
 let _carIdx   = 0;
 
+// Convierte URLs antiguas de Drive thumbnail al formato de embed público
+function _normalizeDriveUrl(url) {
+  if (!url) return url;
+  const m = url.match(/[?&]id=([^&]+)/);
+  if (m && url.includes('drive.google.com/thumbnail')) {
+    return 'https://lh3.googleusercontent.com/d/' + m[1];
+  }
+  return url;
+}
+
 function abrirCarrusel(fotos, titulo, startIdx) {
   _carFotos = Array.isArray(fotos) ? fotos : String(fotos).split(',').filter(Boolean);
   _carIdx   = startIdx || 0;
@@ -187,7 +197,7 @@ function carruselGoTo(idx) {
 }
 
 function _renderCarrusel() {
-  document.getElementById('carImg').src        = _carFotos[_carIdx] || '';
+  document.getElementById('carImg').src        = _normalizeDriveUrl(_carFotos[_carIdx] || '');
   document.getElementById('carIdx').textContent  = _carIdx + 1;
   document.getElementById('carTotal').textContent = _carFotos.length;
   const multi = _carFotos.length > 1;
@@ -197,7 +207,7 @@ function _renderCarrusel() {
     <div onclick="carruselGoTo(${i})"
          class="w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer border-2 transition-all"
          style="border-color:${i === _carIdx ? '#3b82f6' : 'transparent'};background:#1e293b">
-      <img src="${url}" class="w-full h-full object-cover" loading="lazy"/>
+      <img src="${_normalizeDriveUrl(url)}" class="w-full h-full object-cover" loading="lazy"/>
     </div>`).join('');
 }
 
@@ -801,17 +811,12 @@ const App = (() => {
 
   // ── Tools view ────────────────────────────────────────────
   function _loadTools() {
-    // Versión
     fetch('./version.json').then(r => r.json()).then(v => {
       const el = document.getElementById('toolsVersion');
       if (el) el.textContent = v.version + ' (' + (v.build || '') + ')';
     }).catch(() => {});
-    // GAS URL
     const gasEl = document.getElementById('toolsGasUrl');
     if (gasEl) gasEl.textContent = window.WH_CONFIG?.gasUrl || '—';
-    // Cargar GAS url en input
-    const inp = document.getElementById('cfgGasUrl');
-    if (inp && window.WH_CONFIG?.gasUrl) inp.value = window.WH_CONFIG.gasUrl;
   }
 
   async function syncForzado() {
@@ -1406,7 +1411,7 @@ const GuiasView = (() => {
       } else if (g.foto) {
         fotoEl.innerHTML = `
           <div class="relative rounded-lg overflow-hidden mb-3" style="height:110px">
-            <img src="${escAttr(g.foto)}" class="w-full h-full object-cover cursor-pointer" loading="lazy"
+            <img src="${escAttr(_normalizeDriveUrl(g.foto))}" class="w-full h-full object-cover cursor-pointer" loading="lazy"
                  onclick="GuiasView.verFotoGuia()" onerror="this.style.opacity='.3'"/>
             ${abierta ? `<div class="absolute top-2 right-2 flex gap-1">
               <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Cambiar - Galería">
@@ -2393,7 +2398,7 @@ const GuiasView = (() => {
   // Abrir foto guía en carrusel (usa _guiaActual)
   function verFotoGuia() {
     if (!_guiaActual?.foto) { toast('Sin foto', 'info'); return; }
-    abrirCarrusel([_guiaActual.foto], _guiaActual.idGuia);
+    abrirCarrusel([_normalizeDriveUrl(_guiaActual.foto)], _guiaActual.idGuia);
   }
 
   return {
@@ -3154,13 +3159,13 @@ const PreingresosView = (() => {
     const emptyMsg  = document.getElementById('piEditFotosEmpty');
     if (!container) return;
     container.querySelectorAll('.foto-thumb').forEach(el => el.remove());
-    const allUrls = [..._fotosEdit.map(f => f.url), ..._fotosNuevas.map(f => f.objectUrl)];
+    const allUrls = [..._fotosEdit.map(f => _normalizeDriveUrl(f.url)), ..._fotosNuevas.map(f => f.objectUrl)];
     emptyMsg.style.display = allUrls.length ? 'none' : 'block';
     _fotosEdit.forEach((f, i) => {
       const div = document.createElement('div');
       div.className = 'foto-thumb';
       div.onclick = () => abrirCarrusel(allUrls, 'Fotos', i);
-      div.innerHTML = `<img src="${f.url}" loading="lazy"/>
+      div.innerHTML = `<img src="${_normalizeDriveUrl(f.url)}" loading="lazy"/>
         <span class="foto-num">${i + 1}</span>
         <button class="foto-rm" onclick="event.stopPropagation();PreingresosView.quitarFotoEdit('exist',${i})">×</button>`;
       container.appendChild(div);
@@ -4387,6 +4392,135 @@ const ProductosView = (() => {
            verHistorial, imprimirHistorial };
 })();
 
+
+// ════════════════════════════════════════════════
+// MEMBRETE VIEW — herramienta de impresión de membretes
+// ════════════════════════════════════════════════
+const MembreteView = (() => {
+  let _sel = null; // producto seleccionado
+
+  function buscar(q) {
+    const val  = (q || '').trim();
+    const sEl  = document.getElementById('memSugerencias');
+    if (!sEl) return;
+    if (val.length < 2) { sEl.style.display = 'none'; sEl.innerHTML = ''; return; }
+
+    const ql      = val.toLowerCase();
+    const prods   = OfflineManager.getProductosCache();
+    const equivs  = OfflineManager.getEquivalenciasCache();
+    const matches = prods.filter(p =>
+      String(p.descripcion || '').toLowerCase().includes(ql) ||
+      String(p.idProducto  || '').toLowerCase().includes(ql) ||
+      String(p.codigoBarra || '').includes(val) ||
+      equivs.some(e => e.idProducto === p.idProducto && String(e.codigoBarra || '').includes(val))
+    ).slice(0, 8);
+
+    if (!matches.length) {
+      sEl.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:#64748b;">Sin resultados</div>`;
+    } else {
+      sEl.innerHTML = matches.map(p => `
+        <button onclick="MembreteView.seleccionar('${escAttr(p.idProducto)}')"
+                style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+                       padding:10px 12px;background:none;border:none;cursor:pointer;
+                       border-bottom:1px solid #1e293b;transition:background .1s;"
+                onmouseenter="this.style.background='#1e293b'"
+                onmouseleave="this.style.background='none'">
+          <span style="flex:1;font-size:13px;font-weight:600;color:#e2e8f0;
+                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escAttr(p.descripcion || p.idProducto)}</span>
+          <span style="font-size:11px;color:#475569;font-family:monospace;flex-shrink:0;">${escAttr(p.idProducto)}</span>
+        </button>`).join('');
+    }
+    sEl.style.display = 'block';
+  }
+
+  function seleccionar(idProducto) {
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    const prod   = prods.find(p => p.idProducto === idProducto);
+    if (!prod) return;
+    _sel = prod;
+
+    const altCodes = equivs
+      .filter(e => e.idProducto === idProducto && String(e.activo) === '1' && e.codigoBarra)
+      .map(e => String(e.codigoBarra));
+    const allEan = [];
+    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
+    altCodes.forEach(c => { if (!allEan.includes(c)) allEan.push(c); });
+
+    document.getElementById('memSugerencias').style.display = 'none';
+    document.getElementById('memBuscar').value = prod.descripcion || prod.idProducto;
+    document.getElementById('memNombre').textContent = prod.descripcion || prod.idProducto;
+
+    let codigosLines = `SKU: ${prod.idProducto}`;
+    if (allEan.length === 1)  codigosLines += `  ·  EAN: ${allEan[0]}`;
+    if (allEan.length >  1)  codigosLines += '\n' + allEan.map(c => `EAN: ${c}`).join('\n');
+    document.getElementById('memCodigos').textContent = codigosLines;
+
+    document.getElementById('memProductoSel').style.display = 'block';
+    const btn = document.getElementById('btnImprimirMembrete');
+    if (btn) btn.disabled = false;
+    const st = document.getElementById('memStatus');
+    if (st) st.style.display = 'none';
+  }
+
+  function limpiar() {
+    _sel = null;
+    const inp = document.getElementById('memBuscar');
+    if (inp) inp.value = '';
+    const sEl = document.getElementById('memSugerencias');
+    if (sEl) { sEl.style.display = 'none'; sEl.innerHTML = ''; }
+    const pEl = document.getElementById('memProductoSel');
+    if (pEl) pEl.style.display = 'none';
+    const btn = document.getElementById('btnImprimirMembrete');
+    if (btn) btn.disabled = true;
+    const st = document.getElementById('memStatus');
+    if (st) st.style.display = 'none';
+  }
+
+  function abrirScanner() {
+    abrirScannerPara('memBuscar', code => {
+      const el = document.getElementById('memBuscar');
+      if (el) el.value = code;
+      buscar(code);
+      // Auto-seleccionar si hay match exacto de barcode
+      const prods  = OfflineManager.getProductosCache();
+      const equivs = OfflineManager.getEquivalenciasCache();
+      const exact  = prods.find(p =>
+        p.idProducto === code || p.codigoBarra === code ||
+        equivs.some(e => e.idProducto === p.idProducto && String(e.codigoBarra) === code)
+      );
+      if (exact) seleccionar(exact.idProducto);
+    });
+  }
+
+  async function imprimir() {
+    if (!_sel) return;
+    const btn = document.getElementById('btnImprimirMembrete');
+    const st  = document.getElementById('memStatus');
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+    if (st)  { st.style.display = ''; st.textContent = 'Enviando a impresora…'; st.style.color = '#94a3b8'; }
+
+    const res = await API.call({ action: 'imprimirMembrete', idProducto: _sel.idProducto })
+      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+        <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+      </svg> Imprimir membrete`;
+    }
+    if (res.ok) {
+      if (st) { st.style.display = ''; st.textContent = '✓ Impreso correctamente'; st.style.color = '#4ade80'; }
+      toast('Membrete enviado a impresora', 'ok');
+    } else {
+      if (st) { st.style.display = ''; st.textContent = '✗ ' + (res.error || 'Error al imprimir'); st.style.color = '#f87171'; }
+      toast(res.error || 'Error al imprimir', 'danger');
+    }
+  }
+
+  return { buscar, seleccionar, limpiar, abrirScanner, imprimir };
+})();
 
 // ════════════════════════════════════════════════
 // CONFIG VIEW

@@ -60,7 +60,9 @@ function registrarEnvasado(params) {
     };
   }
 
-  var factor    = parseFloat(prodDerivado.factorConversion) || 1;
+  // factorConversionBase = unidades WH por 1 unidad de granel (transformación)
+  // factorConversion = fallback para compatibilidad con registros previos
+  var factor    = parseFloat(prodDerivado.factorConversionBase) || parseFloat(prodDerivado.factorConversion) || 1;
   var merma     = parseFloat(prodDerivado.mermaEsperadaPct) || 0;
   var unidadesEsperadas = Math.floor(cantBase * factor * (1 - merma / 100));
   var mermaReal         = Math.max(0, unidadesEsperadas - unidadesReales);
