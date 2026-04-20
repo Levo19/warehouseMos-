@@ -162,13 +162,16 @@ function diasColor(dias) {
 let _carFotos = [];
 let _carIdx   = 0;
 
-// Convierte URLs antiguas de Drive thumbnail al formato de embed público
+// Convierte URLs de Drive al formato de embed público con tamaño
 function _normalizeDriveUrl(url) {
   if (!url) return url;
-  const m = url.match(/[?&]id=([^&]+)/);
-  if (m && url.includes('drive.google.com/thumbnail')) {
-    return 'https://lh3.googleusercontent.com/d/' + m[1];
+  // Ya es lh3 → solo asegura el sufijo de tamaño para carga correcta
+  if (url.includes('lh3.googleusercontent.com/d/')) {
+    return url.includes('=w') ? url : url + '=w800';
   }
+  // thumbnail o uc con parámetro id → convertir
+  const m = url.match(/[?&]id=([^&]+)/);
+  if (m) return 'https://lh3.googleusercontent.com/d/' + m[1] + '=w800';
   return url;
 }
 
@@ -2770,6 +2773,7 @@ const PreingresosView = (() => {
   // Edit modal state
   let _editItem          = null;
   let _tagsEdit          = { comp: null, compl: null };
+  let _cargadoresEdit    = [];   // [{ id, nombre, carretas }]
   let _fotosEdit         = [];   // [{ url }] existing Drive URLs kept
   let _fotosNuevas       = [];   // [{ file, objectUrl }] new files to upload
 
@@ -3131,10 +3135,24 @@ const PreingresosView = (() => {
   function abrirDetalle(idPreingreso) {
     const cached = OfflineManager.getPreingresosCache();
     const p = cached.find(x => x.idPreingreso === idPreingreso);
-    if (!p) { toast('No encontrado en caché', 'warn'); return; }
-    _editItem = { ...p };
-    _renderModal(p);
-    abrirSheet('sheetDetallePI');
+    if (p) {
+      _editItem = { ...p };
+      _renderModal(p);
+      abrirSheet('sheetDetallePI');
+    } else {
+      // Aún no está en caché (recién creado) → buscar en GAS
+      toast('Cargando...', 'info', 1500);
+      API.getPreingresos({ idPreingreso }).then(res => {
+        const item = res.ok && res.data?.find ? res.data.find(x => x.idPreingreso === idPreingreso) : null;
+        if (item) {
+          _editItem = { ...item };
+          _renderModal(item);
+          abrirSheet('sheetDetallePI');
+        } else {
+          toast('Preingreso no encontrado', 'warn');
+        }
+      }).catch(() => toast('Sin conexión', 'warn'));
+    }
   }
 
   function _renderModal(p) {
@@ -3167,6 +3185,11 @@ const PreingresosView = (() => {
     const comEl = document.getElementById('piEditComentario');
     if (comEl) comEl.value = _textoLibreFromComentario(p.comentario);
 
+    // Cargadores
+    try { _cargadoresEdit = JSON.parse(p.cargadores || '[]'); } catch { _cargadoresEdit = []; }
+    if (!Array.isArray(_cargadoresEdit)) _cargadoresEdit = [];
+    _renderCargadoresEdit();
+
     // Fotos
     _fotosEdit   = (p.fotos || '').split(',').filter(Boolean).map(url => ({ url }));
     _fotosNuevas.forEach(f => URL.revokeObjectURL(f.objectUrl));
@@ -3179,6 +3202,93 @@ const PreingresosView = (() => {
     if (btnG) { btnG.disabled = false; btnG.textContent = 'Crear Guía de Ingreso'; }
     const btnS = document.getElementById('btnGuardarPI');
     if (btnS) { btnS.disabled = false; btnS.textContent = 'Guardar cambios'; }
+  }
+
+  // ── Cargadores edit modal ────────────────────────────────
+  function _renderCargadoresEdit() {
+    const list = document.getElementById('piCargadoresList');
+    if (!list) return;
+    if (!_cargadoresEdit.length) {
+      list.innerHTML = '<p class="text-xs text-slate-600 italic">Sin cargadores asignados</p>';
+      return;
+    }
+    list.innerHTML = _cargadoresEdit.map((c, i) => `
+      <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
+        <span class="text-amber-400 text-xs">🛺</span>
+        <span class="text-amber-200 text-xs flex-1">${escAttr(c.nombre)}</span>
+        <div class="flex items-center gap-1">
+          <button onclick="PreingresosView.cambiarCarretasEdit(${i},-1)"
+                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
+                  style="background:#334155">−</button>
+          <span class="text-amber-300 text-xs font-bold min-w-[1.2rem] text-center">${c.carretas}</span>
+          <button onclick="PreingresosView.cambiarCarretasEdit(${i},1)"
+                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
+                  style="background:#334155">+</button>
+        </div>
+        <button onclick="PreingresosView.quitarCargadorEdit(${i})"
+                class="text-slate-500 hover:text-red-400 text-sm leading-none ml-1">×</button>
+      </div>`).join('');
+  }
+
+  async function _autoguardarCargadores() {
+    if (!_editItem) return;
+    const cargadores = JSON.stringify(_cargadoresEdit);
+    _editItem.cargadores = cargadores;
+    await API.actualizarPreingreso({ idPreingreso: _editItem.idPreingreso, cargadores })
+      .catch(() => {});
+    // Actualizar en caché local
+    const cache = OfflineManager.getPreingresosCache();
+    const idx = cache.findIndex(x => x.idPreingreso === _editItem.idPreingreso);
+    if (idx >= 0) { cache[idx].cargadores = cargadores; OfflineManager.inyectarPreingreso && null; }
+  }
+
+  function cambiarCarretasEdit(idx, delta) {
+    if (!_cargadoresEdit[idx]) return;
+    _cargadoresEdit[idx].carretas = Math.max(1, _cargadoresEdit[idx].carretas + delta);
+    _renderCargadoresEdit();
+    _autoguardarCargadores();
+  }
+
+  function quitarCargadorEdit(idx) {
+    _cargadoresEdit.splice(idx, 1);
+    _renderCargadoresEdit();
+    _autoguardarCargadores();
+  }
+
+  function abrirPickerCargadorEdit() {
+    const todos = OfflineManager.getProveedoresCache()
+      .filter(p => (p.nombre || '').toLowerCase().startsWith('cargador'));
+    if (!todos.length) { toast('No hay cargadores registrados', 'warn'); return; }
+    const yaIds = _cargadoresEdit.map(c => c.id);
+    const disponibles = todos.filter(p => !yaIds.includes(p.idProveedor));
+    if (!disponibles.length) { toast('Ya están todos los cargadores', 'info'); return; }
+    const existing = document.getElementById('sheetCargadoresEdit');
+    if (existing) existing.remove();
+    const sheet = document.createElement('div');
+    sheet.id = 'sheetCargadoresEdit';
+    sheet.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:1.25rem;background:#0f172a;border-top:1px solid #1e293b;border-radius:1rem 1rem 0 0;max-height:55vh;overflow-y:auto';
+    sheet.innerHTML = `
+      <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+      <p class="font-bold text-sm mb-3 text-amber-300">🛺 Agregar Cargador</p>
+      <div class="space-y-2">
+        ${disponibles.map(c => `
+          <button onclick="PreingresosView.agregarCargadorEdit('${c.idProveedor}','${escAttr(c.nombre)}')"
+                  class="w-full text-left px-3 py-2.5 rounded-lg text-sm text-slate-200"
+                  style="background:#1e293b;border:1px solid #334155">
+            ${c.nombre}
+          </button>`).join('')}
+      </div>
+      <button onclick="document.getElementById('sheetCargadoresEdit').remove()"
+              class="mt-4 w-full text-xs text-slate-500 py-2">Cancelar</button>`;
+    document.body.appendChild(sheet);
+  }
+
+  function agregarCargadorEdit(id, nombre) {
+    if (_cargadoresEdit.find(c => c.id === id)) return;
+    _cargadoresEdit.push({ id, nombre, carretas: 1 });
+    _renderCargadoresEdit();
+    _autoguardarCargadores();
+    document.getElementById('sheetCargadoresEdit')?.remove();
   }
 
   // ── Fotos edit modal ──────────────────────────────────────
@@ -3546,6 +3656,14 @@ const PreingresosView = (() => {
     // 2. Finalizar card inmediatamente — el usuario ya puede ver y usar el preingreso
     _finalizeOptimisticCard(idPreingresoReal, { idProveedor, monto });
     toast(`Preingreso ${idPreingresoReal} registrado`, 'ok');
+
+    // Inyectar en caché para que abrirDetalle no tenga que ir al GAS
+    OfflineManager.inyectarPreingreso({
+      idPreingreso: idPreingresoReal, idProveedor, cargadores, monto,
+      comentario, estado: 'PENDIENTE',
+      fecha: new Date().toISOString(), fotos: '',
+      usuario: window.WH_CONFIG.usuario
+    });
     btn.disabled = false; btn.textContent = 'Registrar preingreso';
 
     // 3. Subir fotos en segundo plano (no bloquea UI)
@@ -3618,7 +3736,8 @@ const PreingresosView = (() => {
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
-           abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador };
+           abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
+           abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit };
 })();
 
 // ════════════════════════════════════════════════

@@ -249,6 +249,15 @@ const OfflineManager = (() => {
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;
 
+  // ── Inyectar un preingreso recién creado en caché ────────────
+  function inyectarPreingreso(item) {
+    const cache = getPreingresosCache();
+    if (!cache.find(x => x.idPreingreso === item.idPreingreso)) {
+      cache.unshift(item);
+      guardar(KEYS.PREINGRESOS, cache);
+    }
+  }
+
   // ── Actualizar cache de detalle para una guía específica ─────
   // Reemplaza todas las entradas de idGuia con los nuevos detalles
   function actualizarDetallesGuia(idGuia, nuevosDetalles) {
@@ -277,7 +286,7 @@ const OfflineManager = (() => {
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     getAdminPin,
-    actualizarDetallesGuia, addDetalleCache,
+    actualizarDetallesGuia, addDetalleCache, inyectarPreingreso,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
   };
