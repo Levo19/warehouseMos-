@@ -111,6 +111,7 @@ function agregarDetalleGuia(params) {
     }
   }
 
+  var nextRow = sheet.getLastRow() + 1;
   sheet.appendRow([
     idDetalle,
     params.idGuia,
@@ -121,6 +122,8 @@ function agregarDetalleGuia(params) {
     idLote,
     params.observacion || ''
   ]);
+  // Forzar codigoProducto como texto para preservar ceros a la izquierda
+  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(String(prod.idProducto));
 
   return {
     ok: true,
