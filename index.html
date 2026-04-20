@@ -40,6 +40,12 @@
     body { font-family: 'Segoe UI', system-ui, sans-serif; background:#0f172a; color:#f1f5f9; }
     .view { display:none; }
     .view.active { display:block; }
+    /* Scrollbars modernos — delgados y sutiles en todos lados */
+    ::-webkit-scrollbar { width:5px; height:5px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:rgba(100,116,139,.35); border-radius:3px; }
+    ::-webkit-scrollbar-thumb:hover { background:rgba(100,116,139,.65); }
+    * { scrollbar-width:thin; scrollbar-color:rgba(100,116,139,.35) transparent; }
     /* Nav bar */
     .nav-btn.active { color:#60a5fa; }
     #navBtnProductos.active #navLblProductos { color:#60a5fa; }
@@ -86,6 +92,20 @@
                 font-weight:700;font-size:13px;letter-spacing:.06em;border:none;cursor:pointer;
                 box-shadow:0 4px 20px rgba(29,78,216,.5);transition:transform .1s; }
     .fab-pill:active { transform:scale(.96); }
+    /* Tablet split — hidden by default */
+    #tabletPrePanel { display:none; }
+    #tabletNuevaGuia { display:none; }
+    #guiasMainCol { min-width:0; }
+    /* Mobile: search row is just the search (full width) */
+    #guiasSearchRow { display:block; margin-bottom:12px; }
+    #guiasSearchRow .smart-srch { margin-bottom:0; }
+    .tpp-hdr { display:flex;align-items:center;justify-content:space-between;
+               padding:0 0 10px;border-bottom:1px solid #1e293b;margin-bottom:10px; }
+    .tpp-hdr span { font-size:11px;font-weight:700;color:#64748b;letter-spacing:.1em; }
+    .tpp-fab-btn { width:26px;height:26px;border-radius:8px;background:#1d4ed8;color:#fff;
+                   display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;
+                   flex-shrink:0; }
+    .tpp-fab-btn:active { opacity:.7; }
     /* Módulo btn (Más menu) */
     .mod-btn { background:#1e293b;border-radius:12px;padding:14px 8px;
                display:flex;flex-direction:column;align-items:center;gap:8px;
@@ -607,6 +627,63 @@
       /* Input y btn un toque más grandes */
       .input { font-size:15px !important; padding:10px 13px !important; }
       .btn   { font-size:14px !important; padding:11px 16px !important; }
+
+      /* FAB pills: sube porque no hay bottom nav */
+      .fab-pill { bottom:20px; right:20px; }
+
+      /* ── Bloquear scroll exterior en tablet (cada vista maneja el suyo) ── */
+      body { overflow:hidden; }
+      #mainContent { height:calc(100vh - 52px); overflow-y:auto; }
+
+      /* ── Guías split view ── */
+      /* .active evita romper display:none de las otras vistas */
+      #view-guias.active {
+        display:grid;
+        grid-template-columns: 3fr 1fr;
+        gap:14px;
+        /* 52px topbar + 16px padding-top + 20px padding-bottom = 88px */
+        height:calc(100vh - 88px);
+        overflow:hidden;
+      }
+
+      /* Columna izquierda: flex column, lista scrollable */
+      #guiasMainCol {
+        min-width:0;
+        display:flex; flex-direction:column;
+        height:100%; overflow:hidden;
+      }
+      #guiasSearchRow { flex-shrink:0; margin-bottom:10px; display:flex; gap:8px; align-items:center; }
+      #guiasSearchRow .smart-srch { flex:1; margin-bottom:0; }
+      #listGuias { flex:1; overflow-y:auto; padding-bottom:8px; }
+
+      /* Ocultar FAB flotante en tablet (hay botón inline) */
+      #view-guias .fab-pill { display:none !important; }
+
+      /* Botón inline "NUEVA GUÍA" (tablet) */
+      #tabletNuevaGuia {
+        display:flex; align-items:center; gap:6px; flex-shrink:0;
+        height:38px; padding:0 14px; border-radius:10px;
+        background:#1d4ed8; color:#fff; font-size:12px; font-weight:700;
+        letter-spacing:.05em; border:none; cursor:pointer; white-space:nowrap;
+      }
+      #tabletNuevaGuia:active { opacity:.8; }
+
+      /* Columna derecha pre-ingresos: flex column, lista scrollable */
+      #tabletPrePanel {
+        display:flex; flex-direction:column;
+        height:100%; overflow:hidden;
+        background:#0d1626; border:1px solid #1e293b; border-radius:14px;
+        padding:14px 12px;
+      }
+      #tppList { flex:1; overflow-y:auto; }
+
+      /* Ocultar botones de navegación cruzada (el panel siempre está visible) */
+      #view-guias .nav-sibling-btn,
+      #view-preingresos .nav-sibling-btn { display:none !important; }
+
+      /* ── Productos: 2 columnas ── */
+      #listProductos { display:grid !important; grid-template-columns:repeat(2,1fr); gap:12px; }
+      #listProductos > * { margin-top:0 !important; }
     }
   </style>
   <!-- ── PWA Install prompt ── -->
@@ -859,6 +936,7 @@
 
   <!-- ── GUIAS ──────────────────────────────────── -->
   <section id="view-guias" class="view slide-up">
+    <div id="guiasMainCol">
     <div class="flex items-center justify-between mb-4">
 
       <!-- Filtro dropdown -->
@@ -897,25 +975,32 @@
       </button>
     </div>
 
-    <!-- Barra de búsqueda inteligente guías -->
-    <div class="smart-srch mb-3">
-      <span class="smart-srch-ico">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
-      </span>
-      <input type="text" id="inputBuscarGuia" class="smart-srch-input"
-             placeholder="ID guía, nombre o código de proveedor…"
-             oninput="GuiasView.buscar(this.value)"
-             autocomplete="off" spellcheck="false"/>
-      <div class="smart-srch-actions">
-        <button id="clearBuscarGuia" class="smart-srch-clear" onclick="GuiasView.buscarClear()">✕</button>
-        <button class="smart-srch-btn" title="Escanear código"
-                onclick="abrirScanner(c=>{document.getElementById('inputBuscarGuia').value=c;GuiasView.buscar(c);})">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
-        </button>
+    <!-- Barra de búsqueda inteligente guías + botón nueva (tablet inline) -->
+    <div id="guiasSearchRow">
+      <div class="smart-srch">
+        <span class="smart-srch-ico">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
+        </span>
+        <input type="text" id="inputBuscarGuia" class="smart-srch-input"
+               placeholder="ID guía, nombre o código de proveedor…"
+               oninput="GuiasView.buscar(this.value)"
+               autocomplete="off" spellcheck="false"/>
+        <div class="smart-srch-actions">
+          <button id="clearBuscarGuia" class="smart-srch-clear" onclick="GuiasView.buscarClear()">✕</button>
+          <button class="smart-srch-btn" title="Escanear código"
+                  onclick="abrirScanner(c=>{document.getElementById('inputBuscarGuia').value=c;GuiasView.buscar(c);})">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
+          </button>
+        </div>
       </div>
+      <!-- Solo visible en tablet landscape -->
+      <button id="tabletNuevaGuia" onclick="GuiasView.nueva()">
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+        NUEVA GUÍA
+      </button>
     </div>
 
-    <div id="listGuias" class="pb-20"></div>
+    <div id="listGuias"></div>
 
     <!-- FAB elegante -->
     <button onclick="GuiasView.nueva()" class="fab-pill">
@@ -924,6 +1009,30 @@
       </svg>
       NUEVA GUÍA
     </button>
+    </div><!-- /guiasMainCol -->
+
+    <!-- Tablet: panel lateral de pre-ingresos (solo visible en landscape 768px+) -->
+    <div id="tabletPrePanel">
+      <div class="tpp-hdr">
+        <span>PRE-INGRESOS</span>
+        <button onclick="PreingresosView.nuevo()" class="tpp-fab-btn" title="Nuevo preingreso">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+        </button>
+      </div>
+      <div class="smart-srch" style="margin-bottom:8px;flex-shrink:0">
+        <span class="smart-srch-ico">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
+        </span>
+        <input id="tppSearch" type="text" class="smart-srch-input" placeholder="Buscar proveedor…"
+               oninput="PreingresosView.buscarEnPanel(this.value)"
+               autocomplete="off" spellcheck="false"/>
+        <div class="smart-srch-actions">
+          <button id="clearTppSearch" class="smart-srch-clear" style="display:none"
+                  onclick="PreingresosView.limpiarBuscarPanel()">✕</button>
+        </div>
+      </div>
+      <div id="tppList" class="pre-date-group" style="gap:6px"></div>
+    </div>
   </section>
 
   <!-- ── ENVASADOS ──────────────────────────────── -->

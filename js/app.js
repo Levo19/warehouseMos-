@@ -270,12 +270,10 @@ const Session = (() => {
 
     const yaHayCache = OfflineManager.getPersonalCache().length > 0;
     if (!yaHayCache && navigator.onLine && window.WH_CONFIG.gasUrl) {
-      // Sin caché: esperar descarga antes de mostrar teclado
-      await OfflineManager.precargar().catch(() => {});
-    } else if (navigator.onLine && window.WH_CONFIG.gasUrl) {
-      // Con caché: refrescar en background (no bloquea)
-      OfflineManager.precargar().catch(() => {});
+      // Sin caché: forzar descarga antes de mostrar teclado
+      await OfflineManager.precargar(true).catch(() => {});
     }
+    // Con caché: el timer de 60s se encarga del refresh — no disparar call extra aquí
 
     // Ocultar spinner, revelar teclado con animación
     loadingEl.style.display = 'none';
@@ -416,12 +414,11 @@ const Session = (() => {
       syncing: false
     });
 
-    // Precargar datos en background
-    OfflineManager.precargar().then(() => {
-      App.cargarDashboard();
-      App.cargarProductosMaestro();
-      App.cargarProveedoresMaestro();
-    });
+    // Dashboard y maestros: usar caché si está disponible
+    // precargar() ya está corriendo vía iniciarRefreshOperacional — no disparar otra llamada
+    App.cargarDashboard();
+    App.cargarProductosMaestro();
+    App.cargarProveedoresMaestro();
 
     // Si hay cola pendiente y hay red, sincronizar
     if (navigator.onLine) OfflineManager.sincronizar();
@@ -997,26 +994,30 @@ const App = (() => {
   }
 
   async function cargarProductosMaestro() {
+    // Usar caché primero — precargar() ya trae productos en background
+    const cached = OfflineManager.getProductosCache();
+    if (cached.length) { todosProductos = cached; return; }
     const res = await API.getProductos({ estado: '1' }).catch(() => ({ ok: false }));
     if (res.ok) todosProductos = res.data;
   }
 
   async function cargarProveedoresMaestro() {
-    const res = await API.getProveedores({ estado: '1' }).catch(() => ({ ok: false }));
-    if (res.ok) {
-      todosProveedores = res.data;
-      // Llenar selects de proveedores
-      ['guiaProveedor', 'preProvSelect'].forEach(id => {
-        const sel = document.getElementById(id);
-        if (!sel) return;
-        todosProveedores.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.idProveedor;
-          opt.textContent = p.nombre;
-          sel.appendChild(opt);
-        });
+    // Usar caché primero — precargar() ya trae proveedores en background
+    const cached = OfflineManager.getProveedoresCache();
+    const lista  = cached.length ? cached : await API.getProveedores({ estado: '1' })
+                     .then(r => r.ok ? r.data : []).catch(() => []);
+    if (!lista.length) return;
+    todosProveedores = lista;
+    ['guiaProveedor', 'preProvSelect'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      todosProveedores.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.idProveedor;
+        opt.textContent = p.nombre;
+        sel.appendChild(opt);
       });
-    }
+    });
   }
 
   function showUsuarioDialog() {
@@ -1250,6 +1251,7 @@ const GuiasView = (() => {
     if (!list.length) {
       container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">No hay guías</p>';
       optCards.forEach(c => container.insertBefore(c, container.firstChild));
+      _renderTabletPrePanel();
       return;
     }
 
@@ -1304,6 +1306,13 @@ const GuiasView = (() => {
         container.insertBefore(c, container.firstChild);
       }
     });
+
+    _renderTabletPrePanel();
+  }
+
+  // ── Tablet pre-ingreso panel — delega al renderer real de PreingresosView ──
+  function _renderTabletPrePanel() {
+    PreingresosView.renderTppList();
   }
 
   // ── Optimistic guía card ──────────────────────────────────
@@ -1977,8 +1986,6 @@ const GuiasView = (() => {
   // ── MODO CÁMARA ──────────────────────────────────────────────
   function abrirCamaraItem() {
     if (!_guiaActual) return;
-    // Recargar productos antes de abrir (para búsqueda fresca)
-    OfflineManager.precargar().catch(() => {});
     document.getElementById('scannerModal').classList.add('open');
     // Ocultar picker y toast previos
     document.getElementById('camPicker').style.display = 'none';
@@ -2073,7 +2080,6 @@ const GuiasView = (() => {
 
   function abrirScannerItem() {
     if (!_guiaActual) return;
-    OfflineManager.precargar().catch(() => {});
     _hidBuffer = '';
     abrirSheet('sheetScanInput');
     // Limpiar estado visual
@@ -3057,6 +3063,7 @@ const EnvasadorView = (() => {
 const PreingresosView = (() => {
   let _filtroEstado      = '';
   let _busquedaQ         = '';
+  let _tppBusq           = '';   // búsqueda del panel tablet
   let _tags              = { comp: null, compl: null };   // 'si' | 'no' | null
   let _fotosSeleccionadas = [];                           // [{ file, objectUrl }]
   // Edit modal state
@@ -3242,6 +3249,9 @@ const PreingresosView = (() => {
         container.insertBefore(c, container.firstChild);
       }
     });
+
+    // Sincronizar panel tablet (columna derecha de Guías)
+    renderTppList();
   }
 
   async function cargar(estado = '', silencioso = false) {
@@ -3254,9 +3264,11 @@ const PreingresosView = (() => {
     } else if (!silencioso) {
       loading('listPreingresos', true);
     }
-    // Refrescar en background desde GAS
-    const res = await API.getPreingresos(estado ? { estado } : {}).catch(() => ({ ok: false }));
-    if (res.ok && res.data) _renderPreingresos(_aplicarBusqueda(res.data));
+    // Refrescar vía endpoint compartido (throttled, no dispara si recién se llamó)
+    await OfflineManager.precargarOperacional().catch(() => {});
+    const fresh = OfflineManager.getPreingresosCache();
+    const freshFiltrados = estado ? fresh.filter(p => p.estado === estado) : fresh;
+    if (freshFiltrados.length) _renderPreingresos(_aplicarBusqueda(freshFiltrados));
   }
 
   function toggleFiltro() {
@@ -3334,13 +3346,7 @@ const PreingresosView = (() => {
         </div>`).join('');
     };
     container.innerHTML = html(list);
-    // Background refresh from GAS
-    if (navigator.onLine) {
-      API.getPreingresos(estado ? { estado } : {}).then(res => {
-        if (res.ok && res.data && container.isConnected)
-          container.innerHTML = html(res.data);
-      }).catch(() => {});
-    }
+    // Datos actualizados llegan por precargarOperacional (60s timer) → sin llamada extra aquí
   }
 
   async function aprobarDesdePanel(id) {
@@ -3789,10 +3795,11 @@ const PreingresosView = (() => {
                   class="pre-guia-btn">+ Guía</button>
         </div>`;
     }
-    // Refrescar en background — cuando GAS responda, _renderPreingresos descartará
-    // el card optimista porque el ID ya estará en la lista real
-    API.getPreingresos(_filtroEstado ? { estado: _filtroEstado } : {}).then(res => {
-      if (res.ok && res.data) _renderPreingresos(_aplicarBusqueda(res.data));
+    // Refrescar via endpoint compartido (throttled) — actualizará la lista cuando llegue
+    OfflineManager.precargarOperacional().then(() => {
+      const fresh = OfflineManager.getPreingresosCache();
+      const filtrados = _filtroEstado ? fresh.filter(p => p.estado === _filtroEstado) : fresh;
+      if (filtrados.length) _renderPreingresos(_aplicarBusqueda(filtrados));
     }).catch(() => {});
   }
 
@@ -4021,6 +4028,49 @@ const PreingresosView = (() => {
     abrirSheet('sheetPreingreso');
   }
 
+  // ── Panel tablet (columna derecha en vista Guías) ────────
+  function renderTppList() {
+    const container = document.getElementById('tppList');
+    if (!container || !container.offsetParent) return;
+    const todos = OfflineManager.getPreingresosCache();
+    const list = _tppBusq
+      ? todos.filter(p =>
+          _getProveedorNombre(p.idProveedor).toLowerCase().includes(_tppBusq) ||
+          (p.idPreingreso || '').toLowerCase().includes(_tppBusq) ||
+          (p.idProveedor  || '').toLowerCase().includes(_tppBusq)
+        )
+      : todos;
+    if (!list.length) {
+      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin preingresos</p>';
+      return;
+    }
+    const sorted = [...list].sort((a, b) => {
+      const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
+      const td = db - da;
+      if (td !== 0) return td;
+      const na = parseInt((a.idPreingreso || '').replace(/\D/g, '')) || 0;
+      const nb = parseInt((b.idPreingreso || '').replace(/\D/g, '')) || 0;
+      return nb - na;
+    });
+    container.innerHTML = sorted.slice(0, 40).map(_renderCard).join('');
+  }
+
+  function buscarEnPanel(q) {
+    _tppBusq = (q || '').toLowerCase().trim();
+    const btn = document.getElementById('clearTppSearch');
+    if (btn) btn.style.display = _tppBusq ? 'flex' : 'none';
+    renderTppList();
+  }
+
+  function limpiarBuscarPanel() {
+    _tppBusq = '';
+    const inp = document.getElementById('tppSearch');
+    if (inp) inp.value = '';
+    const btn = document.getElementById('clearTppSearch');
+    if (btn) btn.style.display = 'none';
+    renderTppList();
+  }
+
   return { cargar, filtrar, toggleFiltro, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
@@ -4029,7 +4079,8 @@ const PreingresosView = (() => {
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
-           abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit };
+           abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
+           renderTppList, buscarEnPanel, limpiarBuscarPanel };
 })();
 
 // ════════════════════════════════════════════════
@@ -4929,14 +4980,13 @@ const ProductosView = (() => {
     _initAuditDia();
     _aplicarQuery();
 
-    // Actualizar stock en background — respeta búsqueda activa
-    const res = await API.getStock().catch(() => ({ ok: false }));
-    if (res.ok && res.data) {
-      _buildMap(res.data);
-      _grupos = _agrupar(prods, equivs);
+    // Refrescar stock via endpoint compartido (throttled) — evita llamada individual a getStock
+    OfflineManager.precargarOperacional().then(() => {
+      _buildMap(OfflineManager.getStockCache());
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _actualizarBadge();
       _aplicarQuery();
-    }
+    }).catch(() => {});
   }
 
   // Re-render desde caché sin spinner ni API call (llamado por wh:data-refresh)

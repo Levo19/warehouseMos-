@@ -25,7 +25,13 @@ const OfflineManager = (() => {
   };
 
   // ── Estado ────────────────────────────────────────────────
-  let _syncing = false;
+  let _syncing       = false;
+  let _opLoading     = false;  // guard: evitar llamadas concurrent a precargarOperacional
+  let _lastOpTs      = 0;      // timestamp de la última llamada a precargarOperacional
+  const OP_MIN_MS    = 15000;  // mínimo 15s entre llamadas operacionales
+  let _masterLoading = false;  // guard: evitar llamadas concurrent a precargar (maestros)
+  let _lastMasterTs  = 0;      // timestamp de la última llamada a precargar
+  const MASTER_MIN_MS = 60000; // maestros: mínimo 60s (cambian poco)
   let _onStatusChange = null;
   let _opRefreshTimer = null;
 
@@ -60,8 +66,12 @@ const OfflineManager = (() => {
   // Intenta descargarMaestros (endpoint nuevo que trae las 4 tablas de MOS).
   // Si el GAS desplegado no lo conoce aún, degrada al endpoint legacy
   // getPersonalConPin para que el login siempre funcione.
-  async function precargar() {
+  async function precargar(forzar = false) {
     if (!navigator.onLine) return;
+    if (_masterLoading) return;
+    if (!forzar && Date.now() - _lastMasterTs < MASTER_MIN_MS) return;
+    _masterLoading = true;
+    _lastMasterTs  = Date.now();
     try {
       const [maestros, stock, config] = await Promise.all([
         fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null),
@@ -107,6 +117,8 @@ const OfflineManager = (() => {
       _notificar();
     } catch(e) {
       console.warn('[Offline] Error en precarga:', e);
+    } finally {
+      _masterLoading = false;
     }
   }
 
@@ -179,6 +191,12 @@ const OfflineManager = (() => {
   // ── Precarga operacional (guías, preingresos, stock, ajustes, auditorías) ──
   async function precargarOperacional() {
     if (!navigator.onLine) return;
+    // Guardia de concurrencia: si ya hay una llamada en vuelo, esperar a que termine
+    if (_opLoading) return;
+    // Throttle: no disparar si la última llamada fue hace menos de OP_MIN_MS
+    if (Date.now() - _lastOpTs < OP_MIN_MS) return;
+    _opLoading = true;
+    _lastOpTs  = Date.now();
     try {
       const r = await fetch(_gasUrl('descargarOperacional')).then(r => r.json()).catch(() => null);
       if (!r?.ok) return;
@@ -200,29 +218,23 @@ const OfflineManager = (() => {
 
       window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } }));
     } catch(e) { console.warn('[Offline] Error en precarga operacional:', e); }
+    finally { _opLoading = false; }
   }
 
-  // ── Precarga maestros con throttle 55s (1 ciclo del intervalo) ──
-  async function _precargarMaestrosThrottled() {
-    const last = parseInt(localStorage.getItem(KEYS.LAST_MASTER) || '0', 10);
-    if (Date.now() - last < 55 * 1000) return; // menos de 55s → skip
-    localStorage.setItem(KEYS.LAST_MASTER, String(Date.now())); // reservar antes de fetch para evitar solapamiento
-    await precargar().catch(() => {});
-  }
-
-  // Inicia el refresh automático cada 30s (llamar desde App.init, antes del login)
+  // Inicia el refresh automático cada 60s (llamar desde App.init, antes del login)
   function iniciarRefreshOperacional() {
     if (_opRefreshTimer) return;
     // Carga inmediata: maestros (si no hay caché) + operacional
+    // precargar() ya tiene throttle propio (MASTER_MIN_MS=60s) así que es seguro llamarlo
     if (!cargar(KEYS.PERSONAL)?.length) {
-      precargar().catch(() => {});
+      precargar(true).catch(() => {}); // forzar: primer arranque sin caché
     } else {
-      _precargarMaestrosThrottled();
+      precargar().catch(() => {});     // respetará throttle de 60s
     }
     precargarOperacional();
     _opRefreshTimer = setInterval(() => {
-      _precargarMaestrosThrottled();
-      precargarOperacional();
+      precargar().catch(() => {});     // throttled internamente
+      precargarOperacional();          // throttled internamente
     }, 60000);
   }
 
