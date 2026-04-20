@@ -956,7 +956,7 @@ function actualizarGuia(params) {
   var hdrs  = data[0];
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] !== idGuia) continue;
-    ['comentario', 'foto'].forEach(function(key) {
+    ['tipo', 'idProveedor', 'idZona', 'numeroDocumento', 'comentario', 'foto'].forEach(function(key) {
       if (params[key] === undefined) return;
       var col = hdrs.indexOf(key);
       if (col >= 0) sheet.getRange(i + 1, col + 1).setValue(String(params[key]));

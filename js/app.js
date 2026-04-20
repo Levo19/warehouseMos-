@@ -995,8 +995,13 @@ const GuiasView = (() => {
   let _fotoGuiaNueva = null; // { file, objectUrl }
   // Comentario + tags guía (estado del sheet de detalle — se guardan al cerrar)
   let _tagsGuia    = { comp: null, compl: null };
-  // Tags para CREAR nueva guía
+  // Tags para CREAR/EDITAR guía
   let _tagsNueva   = { comp: null, compl: null };
+  // Paneles del header de detalle
+  let _fotoOpen    = false;
+  let _notasOpen   = false;
+  // Modo edición de guía existente
+  let _guiaModoEdicion = false;
   // Agregar ítem: estado del scanner+form
   let _itemProd    = null;   // product object seleccionado
   let _itemQty     = 1;
@@ -1323,14 +1328,40 @@ const GuiasView = (() => {
         <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
         <span onclick="event.stopPropagation()">${lockBtn}</span>
       </div>
-      <p class="font-black text-lg text-white leading-tight truncate" onclick="GuiasView.deselectItem()">${escAttr(provNombreHdr)}</p>
-      <p class="text-xs text-slate-500 mt-0.5 mb-1" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}${g.numeroDocumento ? ' · Doc: ' + escAttr(g.numeroDocumento) : ''}</p>
-      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}`;
+      <p class="font-black text-lg text-white leading-tight" onclick="GuiasView.deselectItem()">${escAttr(provNombreHdr)}</p>
+      <p class="text-xs text-slate-500 mt-0.5" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
+      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}
+      <div class="flex gap-2 mt-2 mb-1">
+        <button onclick="GuiasView.toggleFotoPanel()" id="btnHdrFoto"
+                class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs transition-colors ${_fotoOpen ? 'bg-blue-700/60 text-blue-200' : 'bg-slate-800 text-slate-400'}">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/>
+            <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"/>
+          </svg>
+          Foto${g.foto ? ' ✓' : ''}
+        </button>
+        <button onclick="GuiasView.toggleNotasPanel()" id="btnHdrNotas"
+                class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs transition-colors ${_notasOpen ? 'bg-blue-700/60 text-blue-200' : 'bg-slate-800 text-slate-400'}">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4.414a1 1 0 0 0-.707.293L.854 15.146A.5.5 0 0 1 0 14.793V2zm3.5 1a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/>
+          </svg>
+          Notas${g.comentario ? ' ✓' : ''}
+        </button>
+        ${abierta ? `
+        <button onclick="GuiasView.editarGuia()" class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs bg-slate-800 text-slate-400 transition-colors ml-auto">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
+          </svg>
+          Editar
+        </button>` : ''}
+      </div>`;
 
-    // ── Foto guía (una foto única) ─────────────────────────
+    // ── Foto panel (toggle) ────────────────────────────────
     const fotoEl = document.getElementById('guiaDetFotoSection');
     if (fotoEl) {
-      if (g.foto) {
+      if (!_fotoOpen) {
+        fotoEl.innerHTML = '';
+      } else if (g.foto) {
         fotoEl.innerHTML = `
           <div class="relative rounded-lg overflow-hidden cursor-pointer mb-3" style="height:110px"
                onclick="GuiasView.verFotoGuia()">
@@ -1338,42 +1369,40 @@ const GuiasView = (() => {
                  onerror="this.style.opacity='.3'"/>
             ${abierta ? `<div class="absolute top-2 right-2 flex gap-1">
               <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Galería">
-                <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
-                🖼
+                <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>🖼
               </label>
               <label class="bg-blue-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-blue-200" title="Cámara">
-                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
-                📷
+                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>📷
               </label>
             </div>` : ''}
           </div>`;
-      } else if (abierta) {
+      } else {
         fotoEl.innerHTML = `
           <div class="flex gap-2 mb-3">
-            <label class="flex-1 flex items-center justify-center gap-2 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer text-slate-400 text-sm" style="height:64px" title="Galería">
+            <label class="flex-1 flex items-center justify-center gap-1 bg-slate-800 rounded-xl cursor-pointer text-slate-300 text-xs" style="min-height:48px">
               <input type="file" accept="image/*" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
               🖼 Galería
             </label>
-            <label class="flex items-center justify-center gap-1 border-2 border-dashed border-blue-700 rounded-lg cursor-pointer text-blue-400 text-sm px-3" style="height:64px" title="Cámara">
+            <label class="flex-1 flex items-center justify-center gap-1 bg-slate-800 rounded-xl cursor-pointer text-blue-300 text-xs" style="min-height:48px">
               <input type="file" accept="image/*" capture="environment" class="hidden" onchange="GuiasView.onFotoGuiaSeleccionada(event)"/>
               📷 Cámara
             </label>
             ${g.idPreingreso ? `<button onclick="GuiasView.copiarFotoDePreingreso()"
-                    class="px-3 rounded-lg border border-slate-600 text-xs text-blue-400" style="height:64px">
-              Copiar de<br>preingreso
+                    class="flex-1 flex items-center justify-center bg-slate-800 rounded-xl text-blue-400 text-xs" style="min-height:48px">
+              📋 Preingreso
             </button>` : ''}
           </div>`;
-      } else {
-        fotoEl.innerHTML = '';
       }
     }
 
-    // ── Comentario + tags guía ─────────────────────────────
+    // ── Notas panel (toggle) ───────────────────────────────
     _tagsGuia = _tagsFromComentario(g.comentario);
     const textoLibre = _textoLibreFromComentario(g.comentario);
     const cEl = document.getElementById('guiaDetComentarioSection');
     if (cEl) {
-      if (abierta) {
+      if (!_notasOpen) {
+        cEl.innerHTML = '';
+      } else if (abierta) {
         const _tb = (id, label, grupo, val, colorA, colorI) =>
           `<button id="${id}" onclick="GuiasView.toggleTagGuia('${grupo}','${val}')"
                    class="flex-1 py-2 rounded-lg text-xs font-bold border transition-all
@@ -2043,6 +2072,12 @@ const GuiasView = (() => {
   }
 
   function nueva() {
+    _guiaModoEdicion = false;
+    // Reset título y botón a modo creación
+    const titleEl = document.getElementById('guiaFormTitle');
+    if (titleEl) titleEl.textContent = '📋 Nueva Guía';
+    const btnEl = document.getElementById('btnGuiaSubmit');
+    if (btnEl) { btnEl.textContent = 'Crear guía'; btnEl.onclick = () => GuiasView.crearGuia(); }
     // Reset tags de creación
     _tagsNueva = { comp: null, compl: null };
     ['nTagComp1','nTagComp0','nTagCompl1','nTagCompl0'].forEach(id => {
@@ -2061,6 +2096,13 @@ const GuiasView = (() => {
         opt.textContent = p.nombre || p.idProveedor;
         provSel.appendChild(opt);
       });
+    }
+    // Reset tipo/prov/zona rows
+    const tipoEl = document.getElementById('guiaTipo');
+    if (tipoEl) {
+      tipoEl.value = 'INGRESO_PROVEEDOR';
+      document.getElementById('guiaZonaRow')?.classList.add('hidden');
+      document.getElementById('guiaProvRow')?.classList.remove('hidden');
     }
     abrirSheet('sheetGuia');
   }
@@ -2162,6 +2204,109 @@ const GuiasView = (() => {
     });
   }
 
+  // ── Toggle paneles header ────────────────────────────────
+  function toggleFotoPanel() {
+    _fotoOpen = !_fotoOpen;
+    if (_fotoOpen) _notasOpen = false;
+    _mostrarDetalleSheet(_guiaActual, false);
+  }
+
+  function toggleNotasPanel() {
+    _notasOpen = !_notasOpen;
+    if (_notasOpen) _fotoOpen = false;
+    _mostrarDetalleSheet(_guiaActual, false);
+  }
+
+  // ── Editar guía existente ────────────────────────────────
+  function editarGuia() {
+    if (!_guiaActual) return;
+    _guiaModoEdicion = true;
+    const g = _guiaActual;
+
+    // Poblar proveedor select si hace falta
+    const provSel = document.getElementById('guiaProveedor');
+    if (provSel && provSel.options.length <= 1) {
+      const provs = OfflineManager.getProveedoresCache();
+      provs.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.idProveedor;
+        opt.textContent = p.nombre || p.idProveedor;
+        provSel.appendChild(opt);
+      });
+    }
+
+    // Pre-llenar campos
+    const tipoEl = document.getElementById('guiaTipo');
+    if (tipoEl) {
+      tipoEl.value = g.tipo || 'INGRESO_PROVEEDOR';
+      // Disparar cambio visual de filas proveedor/zona
+      const isZona   = tipoEl.value === 'SALIDA_ZONA';
+      const isIngProv = tipoEl.value === 'INGRESO_PROVEEDOR';
+      document.getElementById('guiaZonaRow')?.classList.toggle('hidden', !isZona);
+      document.getElementById('guiaProvRow')?.classList.toggle('hidden', !isIngProv);
+    }
+    if (provSel) provSel.value = g.idProveedor || '';
+    const zonaEl = document.getElementById('guiaZona');
+    if (zonaEl) zonaEl.value = g.idZona || '';
+    const numDocEl = document.getElementById('guiaNumDoc');
+    if (numDocEl) numDocEl.value = g.numeroDocumento || '';
+
+    // Tags y texto libre del comentario
+    _tagsNueva = { ..._tagsFromComentario(g.comentario) };
+    const textoLibre = _textoLibreFromComentario(g.comentario);
+    const comInput = document.getElementById('guiaComentario');
+    if (comInput) comInput.value = textoLibre;
+
+    // Sincronizar clases de botones de tag
+    const cfgs = [
+      { id:'nTagComp1',  g:'comp',  v:'si',  a:'bg-blue-900/70 border-blue-500 text-blue-200',   i:'border-slate-700 text-slate-500' },
+      { id:'nTagComp0',  g:'comp',  v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+      { id:'nTagCompl1', g:'compl', v:'si',  a:'bg-green-900/70 border-green-500 text-green-200', i:'border-slate-700 text-slate-500' },
+      { id:'nTagCompl0', g:'compl', v:'no',  a:'bg-amber-900/70 border-amber-500 text-amber-200', i:'border-slate-700 text-slate-500' },
+    ];
+    const base = 'flex-1 py-2 rounded-lg text-xs font-bold border transition-all';
+    cfgs.forEach(({ id, g: grp, v, a, i }) => {
+      const el = document.getElementById(id);
+      if (el) el.className = `${base} ${_tagsNueva[grp] === v ? a : i}`;
+    });
+
+    // Cambiar título y botón
+    const titleEl = document.getElementById('guiaFormTitle');
+    if (titleEl) titleEl.textContent = '✏️ Editar Guía';
+    const btnEl = document.getElementById('btnGuiaSubmit');
+    if (btnEl) { btnEl.textContent = 'GUARDAR CAMBIOS'; btnEl.onclick = () => GuiasView.guardarCambiosGuia(); }
+
+    abrirSheet('sheetGuia');
+  }
+
+  async function guardarCambiosGuia() {
+    if (!_guiaActual) return;
+    const tipo        = document.getElementById('guiaTipo').value;
+    const idProveedor = document.getElementById('guiaProveedor').value;
+    const idZona      = document.getElementById('guiaZona').value;
+    const numDoc      = document.getElementById('guiaNumDoc').value;
+    const textoExtra  = (document.getElementById('guiaComentario')?.value || '').trim();
+    const comentario  = _buildComentario(_tagsNueva, textoExtra);
+
+    // Actualizar optimistamente
+    _guiaActual.tipo            = tipo;
+    _guiaActual.idProveedor     = idProveedor;
+    _guiaActual.idZona          = idZona;
+    _guiaActual.numeroDocumento = numDoc;
+    _guiaActual.comentario      = comentario;
+
+    cerrarSheet('sheetGuia');
+    _mostrarDetalleSheet(_guiaActual, false);
+
+    const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+    if (idx >= 0) Object.assign(todas[idx], { tipo, idProveedor, idZona, numeroDocumento: numDoc, comentario });
+
+    API.actualizarGuia({ idGuia: _guiaActual.idGuia, tipo, idProveedor, idZona, numeroDocumento: numDoc, comentario })
+      .catch(() => toast('Error al guardar cambios', 'danger'));
+
+    toast('Guía actualizada', 'ok', 1500);
+  }
+
   // Auto-guardar comentario al cerrar el sheet de detalle
   function cerrarGuiaDetalle() {
     if (_guiaActual && _guiaActual.estado === 'ABIERTA') {
@@ -2213,7 +2358,8 @@ const GuiasView = (() => {
     injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia,
     selectItem, deselectItem,
     inlineQtyDelta, inlineQtyInput, inlineQtyBlur,
-    inlinePickVenc, inlineVencChanged, inlineDelete
+    inlinePickVenc, inlineVencChanged, inlineDelete,
+    toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia
   };
 })();
 

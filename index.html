@@ -1038,7 +1038,7 @@
 <div class="sheet-overlay" id="overlayGuia" onclick="cerrarSheet('sheetGuia')"></div>
 <div class="bottom-sheet" id="sheetGuia">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-4">📋 Nueva Guía</p>
+  <p id="guiaFormTitle" class="font-bold text-base mb-4">📋 Nueva Guía</p>
   <div class="space-y-3">
     <div>
       <label class="text-xs text-slate-400">Tipo de guía</label>
@@ -1065,7 +1065,7 @@
         <option value="Z004">Zona Este</option>
       </select>
     </div>
-    <div>
+    <div class="hidden">
       <label class="text-xs text-slate-400">Nº Documento (guía remisión / factura)</label>
       <input id="guiaNumDoc" class="input mt-1" type="text" placeholder="GR-2024-000"/>
     </div>
@@ -1096,7 +1096,7 @@
       <label class="text-xs text-slate-400">Notas adicionales</label>
       <input id="guiaComentario" class="input mt-1" type="text" placeholder="Opcional…"/>
     </div>
-    <button onclick="GuiasView.crearGuia()" class="btn btn-primary btn-lg w-full">Crear guía</button>
+    <button id="btnGuiaSubmit" onclick="GuiasView.crearGuia()" class="btn btn-primary btn-lg w-full">Crear guía</button>
   </div>
 </div>
 
