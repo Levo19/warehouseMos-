@@ -1133,12 +1133,20 @@ function imprimirMembrete(params) {
   t += ESC + 'J' + String.fromCharCode(160); // avanzar ≈20mm
   t += GS  + '\x56\x00';                     // corte completo
 
+  // ── Encode correcto: string → byte[] → base64 ─────────────
+  // Utilities.base64Encode(string) usa UTF-8 y corrompe bytes > 127.
+  // Convertir cada char a su valor de byte (0-255) antes de codificar.
+  var rawBytes = [];
+  for (var b = 0; b < t.length; b++) {
+    rawBytes.push(t.charCodeAt(b) & 0xff);
+  }
+
   // ── Enviar a PrintNode ─────────────────────────────────────
   var payload = {
     printerId:   parseInt(printerId),
     title:       'Membrete ' + sku,
     contentType: 'raw_base64',
-    content:     Utilities.base64Encode(t),
+    content:     Utilities.base64Encode(rawBytes),
     source:      'warehouseMos'
   };
 
