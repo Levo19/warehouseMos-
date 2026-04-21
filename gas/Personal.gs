@@ -48,6 +48,15 @@ function loginPersonal(params) {
     'ACTIVA'
   ]);
 
+  // ── Auto-registro de jornada en MOS (idempotente por nombre + fecha) ───────
+  try {
+    _registrarJornadaEnMOS(
+      operador.nombre + ' ' + (operador.apellido || ''),
+      operador.rol,
+      parseFloat(operador.montoBase) || 0
+    );
+  } catch(eJ) { Logger.log('Auto-jornada MOS: ' + eJ.message); }
+
   return {
     ok: true,
     data: {
@@ -61,6 +70,34 @@ function loginPersonal(params) {
       sesionAnterior: huerfanas.ultimaFecha || null   // fecha si había sesión de otro día
     }
   };
+}
+
+// Registra la jornada del operador en ProyectoMOS al iniciar sesión.
+// Idempotente: si ya existe una jornada con el mismo nombre y fecha no inserta duplicados.
+// Cubre el caso multi-dispositivo: tablet + celular → solo la primera sesión registra.
+function _registrarJornadaEnMOS(nombre, rol, montoBase) {
+  nombre = String(nombre || '').trim();
+  if (!nombre) return;
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  if (!mosSsId) return;
+
+  var tz    = Session.getScriptTimeZone();
+  var fecha = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var ss    = SpreadsheetApp.openById(mosSsId);
+  var sheet = ss.getSheetByName('JORNADAS');
+  if (!sheet) return;
+
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][3]).toLowerCase() === nombre.toLowerCase() &&
+        String(data[i][1]).substring(0, 10) === fecha) return; // ya existe hoy
+  }
+
+  sheet.appendRow([
+    'JOR' + new Date().getTime(), fecha, '', nombre,
+    rol || 'OPERADOR', 'warehouseMos', '', parseFloat(montoBase) || 0,
+    '', 'AUTO', 'AUTO_LOGIN'
+  ]);
 }
 
 // ── Cerrar turno ────────────────────────────────────────────
