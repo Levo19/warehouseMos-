@@ -3109,7 +3109,14 @@ const GuiasView = (() => {
     ];
     if (g.comentario)   lineas.push(`💬 *Comentario:* ${g.comentario}`);
     if (g.idPreingreso) lineas.push(`🔗 *Preingreso:* ${g.idPreingreso}`);
-    lineas.push(`─────────────────────`, `🔗 *Ver reporte en tiempo real:*`, url, `\n_InversionMos Warehouse_`);
+    lineas.push(
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `👇 *TOCA AQUÍ PARA VER EL REPORTE COMPLETO*`,
+      url,
+      `━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `_InversionMos Warehouse_`
+    );
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
 
@@ -4473,7 +4480,14 @@ const PreingresosView = (() => {
     ];
     if (pi.comentario) lineas.push(`💬 *Comentario:* ${pi.comentario}`);
     if (pi.idGuia)     lineas.push(`📋 *Guía:* ${pi.idGuia}`);
-    lineas.push(`─────────────────────`, `🔗 *Ver reporte en tiempo real:*`, url, `\n_InversionMos Warehouse_`);
+    lineas.push(
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `👇 *TOCA AQUÍ PARA VER EL REPORTE COMPLETO*`,
+      url,
+      `━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `_InversionMos Warehouse_`
+    );
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
 
