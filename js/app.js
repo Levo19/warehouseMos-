@@ -5450,7 +5450,7 @@ const MembreteView = (() => {
     if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
     if (st)  { st.style.display = ''; st.textContent = 'Enviando a impresora…'; st.style.color = '#94a3b8'; }
 
-    const res = await API.call({ action: 'imprimirMembrete', idProducto: _sel.idProducto })
+    const res = await API.imprimirMembrete({ idProducto: _sel.idProducto })
       .catch(() => ({ ok: false, error: 'Sin conexión' }));
 
     if (btn) {
