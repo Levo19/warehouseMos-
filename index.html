@@ -1195,7 +1195,7 @@
     <div id="panelVenc" class="hidden mb-3">
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <span class="font-bold text-red-400">🚨 Productos por vencer</span>
+          <span class="font-bold text-red-400">Productos por vencer</span>
           <button onclick="Dashboard.toggle('venc')" class="text-slate-500 text-lg">✕</button>
         </div>
         <div id="listVencCrit" class="space-y-2 mb-2"></div>
@@ -1208,7 +1208,7 @@
     <div id="panelEnv" class="hidden mb-3">
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <span class="font-bold text-amber-400">📦 Pendientes de envasar</span>
+          <span class="font-bold text-amber-400">Pendientes de envasar</span>
           <button onclick="Dashboard.toggle('env')" class="text-slate-500 text-lg">✕</button>
         </div>
         <div id="listPendEnvDash" class="space-y-3"></div>
@@ -1222,7 +1222,7 @@
     <div id="panelStock" class="hidden mb-3">
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <span class="font-bold text-orange-400">📉 Stock bajo mínimo</span>
+          <span class="font-bold text-orange-400">Stock bajo mínimo</span>
           <button onclick="Dashboard.toggle('stock')" class="text-slate-500 text-lg">✕</button>
         </div>
         <div id="listStockBajoDash" class="space-y-2"></div>
@@ -1233,7 +1233,7 @@
     <div id="panelMermas" class="hidden mb-3">
       <div class="card">
         <div class="flex items-center justify-between mb-3">
-          <span class="font-bold text-rose-400">⚠️ Mermas pendientes</span>
+          <span class="font-bold text-rose-400">Mermas pendientes</span>
           <button onclick="Dashboard.toggle('mermas')" class="text-slate-500 text-lg">✕</button>
         </div>
         <div id="listMermasDash" class="space-y-2 mb-3"></div>
@@ -1595,7 +1595,7 @@
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
           <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
         </svg>
-        📲 Instalar en este dispositivo
+        Instalar en este dispositivo
       </button>
     </div>
 
@@ -1612,7 +1612,7 @@
         </button>
         <button onclick="App.checkUpdate()"
                 class="btn btn-outline w-full flex items-center justify-center gap-2 text-sm">
-          🔍 Buscar actualización
+          Buscar actualización
         </button>
         <div id="syncStatus" class="text-xs text-slate-500 text-center"></div>
       </div>
@@ -1707,7 +1707,8 @@
                      border-radius:10px;transition:background .12s"
               onmouseenter="this.style.background='rgba(255,255,255,.06)'" onmouseleave="this.style.background='none'"
               ontouchstart="this.style.background='rgba(255,255,255,.06)'" ontouchend="this.style.background='none'">
-        🔒 Bloquear sesión
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6v5H5z"/></svg>
+        Bloquear sesión
       </button>
       <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.confirmarCierre()"
               style="width:100%;text-align:left;padding:13px 16px;font-size:13.5px;color:#f87171;
@@ -1715,7 +1716,8 @@
                      border-radius:10px;transition:background .12s"
               onmouseenter="this.style.background='rgba(248,113,113,.08)'" onmouseleave="this.style.background='none'"
               ontouchstart="this.style.background='rgba(248,113,113,.08)'" ontouchend="this.style.background='none'">
-        🚪 Cerrar sesión
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M10 12.5a.5.5 0 0 1-.5.5h-8a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h8a.5.5 0 0 1 .5.5v2a.5.5 0 0 0 1 0v-2A1.5 1.5 0 0 0 9.5 2h-8A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h8a1.5 1.5 0 0 0 1.5-1.5v-2a.5.5 0 0 0-1 0v2z"/><path d="M15.854 8.354a.5.5 0 0 0 0-.708l-3-3a.5.5 0 0 0-.708.708L14.293 7.5H5.5a.5.5 0 0 0 0 1h8.793l-2.147 2.146a.5.5 0 0 0 .708.708l3-3z"/></svg>
+        Cerrar sesión
       </button>
     </div>
 
@@ -1789,7 +1791,10 @@
 ═══════════════════════════════════════════════════ -->
 <div id="scannerModal">
   <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
-    <span class="text-white font-bold text-sm">📷 Escanear código de barras</span>
+    <span class="text-white font-bold text-sm flex items-center gap-2">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
+      Escanear código de barras
+    </span>
     <button onclick="if(typeof GuiasView!=='undefined'&&GuiasView.cerrarCamara)GuiasView.cerrarCamara();else cerrarScanner();"
             class="text-white text-2xl leading-none px-2">✕</button>
   </div>
@@ -1876,7 +1881,7 @@
 <div class="sheet-overlay" id="overlayGuia" onclick="cerrarSheet('sheetGuia')"></div>
 <div class="bottom-sheet" id="sheetGuia">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p id="guiaFormTitle" class="font-bold text-base mb-4">📋 Nueva Guía</p>
+  <p id="guiaFormTitle" class="font-bold text-base mb-4">Nueva Guía</p>
   <div class="space-y-3">
     <div>
       <label class="text-xs text-slate-400">Tipo de guía</label>
@@ -2089,7 +2094,7 @@
 <div class="sheet-overlay" id="overlayEnvasado" onclick="cerrarSheet('sheetEnvasado')"></div>
 <div class="bottom-sheet" id="sheetEnvasado">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-1">📦 Registrar Envasado</p>
+  <p class="font-bold text-base mb-1">Registrar Envasado</p>
 
   <!-- Info factor (se llena al seleccionar derivado) -->
   <div id="envasadoFactorInfo" class="hidden card-sm mb-3 text-sm space-y-1">
@@ -2170,7 +2175,7 @@
 <div class="sheet-overlay" id="overlayPreingreso" onclick="cerrarSheet('sheetPreingreso')"></div>
 <div class="bottom-sheet" id="sheetPreingreso" style="max-height:95vh">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-4">🚚 Nuevo Preingreso</p>
+  <p class="font-bold text-base mb-4">Nuevo Preingreso</p>
   <div class="space-y-4 overflow-y-auto pb-2" style="max-height:calc(95vh - 80px)">
 
     <!-- Proveedor (searchable) + botón Cargador -->
@@ -2401,13 +2406,15 @@
 <div class="sheet-overlay" id="overlayMerma" onclick="cerrarSheet('sheetMerma')"></div>
 <div class="bottom-sheet" id="sheetMerma">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-4">⚠️ Registrar Merma</p>
+  <p class="font-bold text-base mb-4">Registrar Merma</p>
   <div class="space-y-3">
     <div>
       <label class="text-xs text-slate-400">Producto</label>
       <div class="flex gap-2 mt-1">
         <input id="mermaCodigoProd" class="input flex-1" type="text" placeholder="Escanear o escribir código"/>
-        <button onclick="abrirScannerPara('mermaCodigoProd')" class="btn btn-outline px-3">📷</button>
+        <button onclick="abrirScannerPara('mermaCodigoProd')" class="btn btn-outline px-3">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
+        </button>
       </div>
     </div>
     <div>

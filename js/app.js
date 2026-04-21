@@ -168,8 +168,9 @@ const GlobalSearch = (() => {
 
     // Buscar en productos (caché)
     const productos = (OfflineManager.getProductosCache() || []).filter(p =>
-      (p.descripcion || '').toLowerCase().includes(qL) ||
-      (p.codigo      || '').toLowerCase().includes(qL)
+      (p.descripcion  || '').toLowerCase().includes(qL) ||
+      (p.codigoBarra  || '').toLowerCase().includes(qL) ||
+      (p.idProducto   || '').toLowerCase().includes(qL)
     ).slice(0, 5);
 
     // Buscar en preingresos (caché)
@@ -211,7 +212,7 @@ const GlobalSearch = (() => {
           </div>
           <div class="gs-item-main">
             <div class="gs-item-title">${escHtml(p.descripcion || '—')}</div>
-            <div class="gs-item-sub">${escHtml(p.codigo || '')} · Stock: ${fmt(p.stockActual || 0)}</div>
+            <div class="gs-item-sub">${escHtml(p.codigoBarra || p.idProducto || '')}</div>
           </div>
         </div>`).join('');
       html += '</div>';
@@ -1380,9 +1381,9 @@ const GuiasView = (() => {
   let _itemVenc    = '';
 
   const TIPO_LABELS = {
-    INGRESO_PROVEEDOR: '🚚 Proveedor', INGRESO_JEFATURA: '🏢 Jefatura',
-    SALIDA_ZONA: '📍 Zona',  SALIDA_DEVOLUCION: '↩️ Devolución',
-    SALIDA_JEFATURA: '🏢 Jefatura', SALIDA_ENVASADO: '📦 Envasado', SALIDA_MERMA: '⚠️ Merma'
+    INGRESO_PROVEEDOR: 'Proveedor', INGRESO_JEFATURA: 'Jefatura',
+    SALIDA_ZONA: 'Zona',  SALIDA_DEVOLUCION: 'Devolución',
+    SALIDA_JEFATURA: 'Jefatura', SALIDA_ENVASADO: 'Envasado', SALIDA_MERMA: 'Merma'
   };
 
   // Carga inicial: primero desde caché (instantáneo), luego refresca en bg
@@ -1632,7 +1633,7 @@ const GuiasView = (() => {
     div.style.borderLeftColor = '#22c55e';
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="text-xs font-bold text-emerald-400">🚚 Proveedor</span>
+        <span class="text-xs font-bold text-emerald-400">Proveedor</span>
       </div>
       <div class="flex items-center gap-2">
         <div class="spinner" style="width:12px;height:12px;border-width:2px"></div>
