@@ -987,8 +987,12 @@ function actualizarGuia(params) {
 }
 
 // ============================================================
-// imprimirMembrete — ticket ESC/POS 80mm para membrete de producto
-// Barcode CODE128 del código principal + nombre + lista de EAN
+// imprimirMembrete — ESC/POS 80mm, layout 2 columnas × 3 filas
+//
+// Columna izquierda (≈34mm): 1-3 barcodes CODE128 + texto EAN
+// Columna derecha (≈37mm):   Nombre grande + SKU barcode (si hay varios EAN)
+//
+// Usa ESC/POS Page Mode (ESC L) para posicionamiento preciso.
 // ============================================================
 function imprimirMembrete(params) {
   var idProducto = String(params.idProducto || '');
@@ -1001,84 +1005,138 @@ function imprimirMembrete(params) {
   try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
   catch(e) { return { ok: false, error: e.message }; }
 
-  // Buscar producto
+  // ── Producto ───────────────────────────────────────────────
   var productos = _sheetToObjects(getProductosSheet());
   var prod = productos.find(function(p) {
     return p.idProducto === idProducto || String(p.codigoBarra) === idProducto;
   });
   if (!prod) return { ok: false, error: 'Producto no encontrado: ' + idProducto };
 
-  // Barcodes alternativos (EQUIVALENCIAS)
+  var sku = String(prod.idProducto);
+
+  // ── EANs (principal + equivalencias activas, max 3) ────────
   var altCodes = [];
   try {
     var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
     if (equivSheet) {
-      var equivRows = _sheetToObjects(equivSheet);
-      altCodes = equivRows
+      _sheetToObjects(equivSheet)
         .filter(function(e) {
-          return String(e.idProducto) === String(prod.idProducto) &&
-                 String(e.activo) === '1' && e.codigoBarra;
+          return String(e.idProducto) === sku && String(e.activo) === '1' && e.codigoBarra;
         })
-        .map(function(e) { return String(e.codigoBarra); });
+        .forEach(function(e) { altCodes.push(String(e.codigoBarra)); });
     }
-  } catch(e) { /* no equivalencias — no fatal */ }
+  } catch(e) {}
 
-  // Todos los códigos EAN del producto (sin el SKU)
   var allEan = [];
   if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
   altCodes.forEach(function(c) { if (allEan.indexOf(c) < 0) allEan.push(c); });
+  if (allEan.length === 0) allEan.push(sku);  // fallback al SKU si no hay EAN
+  var numEan      = Math.min(allEan.length, 3);
+  var hasMultiple = allEan.length > 1;
 
-  var hasMultiple  = allEan.length > 1;
-  // Barcode a imprimir: SKU si hay múltiples EAN, sino el único EAN (o el SKU como fallback)
-  var mainCode = hasMultiple
-    ? String(prod.idProducto)
-    : (allEan.length === 1 ? allEan[0] : String(prod.idProducto));
+  // ── Nombre (word-wrap sin cortar palabras) ─────────────────
+  // Columna derecha ≈37mm con fuente doble ancho: ~11 chars/línea
+  var descripcion = String(prod.descripcion || sku).toUpperCase();
+  var nameLines   = _membWrap(descripcion, 11);
 
-  var descripcion = String(prod.descripcion || prod.idProducto).toUpperCase();
-  // Smart wrap a 32 chars (bold font A en 80mm — máx real ~48, 32 da margen para centrado)
-  var nameLines = _membWrap(descripcion, 32);
-
-  // ── Construir ESC/POS ───────────────────────────────────────
+  // ── Constantes ESC/POS ─────────────────────────────────────
   var ESC = '\x1b';
   var GS  = '\x1d';
   var LF  = '\x0a';
+  var FF  = '\x0c';  // FormFeed → imprime página y vuelve al modo estándar
 
+  // ── Dimensiones (dots a 203 dpi; 1mm ≈ 8 dots) ────────────
+  //   Papel 80mm, zona imprimible ≈ 72mm = 576 dots
+  //   Col izquierda: x=0..271   (272 dots ≈ 34mm)
+  //   Col derecha:   x=288..575 (288 dots ≈ 36mm)
+  var L_W  = 272;
+  var R_X  = 288;
+  var R_W  = 272;
+
+  // Altura de cada fila según cuántos EAN hay
+  // 1 EAN → fila alta (código grande y visible)
+  // 2 EAN → fila media
+  // 3 EAN → fila compacta
+  var ROW_H = numEan === 1 ? 200 : (numEan === 2 ? 130 : 100);
+  var totalH = numEan * ROW_H;
+
+  // Altura del código de barras dentro de la fila
+  // = altura fila − 30 (texto HRI) − 14 (márgenes)
+  var BC_H = Math.max(50, ROW_H - 44);
+
+  // Área del SKU en col derecha (solo si hay múltiples EAN)
+  var SKU_H  = hasMultiple ? 88 : 0;
+  var NAME_H = totalH - SKU_H;
+
+  // ── Helpers ────────────────────────────────────────────────
+  // ESC W: define zona activa en page mode
+  function setArea(x, y, w, h) {
+    return ESC + 'W' +
+      String.fromCharCode(x & 0xff, (x >> 8) & 0xff,
+                          y & 0xff, (y >> 8) & 0xff,
+                          w & 0xff, (w >> 8) & 0xff,
+                          h & 0xff, (h >> 8) & 0xff);
+  }
+
+  // CODE128 auto-select ({B), centrado
+  function barcode(code, height) {
+    var bd = '{B' + code;
+    return ESC + '\x61\x01' +                              // centrar
+      GS + '\x68' + String.fromCharCode(Math.min(255, height)) +
+      GS + '\x77\x02' +                                    // módulo ancho 2
+      GS + '\x48\x02' +                                    // HRI debajo
+      GS + '\x66\x01' +                                    // HRI font B (pequeña)
+      GS + '\x6b\x49' + String.fromCharCode(bd.length) + bd +
+      LF;
+  }
+
+  // ── Construir ESC/POS ──────────────────────────────────────
   var t = '';
-  t += ESC + '\x40';              // init impresora
-  t += ESC + '\x61\x01';         // centrar
+  t += ESC + '\x40';  // inicializar impresora
+  t += ESC + 'L';     // entrar a Page Mode
 
-  // Barcode CODE128
-  t += GS  + '\x68\x78';         // altura 120 dots ≈ 15 mm
-  t += GS  + '\x77\x02';         // módulo ancho 2
-  t += GS  + '\x48\x02';         // HRI debajo del código
-  t += GS  + '\x66\x00';         // HRI fuente A
-  var barData = '{B' + mainCode;
-  t += GS + '\x6b\x49' + String.fromCharCode(barData.length) + barData;
-  t += LF;
-
-  // Nombre del producto — negrita
-  t += ESC + '\x21\x08';         // bold on
-  for (var i = 0; i < Math.min(nameLines.length, 2); i++) {
-    t += nameLines[i] + LF;
+  // ── Columna izquierda: 1-3 barcodes EAN ───────────────────
+  for (var i = 0; i < numEan; i++) {
+    t += setArea(0, i * ROW_H, L_W, ROW_H);
+    t += barcode(allEan[i], BC_H);
   }
-  t += ESC + '\x21\x00';         // bold off
 
-  // Si hay múltiples EAN → listar como texto en fuente pequeña
+  // ── Columna derecha superior: nombre del producto ──────────
+  t += setArea(R_X, 0, R_W, NAME_H);
+  t += ESC + '\x61\x01';   // centrar
+  // Padding vertical aproximado para centrar el bloque de nombre
+  var NAME_LINE_H = 48;    // fuente doble en dots (≈6mm)
+  var FEED_H      = 24;    // un LF en spacing estándar ≈3mm
+  var nameH = Math.min(nameLines.length, 4) * NAME_LINE_H;
+  var padLines = Math.max(0, Math.floor((NAME_H - nameH) / 2 / FEED_H));
+  for (var p = 0; p < padLines; p++) { t += LF; }
+  t += ESC + '\x21\x38';   // font A + bold + doble alto + doble ancho
+  for (var ln = 0; ln < Math.min(nameLines.length, 4); ln++) {
+    t += nameLines[ln] + LF;
+  }
+  t += ESC + '\x21\x00';   // normal
+
+  // ── Columna derecha inferior: SKU barcode (si hay varios EAN)
   if (hasMultiple) {
-    t += ESC + '\x21\x01';       // font B (más pequeña)
-    t += 'SKU: ' + String(prod.idProducto) + LF;
-    for (var j = 0; j < Math.min(allEan.length, 4); j++) {
-      t += allEan[j] + LF;
-    }
-    t += ESC + '\x21\x00';       // volver a font A
+    t += setArea(R_X, NAME_H, R_W, SKU_H);
+    t += ESC + '\x61\x01';                    // centrar
+    t += ESC + '\x21\x01';                    // font B pequeña
+    t += 'SKU GRUPAL' + LF;
+    t += ESC + '\x21\x00';
+    t += barcode(sku, Math.max(40, SKU_H - 36));
   }
 
-  t += LF + LF;
-  t += GS + '\x56\x00';          // corte completo
+  // ── Imprimir página y salir de page mode ──────────────────
+  t += FF;
 
+  // ── Feed antes del corte (cuchilla ≈20mm sobre cabezal) ───
+  t += ESC + 'J' + String.fromCharCode(160); // avanzar ≈20mm
+  t += GS  + '\x56\x00';                     // corte completo
+
+  // ── Enviar a PrintNode ─────────────────────────────────────
   var payload = {
     printerId:   parseInt(printerId),
-    title:       'Membrete ' + String(prod.idProducto),
+    title:       'Membrete ' + sku,
     contentType: 'raw_base64',
     content:     Utilities.base64Encode(t),
     source:      'warehouseMos'
@@ -1103,7 +1161,7 @@ function imprimirMembrete(params) {
   }
 }
 
-// Word-wrap sin cortar palabras — para nombre en membrete
+// Word-wrap sin cortar palabras
 function _membWrap(text, maxLen) {
   var words = String(text || '').trim().split(/\s+/);
   var lines = [];
