@@ -5506,39 +5506,37 @@ const MembreteView = (() => {
     });
   }
 
-  async function imprimir() {
+  function imprimir() {
     if (!_cola.length) return;
-    const btn = document.getElementById('btnImprimirMembrete');
-    const st  = document.getElementById('memStatus');
-    if (btn) btn.disabled = true;
+    const trabajos = [..._cola];
+    const n = trabajos.length;
 
-    let ok = 0, errCount = 0;
-    for (const item of [..._cola]) {
-      if (st) {
-        st.style.display = '';
-        st.textContent   = `Imprimiendo ${item.prod.descripcion || item.prod.idProducto}…`;
-        st.style.color   = '#94a3b8';
-      }
-      const res = await API.imprimirMembrete({
-        idProducto: item.prod.idProducto,
-        barcodes:   JSON.stringify(item.allEan),
-        skuGrupal:  item.prod.idProducto
-      }).catch(() => ({ ok: false, error: 'Sin conexión' }));
-      if (res.ok) ok++; else errCount++;
-    }
-
-    if (ok > 0 && errCount === 0) {
-      if (st) { st.textContent = `✓ ${ok} membrete${ok > 1 ? 's' : ''} enviados a impresora`; st.style.color = '#4ade80'; }
-      toast(`${ok} membretes enviados`, 'ok');
-      _cola = [];
-    } else if (ok > 0) {
-      if (st) { st.textContent = `${ok} enviados, ${errCount} con error`; st.style.color = '#f59e0b'; }
-      toast(`${ok} impresos, ${errCount} con error`, 'warn');
-    } else {
-      if (st) { st.textContent = '✗ Error al imprimir. Verifica conexión e impresora.'; st.style.color = '#f87171'; }
-      toast('Error al imprimir', 'danger');
-    }
+    // Optimista: limpiar cola y dar feedback inmediato
+    _cola = [];
     _renderCola();
+    vibrate(15);
+    toast(`${n} membrete${n > 1 ? 's' : ''} enviados a impresora`, 'ok');
+    const st = document.getElementById('memStatus');
+    if (st) { st.style.display = ''; st.textContent = `Enviando ${n} membrete${n > 1 ? 's' : ''}…`; st.style.color = '#94a3b8'; }
+
+    // Enviar en segundo plano — sin await, sin bloquear UI
+    (async () => {
+      let errCount = 0;
+      for (const item of trabajos) {
+        const res = await API.imprimirMembrete({
+          idProducto: item.prod.idProducto,
+          barcodes:   JSON.stringify(item.allEan),
+          skuGrupal:  item.prod.idProducto
+        }).catch(() => ({ ok: false }));
+        if (!res.ok) errCount++;
+      }
+      if (errCount > 0) {
+        toast(`${errCount} membrete${errCount > 1 ? 's' : ''} con error — verifica impresora`, 'danger');
+        if (st) { st.textContent = `${errCount} con error`; st.style.color = '#f87171'; }
+      } else {
+        if (st) st.style.display = 'none';
+      }
+    })();
   }
 
   return { buscar, seleccionar, limpiar, remover, vaciarCola, abrirScanner, imprimir };
