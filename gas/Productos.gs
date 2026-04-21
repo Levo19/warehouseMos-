@@ -987,17 +987,14 @@ function actualizarGuia(params) {
 }
 
 // ============================================================
-// imprimirMembrete — ESC/POS 80mm, layout 2 columnas × 3 filas
+// imprimirMembrete — ESC/POS 80mm, layout secuencial (standard mode)
 //
-// Col izquierda (≈34mm): 1-3 barcodes CODE128 centrados, cada uno
-//   en su fila con EAN text abajo.
-// Col derecha  (≈34mm): nombre grande bold centrado + SKU barcode
-//   al pie si hay más de 1 EAN.
+// Nombre: bold+doble alto+doble ancho, centrado, máx 2 líneas.
+// Barcodes EAN: CODE128, module width=2, height=80 dots (uniforme).
+// SKU barcode al final si hay más de 1 EAN.
 //
-// TÉCNICA: ESC/POS Page Mode (ESC L + ESC W + FF).
 // ENCODING: byte array nativo → Utilities.newBlob → base64
-//   (evita la corrupción UTF-8 de Utilities.base64Encode(string))
-// BARCODES: usa params.barcodes del frontend; fallback a DB lookup.
+// BARCODES: usa params.barcodes del frontend; fallback a DB.
 // ============================================================
 function imprimirMembrete(params) {
   var idProducto = String(params.idProducto || '');
@@ -1017,10 +1014,9 @@ function imprimirMembrete(params) {
   });
   if (!prod) return { ok: false, error: 'Producto no encontrado: ' + idProducto };
 
-  var sku = String(prod.idProducto);
+  var sku = String(prod.skuBase || prod.idProducto);
 
-  // ── Barcodes: frontend envía params.barcodes (ya calculado).
-  //    Si no viene o está vacío, buscar en DB como fallback.
+  // ── Barcodes: frontend envía params.barcodes; fallback a DB ─
   var allEan = [];
   if (params.barcodes) {
     try {
@@ -1049,101 +1045,79 @@ function imprimirMembrete(params) {
   var numEan      = Math.min(allEan.length, 3);
   var hasMultiple = numEan > 1;
 
-  // ── Word-wrap sin cortar palabras (col derecha ~34mm doble ancho)
-  //    Fuente doble ancho font A = 24 dots/char → 272 dots / 24 ≈ 11 chars
+  // ── Nombre: word-wrap, máx 2 líneas, ~20 chars/línea ───────
+  // Font A doble ancho en 80mm ≈ 24 chars visibles; 20 deja margen
   var desc      = String(prod.descripcion || sku).toUpperCase();
-  var nameLines = _membWrap(desc, 11);
+  var nameLines = _membWrap(desc, 20).slice(0, 2);
 
-  // ── Construir ESC/POS como array de bytes (0-255) ──────────
-  //    Sin strings intermedias → sin riesgo de corrupción UTF-8.
+  // ── Construir ESC/POS como array de bytes ───────────────────
   var B = [];
+  function b1(v)   { B.push(v & 0xff); }
+  function bStr(s) { for (var k = 0; k < s.length; k++) B.push(s.charCodeAt(k) & 0xff); }
+  function bLn(s)  { bStr(s); b1(0x0a); }
 
-  function b1(v)    { B.push(v & 0xff); }
-  function b2(v)    { B.push(v & 0xff); B.push((v >> 8) & 0xff); }  // LE 16-bit
-  function bStr(s)  { for (var i = 0; i < s.length; i++) B.push(s.charCodeAt(i) & 0xff); }
+  // Separadores (48 chars = ancho nominal 80mm font A)
+  var SEPEQ  = '================================================';
+  var SEPDA  = '------------------------------------------------';
 
   // ESC @ — init
   b1(0x1b); b1(0x40);
 
-  // ESC L — entrar Page Mode
-  b1(0x1b); b1(0x4c);
-
-  // ── Dimensiones (203 dpi, 1mm ≈ 8 dots) ────────────────────
-  var LW = 272;   // col izquierda  0..271  (34mm)
-  var RX = 288;   // col derecha start      (36mm offset)
-  var RW = 272;   // col derecha width
-
-  // Altura de fila en col izquierda (adapta según cantidad de EAN)
-  var ROW_H   = numEan === 1 ? 200 : (numEan === 2 ? 130 : 100);
-  var TOTAL_H = numEan * ROW_H;
-  var BC_H    = ROW_H - 44;        // barcode height dentro de la fila
-  if (BC_H < 50) BC_H = 50;
-
-  var SKU_H  = hasMultiple ? 90 : 0;
-  var NAME_H = TOTAL_H - SKU_H;
-
-  // ESC W xL xH yL yH dxL dxH dyL dyH — define área en page mode
-  function setArea(x, y, w, h) {
-    b1(0x1b); b1(0x57);
-    b2(x); b2(y); b2(w); b2(h);
-  }
-
-  // CODE128 centrado con HRI debajo
-  function printBC(code, height) {
-    var bd = '{B' + code;
-    b1(0x1b); b1(0x61); b1(0x01);          // centrar
-    b1(0x1d); b1(0x68); b1(height & 0xff); // GS h: barcode height
-    b1(0x1d); b1(0x77); b1(0x02);          // GS w: module width 2
-    b1(0x1d); b1(0x48); b1(0x02);          // GS H 2: HRI debajo
-    b1(0x1d); b1(0x66); b1(0x01);          // GS f 1: HRI font B pequeña
-    b1(0x1d); b1(0x6b); b1(0x49);          // GS k 73: CODE128 func.2
-    b1(bd.length & 0xff);                  // longitud datos
-    bStr(bd);
-    b1(0x0a);                              // LF
-  }
-
-  // ── Col izquierda: 1-3 barcodes EAN ────────────────────────
-  for (var i = 0; i < numEan; i++) {
-    setArea(0, i * ROW_H, LW, ROW_H);
-    printBC(allEan[i], BC_H);
-  }
-
-  // ── Col derecha superior: nombre grande centrado ────────────
-  setArea(RX, 0, RW, NAME_H);
-  b1(0x1b); b1(0x61); b1(0x01);   // centrar
-  // padding vertical para centrar el bloque de texto
-  var maxLines  = Math.min(nameLines.length, 4);
-  var nameBlockH = maxLines * 48;  // fuente doble = 48 dots/línea
-  var padLF     = Math.max(0, Math.floor((NAME_H - nameBlockH) / 2 / 24));
-  for (var p = 0; p < padLF; p++) b1(0x0a);
-  b1(0x1b); b1(0x21); b1(0x38);   // ESC ! 0x38 = bold+doble alto+doble ancho
-  for (var ln = 0; ln < maxLines; ln++) { bStr(nameLines[ln]); b1(0x0a); }
+  // ── Nombre: centrado, bold + doble alto + doble ancho ───────
+  b1(0x1b); b1(0x61); b1(0x01);   // center
+  b1(0x1b); b1(0x21); b1(0x38);   // bold + double-height + double-width
+  for (var ni = 0; ni < nameLines.length; ni++) { bLn(nameLines[ni]); }
   b1(0x1b); b1(0x21); b1(0x00);   // normal
 
-  // ── Col derecha inferior: SKU barcode (solo si hay varios EAN)
-  if (hasMultiple) {
-    setArea(RX, NAME_H, RW, SKU_H);
-    b1(0x1b); b1(0x61); b1(0x01);   // centrar
-    b1(0x1b); b1(0x21); b1(0x01);   // font B pequeña
-    bStr('SKU'); b1(0x0a);
-    b1(0x1b); b1(0x21); b1(0x00);   // normal
-    printBC(sku, Math.max(38, SKU_H - 36));
+  // Separador "===..." debajo del nombre
+  b1(0x1b); b1(0x61); b1(0x00);   // left
+  bLn(SEPEQ);
+
+  // ── EAN barcodes: tamaño uniforme h=80 w=2 ──────────────────
+  for (var ei = 0; ei < numEan; ei++) {
+    var bd = '{B' + allEan[ei];
+    b1(0x1b); b1(0x61); b1(0x01);   // center
+    b1(0x1d); b1(0x68); b1(80);     // GS h 80: altura uniforme 80 dots
+    b1(0x1d); b1(0x77); b1(0x02);   // GS w 2: module width fijo 2
+    b1(0x1d); b1(0x48); b1(0x02);   // GS H 2: HRI debajo
+    b1(0x1d); b1(0x66); b1(0x00);   // GS f 0: HRI font A
+    b1(0x1d); b1(0x6b); b1(0x49);   // GS k 73: CODE128 func.2
+    b1(bd.length & 0xff);
+    bStr(bd);
+    b1(0x0a);                       // LF tras barcode
+    b1(0x1b); b1(0x61); b1(0x00);   // left
+    // "---" entre barcodes; "===" antes de sección SKU o al final
+    var isLast = (ei === numEan - 1);
+    bLn(isLast ? SEPEQ : SEPDA);
   }
 
-  // ── FF — imprimir página y salir de page mode ───────────────
-  b1(0x0c);
+  // ── SKU barcode (solo si hay varios EAN) ────────────────────
+  if (hasMultiple) {
+    var skuBd = '{B' + sku;
+    b1(0x1b); b1(0x61); b1(0x01);   // center
+    b1(0x1b); b1(0x21); b1(0x08);   // bold
+    bLn('SKU: ' + sku);
+    b1(0x1b); b1(0x21); b1(0x00);   // normal
+    b1(0x1d); b1(0x68); b1(60);     // GS h 60
+    b1(0x1d); b1(0x77); b1(0x02);   // GS w 2
+    b1(0x1d); b1(0x48); b1(0x02);   // GS H 2: HRI debajo
+    b1(0x1d); b1(0x66); b1(0x00);   // font A
+    b1(0x1d); b1(0x6b); b1(0x49);   // CODE128
+    b1(skuBd.length & 0xff);
+    bStr(skuBd);
+    b1(0x0a);
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEPEQ);
+  }
 
-  // ── ESC J 160 — avanzar ≈20mm antes del corte ───────────────
-  b1(0x1b); b1(0x4a); b1(160);
+  // ── Avance ≈20mm + corte completo ───────────────────────────
+  b1(0x1b); b1(0x4a); b1(160);   // ESC J 160
+  b1(0x1d); b1(0x56); b1(0x00);  // GS V 0
 
-  // ── GS V 0 — corte completo ──────────────────────────────────
-  b1(0x1d); b1(0x56); b1(0x00);
-
-  // ── Base64 correcto via Blob (raw bytes garantizados) ────────
+  // ── Base64 vía Blob (raw bytes garantizados) ─────────────────
   var blob = Utilities.newBlob(B, 'application/octet-stream');
   var b64  = Utilities.base64Encode(blob.getBytes());
 
-  // ── Enviar a PrintNode ────────────────────────────────────────
   var payload = {
     printerId:   parseInt(printerId),
     title:       'Membrete ' + sku,

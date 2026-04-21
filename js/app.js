@@ -4,8 +4,11 @@
 // ════════════════════════════════════════════════
 // Vibración táctil (feedback)
 // ════════════════════════════════════════════════
+let _userActivated = false;
+document.addEventListener('pointerdown', () => { _userActivated = true; }, { once: true });
+
 function vibrate(ms = 10) {
-  if (navigator.vibrate) navigator.vibrate(ms);
+  if (_userActivated && navigator.vibrate) navigator.vibrate(ms);
 }
 
 // ════════════════════════════════════════════════
@@ -5352,7 +5355,7 @@ const MembreteView = (() => {
   function _buildEan(prod) {
     const equivs = OfflineManager.getEquivalenciasCache();
     const altCodes = equivs
-      .filter(e => e.idProducto === prod.idProducto && String(e.activo) === '1' && e.codigoBarra)
+      .filter(e => e.skuBase === (prod.skuBase || prod.idProducto) && String(e.activo) === '1' && e.codigoBarra)
       .map(e => String(e.codigoBarra));
     const allEan = [];
     if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
@@ -5379,20 +5382,18 @@ const MembreteView = (() => {
     }
 
     listEl.innerHTML = _cola.map((item, idx) => {
-      const eanText = item.allEan.length
-        ? item.allEan.slice(0, 3).join('  ·  ')
-        : '—';
+      const n = item.allEan.length;
+      const tagColor = n > 1 ? '#3b82f6' : '#475569';
+      const tagBg    = n > 1 ? 'rgba(59,130,246,.15)' : 'rgba(71,85,105,.15)';
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;
                           background:#1e293b;border-radius:8px;margin-bottom:5px;">
-        <div style="flex:1;min-width:0;">
-          <p style="font-size:13px;font-weight:700;color:#e2e8f0;
-                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 2px;">
-            ${escHtml(item.prod.descripcion || item.prod.idProducto)}</p>
-          <p style="font-size:10px;color:#475569;font-family:monospace;margin:0;">
-            SKU: ${escHtml(item.prod.idProducto)}
-            ${item.allEan.length ? ' &nbsp;·&nbsp; EAN: ' + escHtml(eanText) : ''}
-            ${item.allEan.length > 3 ? ` <span style="color:#3b82f6">+${item.allEan.length - 3}</span>` : ''}
-          </p>
+        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:13px;font-weight:700;color:#e2e8f0;
+                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${escHtml(item.prod.descripcion || item.prod.idProducto)}</span>
+          <span style="flex-shrink:0;font-size:10px;font-weight:600;padding:2px 7px;
+                       border-radius:99px;color:${tagColor};background:${tagBg};">
+            ${n} codebar${n !== 1 ? 's' : ''}</span>
         </div>
         <button onclick="MembreteView.remover(${idx})"
                 style="background:none;border:none;cursor:pointer;color:#475569;
@@ -5421,8 +5422,9 @@ const MembreteView = (() => {
     const matches = prods.filter(p =>
       String(p.descripcion || '').toLowerCase().includes(ql) ||
       String(p.idProducto  || '').toLowerCase().includes(ql) ||
+      String(p.skuBase     || '').toLowerCase().includes(ql) ||
       String(p.codigoBarra || '').includes(val) ||
-      equivs.some(e => e.idProducto === p.idProducto && String(e.codigoBarra || '').includes(val))
+      equivs.some(e => e.skuBase === (p.skuBase || p.idProducto) && String(e.codigoBarra || '').includes(val))
     ).slice(0, 8);
 
     if (!matches.length) {
@@ -5526,7 +5528,7 @@ const MembreteView = (() => {
         const res = await API.imprimirMembrete({
           idProducto: item.prod.idProducto,
           barcodes:   JSON.stringify(item.allEan),
-          skuGrupal:  item.prod.idProducto
+          skuGrupal:  item.prod.skuBase || item.prod.idProducto
         }).catch(() => ({ ok: false }));
         if (!res.ok) errCount++;
       }
