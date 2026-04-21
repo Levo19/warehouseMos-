@@ -156,6 +156,9 @@ function _route(method, e) {
       case 'getConfig':          return getConfigAll();
       case 'setConfigValue':     return setConfigValue(params.clave, params.valor);
 
+      // ── Reportes públicos ──────────────────────────────────
+      case 'getReporte':          return getReporte(params);
+
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);

@@ -1542,13 +1542,18 @@ const GuiasView = (() => {
     const detCache = OfflineManager.getGuiaDetalleCache();
     const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
     const itemsTag = numItems > 0 ? ` <span class="text-slate-500">[${numItems}]</span>` : '';
+    const waGuiaBtn = `<button onclick="event.stopPropagation();GuiasView.compartirWA('${escAttr(g.idGuia)}')"
+      style="background:none;border:none;cursor:pointer;padding:2px;color:#25d366;flex-shrink:0;line-height:0"
+      title="Compartir por WhatsApp">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+    </button>`;
     return `
     <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
       <div class="flex items-center justify-between gap-1 overflow-hidden">
         <span class="text-xs font-bold truncate" style="color:${isIngreso ? '#4ade80' : '#60a5fd'}">${tipoLabel}</span>
-        <div class="flex items-center gap-1 flex-shrink-0">${preTag}${fotoTag}${estadoDot}</div>
+        <div class="flex items-center gap-1 flex-shrink-0">${preTag}${fotoTag}${waGuiaBtn}${estadoDot}</div>
       </div>
       <p class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</p>
       <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}${itemsTag}</p>
@@ -3075,8 +3080,40 @@ const GuiasView = (() => {
     inlinePickVenc, inlineVencChanged, inlineDelete,
     toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia,
     eliminarFotoGuia,
-    filtrarChip
+    filtrarChip,
+    compartirWA
   };
+
+  function compartirWA(idGuia) {
+    const g = (OfflineManager.getGuiasCache() || []).find(x => x.idGuia === idGuia);
+    if (!g) return;
+    const prov      = (OfflineManager.getProveedoresCache() || []).find(x => x.idProveedor === g.idProveedor);
+    const provNombre = prov?.nombre || g.idProveedor || g.usuario || '—';
+    const detCache  = OfflineManager.getGuiaDetalleCache() || [];
+    const numItems  = detCache.filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO').length;
+    const TIPO_LABELS_WA = {
+      INGRESO_PROVEEDOR:'Ingreso Proveedor', INGRESO_JEFATURA:'Ingreso Jefatura',
+      SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
+      SALIDA_JEFATURA:'Salida Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
+    };
+    const gasUrl = window.WH_CONFIG?.gasUrl || '';
+    const gParam = gasUrl ? btoa(gasUrl) : '';
+    const url    = `${location.origin}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}&g=${encodeURIComponent(gParam)}`;
+    const lineas = [
+      `*📋 GUÍA ${idGuia}*`,
+      `─────────────────────`,
+      `📦 *Tipo:* ${TIPO_LABELS_WA[g.tipo] || g.tipo || '—'}`,
+      `🏪 *Proveedor:* ${provNombre}`,
+      `📅 *Fecha:* ${_fmtCorta(g.fecha)}`,
+      `📊 *Estado:* ${g.estado || '—'}`,
+      `👤 *Usuario:* ${g.usuario || '—'}`,
+      `📝 *Ítems:* ${numItems}`,
+    ];
+    if (g.comentario)   lineas.push(`💬 *Comentario:* ${g.comentario}`);
+    if (g.idPreingreso) lineas.push(`🔗 *Preingreso:* ${g.idPreingreso}`);
+    lineas.push(`─────────────────────`, `🔗 *Ver reporte en tiempo real:*`, url, `\n_InversionMos Warehouse_`);
+    window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
+  }
 
   // Método para chips de filtro (actualiza estado visual de chips + llama filtrar())
   function filtrarChip(chipEl, filtro) {
@@ -3513,6 +3550,12 @@ const PreingresosView = (() => {
       : `<button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(p.idPreingreso)}')"
                  class="pre-guia-btn">+ Guía</button>`;
 
+    const waPreBtn = `<button onclick="event.stopPropagation();PreingresosView.compartirWA('${escAttr(p.idPreingreso)}')"
+      style="background:none;border:none;cursor:pointer;padding:3px 2px;color:#25d366;flex-shrink:0;line-height:0"
+      title="Compartir por WhatsApp">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+    </button>`;
+
     return `
     <div class="pre-card" id="pre-${(p.idPreingreso||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
@@ -3524,7 +3567,7 @@ const PreingresosView = (() => {
       <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}</p>
       <div class="flex items-center justify-between gap-1">
         <p class="text-sm font-bold ${p.monto ? 'text-emerald-400' : 'opacity-0'} leading-none">${p.monto ? 'S/. ' + fmt(p.monto, 2) : '—'}</p>
-        ${actionHtml}
+        <div class="flex items-center gap-1">${waPreBtn}${actionHtml}</div>
       </div>
     </div>`;
   }
@@ -4412,6 +4455,32 @@ const PreingresosView = (() => {
     renderTppList();
   }
 
+  function compartirWA(idPreingreso) {
+    const pi = (OfflineManager.getPreingresosCache() || []).find(x => x.idPreingreso === idPreingreso);
+    if (!pi) return;
+    const prov     = (OfflineManager.getProveedoresCache() || []).find(x => x.idProveedor === pi.idProveedor);
+    const provNombre = prov?.nombre || pi.idProveedor || '—';
+    let cargadores = [];
+    try { cargadores = JSON.parse(pi.cargadores || '[]'); } catch {}
+    const cargStr  = cargadores.length ? cargadores.map(c => c.nombre || c.id || String(c)).join(', ') : '—';
+    const gasUrl   = window.WH_CONFIG?.gasUrl || '';
+    const g        = gasUrl ? btoa(gasUrl) : '';
+    const url      = `${location.origin}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}&g=${encodeURIComponent(g)}`;
+    const lineas   = [
+      `*📦 PREINGRESO ${idPreingreso}*`,
+      `─────────────────────`,
+      `🏪 *Proveedor:* ${provNombre}`,
+      `💰 *Monto:* ${pi.monto ? 'S/ ' + fmt(pi.monto, 2) : '—'}`,
+      `📅 *Fecha:* ${_fmtCorta(pi.fecha)}`,
+      `📊 *Estado:* ${pi.estado || '—'}`,
+      `👥 *Cargadores:* ${cargStr}`,
+    ];
+    if (pi.comentario) lineas.push(`💬 *Comentario:* ${pi.comentario}`);
+    if (pi.idGuia)     lineas.push(`📋 *Guía:* ${pi.idGuia}`);
+    lineas.push(`─────────────────────`, `🔗 *Ver reporte en tiempo real:*`, url, `\n_InversionMos Warehouse_`);
+    window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
+  }
+
   return { cargar, filtrar, toggleFiltro, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
@@ -4421,7 +4490,7 @@ const PreingresosView = (() => {
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
-           renderTppList, buscarEnPanel, limpiarBuscarPanel };
+           renderTppList, buscarEnPanel, limpiarBuscarPanel, compartirWA };
 })();
 
 // ════════════════════════════════════════════════
