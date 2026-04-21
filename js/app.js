@@ -3096,9 +3096,7 @@ const GuiasView = (() => {
       SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
       SALIDA_JEFATURA:'Salida Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
     };
-    const gasUrl = window.WH_CONFIG?.gasUrl || '';
-    const gParam = gasUrl ? btoa(gasUrl) : '';
-    const url    = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}&g=${encodeURIComponent(gParam)}`;
+    const url    = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
     const lineas = [
       `*📋 GUÍA ${idGuia}*`,
       `─────────────────────`,
@@ -4463,9 +4461,7 @@ const PreingresosView = (() => {
     let cargadores = [];
     try { cargadores = JSON.parse(pi.cargadores || '[]'); } catch {}
     const cargStr  = cargadores.length ? cargadores.map(c => c.nombre || c.id || String(c)).join(', ') : '—';
-    const gasUrl   = window.WH_CONFIG?.gasUrl || '';
-    const g        = gasUrl ? btoa(gasUrl) : '';
-    const url      = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}&g=${encodeURIComponent(g)}`;
+    const url      = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
     const lineas   = [
       `*📦 PREINGRESO ${idPreingreso}*`,
       `─────────────────────`,

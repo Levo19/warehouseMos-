@@ -103,10 +103,11 @@
 <script>
 // ── Config ────────────────────────────────────────────────────
 const REFRESH_SEC = 30;
+const GAS_EMBEBIDO = 'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec';
 const p    = new URLSearchParams(location.search);
 const TIPO = p.get('tipo') || '';
 const ID   = p.get('id')   || '';
-const GAS  = (() => { try { return atob(p.get('g') || ''); } catch { return ''; } })();
+const GAS  = (() => { try { return atob(p.get('g') || '') || GAS_EMBEBIDO; } catch { return GAS_EMBEBIDO; } })();
 
 let _last    = null;
 let _timer   = null;
