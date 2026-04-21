@@ -2,6 +2,248 @@
 'use strict';
 
 // ════════════════════════════════════════════════
+// Vibración táctil (feedback)
+// ════════════════════════════════════════════════
+function vibrate(ms = 10) {
+  if (navigator.vibrate) navigator.vibrate(ms);
+}
+
+// ════════════════════════════════════════════════
+// Long press handler
+// ════════════════════════════════════════════════
+function addLongPress(el, cb, ms = 500) {
+  let timer = null;
+  const start = e => {
+    timer = setTimeout(() => {
+      vibrate(30);
+      // Ripple visual
+      const rect = el.getBoundingClientRect();
+      const x = (e.touches?.[0]?.clientX ?? e.clientX) - rect.left;
+      const y = (e.touches?.[0]?.clientY ?? e.clientY) - rect.top;
+      const rip = document.createElement('div');
+      rip.className = 'lp-ripple';
+      rip.style.cssText = `left:${x}px;top:${y}px;`;
+      el.style.position = 'relative';
+      el.style.overflow = 'hidden';
+      el.appendChild(rip);
+      setTimeout(() => rip.remove(), 600);
+      cb(e);
+    }, ms);
+  };
+  const cancel = () => clearTimeout(timer);
+  el.addEventListener('touchstart', start, { passive: true });
+  el.addEventListener('touchend',   cancel);
+  el.addEventListener('touchmove',  cancel, { passive: true });
+  el.addEventListener('mousedown',  start);
+  el.addEventListener('mouseup',    cancel);
+  el.addEventListener('mouseleave', cancel);
+}
+
+// ════════════════════════════════════════════════
+// Double-tap confirmation para acciones destructivas
+// ════════════════════════════════════════════════
+function dblTapConfirm(btn, action) {
+  if (btn._armed) {
+    btn._armed = false;
+    btn.classList.remove('armed');
+    clearTimeout(btn._armTimer);
+    vibrate(20);
+    action();
+    return;
+  }
+  btn._armed = true;
+  btn.classList.add('armed', 'dbl-btn');
+  vibrate(15);
+  btn._armTimer = setTimeout(() => {
+    btn._armed = false;
+    btn.classList.remove('armed');
+  }, 2500);
+}
+
+// ════════════════════════════════════════════════
+// Pull-to-refresh
+// ════════════════════════════════════════════════
+const PullToRefresh = (() => {
+  let startY = 0, pulling = false, threshold = 70;
+
+  function init(scrollEl, onRefresh) {
+    const indicator = document.getElementById('ptr-indicator');
+    if (!scrollEl || !indicator) return;
+
+    scrollEl.addEventListener('touchstart', e => {
+      if (scrollEl.scrollTop === 0) startY = e.touches[0].clientY;
+    }, { passive: true });
+
+    scrollEl.addEventListener('touchmove', e => {
+      if (!startY) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy > 20 && scrollEl.scrollTop === 0) {
+        pulling = true;
+        if (dy > threshold) indicator.classList.add('visible');
+      }
+    }, { passive: true });
+
+    scrollEl.addEventListener('touchend', () => {
+      if (pulling && indicator.classList.contains('visible')) {
+        vibrate(15);
+        onRefresh();
+        setTimeout(() => indicator.classList.remove('visible'), 800);
+      }
+      startY = 0; pulling = false;
+    });
+  }
+
+  return { init };
+})();
+
+// ════════════════════════════════════════════════
+// Badge counts — actualiza badges en nav
+// ════════════════════════════════════════════════
+function actualizarBadges({ guiasAbiertas = 0 } = {}) {
+  const _setBadge = (id, n) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = n > 9 ? '9+' : String(n);
+    el.dataset.hidden = n === 0 ? 'true' : 'false';
+  };
+  _setBadge('badgeGuias',     guiasAbiertas);
+  _setBadge('sideBadgeGuias', guiasAbiertas);
+}
+
+// ════════════════════════════════════════════════
+// PrintNode status indicator
+// ════════════════════════════════════════════════
+const PrintNodeStatus = (() => {
+  function set(estado) {
+    const dot = document.getElementById('pnDot');
+    if (!dot) return;
+    dot.className = 'pn-dot ' + (estado || '');
+  }
+  function busy()  { set('busy');  setTimeout(() => set('ok'), 4000); }
+  function ok()    { set('ok');    }
+  function error() { set('error'); }
+  function hide()  { set('');      }
+  return { ok, error, busy, hide };
+})();
+
+// ════════════════════════════════════════════════
+// Global Search
+// ════════════════════════════════════════════════
+const GlobalSearch = (() => {
+  let _debounce = null;
+
+  function abrir() {
+    document.getElementById('globalSearchOverlay')?.classList.add('open');
+    setTimeout(() => document.getElementById('gSearchInput')?.focus(), 80);
+    vibrate(8);
+  }
+
+  function cerrar() {
+    document.getElementById('globalSearchOverlay')?.classList.remove('open');
+    const inp = document.getElementById('gSearchInput');
+    if (inp) inp.value = '';
+    document.getElementById('gSearchResults').innerHTML =
+      '<p class="text-slate-500 text-sm text-center pt-8">Escribe para buscar en toda la app</p>';
+  }
+
+  function buscar(q) {
+    clearTimeout(_debounce);
+    if (!q || q.trim().length < 2) {
+      document.getElementById('gSearchResults').innerHTML =
+        '<p class="text-slate-500 text-sm text-center pt-8">Escribe para buscar en toda la app</p>';
+      return;
+    }
+    _debounce = setTimeout(() => _ejecutar(q.trim()), 250);
+  }
+
+  function _ejecutar(q) {
+    const qL = q.toLowerCase();
+    const res = document.getElementById('gSearchResults');
+
+    // Buscar en guías (caché)
+    const guias = (OfflineManager.getGuiasCache() || []).filter(g =>
+      (g.idGuia || '').toLowerCase().includes(qL) ||
+      (g.tipo   || '').toLowerCase().includes(qL)
+    ).slice(0, 5);
+
+    // Buscar en productos (caché)
+    const productos = (OfflineManager.getProductosCache() || []).filter(p =>
+      (p.descripcion || '').toLowerCase().includes(qL) ||
+      (p.codigo      || '').toLowerCase().includes(qL)
+    ).slice(0, 5);
+
+    // Buscar en preingresos (caché)
+    const preingresos = (OfflineManager.getPreingresosCache?.() || []).filter(pi =>
+      (pi.idPreingreso || '').toLowerCase().includes(qL) ||
+      (pi.proveedor    || '').toLowerCase().includes(qL)
+    ).slice(0, 5);
+
+    if (!guias.length && !productos.length && !preingresos.length) {
+      res.innerHTML = `<p class="text-slate-400 text-sm text-center pt-8">Sin resultados para "<strong>${escHtml(q)}</strong>"</p>`;
+      return;
+    }
+
+    let html = '';
+    if (guias.length) {
+      html += `<div class="gs-section"><div class="gs-hdr">Guías</div>`;
+      html += guias.map(g => `
+        <div class="gs-item" onclick="GlobalSearch.cerrar();App.nav('guias')">
+          <div class="gs-item-ico" style="background:#1e3a8a">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#93c5fd">
+              <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2z"/>
+            </svg>
+          </div>
+          <div class="gs-item-main">
+            <div class="gs-item-title">${escHtml(g.idGuia || '—')}</div>
+            <div class="gs-item-sub">${escHtml(g.tipo || '')} · ${escHtml(g.estado || '')}</div>
+          </div>
+        </div>`).join('');
+      html += '</div>';
+    }
+    if (productos.length) {
+      html += `<div class="gs-section"><div class="gs-hdr">Productos</div>`;
+      html += productos.map(p => `
+        <div class="gs-item" onclick="GlobalSearch.cerrar();App.nav('productos')">
+          <div class="gs-item-ico" style="background:#14532d">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#86efac">
+              <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2z"/>
+            </svg>
+          </div>
+          <div class="gs-item-main">
+            <div class="gs-item-title">${escHtml(p.descripcion || '—')}</div>
+            <div class="gs-item-sub">${escHtml(p.codigo || '')} · Stock: ${fmt(p.stockActual || 0)}</div>
+          </div>
+        </div>`).join('');
+      html += '</div>';
+    }
+    if (preingresos.length) {
+      html += `<div class="gs-section"><div class="gs-hdr">Pre-Ingresos</div>`;
+      html += preingresos.map(pi => `
+        <div class="gs-item" onclick="GlobalSearch.cerrar();App.nav('preingresos')">
+          <div class="gs-item-ico" style="background:#78350f">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="#fde68a">
+              <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2z"/>
+            </svg>
+          </div>
+          <div class="gs-item-main">
+            <div class="gs-item-title">${escHtml(pi.idPreingreso || pi.proveedor || '—')}</div>
+            <div class="gs-item-sub">${escHtml(pi.estado || '')}</div>
+          </div>
+        </div>`).join('');
+      html += '</div>';
+    }
+    res.innerHTML = html;
+  }
+
+  // Cerrar con Escape
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') cerrar();
+  });
+
+  return { abrir, cerrar, buscar };
+})();
+
+// ════════════════════════════════════════════════
 // Helpers UI globales
 // ════════════════════════════════════════════════
 function toast(msg, tipo = 'info', dur = 3000) {
@@ -20,7 +262,10 @@ function loading(parentId, show) {
   const el = document.getElementById(parentId);
   if (!el) return;
   if (show) {
-    el.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+    // Skeleton cards en lugar de spinner central
+    el.innerHTML = [1,2,3].map(() =>
+      '<div class="skel skel-card"></div>'
+    ).join('');
   }
 }
 
@@ -391,6 +636,9 @@ const Session = (() => {
     av.textContent   = sesionActual.nombre[0] + sesionActual.apellido[0];
     av.style.background = sesionActual.color;
     document.getElementById('usuarioNombre').textContent = sesionActual.nombre;
+    // User menu v2: avatar + nombre completo
+    const umAv = document.getElementById('umAvatar');
+    if (umAv) { umAv.textContent = sesionActual.nombre[0] + sesionActual.apellido[0]; umAv.style.background = sesionActual.color; }
 
     // Avatar sidebar (tablet)
     const sideAv = document.getElementById('sideAvatar');
@@ -426,8 +674,11 @@ const Session = (() => {
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
     const dot    = document.getElementById('statusDot');
-    const dotM   = document.getElementById('statusDotMobile');
     const lbl    = document.getElementById('statusLabel');
+    const bar    = document.getElementById('syncBar');
+    const barLbl = document.getElementById('syncBarLabel');
+    const umDot  = document.getElementById('umOnlineDot');
+    const umLbl  = document.getElementById('umStatusLabel');
 
     let color, texto;
     if (syncing) {
@@ -440,9 +691,26 @@ const Session = (() => {
       color = '#22c55e'; texto = 'En línea';
     }
 
-    if (dot)  { dot.style.background  = color; }
-    if (dotM) { dotM.style.background = color; }
-    if (lbl)  { lbl.textContent = texto; }
+    if (dot) dot.style.background = color;
+    if (lbl) lbl.textContent = texto;
+    if (umDot) umDot.style.background = color;
+    if (umLbl) umLbl.textContent = texto;
+
+    // Sync bar (barra bajo topbar)
+    if (bar) {
+      if (syncing) {
+        bar.className = 'show syncing';
+        if (barLbl) barLbl.textContent = 'Sincronizando datos…';
+      } else if (!online) {
+        bar.className = 'show offline';
+        if (barLbl) barLbl.textContent = pending > 0 ? `Sin conexión · ${pending} ops pendientes` : 'Sin conexión';
+      } else if (pending > 0) {
+        bar.className = 'show pending';
+        if (barLbl) barLbl.textContent = `${pending} operaciones por sincronizar`;
+      } else {
+        bar.className = '';
+      }
+    }
   }
 
   // ── Bloqueo por inactividad ────────────────────────────────
@@ -754,6 +1022,20 @@ const App = (() => {
       if (currentView === 'productos'   && productosChanged) ProductosView.silentRefresh();
     });
 
+    // Pull-to-refresh en la vista principal
+    const mainContent = document.getElementById('mainContent');
+    PullToRefresh.init(mainContent, () => {
+      if (currentView === 'guias')        GuiasView.cargar();
+      else if (currentView === 'productos')    ProductosView.cargar();
+      else if (currentView === 'dashboard')    cargarDashboard();
+      else if (currentView === 'preingresos')  PreingresosView.cargar?.();
+    });
+
+    // Vibración en navegación entre módulos
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+      btn.addEventListener('touchstart', () => vibrate(6), { passive: true });
+    });
+
     // Iniciar sesión (muestra login si no hay sesión activa)
     Session.init();
   }
@@ -920,7 +1202,7 @@ const App = (() => {
     const stockBajo = alertas.stockBajoMinimo    || [];
     const mermasPend = alertas.mermasPendientes  || [];
 
-    // KPIs principales
+    // KPIs principales (reemplaza skeletons con valores reales)
     document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
     document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
     document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
@@ -937,6 +1219,31 @@ const App = (() => {
     const sideArrow     = document.getElementById('sideAlertArrow');
     if (sideLogoAlert) sideLogoAlert.classList.toggle('visible', totalAlertas > 0);
     if (sideArrow)     sideArrow.classList.toggle('visible',     totalAlertas > 0);
+
+    // Badges en nav: guías abiertas
+    const guiasAbiertas = (alertas.guiasAbiertas ?? contadores.guiasAbiertas ?? 0);
+    actualizarBadges({ guiasAbiertas });
+
+    // Historial rápido (últimas guías del caché)
+    const histEl = document.getElementById('historialRapido');
+    if (histEl) {
+      const guiasRecientes = (OfflineManager.getGuiasCache() || []).slice(0, 6);
+      if (guiasRecientes.length) {
+        const TIPO_SHORT = {
+          INGRESO_PROVEEDOR:'Ingreso Prov.', INGRESO_JEFATURA:'Ing. Jefatura',
+          SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
+          SALIDA_JEFATURA:'Sal. Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
+        };
+        histEl.innerHTML = guiasRecientes.map(g => `
+          <div class="hist-item" onclick="App.nav('guias')">
+            <div class="hist-type">${TIPO_SHORT[g.tipo] || g.tipo || 'Guía'}</div>
+            <div class="hist-desc">${escHtml(g.idGuia || '—')}</div>
+            <div class="hist-time">${escHtml(g.estado || '')} · ${_fmtCorta(g.fecha)}</div>
+          </div>`).join('');
+      } else {
+        histEl.innerHTML = '<p class="text-slate-500 text-xs py-2 px-2">Sin registros recientes</p>';
+      }
+    }
 
     // Panel Vencimientos
     document.getElementById('listVencCrit').innerHTML = criticos.map(v => `
@@ -1909,6 +2216,27 @@ const GuiasView = (() => {
   function toggleEstadoGuia() {
     if (!_guiaActual) return;
     if (_guiaActual.estado === 'ABIERTA') {
+      // Double-tap confirm para cierre (acción irreversible sin admin)
+      const lockBtnEl = document.querySelector('[onclick="GuiasView.toggleEstadoGuia()"]');
+      if (lockBtnEl) {
+        if (!lockBtnEl._tapArmed) {
+          lockBtnEl._tapArmed = true;
+          lockBtnEl.style.background = 'rgba(245,158,11,.2)';
+          lockBtnEl.style.borderColor = '#f59e0b';
+          lockBtnEl.style.color = '#fde68a';
+          lockBtnEl.title = 'Toca de nuevo para confirmar cierre';
+          vibrate(15);
+          lockBtnEl._tapTimer = setTimeout(() => {
+            lockBtnEl._tapArmed = false;
+            lockBtnEl.style.cssText = '';
+            lockBtnEl.title = 'Cerrar guía';
+          }, 2500);
+          return;
+        }
+        clearTimeout(lockBtnEl._tapTimer);
+        lockBtnEl._tapArmed = false;
+        lockBtnEl.style.cssText = '';
+      }
       confirmarCerrarGuia();
     } else {
       _pedirAdminPin(_guiaActual.idGuia);
@@ -2742,8 +3070,17 @@ const GuiasView = (() => {
     inlineQtyDelta, inlineQtyInput, inlineQtyBlur,
     inlinePickVenc, inlineVencChanged, inlineDelete,
     toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia,
-    eliminarFotoGuia
+    eliminarFotoGuia,
+    filtrarChip
   };
+
+  // Método para chips de filtro (actualiza estado visual de chips + llama filtrar())
+  function filtrarChip(chipEl, filtro) {
+    document.querySelectorAll('#guiaChips .chip').forEach(c => c.classList.remove('active'));
+    chipEl.classList.add('active');
+    vibrate(8);
+    filtrar(filtro);
+  }
 })();
 
 // ════════════════════════════════════════════════
