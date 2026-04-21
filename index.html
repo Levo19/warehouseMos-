@@ -1564,22 +1564,27 @@
       <!-- Sugerencias -->
       <div id="memSugerencias" style="display:none;max-height:200px;overflow-y:auto;"
            class="rounded-lg border border-slate-700 mb-2 overflow-hidden"></div>
-      <!-- Producto seleccionado -->
-      <div id="memProductoSel" style="display:none" class="card-sm mb-3 relative">
-        <button onclick="MembreteView.limpiar()"
-                class="absolute top-2 right-2 text-slate-500 hover:text-slate-300"
-                style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;">×</button>
-        <p id="memNombre" class="font-semibold text-sm pr-5 mb-1 leading-snug"></p>
-        <p id="memCodigos" class="text-xs text-slate-400 font-mono whitespace-pre-wrap"></p>
+
+      <!-- Cola de impresión -->
+      <div id="memCola" style="display:none;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span style="font-size:10px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.06em;">Cola de impresión</span>
+          <button onclick="MembreteView.vaciarCola()"
+                  style="font-size:11px;color:#f87171;background:none;border:none;cursor:pointer;padding:2px 6px;">
+            Vaciar todo
+          </button>
+        </div>
+        <div id="memColaList"></div>
       </div>
-      <!-- Botón imprimir -->
+
+      <!-- Botón imprimir todos -->
       <button id="btnImprimirMembrete" onclick="MembreteView.imprimir()"
               class="btn btn-primary w-full flex items-center justify-center gap-2" disabled>
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
           <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
           <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
         </svg>
-        Imprimir membrete
+        Imprimir membretes
       </button>
       <p id="memStatus" class="text-xs text-center mt-2" style="display:none;color:#94a3b8"></p>
     </div>

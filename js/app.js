@@ -5344,10 +5344,70 @@ const ProductosView = (() => {
 
 
 // ════════════════════════════════════════════════
-// MEMBRETE VIEW — herramienta de impresión de membretes
+// MEMBRETE VIEW — cola de impresión de membretes
 // ════════════════════════════════════════════════
 const MembreteView = (() => {
-  let _sel = null; // producto seleccionado
+  let _cola = []; // [{ prod, allEan }]
+
+  function _buildEan(prod) {
+    const equivs = OfflineManager.getEquivalenciasCache();
+    const altCodes = equivs
+      .filter(e => e.idProducto === prod.idProducto && String(e.activo) === '1' && e.codigoBarra)
+      .map(e => String(e.codigoBarra));
+    const allEan = [];
+    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
+    altCodes.forEach(c => { if (!allEan.includes(c)) allEan.push(c); });
+    return allEan;
+  }
+
+  function _renderCola() {
+    const colaEl = document.getElementById('memCola');
+    const listEl = document.getElementById('memColaList');
+    const btn    = document.getElementById('btnImprimirMembrete');
+    if (!listEl) return;
+
+    if (!_cola.length) {
+      if (colaEl) colaEl.style.display = 'none';
+      if (btn) { btn.disabled = true; btn.innerHTML = _btnHTML('Imprimir membretes'); }
+      return;
+    }
+
+    if (colaEl) colaEl.style.display = '';
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = _btnHTML(`Imprimir ${_cola.length} membrete${_cola.length > 1 ? 's' : ''}`);
+    }
+
+    listEl.innerHTML = _cola.map((item, idx) => {
+      const eanText = item.allEan.length
+        ? item.allEan.slice(0, 3).join('  ·  ')
+        : '—';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 10px;
+                          background:#1e293b;border-radius:8px;margin-bottom:5px;">
+        <div style="flex:1;min-width:0;">
+          <p style="font-size:13px;font-weight:700;color:#e2e8f0;
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin:0 0 2px;">
+            ${escHtml(item.prod.descripcion || item.prod.idProducto)}</p>
+          <p style="font-size:10px;color:#475569;font-family:monospace;margin:0;">
+            SKU: ${escHtml(item.prod.idProducto)}
+            ${item.allEan.length ? ' &nbsp;·&nbsp; EAN: ' + escHtml(eanText) : ''}
+            ${item.allEan.length > 3 ? ` <span style="color:#3b82f6">+${item.allEan.length - 3}</span>` : ''}
+          </p>
+        </div>
+        <button onclick="MembreteView.remover(${idx})"
+                style="background:none;border:none;cursor:pointer;color:#475569;
+                       font-size:18px;line-height:1;padding:2px 4px;flex-shrink:0;"
+                title="Quitar">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  function _btnHTML(label) {
+    return `<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+      <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+    </svg> ${label}`;
+  }
 
   function buscar(q) {
     const val  = (q || '').trim();
@@ -5368,71 +5428,74 @@ const MembreteView = (() => {
     if (!matches.length) {
       sEl.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:#64748b;">Sin resultados</div>`;
     } else {
-      sEl.innerHTML = matches.map(p => `
-        <button onclick="MembreteView.seleccionar('${escAttr(p.idProducto)}')"
+      sEl.innerHTML = matches.map(p => {
+        const yaEnCola = _cola.some(i => i.prod.idProducto === p.idProducto);
+        return `<button onclick="MembreteView.seleccionar('${escAttr(p.idProducto)}')"
                 style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;
                        padding:10px 12px;background:none;border:none;cursor:pointer;
                        border-bottom:1px solid #1e293b;transition:background .1s;"
                 onmouseenter="this.style.background='#1e293b'"
                 onmouseleave="this.style.background='none'">
-          <span style="flex:1;font-size:13px;font-weight:600;color:#e2e8f0;
-                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escAttr(p.descripcion || p.idProducto)}</span>
-          <span style="font-size:11px;color:#475569;font-family:monospace;flex-shrink:0;">${escAttr(p.idProducto)}</span>
-        </button>`).join('');
+          <span style="flex:1;font-size:13px;font-weight:600;color:${yaEnCola ? '#475569' : '#e2e8f0'};
+                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+            ${escHtml(p.descripcion || p.idProducto)}
+          </span>
+          ${yaEnCola ? '<span style="font-size:10px;color:#22c55e;flex-shrink:0;">✓ en cola</span>' : ''}
+          <span style="font-size:11px;color:#475569;font-family:monospace;flex-shrink:0;">${escHtml(p.idProducto)}</span>
+        </button>`;
+      }).join('');
     }
     sEl.style.display = 'block';
   }
 
   function seleccionar(idProducto) {
-    const prods  = OfflineManager.getProductosCache();
-    const equivs = OfflineManager.getEquivalenciasCache();
-    const prod   = prods.find(p => p.idProducto === idProducto);
+    const prods = OfflineManager.getProductosCache();
+    const prod  = prods.find(p => p.idProducto === idProducto);
     if (!prod) return;
-    _sel = prod;
 
-    const altCodes = equivs
-      .filter(e => e.idProducto === idProducto && String(e.activo) === '1' && e.codigoBarra)
-      .map(e => String(e.codigoBarra));
-    const allEan = [];
-    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
-    altCodes.forEach(c => { if (!allEan.includes(c)) allEan.push(c); });
+    if (_cola.some(i => i.prod.idProducto === idProducto)) {
+      toast('Ya está en la cola de impresión', 'warn');
+    } else {
+      _cola.push({ prod, allEan: _buildEan(prod) });
+      vibrate(8);
+    }
 
-    document.getElementById('memSugerencias').style.display = 'none';
-    document.getElementById('memBuscar').value = prod.descripcion || prod.idProducto;
-    document.getElementById('memNombre').textContent = prod.descripcion || prod.idProducto;
+    // Limpiar búsqueda y devolver foco para agregar otro
+    const inp = document.getElementById('memBuscar');
+    if (inp) { inp.value = ''; inp.focus(); }
+    const sEl = document.getElementById('memSugerencias');
+    if (sEl) { sEl.style.display = 'none'; sEl.innerHTML = ''; }
+    const st = document.getElementById('memStatus');
+    if (st) st.style.display = 'none';
 
-    let codigosLines = `SKU: ${prod.idProducto}`;
-    if (allEan.length === 1)  codigosLines += `  ·  EAN: ${allEan[0]}`;
-    if (allEan.length >  1)  codigosLines += '\n' + allEan.map(c => `EAN: ${c}`).join('\n');
-    document.getElementById('memCodigos').textContent = codigosLines;
+    _renderCola();
+  }
 
-    document.getElementById('memProductoSel').style.display = 'block';
-    const btn = document.getElementById('btnImprimirMembrete');
-    if (btn) btn.disabled = false;
+  function remover(idx) {
+    _cola.splice(idx, 1);
+    vibrate(8);
+    _renderCola();
+  }
+
+  function vaciarCola() {
+    _cola = [];
+    _renderCola();
     const st = document.getElementById('memStatus');
     if (st) st.style.display = 'none';
   }
 
   function limpiar() {
-    _sel = null;
     const inp = document.getElementById('memBuscar');
     if (inp) inp.value = '';
     const sEl = document.getElementById('memSugerencias');
     if (sEl) { sEl.style.display = 'none'; sEl.innerHTML = ''; }
-    const pEl = document.getElementById('memProductoSel');
-    if (pEl) pEl.style.display = 'none';
-    const btn = document.getElementById('btnImprimirMembrete');
-    if (btn) btn.disabled = true;
-    const st = document.getElementById('memStatus');
-    if (st) st.style.display = 'none';
   }
 
   function abrirScanner() {
     abrirScannerPara('memBuscar', code => {
-      const el = document.getElementById('memBuscar');
-      if (el) el.value = code;
+      const inp = document.getElementById('memBuscar');
+      if (inp) inp.value = code;
       buscar(code);
-      // Auto-seleccionar si hay match exacto de barcode
       const prods  = OfflineManager.getProductosCache();
       const equivs = OfflineManager.getEquivalenciasCache();
       const exact  = prods.find(p =>
@@ -5444,32 +5507,41 @@ const MembreteView = (() => {
   }
 
   async function imprimir() {
-    if (!_sel) return;
+    if (!_cola.length) return;
     const btn = document.getElementById('btnImprimirMembrete');
     const st  = document.getElementById('memStatus');
-    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
-    if (st)  { st.style.display = ''; st.textContent = 'Enviando a impresora…'; st.style.color = '#94a3b8'; }
+    if (btn) btn.disabled = true;
 
-    const res = await API.imprimirMembrete({ idProducto: _sel.idProducto })
-      .catch(() => ({ ok: false, error: 'Sin conexión' }));
-
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
-        <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
-      </svg> Imprimir membrete`;
+    let ok = 0, errCount = 0;
+    for (const item of [..._cola]) {
+      if (st) {
+        st.style.display = '';
+        st.textContent   = `Imprimiendo ${item.prod.descripcion || item.prod.idProducto}…`;
+        st.style.color   = '#94a3b8';
+      }
+      const res = await API.imprimirMembrete({
+        idProducto: item.prod.idProducto,
+        barcodes:   JSON.stringify(item.allEan),
+        skuGrupal:  item.prod.idProducto
+      }).catch(() => ({ ok: false, error: 'Sin conexión' }));
+      if (res.ok) ok++; else errCount++;
     }
-    if (res.ok) {
-      if (st) { st.style.display = ''; st.textContent = '✓ Impreso correctamente'; st.style.color = '#4ade80'; }
-      toast('Membrete enviado a impresora', 'ok');
+
+    if (ok > 0 && errCount === 0) {
+      if (st) { st.textContent = `✓ ${ok} membrete${ok > 1 ? 's' : ''} enviados a impresora`; st.style.color = '#4ade80'; }
+      toast(`${ok} membretes enviados`, 'ok');
+      _cola = [];
+    } else if (ok > 0) {
+      if (st) { st.textContent = `${ok} enviados, ${errCount} con error`; st.style.color = '#f59e0b'; }
+      toast(`${ok} impresos, ${errCount} con error`, 'warn');
     } else {
-      if (st) { st.style.display = ''; st.textContent = '✗ ' + (res.error || 'Error al imprimir'); st.style.color = '#f87171'; }
-      toast(res.error || 'Error al imprimir', 'danger');
+      if (st) { st.textContent = '✗ Error al imprimir. Verifica conexión e impresora.'; st.style.color = '#f87171'; }
+      toast('Error al imprimir', 'danger');
     }
+    _renderCola();
   }
 
-  return { buscar, seleccionar, limpiar, abrirScanner, imprimir };
+  return { buscar, seleccionar, limpiar, remover, vaciarCola, abrirScanner, imprimir };
 })();
 
 // ════════════════════════════════════════════════
