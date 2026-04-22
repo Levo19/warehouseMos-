@@ -42,7 +42,6 @@ function imprimirTicketGuia(params) {
     var prodMap = {};
     prods.forEach(function(p) { prodMap[p.idProducto] = p.descripcion || p.idProducto; });
 
-    // PN map: codigoBarra → { descripcion, estado }
     var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
     var pnMap = {};
     pns.forEach(function(pn) {
@@ -53,15 +52,18 @@ function imprimirTicketGuia(params) {
     dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
       .filter(function(d) { return d.idGuia === idGuia && d.observacion !== 'ANULADO'; })
       .map(function(d) {
-        var cod   = String(d.codigoProducto || '');
-        var esPN  = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
-        var desc  = esPN
-          ? (pnMap[cod] ? pnMap[cod].desc : cod)
-          : (prodMap[cod] || cod);
+        var cod        = String(d.codigoProducto || '');
+        var esPN       = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
+        var enCatalogo = !!prodMap[cod];
+        var desc       = esPN ? (pnMap[cod] ? pnMap[cod].desc : cod)
+                       : enCatalogo ? prodMap[cod] : cod;
         return {
+          codigoProducto:  cod,
           descripcion:     desc,
           cantidad:        parseFloat(d.cantidadReal || d.cantidadRecibida || d.cantidadEsperada || 0),
+          fechaVencimiento: String(d.fechaVencimiento || '').split('T')[0],
           esProductoNuevo: esPN,
+          esIncompleto:    !esPN && !enCatalogo,
           estadoPN:        esPN && pnMap[cod] ? pnMap[cod].estado : ''
         };
       });
@@ -81,17 +83,27 @@ function imprimirTicketGuia(params) {
   function bStr(s) { for (var i = 0; i < s.length; i++) B.push(s.charCodeAt(i) & 0xff); }
   function bLn(s) { bStr(s); b1(0x0a); }
 
-  // 48 chars: tag(2) + nombre(38) + cant(rest) → con etiqueta N o I
+  // 48 chars: tag(2) + nombre(38) + cant(rest)
+  // tag: 'n'=nuevo, 'i'=incompleto, ' '=exacto (sin prefijo visual)
   function lineaDet(tag, nombre, cant) {
-    var pre = (tag ? tag.substring(0,1) : ' ') + ' ';   // ej: "N " o "I "
+    var pre = (tag && tag !== ' ' ? tag.substring(0,1) : ' ') + ' ';
     var n   = String(nombre).substring(0, 38);
     var c   = String(cant);
     var pad = 48 - pre.length - n.length - c.length;
     if (pad < 1) pad = 1;
     return pre + n + Array(pad + 1).join(' ') + c;
   }
-  // Retro-compat para header (sin tag)
   function lineaProd(nombre, cant) { return lineaDet(' ', nombre, cant); }
+
+  // Formato simple de fecha "YYYY-MM-DD" → "15 ago 2027"
+  function fmtVenc(raw) {
+    if (!raw) return '';
+    var parts = String(raw).split('-');
+    if (parts.length !== 3) return raw;
+    var meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    var m = parseInt(parts[1], 10) - 1;
+    return parts[2] + ' ' + (meses[m] || parts[1]) + ' ' + parts[0];
+  }
 
   // Línea etiqueta: label fijo 10 chars + valor
   function lineaKV(label, valor) {
@@ -139,14 +151,22 @@ function imprimirTicketGuia(params) {
 
   // Items
   dets.forEach(function(d) {
-    var tag    = d.esProductoNuevo ? 'N' : 'I';
+    var tag    = d.esProductoNuevo ? 'n' : d.esIncompleto ? 'i' : ' ';
     var nombre = String(d.descripcion || '').toUpperCase();
     var cant   = d.cantidad % 1 === 0 ? String(Math.round(d.cantidad)) : String(d.cantidad);
     if (nombre.length <= 38) {
       bLn(lineaDet(tag, nombre, cant));
     } else {
       bLn(lineaDet(tag, nombre.substring(0, 38), cant));
-      bLn('  ' + nombre.substring(38, 78));
+      bLn('   ' + nombre.substring(38, 78));
+    }
+    // Código: solo para productos nuevos (NLEV u otro código PN)
+    if (d.esProductoNuevo && d.codigoProducto) {
+      bLn('  ' + String(d.codigoProducto));
+    }
+    // Fecha de vencimiento (si tiene)
+    if (d.fechaVencimiento) {
+      bLn('  Venc: ' + fmtVenc(d.fechaVencimiento));
     }
   });
 
@@ -308,19 +328,20 @@ function _reporteGuia(id) {
     dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
       .filter(function(d) { return d.idGuia === id && d.observacion !== 'ANULADO'; })
       .map(function(d) {
-        var cod  = String(d.codigoProducto || '');
-        var esPN = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
-        var desc = esPN
-          ? (pnMap[cod] ? pnMap[cod].desc : cod)
-          : (prodMap[cod] || cod);
+        var cod        = String(d.codigoProducto || '');
+        var esPN       = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
+        var enCatalogo = !!prodMap[cod];
+        var desc       = esPN ? (pnMap[cod] ? pnMap[cod].desc : cod)
+                       : enCatalogo ? prodMap[cod] : cod;
         return {
           codigoProducto:   cod,
           descripcion:      desc,
           cantidadEsperada: d.cantidadEsperada || 0,
           cantidadReal:     d.cantidadReal || d.cantidadRecibida || 0,
-          fechaVencimiento: String(d.fechaVencimiento || ''),
+          fechaVencimiento: String(d.fechaVencimiento || '').split('T')[0],
           observacion:      d.observacion || '',
           esProductoNuevo:  esPN,
+          esIncompleto:     !esPN && !enCatalogo,
           estadoPN:         esPN && pnMap[cod] ? pnMap[cod].estado : ''
         };
       });
