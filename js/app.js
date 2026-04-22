@@ -3363,8 +3363,7 @@ const EnvasadosView = (() => {
     }).join('');
   }
 
-  async function nuevo() {
-    // Cargar derivados
+  async function nuevo(preIdBase, preIdDerivado) {
     productosMaestro = App.getProductosMaestro();
     derivados = productosMaestro.filter(p => p.codigoProductoBase && p.codigoProductoBase !== '');
 
@@ -3373,9 +3372,14 @@ const EnvasadosView = (() => {
     derivados.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.idProducto;
-      opt.textContent = p.descripcion + ' (base: ' + p.codigoProductoBase + ')';
+      opt.textContent = p.descripcion + (preIdBase ? '' : ' (base: ' + p.codigoProductoBase + ')');
       sel.appendChild(opt);
     });
+
+    if (preIdDerivado) {
+      sel.value = preIdDerivado;
+      await onDerivadoChange(preIdDerivado);
+    }
 
     abrirSheet('sheetEnvasado');
   }
@@ -3500,39 +3504,179 @@ const EnvasadosView = (() => {
 })();
 
 // ════════════════════════════════════════════════
-// MODO ENVASADOR — vista rápida urgentes
+// MODO ENVASADOR — catálogo por producto base
 // ════════════════════════════════════════════════
 const EnvasadorView = (() => {
-  let _historialCargado = false;
+  let _filtroUrg  = false;
+  let _catalog    = [];
+  let _timer      = null;
 
-  function setTab(tab) {
-    const isUrg = tab === 'urgentes';
-    document.getElementById('tabPanelUrgentes').classList.toggle('hidden', !isUrg);
-    document.getElementById('tabPanelHistorial').classList.toggle('hidden', isUrg);
-    const actCls = 'flex-1 py-2 text-sm font-semibold border-b-2 -mb-px text-blue-400 border-blue-400';
-    const inaCls = 'flex-1 py-2 text-sm font-semibold border-b-2 -mb-px text-slate-500 border-transparent';
-    document.getElementById('tabBtnUrgentes').className  = isUrg  ? actCls : inaCls;
-    document.getElementById('tabBtnHistorial').className = !isUrg ? actCls : inaCls;
-    if (!isUrg && !_historialCargado) _cargarHistorial();
+  function _buildStockMap() {
+    const map = {};
+    OfflineManager.getStockCache().forEach(s => {
+      map[s.codigoProducto || s.idProducto] = s;
+    });
+    return map;
   }
 
-  async function _cargarHistorial() {
-    _historialCargado = true;
-    const container = document.getElementById('listHistorialEnvasado');
+  function _urgencia(stockActual, stockMin) {
+    if (!stockMin || stockMin <= 0) return null;
+    if (stockActual <= 0) return 'CRITICA';
+    if (stockActual < stockMin) return 'ALTA';
+    return null;
+  }
+
+  function _buildCatalog() {
+    const master   = App.getProductosMaestro();
+    const stockMap = _buildStockMap();
+
+    const bases = master.filter(p =>
+      String(p.esEnvasable) === '1' &&
+      p.estado !== '0' && p.estado !== 0
+    );
+
+    return bases.map(base => {
+      const bs        = stockMap[base.idProducto] || {};
+      const stockBase = parseFloat(bs.cantidadDisponible || 0);
+      const unidad    = bs.unidad || base.unidad || '';
+
+      const derivados = master
+        .filter(d =>
+          d.codigoProductoBase === base.idProducto &&
+          d.estado !== '0' && d.estado !== 0
+        )
+        .map(d => {
+          const factor   = parseFloat(d.factorConversionBase || d.factorConversion || 1);
+          const merma    = parseFloat(d.mermaEsperadaPct || 0);
+          const posibles = Math.floor(stockBase * factor * (1 - merma / 100));
+          const ds       = stockMap[d.idProducto] || {};
+          const stockD   = parseFloat(ds.cantidadDisponible || 0);
+          const stockMin = parseFloat(ds.stockMinimo || d.stockMinimo || 0);
+          return { ...d, stockD, stockMin, posibles, factor, merma,
+                   urgencia: _urgencia(stockD, stockMin) };
+        });
+
+      const worstUrg = derivados.some(d => d.urgencia === 'CRITICA') ? 'CRITICA'
+                     : derivados.some(d => d.urgencia === 'ALTA')    ? 'ALTA' : null;
+
+      return { ...base, stockBase, unidad, derivados, worstUrg };
+    }).filter(b => b.derivados.length > 0);
+  }
+
+  function _urgIcon(urg) {
+    if (urg === 'CRITICA') return '<span style="color:#ef4444">⚡</span>';
+    if (urg === 'ALTA')    return '<span style="color:#f59e0b">⚡</span>';
+    return '';
+  }
+
+  function _render() {
+    const container = document.getElementById('listEnvasadorCatalog');
+    if (!container) return;
+    const list = _filtroUrg ? _catalog.filter(b => b.worstUrg) : _catalog;
+
+    if (!list.length) {
+      container.innerHTML = _filtroUrg
+        ? '<div class="card text-center py-8"><p class="text-2xl mb-2">✅</p><p class="font-semibold">¡Sin urgentes!</p></div>'
+        : '<p class="text-slate-500 text-center py-8 text-sm">Sin productos envasables configurados</p>';
+      return;
+    }
+
+    container.innerHTML = list.map(base => {
+      const urgHdr = base.worstUrg ? _urgIcon(base.worstUrg) + ' ' : '';
+      const derivRows = base.derivados
+        .filter(d => !_filtroUrg || d.urgencia)
+        .map(d => {
+          const urg = d.urgencia ? _urgIcon(d.urgencia) + ' ' : '';
+          const posiblesHtml = d.posibles > 0
+            ? `<span class="text-emerald-400 text-xs">~${fmt(d.posibles)} uds posibles</span>`
+            : `<span class="text-slate-500 text-xs">Base insuficiente</span>`;
+          const urgTag = d.urgencia
+            ? `<span class="tag-${d.urgencia === 'CRITICA' ? 'danger' : 'warn'} text-xs">${d.urgencia}</span>`
+            : '';
+          return `
+          <div class="env-deriv-row">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-medium text-slate-200 flex-1 min-w-0 truncate">${urg}${escHtml(d.descripcion)}</span>
+              ${urgTag}
+            </div>
+            <div class="flex items-center gap-2 mt-1">
+              ${posiblesHtml}
+              <button onclick="EnvasadorView.envasar('${escAttr(base.idProducto)}','${escAttr(d.idProducto)}')"
+                      class="btn btn-sm btn-primary ml-auto" style="flex-shrink:0">Envasar</button>
+            </div>
+          </div>`;
+        }).join('');
+
+      return `
+      <div class="card env-base-card">
+        <div class="flex items-center justify-between cursor-pointer mb-1"
+             onclick="this.closest('.env-base-card').classList.toggle('env-collapsed')">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-bold text-base truncate">${urgHdr}${escHtml(base.descripcion)}</span>
+            <span class="text-xs text-slate-400 flex-shrink-0">${fmt(base.stockBase, 1)} ${escHtml(base.unidad)}</span>
+          </div>
+          <svg class="env-chevron w-4 h-4 text-slate-400 flex-shrink-0 ml-2" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+          </svg>
+        </div>
+        <div class="env-deriv-list">${derivRows}</div>
+      </div>`;
+    }).join('');
+  }
+
+  function _updateUrgBtn() {
+    const btn = document.getElementById('envUrgBtn');
+    if (!btn) return;
+    const urgN = _catalog.filter(b => b.worstUrg).length;
+    document.getElementById('envUrgCount').textContent = urgN;
+    btn.style.display = urgN > 0 ? 'flex' : 'none';
+    btn.classList.toggle('active', _filtroUrg);
+  }
+
+  function toggleUrgFilter() {
+    _filtroUrg = !_filtroUrg;
+    _updateUrgBtn();
+    _render();
+  }
+
+  function cargar() {
+    if (_timer) { clearInterval(_timer); _timer = null; }
+    _filtroUrg = false;
+    document.getElementById('envCatalogPanel').classList.remove('hidden');
+    document.getElementById('envHistorialPanel').classList.add('hidden');
+    document.getElementById('listEnvasadorCatalog').innerHTML =
+      '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+
+    _catalog = _buildCatalog();
+    if (_catalog.some(b => b.worstUrg)) _filtroUrg = true;
+    _updateUrgBtn();
+    _render();
+
+    _timer = setInterval(() => {
+      _catalog = _buildCatalog();
+      _updateUrgBtn();
+      _render();
+    }, 120_000);
+  }
+
+  async function verHistorial() {
+    document.getElementById('envCatalogPanel').classList.add('hidden');
+    document.getElementById('envHistorialPanel').classList.remove('hidden');
+    const container = document.getElementById('listEnvasadorHistorial');
     container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
     const res = await API.getEnvasados({ limit: 30 }).catch(() => ({ ok: false }));
     const list = res.ok ? res.data : [];
     if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin historial</p>'; return; }
     container.innerHTML = list.map(e => {
-      const efPct = parseFloat(e.eficienciaPct) || 0;
+      const efPct   = parseFloat(e.eficienciaPct) || 0;
       const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
       return `
       <div class="card-sm">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-xs tag-blue">${e.codigoProductoBase} → ${e.codigoProductoEnvasado}</span>
+          <span class="text-xs tag-blue">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}</span>
           <span class="${efColor} font-bold text-sm">${efPct}%</span>
         </div>
-        <p class="text-xs text-slate-400">${fmtFecha(e.fecha)} · ${e.usuario}</p>
+        <p class="text-xs text-slate-400">${fmtFecha(e.fecha)} · ${escHtml(e.usuario)}</p>
         <div class="flex gap-4 mt-1 text-xs text-slate-300">
           <span>Base: ${fmt(e.cantidadBase, 1)}</span>
           <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
@@ -3542,102 +3686,16 @@ const EnvasadorView = (() => {
     }).join('');
   }
 
-  async function cargar() {
-    _historialCargado = false;
-    // Asegurar que estamos en tab urgentes al entrar
-    setTab('urgentes');
-    const container = document.getElementById('listEnvasadorUrgentes');
-    container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
-
-    const res = await API.getPendientes().catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-
-    if (!list.length) {
-      container.innerHTML = `
-        <div class="card text-center py-8">
-          <p class="text-2xl mb-2">✅</p>
-          <p class="font-semibold">¡Todo en orden!</p>
-          <p class="text-xs text-slate-400 mt-1">No hay productos urgentes para envasar</p>
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = list.map(p => `
-      <div class="card">
-        <div class="flex items-center justify-between mb-2">
-          <span class="font-bold text-base">${p.descripcion}</span>
-          <span class="tag-${p.urgencia === 'CRITICA' ? 'danger' : 'warn'} font-bold">${p.urgencia}</span>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2 text-xs mb-3">
-          <div class="card-sm text-center">
-            <div class="text-lg font-bold ${p.stockDerivado === 0 ? 'text-red-400' : 'text-amber-400'}">${fmt(p.stockDerivado)}</div>
-            <div class="text-slate-400">Stock actual</div>
-          </div>
-          <div class="card-sm text-center">
-            <div class="text-lg font-bold text-slate-300">${fmt(p.stockMinimoDerivado)}</div>
-            <div class="text-slate-400">Mínimo requerido</div>
-          </div>
-          <div class="card-sm text-center">
-            <div class="text-lg font-bold text-blue-400">${fmt(p.stockBase, 1)}</div>
-            <div class="text-slate-400">Base disponible</div>
-          </div>
-          <div class="card-sm text-center">
-            <div class="text-lg font-bold text-emerald-400">${fmt(p.maxProducibles)}</div>
-            <div class="text-slate-400">Máx. producibles</div>
-          </div>
-        </div>
-
-        <!-- Registro rápido inline -->
-        <div class="flex gap-2 items-center">
-          <button onclick="EnvasadorView.ajustar('${p.codigoDerivado}', -10)" class="btn btn-outline w-10 h-10 text-lg">−</button>
-          <input id="quickEnv_${p.codigoDerivado}" type="number" value="${Math.min(p.maxProducibles, p.faltan)}"
-                 class="input text-center text-xl font-bold flex-1" min="1" max="${p.maxProducibles}"/>
-          <button onclick="EnvasadorView.ajustar('${p.codigoDerivado}', +10)" class="btn btn-outline w-10 h-10 text-lg">+</button>
-        </div>
-        <div class="text-xs text-slate-500 text-center mt-1">
-          Factor: ${p.factorConversion} uds/unidad · Merma: ${p.mermaEsperadaPct}%
-        </div>
-        <button onclick="EnvasadorView.registrarRapido('${p.codigoDerivado}','${p.codigoBase}',${p.factorConversion},${p.mermaEsperadaPct})"
-                class="btn btn-primary w-full mt-2 btn-lg">
-          📦 Envasar + 🖨️ Etiquetas
-        </button>
-      </div>`).join('');
+  function verCatalogo() {
+    document.getElementById('envHistorialPanel').classList.add('hidden');
+    document.getElementById('envCatalogPanel').classList.remove('hidden');
   }
 
-  function ajustar(codigoDerivado, delta) {
-    const el = document.getElementById('quickEnv_' + codigoDerivado);
-    if (el) el.value = Math.max(1, (parseInt(el.value) || 0) + delta);
+  function envasar(idBase, idDerivado) {
+    EnvasadosView.nuevo(idBase, idDerivado);
   }
 
-  async function registrarRapido(codigoDerivado, codigoBase, factor, merma) {
-    const el = document.getElementById('quickEnv_' + codigoDerivado);
-    const unidades = parseInt(el?.value) || 0;
-    if (unidades <= 0) { toast('Ingresa la cantidad', 'warn'); return; }
-
-    // Calcular cantidad base necesaria (inverso del factor)
-    const cantBase = Math.ceil(unidades / (factor * (1 - merma / 100)));
-
-    const res = await API.registrarEnvasado({
-      codigoProductoBase:     codigoBase,
-      cantidadBase:           cantBase,
-      codigoProductoEnvasado: codigoDerivado,
-      unidadesProducidas:     unidades,
-      imprimirEtiquetas:      true,
-      usuario:                window.WH_CONFIG.usuario
-    });
-
-    if (res.ok) {
-      const d = res.data;
-      const impMsg = d.impresion?.ok ? ` · ${unidades} etiquetas 🖨️` : ' · Impresora no lista';
-      toast(`✅ ${unidades} uds envasadas · ${d.eficienciaPct}%${impMsg}`, 'ok', 5000);
-      cargar(); // Recargar lista
-    } else {
-      toast('Error: ' + res.error, 'danger', 5000);
-    }
-  }
-
-  return { cargar, setTab, ajustar, registrarRapido };
+  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar };
 })();
 
 // ════════════════════════════════════════════════

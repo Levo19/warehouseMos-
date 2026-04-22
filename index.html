@@ -159,6 +159,20 @@
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
                   border-radius:6px;padding:3px 8px;letter-spacing:.5px; }
+    /* Envasador catálogo */
+    .env-base-card .env-deriv-list { transition:none; }
+    .env-base-card.env-collapsed .env-deriv-list { display:none; }
+    .env-base-card.env-collapsed .env-chevron { transform:rotate(-90deg); }
+    .env-chevron { transition:transform .18s; }
+    .env-deriv-row { padding:7px 0; border-top:1px solid rgba(255,255,255,.06); }
+    .env-deriv-row:first-child { border-top:none; }
+    .env-urg-btn { display:flex;align-items:center;gap:6px;
+                   border-radius:9px;padding:6px 12px;font-size:13px;font-weight:700;
+                   border:1.5px solid rgba(255,255,255,.08);
+                   background:rgba(255,255,255,.06);color:#94a3b8;
+                   cursor:pointer;transition:background .15s,color .15s; }
+    .env-urg-btn.active { background:rgba(239,68,68,.18);color:#fca5a5;
+                          border-color:rgba(239,68,68,.4); }
     /* Alertas badge navbar */
     #navAlertaBadge { position:absolute;top:4px;right:4px;pointer-events:none; }
     .nav-item { position:relative; }
@@ -1293,29 +1307,48 @@
 
   <!-- ── MODO ENVASADOR ────────────────────────── -->
   <section id="view-envasador" class="view slide-up">
-    <!-- Tabs -->
-    <div class="flex mb-3 border-b border-slate-700">
-      <button id="tabBtnUrgentes" onclick="EnvasadorView.setTab('urgentes')"
-              class="flex-1 py-2 text-sm font-semibold text-blue-400 border-b-2 border-blue-400 -mb-px">
-        ⚡ Urgentes
-      </button>
-      <button id="tabBtnHistorial" onclick="EnvasadorView.setTab('historial')"
-              class="flex-1 py-2 text-sm font-semibold text-slate-500 border-b-2 border-transparent -mb-px">
-        📋 Historial
-      </button>
-    </div>
-    <!-- Panel Urgentes -->
-    <div id="tabPanelUrgentes">
-      <div id="listEnvasadorUrgentes" class="space-y-3 mb-4">
+
+    <!-- ── Panel Catálogo ─────────────────────── -->
+    <div id="envCatalogPanel">
+      <div class="flex items-center justify-between mb-4">
+        <button id="envUrgBtn" onclick="EnvasadorView.toggleUrgFilter()"
+                class="env-urg-btn" style="display:none">
+          <span>⚡</span>
+          <span>Urgentes (<span id="envUrgCount">0</span>)</span>
+        </button>
+        <div></div>
+        <button onclick="EnvasadorView.verHistorial()" class="nav-sibling-btn">
+          Historial
+          <span class="arrow-slide-r">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </span>
+        </button>
+      </div>
+      <div id="listEnvasadorCatalog" class="space-y-3 mb-4">
         <div class="flex justify-center py-8"><div class="spinner"></div></div>
       </div>
     </div>
-    <!-- Panel Historial -->
-    <div id="tabPanelHistorial" class="hidden">
-      <div id="listHistorialEnvasado" class="space-y-2">
+
+    <!-- ── Panel Historial ────────────────────── -->
+    <div id="envHistorialPanel" class="hidden">
+      <div class="flex items-center justify-between mb-4">
+        <button onclick="EnvasadorView.verCatalogo()" class="nav-sibling-btn">
+          <span class="arrow-slide-l">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+            </svg>
+          </span>
+          Catálogo
+        </button>
+        <span class="text-xs text-slate-500">Últimos 30</span>
+      </div>
+      <div id="listEnvasadorHistorial" class="space-y-2">
         <div class="flex justify-center py-8"><div class="spinner"></div></div>
       </div>
     </div>
+
   </section>
 
   <!-- ── GUIAS ──────────────────────────────────── -->
