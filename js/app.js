@@ -3546,7 +3546,7 @@ const EnvasadorView = (() => {
 
       const derivados = master
         .filter(d =>
-          d.codigoProductoBase === base.idProducto &&
+          (d.codigoProductoBase === base.idProducto || d.codigoProductoBase === base.skuBase) &&
           d.estado !== '0' && d.estado !== 0
         )
         .map(d => {
