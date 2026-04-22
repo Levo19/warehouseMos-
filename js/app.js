@@ -1077,6 +1077,7 @@ const App = (() => {
     const titles = {
       dashboard:   'Dashboard',
       envasador:   'Modo Envasador',
+      despacho:    'Despacho Rápido',
       guias:       'Guías',
       envasados:   'Envasados',
       preingresos: 'Pre-Ingresos',
@@ -1095,6 +1096,7 @@ const App = (() => {
       case 'guias':       GuiasView.cargar(); break;
       case 'envasados':   EnvasadosView.cargar(); break;
       case 'envasador':   EnvasadorView.cargar(); break;
+      case 'despacho':    DespachoView.cargar(); break;
       case 'preingresos': PreingresosView.cargar(); break;
       case 'mermas':      MermasView.cargar(); break;
       case 'productos':   ProductosView.cargar(); break;
@@ -3696,6 +3698,245 @@ const EnvasadorView = (() => {
   }
 
   return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar };
+})();
+
+// ════════════════════════════════════════════════
+// DESPACHO RÁPIDO
+// ════════════════════════════════════════════════
+const DespachoView = (() => {
+  const CART_KEY = 'wh_despacho_cart';
+  let _cart = [];       // [{codigoBarra, descripcion, unidad, cantidad, stockDisp}]
+  let _active = null;   // producto en numpad activo
+  let _qty = '';
+
+  function _saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(_cart)); }
+  function _loadCart() {
+    try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
+  }
+
+  function cargar() {
+    _cart = _loadCart();
+    _renderCart();
+    _updateFooter();
+  }
+
+  function escanear() {
+    abrirScanner(cod => _procesarCodigo(String(cod).trim()));
+  }
+
+  function _procesarCodigo(cod) {
+    if (!cod) return;
+    const master = App.getProductosMaestro();
+    const prod   = master.find(p =>
+      String(p.codigoBarra || '').trim() === cod ||
+      String(p.idProducto  || '').trim() === cod
+    );
+
+    if (!prod) {
+      toast(`"${cod}" no encontrado en catálogo`, 'warn', 4000);
+      return;
+    }
+
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    const st     = stockMap[prod.idProducto] || {};
+    const stockD = parseFloat(st.cantidadDisponible || 0);
+
+    // Si ya está en el carrito → abrir numpad para editar
+    const existing = _cart.find(c => c.codigoBarra === (prod.idProducto));
+    _abrirNumpad({ ...prod, stockDisp: stockD }, existing?.cantidad || 0);
+  }
+
+  function _abrirNumpad(prod, cantActual) {
+    _active = prod;
+    _qty    = cantActual > 0 ? String(cantActual) : '';
+
+    document.getElementById('despItemNombre').textContent = prod.descripcion || prod.idProducto;
+    const st = prod.stockDisp || 0;
+    const un = prod.unidad || '';
+    document.getElementById('despItemInfo').textContent =
+      `Stock disponible: ${fmt(st, 1)} ${un}`.trim();
+
+    _updateNpDisplay();
+    abrirSheet('sheetDespItem');
+  }
+
+  function npKey(k) {
+    if (k === 'del') {
+      _qty = _qty.slice(0, -1);
+    } else if (k === 'ok') {
+      _confirmarItem();
+      return;
+    } else if (_qty.length < 5) {
+      if (k === '0' && _qty === '') return; // no leading zero
+      _qty += k;
+    }
+    _updateNpDisplay();
+  }
+
+  function _updateNpDisplay() {
+    const el  = document.getElementById('despNpDisplay');
+    if (!el) return;
+    const qty = parseInt(_qty) || 0;
+    el.textContent   = qty || (_qty === '' ? '0' : _qty);
+    const overStock  = _active && qty > (_active.stockDisp || 0) && (_active.stockDisp || 0) > 0;
+    el.style.color   = overStock ? '#f87171' : '#f0f9ff';
+  }
+
+  function cancelarItem() {
+    cerrarSheet('sheetDespItem');
+    _active = null;
+    _qty    = '';
+  }
+
+  function _confirmarItem() {
+    const qty = parseInt(_qty) || 0;
+    if (qty <= 0) { toast('Ingresa una cantidad mayor a 0', 'warn'); return; }
+
+    const cod = _active.idProducto;
+    const idx = _cart.findIndex(c => c.codigoBarra === cod);
+
+    const item = {
+      codigoBarra: cod,
+      descripcion: _active.descripcion || cod,
+      unidad:      _active.unidad || '',
+      cantidad:    qty,
+      stockDisp:   _active.stockDisp || 0
+    };
+
+    if (idx >= 0) {
+      _cart[idx] = item;
+    } else {
+      _cart.push(item);
+    }
+
+    _saveCart();
+    cerrarSheet('sheetDespItem');
+    _active = null;
+    _qty    = '';
+    _renderCart();
+    _updateFooter();
+    toast(idx >= 0 ? `✎ ${item.descripcion} actualizado` : `✅ ${item.descripcion} añadido`, 'ok', 2500);
+  }
+
+  function _renderCart() {
+    const el = document.getElementById('despCartList');
+    if (!el) return;
+
+    if (!_cart.length) {
+      el.innerHTML = `
+        <div class="card text-center py-10">
+          <p class="text-4xl mb-2">📦</p>
+          <p class="text-slate-400 text-sm">Escanea el primer producto</p>
+          <p class="text-slate-600 text-xs mt-1">El carrito se guarda automáticamente</p>
+        </div>`;
+      return;
+    }
+
+    el.innerHTML = _cart.map((item, i) => {
+      const over = item.cantidad > item.stockDisp && item.stockDisp > 0;
+      const qtyColor = over ? 'color:#f87171' : 'color:#34d399';
+      const overWarn = over
+        ? `<span class="text-xs text-red-400 block">⚠ stock: ${fmt(item.stockDisp, 1)}</span>` : '';
+      return `
+      <div class="card-sm desp-cart-item flex items-center gap-3" style="animation-delay:${i * 0.03}s">
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-sm truncate">${escHtml(item.descripcion)}</p>
+          <p class="text-xs text-slate-400">${escHtml(item.unidad)}</p>
+          ${overWarn}
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <span class="font-bold text-xl" style="${qtyColor}">${item.cantidad}</span>
+          <button onclick="DespachoView.editarItem('${escAttr(item.codigoBarra)}')"
+                  class="btn btn-outline btn-sm" style="min-width:34px">✎</button>
+          <button onclick="DespachoView.quitarItem('${escAttr(item.codigoBarra)}')"
+                  class="btn btn-outline btn-sm text-red-400" style="min-width:34px">✕</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function _updateFooter() {
+    const n   = _cart.length;
+    const uds = _cart.reduce((s, c) => s + c.cantidad, 0);
+    document.getElementById('despProgress').textContent  = `${n} producto${n !== 1 ? 's' : ''}`;
+    document.getElementById('despTotalUds').textContent  = `${uds} unidades total`;
+    const btn = document.getElementById('despBtnFinalizar');
+    if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.4' : '1'; }
+  }
+
+  function editarItem(codigoBarra) {
+    const item = _cart.find(c => c.codigoBarra === codigoBarra);
+    if (!item) return;
+    const master = App.getProductosMaestro();
+    const prod   = master.find(p => p.idProducto === codigoBarra) || item;
+    _abrirNumpad({ ...prod, stockDisp: item.stockDisp }, item.cantidad);
+  }
+
+  function quitarItem(codigoBarra) {
+    _cart = _cart.filter(c => c.codigoBarra !== codigoBarra);
+    _saveCart();
+    _renderCart();
+    _updateFooter();
+  }
+
+  function finalizar() {
+    if (!_cart.length) return;
+    const zonas = OfflineManager.getZonasCache();
+    const sel   = document.getElementById('despZonaSelect');
+    sel.innerHTML = '<option value="">— Seleccionar zona —</option>' +
+      zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('');
+
+    const n   = _cart.length;
+    const uds = _cart.reduce((s, c) => s + c.cantidad, 0);
+    document.getElementById('despResumenProds').textContent = `${n} producto${n !== 1 ? 's' : ''}`;
+    document.getElementById('despResumenUds').textContent   = `${uds} unidades`;
+
+    abrirSheet('sheetDespFinalizar');
+  }
+
+  async function confirmarDespacho() {
+    const idZona = document.getElementById('despZonaSelect').value;
+    if (!idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
+
+    const btn = document.getElementById('btnConfirmarDespacho');
+    btn.disabled     = true;
+    btn.textContent  = '⏳ Generando guía...';
+
+    const res = await API.crearDespachoRapido({
+      idZona,
+      usuario: window.WH_CONFIG?.usuario || '',
+      items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
+    }).catch(() => ({ ok: false, error: 'Sin conexión' }));
+
+    btn.disabled    = false;
+    btn.textContent = '📦 Generar guía de salida + Imprimir';
+
+    if (res.ok) {
+      const d = res.data;
+      const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
+      toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
+      if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
+      _cart = [];
+      _saveCart();
+      cerrarSheet('sheetDespFinalizar');
+      _renderCart();
+      _updateFooter();
+    } else {
+      toast('Error: ' + (res.error || 'No se pudo crear la guía'), 'danger', 6000);
+    }
+  }
+
+  function cancelar() {
+    if (!_cart.length) return;
+    if (!confirm('¿Vaciar el carrito de despacho?')) return;
+    _cart = [];
+    _saveCart();
+    _renderCart();
+    _updateFooter();
+  }
+
+  return { cargar, escanear, npKey, cancelarItem, editarItem, quitarItem, finalizar, confirmarDespacho, cancelar };
 })();
 
 // ════════════════════════════════════════════════

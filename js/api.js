@@ -92,6 +92,7 @@ const API = (() => {
     getGuias:           (p={})   => call({ action: 'getGuias', ...p }),
     getGuia:            (id)     => call({ action: 'getGuia', idGuia: id }),
     crearGuia:          (p)      => post({ action: 'crearGuia', ...p }),
+    crearDespachoRapido:(p)     => post({ action: 'crearDespachoRapido', ...p }),
     agregarDetalle:           (p) => post({ action: 'agregarDetalleGuia',        ...p }),
     actualizarFechaVencimiento: (p) => post({ action: 'actualizarFechaVencimiento',  ...p }),
     actualizarCantidadDetalle:  (p) => post({ action: 'actualizarCantidadDetalle',   ...p }),

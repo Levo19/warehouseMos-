@@ -173,6 +173,31 @@
                    cursor:pointer;transition:background .15s,color .15s; }
     .env-urg-btn.active { background:rgba(239,68,68,.18);color:#fca5a5;
                           border-color:rgba(239,68,68,.4); }
+    /* Despacho Rápido */
+    .desp-scan-btn {
+      width:100%;padding:20px;border-radius:16px;
+      background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%);
+      color:#fff;font-size:18px;font-weight:800;letter-spacing:.06em;
+      display:flex;align-items:center;justify-content:center;gap:12px;
+      border:none;cursor:pointer;
+      box-shadow:0 6px 24px rgba(14,165,233,.35);
+      transition:transform .1s,box-shadow .1s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .desp-scan-btn:active { transform:scale(.96);box-shadow:0 3px 12px rgba(14,165,233,.2); }
+    .desp-qty-display {
+      font-size:64px;font-weight:900;letter-spacing:-.04em;
+      color:#f0f9ff;text-align:center;min-height:90px;
+      display:flex;align-items:center;justify-content:center;
+      font-variant-numeric:tabular-nums;transition:color .1s;
+    }
+    .desp-footer {
+      position:sticky;bottom:8px;
+      background:#0f172a;border:1px solid #1e293b;
+      border-radius:14px;padding:14px 16px;
+      box-shadow:0 -4px 24px rgba(0,0,0,.5);
+    }
+    .desp-cart-item { animation:slideInItem .2s ease-out both; }
     /* Alertas badge navbar */
     #navAlertaBadge { position:absolute;top:4px;right:4px;pointer-events:none; }
     .nav-item { position:relative; }
@@ -1351,6 +1376,42 @@
 
   </section>
 
+  <!-- ── DESPACHO RÁPIDO ──────────────────────── -->
+  <section id="view-despacho" class="view slide-up">
+
+    <!-- Botón ESCANEAR principal -->
+    <button onclick="DespachoView.escanear()" class="desp-scan-btn mb-4">
+      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/>
+      </svg>
+      ESCANEAR PRODUCTO
+    </button>
+
+    <!-- Lista del carrito -->
+    <div id="despCartList" class="space-y-2 mb-4">
+      <div class="card text-center py-10">
+        <p class="text-4xl mb-2">📦</p>
+        <p class="text-slate-400 text-sm">Escanea el primer producto</p>
+        <p class="text-slate-600 text-xs mt-1">El carrito se guarda automáticamente</p>
+      </div>
+    </div>
+
+    <!-- Footer sticky: resumen + botón finalizar -->
+    <div id="despFooter" class="desp-footer">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <p class="font-bold text-sm" id="despProgress">0 productos</p>
+          <p class="text-xs text-slate-400" id="despTotalUds">0 unidades total</p>
+        </div>
+        <button onclick="DespachoView.finalizar()" id="despBtnFinalizar"
+                class="btn btn-primary" disabled style="opacity:.4">
+          Generar guía →
+        </button>
+      </div>
+    </div>
+
+  </section>
+
   <!-- ── GUIAS ──────────────────────────────────── -->
   <section id="view-guias" class="view slide-up">
     <div id="guiasMainCol">
@@ -1748,8 +1809,18 @@
     </button>
   </div>
 
-  <!-- ── Sectores 5-6: Vacíos (reservados para menú de usuario) ── -->
-  <div class="side-spacer" style="grid-row:5/7"></div>
+  <!-- ── Sector 5: Despacho Rápido ── -->
+  <div class="side-mod-row" style="grid-row:5">
+    <button class="nav-btn side-btn" data-view="despacho" onclick="App.nav('despacho')">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      <span class="side-btn-label">Despacho</span>
+    </button>
+  </div>
+
+  <!-- ── Sector 6: Vacío (reservado para menú de usuario) ── -->
+  <div class="side-spacer" style="grid-row:6"></div>
 
   <!-- ── Sector 7: Tarjeta de usuario ── -->
   <div id="sideUserCard" onclick="App.toggleSideUserMenu()">
@@ -1835,10 +1906,20 @@
     <button data-view="tools" onclick="App.nav('tools')"
             class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
             style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;">
-      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
       </svg>
       Tools
+    </button>
+
+    <!-- Despacho -->
+    <button data-view="despacho" onclick="App.nav('despacho')"
+            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
+            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;position:relative;">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </svg>
+      Despacho
     </button>
 
   </div>
@@ -2250,6 +2331,72 @@
 
   <!-- Lista preingresos dentro del panel -->
   <div id="listPreingresosPanel" class="space-y-2"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: DESPACHO — CANTIDAD (numpad)
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayDespItem" onclick="DespachoView.cancelarItem()"></div>
+<div class="bottom-sheet" id="sheetDespItem">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+
+  <!-- Info del producto -->
+  <div class="text-center mb-1">
+    <p class="font-bold text-base leading-snug" id="despItemNombre">—</p>
+    <p class="text-xs text-slate-400 mt-0.5" id="despItemInfo">—</p>
+  </div>
+
+  <!-- Display cantidad -->
+  <div class="desp-qty-display" id="despNpDisplay">0</div>
+
+  <!-- Numpad -->
+  <div class="wh-numpad-wrap mb-4">
+    <button onclick="DespachoView.npKey('1')" class="pin-btn">1</button>
+    <button onclick="DespachoView.npKey('2')" class="pin-btn">2</button>
+    <button onclick="DespachoView.npKey('3')" class="pin-btn">3</button>
+    <button onclick="DespachoView.npKey('4')" class="pin-btn">4</button>
+    <button onclick="DespachoView.npKey('5')" class="pin-btn">5</button>
+    <button onclick="DespachoView.npKey('6')" class="pin-btn">6</button>
+    <button onclick="DespachoView.npKey('7')" class="pin-btn">7</button>
+    <button onclick="DespachoView.npKey('8')" class="pin-btn">8</button>
+    <button onclick="DespachoView.npKey('9')" class="pin-btn">9</button>
+    <button onclick="DespachoView.npKey('del')" class="pin-btn" style="font-size:18px;color:#94a3b8">⌫</button>
+    <button onclick="DespachoView.npKey('0')" class="pin-btn">0</button>
+    <button onclick="DespachoView.npKey('ok')" class="pin-btn"
+            style="background:#0ea5e9;color:#fff;font-size:15px;font-weight:800;border-color:#0ea5e9">✓ OK</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: DESPACHO — FINALIZAR (zona + confirmar)
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayDespFinalizar" onclick="cerrarSheet('sheetDespFinalizar')"></div>
+<div class="bottom-sheet" id="sheetDespFinalizar">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <p class="font-bold text-base mb-3">Confirmar despacho</p>
+
+  <!-- Resumen -->
+  <div class="card-sm mb-4">
+    <div class="flex justify-between text-sm mb-1">
+      <span class="text-slate-400">Productos</span>
+      <span class="font-bold" id="despResumenProds">—</span>
+    </div>
+    <div class="flex justify-between text-sm">
+      <span class="text-slate-400">Unidades total</span>
+      <span class="font-bold text-emerald-400" id="despResumenUds">—</span>
+    </div>
+  </div>
+
+  <!-- Zona -->
+  <label class="text-xs text-slate-400 block mb-1">Zona de destino *</label>
+  <select id="despZonaSelect" class="input mb-4">
+    <option value="">— Seleccionar zona —</option>
+  </select>
+
+  <button onclick="DespachoView.confirmarDespacho()" id="btnConfirmarDespacho"
+          class="btn btn-primary w-full btn-lg">
+    📦 Generar guía de salida + Imprimir
+  </button>
 </div>
 
 <!-- ════════════════════════════════════════════════

@@ -331,6 +331,48 @@ function _actualizarLote(idLote, codigoProducto, cantidad, idGuia) {
   ]);
 }
 
+function crearDespachoRapido(params) {
+  var idZona   = params.idZona   || '';
+  var items    = params.items    || [];
+  var usuario  = params.usuario  || '';
+  var imprimir = params.imprimir !== false;
+
+  if (!idZona)       return { ok: false, error: 'idZona requerido' };
+  if (!items.length) return { ok: false, error: 'Carrito vacío' };
+
+  // 1. Crear guía SALIDA_ZONA
+  var guiaRes = crearGuia({ tipo: 'SALIDA_ZONA', idZona: idZona, usuario: usuario, comentario: 'Despacho rápido' });
+  if (!guiaRes.ok) return guiaRes;
+  var idGuia = guiaRes.data.idGuia;
+
+  // 2. Registrar cada ítem
+  var errores = [];
+  items.forEach(function(item) {
+    var qty = parseFloat(item.cantidad) || 0;
+    if (qty <= 0) return;
+    var det = agregarDetalleGuia({
+      idGuia:           idGuia,
+      codigoProducto:   String(item.codigoBarra || '').trim(),
+      cantidadEsperada: qty,
+      cantidadRecibida: qty,
+      usuario:          usuario
+    });
+    if (!det.ok) errores.push(String(item.codigoBarra) + ': ' + det.error);
+  });
+
+  // 3. Cerrar guía (descuenta stock)
+  var cerrarRes = cerrarGuia(idGuia, usuario, null);
+  if (!cerrarRes.ok) return { ok: false, error: 'Error al cerrar guía: ' + cerrarRes.error };
+
+  // 4. Imprimir ticket
+  var impresion = { ok: false, error: 'omitido' };
+  if (imprimir) {
+    try { impresion = imprimirTicketGuia({ idGuia: idGuia }); } catch(e) { impresion = { ok: false, error: e.message }; }
+  }
+
+  return { ok: true, data: { idGuia: idGuia, errores: errores, impresion: impresion } };
+}
+
 function _validarTipoGuia(tipo) {
   var validos = ['INGRESO_PROVEEDOR','INGRESO_JEFATURA',
                  'SALIDA_DEVOLUCION','SALIDA_ZONA','SALIDA_JEFATURA',
