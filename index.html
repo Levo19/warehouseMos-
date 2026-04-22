@@ -158,7 +158,11 @@
     .item-slide-in { animation:slideInItem .22s ease-out both; }
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
-                  border-radius:6px;padding:3px 8px;letter-spacing:.5px; }
+                  border-radius:6px;padding:3px 8px;letter-spacing:.5px;cursor:pointer; }
+    .modo-badge:hover { background:#1e40af; }
+    .env-exit-btn { background:transparent;border:1px solid rgba(239,68,68,.5);color:#f87171;
+                    font-size:11px;font-weight:600;border-radius:6px;padding:3px 9px;cursor:pointer; }
+    .env-exit-btn:hover { background:rgba(239,68,68,.12); }
     /* Envasador catálogo */
     .env-base-card .env-deriv-list { transition:none; }
     .env-base-card.env-collapsed .env-deriv-list { display:none; }
@@ -1140,7 +1144,7 @@
     </button>
     <!-- Separador visual -->
     <span id="topBarSep" class="text-slate-700 flex-shrink-0" style="font-size:16px;line-height:1">|</span>
-    <span id="modoIndicador" class="hidden modo-badge flex-shrink-0">⚡ENV</span>
+    <span id="modoIndicador" class="hidden modo-badge flex-shrink-0" onclick="App.nav('envasador')" title="Volver al modo Envasador">⚡ENV</span>
     <h1 id="pageTitle" class="font-semibold text-xs text-slate-400 truncate">Dashboard</h1>
   </div>
 
@@ -1358,12 +1362,14 @@
     <!-- ── Panel Catálogo ─────────────────────── -->
     <div id="envCatalogPanel">
       <div class="flex items-center justify-between mb-4">
-        <button id="envUrgBtn" onclick="EnvasadorView.toggleUrgFilter()"
-                class="env-urg-btn" style="display:none">
-          <span>⚡</span>
-          <span>Urgentes (<span id="envUrgCount">0</span>)</span>
-        </button>
-        <div></div>
+        <div class="flex items-center gap-2">
+          <button onclick="toggleModoEnvasador()" class="env-exit-btn">✕ Salir</button>
+          <button id="envUrgBtn" onclick="EnvasadorView.toggleUrgFilter()"
+                  class="env-urg-btn" style="display:none">
+            <span>⚡</span>
+            <span>Urgentes (<span id="envUrgCount">0</span>)</span>
+          </button>
+        </div>
         <button onclick="EnvasadorView.verHistorial()" class="nav-sibling-btn">
           Historial
           <span class="arrow-slide-r">
@@ -1389,7 +1395,10 @@
           </span>
           Catálogo
         </button>
-        <span class="text-xs text-slate-500">Últimos 30</span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500">Últimos 30</span>
+          <button onclick="toggleModoEnvasador()" class="env-exit-btn">✕ Salir</button>
+        </div>
       </div>
       <div id="listEnvasadorHistorial" class="space-y-2">
         <div class="flex justify-center py-8"><div class="spinner"></div></div>
