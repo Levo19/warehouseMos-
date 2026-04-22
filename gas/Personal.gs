@@ -57,6 +57,14 @@ function loginPersonal(params) {
     );
   } catch(eJ) { Logger.log('Auto-jornada MOS: ' + eJ.message); }
 
+  // ── Push: notificar ingreso a MOS ─────────────────────────────
+  try {
+    _notificarMOS(
+      '👤 ' + operador.nombre + ' ingresó a Almacén',
+      (operador.rol || 'Operador') + ' · ' + horaStr
+    );
+  } catch(eP) { Logger.log('Push login WH: ' + eP.message); }
+
   return {
     ok: true,
     data: {
@@ -358,4 +366,19 @@ function _cerrarSesionesHuerfanas(idPersonal) {
     }
   }
   return { count: count, ultimaFecha: ultimaFecha };
+}
+
+
+// ── Notificar a ProyectoMOS vía push (requiere MOS_WEB_APP_URL en Script Properties) ──
+function _notificarMOS(titulo, cuerpo) {
+  var url = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
+  if (!url) return;
+  try {
+    UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ action: 'enviarPushNotif', titulo: titulo, cuerpo: cuerpo }),
+      muteHttpExceptions: true
+    });
+  } catch(e) { Logger.log('_notificarMOS: ' + e.message); }
 }

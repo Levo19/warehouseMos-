@@ -751,6 +751,15 @@ function crearPreingreso(params) {
   _set('estado',       'PENDIENTE');
   _set('idGuia',       '');
   sheet.appendRow(row);
+
+  // Push: notificar nuevo preingreso a MOS
+  try {
+    _notificarMOS(
+      '📦 Nuevo preingreso',
+      (params.usuario || 'Operador') + ' · S/ ' + (parseFloat(params.monto) || 0).toFixed(2)
+    );
+  } catch(eP) { Logger.log('Push preingreso: ' + eP.message); }
+
   return { ok: true, data: { idPreingreso: id } };
 }
 
