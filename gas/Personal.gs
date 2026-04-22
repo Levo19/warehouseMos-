@@ -103,6 +103,21 @@ function _registrarJornadaEnMOS(nombre, rol, montoBase) {
   ]);
 }
 
+// ── Diagnóstico: corre desde el editor GAS para verificar conexión con MOS ──
+function testMosConexion() {
+  var mosSsId = PropertiesService.getScriptProperties().getProperty('MOS_SS_ID');
+  Logger.log('MOS_SS_ID leído: ' + mosSsId);
+  if (!mosSsId) { Logger.log('ERROR: MOS_SS_ID no está en Script Properties'); return; }
+  try {
+    var ss = SpreadsheetApp.openById(mosSsId);
+    Logger.log('Spreadsheet abierto: ' + ss.getName());
+    var sheet = ss.getSheetByName('JORNADAS');
+    Logger.log('Hoja JORNADAS: ' + (sheet ? 'encontrada (' + sheet.getLastRow() + ' filas)' : 'NO ENCONTRADA'));
+  } catch(e) {
+    Logger.log('ERROR al abrir spreadsheet: ' + e.message);
+  }
+}
+
 // ── Cerrar turno ────────────────────────────────────────────
 function cerrarTurno(params) {
   var idSesion  = params.idSesion;
