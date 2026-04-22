@@ -671,6 +671,8 @@ const Session = (() => {
     App.cargarDashboard();
     App.cargarProductosMaestro();
     App.cargarProveedoresMaestro();
+    DespachoView.startPoll();
+    DespachoView.badgeUpdate();
 
     // Si hay cola pendiente y hay red, sincronizar
     if (navigator.onLine) OfflineManager.sincronizar();
@@ -3718,6 +3720,7 @@ const DespachoView = (() => {
     _cart = _loadCart();
     _renderCart();
     _updateFooter();
+    badgeUpdate();
   }
 
   function escanear() {
@@ -3882,10 +3885,14 @@ const DespachoView = (() => {
 
   function finalizar() {
     if (!_cart.length) return;
-    const zonas = OfflineManager.getZonasCache();
-    const sel   = document.getElementById('despZonaSelect');
+    const zonas   = OfflineManager.getZonasCache();
+    const sel     = document.getElementById('despZonaSelect');
     sel.innerHTML = '<option value="">— Seleccionar zona —</option>' +
       zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('');
+
+    // Pre-seleccionar zona si viene del pickup
+    const preZona = _pickupActivo?.idZona;
+    if (preZona) sel.value = preZona;
 
     const n   = _cart.length;
     const uds = _cart.reduce((s, c) => s + c.cantidad, 0);
@@ -3917,11 +3924,18 @@ const DespachoView = (() => {
       const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
       toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
       if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
+      // Si vino de un pickup, marcarlo como COMPLETADO
+      if (_pickupActivo) {
+        API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'COMPLETADO' }).catch(() => {});
+        _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
+        _pickupActivo = null;
+      }
       _cart = [];
       _saveCart();
       cerrarSheet('sheetDespFinalizar');
       _renderCart();
       _updateFooter();
+      badgeUpdate();
     } else {
       toast('Error: ' + (res.error || 'No se pudo crear la guía'), 'danger', 6000);
     }
@@ -3936,7 +3950,220 @@ const DespachoView = (() => {
     _updateFooter();
   }
 
-  return { cargar, escanear, npKey, cancelarItem, editarItem, quitarItem, finalizar, confirmarDespacho, cancelar };
+  // ── Badge global (carrito + pickups pendientes) ─────────────
+  let _pickupsPendientes = [];
+  let _pollTimer = null;
+
+  function badgeUpdate() {
+    _cart = _loadCart();
+    const n   = _cart.length;
+    const hay = _pickupsPendientes.length > 0;
+
+    // Botón FAB en vista Productos
+    const fabN = document.getElementById('despCartFabN');
+    const dot  = document.getElementById('despPickAlertDot');
+    if (fabN) { fabN.textContent = n; fabN.style.display = n > 0 ? 'inline-flex' : 'none'; }
+    if (dot)  { dot.style.display = hay ? 'block' : 'none'; }
+
+    // Banner en view-despacho
+    const banner = document.getElementById('despPickupBanner');
+    const bannerTxt = document.getElementById('despPickupBannerTxt');
+    if (banner && _pickupsPendientes.length > 0) {
+      const p = _pickupsPendientes[0];
+      if (bannerTxt) bannerTxt.textContent = p.idPickup + (p.notas ? ' · ' + p.notas : '');
+      banner.style.display = 'flex';
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+  }
+
+  async function _pollPickups() {
+    const res = await API.getPickups().catch(() => ({ ok: false }));
+    if (res.ok) _pickupsPendientes = res.data || [];
+    badgeUpdate();
+  }
+
+  function startPoll() {
+    if (_pollTimer) return;
+    _pollPickups();
+    _pollTimer = setInterval(_pollPickups, 120_000);
+  }
+
+  // ── Matching engine (Fase 2) ────────────────────────────────
+  function _norm(s) {
+    return String(s || '').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function _score(query, target) {
+    const qw = _norm(query).split(' ').filter(w => w.length > 1);
+    const tn = _norm(target);
+    if (!qw.length) return 0;
+    return qw.filter(w => tn.includes(w)).length / qw.length;
+  }
+
+  function _bestMatch(nombre) {
+    const master = App.getProductosMaestro();
+    let best = null, bestScore = 0;
+    master.forEach(p => {
+      const s = _score(nombre, p.descripcion);
+      if (s > bestScore) { bestScore = s; best = p; }
+    });
+    return { producto: best, score: bestScore };
+  }
+
+  // ── Pickup pendiente ────────────────────────────────────────
+  let _pickupActivo = null;
+  let _matchResults = []; // [{nombre, qty, producto, score, status, accepted}]
+
+  function abrirPickupPendiente() {
+    if (!_pickupsPendientes.length) return;
+    _pickupActivo = _pickupsPendientes[0];
+    _runMatching(_pickupActivo);
+    abrirSheet('sheetDespPickup');
+  }
+
+  function _runMatching(pickup) {
+    const items = pickup.items || [];
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+
+    _matchResults = items.map(item => {
+      const { producto, score } = _bestMatch(item.nombre);
+      const stockDisp = producto ? parseFloat((stockMap[producto.idProducto] || {}).cantidadDisponible || 0) : 0;
+      const status = score >= 0.75 ? 'exacto' : score >= 0.35 ? 'parcial' : 'nofound';
+      return { nombre: item.nombre, qty: parseInt(item.qty) || 0, producto, score, status, accepted: status === 'exacto', stockDisp };
+    });
+
+    // Render las 3 secciones
+    document.getElementById('despPickTitulo').textContent = 'Pedido ' + pickup.idPickup;
+    document.getElementById('despPickSub').textContent =
+      `${pickup.fuente || 'Externo'} · ${items.length} producto${items.length !== 1 ? 's' : ''}`;
+
+    const exactos  = _matchResults.filter(r => r.status === 'exacto');
+    const parciales = _matchResults.filter(r => r.status === 'parcial');
+    const nofound  = _matchResults.filter(r => r.status === 'nofound');
+
+    const secEx = document.getElementById('despPickSecExactos');
+    const secPa = document.getElementById('despPickSecParciales');
+    const secNF = document.getElementById('despPickSecNoFound');
+
+    secEx.classList.toggle('hidden', !exactos.length);
+    secPa.classList.toggle('hidden', !parciales.length);
+    secNF.classList.toggle('hidden', !nofound.length);
+
+    document.getElementById('despPickListExactos').innerHTML = exactos.map(r => `
+      <div class="card-sm flex items-center justify-between">
+        <div class="min-w-0">
+          <p class="text-xs text-slate-400 truncate">${escHtml(r.nombre)}</p>
+          <p class="font-semibold text-sm truncate">${escHtml(r.producto?.descripcion || '—')}</p>
+        </div>
+        <span class="font-bold text-emerald-400 flex-shrink-0 ml-2">×${r.qty}</span>
+      </div>`).join('');
+
+    document.getElementById('despPickListParciales').innerHTML = parciales.map((r, i) => {
+      const idx = _matchResults.indexOf(r);
+      const master = App.getProductosMaestro();
+      // Top 3 candidates
+      const cands = master
+        .map(p => ({ p, s: _score(r.nombre, p.descripcion) }))
+        .filter(x => x.s >= 0.2)
+        .sort((a, b) => b.s - a.s)
+        .slice(0, 4);
+      const opts = cands.map(x =>
+        `<option value="${escAttr(x.p.idProducto)}" ${x.p === r.producto ? 'selected' : ''}>
+          ${escHtml(x.p.descripcion)}
+        </option>`).join('');
+      return `
+      <div class="card-sm">
+        <p class="text-xs text-slate-400 mb-1">Pedido: <span class="text-amber-300">"${escHtml(r.nombre)}"</span> ×${r.qty}</p>
+        <select class="input text-sm mb-2" onchange="DespachoView.elegirMatchParcial(${idx}, this.value)">
+          <option value="">— No despachar —</option>
+          ${opts}
+        </select>
+      </div>`;
+    }).join('');
+
+    document.getElementById('despPickListNoFound').innerHTML = nofound.map(r => `
+      <div class="card-sm flex items-center justify-between opacity-60">
+        <p class="text-sm truncate">${escHtml(r.nombre)}</p>
+        <span class="text-xs text-red-400 flex-shrink-0 ml-2">×${r.qty}</span>
+      </div>`).join('');
+
+    // Update confirm button label
+    const n = exactos.length + parciales.filter(r => r.accepted).length;
+    document.getElementById('btnConfirmarPickup').textContent =
+      `Cargar ${n} ítem${n !== 1 ? 's' : ''} al carrito`;
+  }
+
+  function elegirMatchParcial(idx, codigoBarra) {
+    const r = _matchResults[idx];
+    if (!r) return;
+    if (!codigoBarra) {
+      r.accepted = false;
+      r.productoOverride = null;
+    } else {
+      const prod = App.getProductosMaestro().find(p => p.idProducto === codigoBarra);
+      r.accepted = true;
+      r.productoOverride = prod || r.producto;
+    }
+    const n = _matchResults.filter(r => r.accepted).length;
+    document.getElementById('btnConfirmarPickup').textContent =
+      `Cargar ${n} ítem${n !== 1 ? 's' : ''} al carrito`;
+  }
+
+  async function confirmarPickup() {
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+
+    const aceptados = _matchResults.filter(r => r.accepted && (r.productoOverride || r.producto));
+    const noEncontrados = _matchResults.filter(r => !r.accepted || r.status === 'nofound');
+
+    aceptados.forEach(r => {
+      const prod = r.productoOverride || r.producto;
+      const cod  = prod.idProducto;
+      const st   = parseFloat((stockMap[cod] || {}).cantidadDisponible || 0);
+      const idx  = _cart.findIndex(c => c.codigoBarra === cod);
+      const item = { codigoBarra: cod, descripcion: prod.descripcion, unidad: prod.unidad || '', cantidad: r.qty, stockDisp: st };
+      if (idx >= 0) _cart[idx] = item; else _cart.push(item);
+    });
+
+    // Pre-select zone from pickup
+    if (_pickupActivo?.idZona) {
+      const zonas = OfflineManager.getZonasCache();
+      if (zonas.find(z => z.idZona === _pickupActivo.idZona)) {
+        _cart._preZona = _pickupActivo.idZona;
+      }
+    }
+
+    // Build nota for not-found items
+    if (noEncontrados.length) {
+      const nota = 'Inexistencias: ' + noEncontrados.map(r => `${r.nombre} ×${r.qty}`).join(', ');
+      _cart._nota = nota;
+    }
+
+    _saveCart();
+    cerrarSheet('sheetDespPickup');
+    _renderCart();
+    _updateFooter();
+
+    // Marcar pickup como EN_PROCESO
+    if (_pickupActivo) {
+      API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'EN_PROCESO' }).catch(() => {});
+      _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
+      _pickupActivo = null;
+    }
+    badgeUpdate();
+
+    const n = aceptados.length;
+    toast(`📥 ${n} producto${n !== 1 ? 's' : ''} cargados del pedido`, 'ok', 3000);
+  }
+
+  return { cargar, escanear, npKey, cancelarItem, editarItem, quitarItem,
+           finalizar, confirmarDespacho, cancelar,
+           badgeUpdate, startPoll,
+           abrirPickupPendiente, elegirMatchParcial, confirmarPickup };
 })();
 
 // ════════════════════════════════════════════════
@@ -5163,7 +5390,7 @@ const ProductosView = (() => {
       });
 
       return { skuBase: g.skuBase, base, children, stockTotal, bajoMin };
-    }).sort((a, b) => (a.base.descripcion || '').localeCompare(b.base.descripcion || '', 'es'));
+    }).sort((a, b) => String(a.base.descripcion || '').localeCompare(String(b.base.descripcion || ''), 'es'));
   }
 
   // ── Render lista de grupos ──────────────────────

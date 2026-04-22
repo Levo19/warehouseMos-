@@ -23,7 +23,8 @@ var SHEET_NAMES = {
   PERSONAL:          'PERSONAL',
   SESIONES:          'SESIONES',
   DESEMPENO:         'DESEMPENO',
-  SYNC_LOG:          'SYNC_LOG'
+  SYNC_LOG:          'SYNC_LOG',
+  PICKUPS:           'PICKUPS'
 };
 
 var HEADERS = {
@@ -74,7 +75,9 @@ var HEADERS = {
                       'preingresoCreados','ajustesRealizados',
                       'totalActividades','actividadesPorHora',
                       'puntuacion','calificacion',
-                      'montoBase','montoBonus','montoTotal','estado']
+                      'montoBase','montoBonus','montoTotal','estado'],
+  PICKUPS:           ['idPickup','fuente','estado','items','idZona',
+                      'notas','creadoPor','fechaCreado','fechaAtendido']
 };
 
 // ============================================================

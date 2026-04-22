@@ -198,6 +198,28 @@
       box-shadow:0 -4px 24px rgba(0,0,0,.5);
     }
     .desp-cart-item { animation:slideInItem .2s ease-out both; }
+    /* Acceso al carrito desde Productos */
+    .desp-cart-fab {
+      position:relative;display:flex;align-items:center;gap:7px;
+      background:linear-gradient(135deg,rgba(14,165,233,.18),rgba(99,102,241,.18));
+      border:1.5px solid rgba(14,165,233,.35);
+      border-radius:11px;padding:7px 13px;
+      color:#38bdf8;font-size:12px;font-weight:800;letter-spacing:.03em;
+      cursor:pointer;transition:background .15s,border-color .15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .desp-cart-fab:active { background:rgba(14,165,233,.3); }
+    .desp-cart-fab .desp-n {
+      background:#0ea5e9;color:#fff;font-size:10px;font-weight:900;
+      border-radius:999px;padding:1px 7px;min-width:20px;text-align:center;
+    }
+    .desp-pick-dot {
+      position:absolute;top:-5px;right:-5px;
+      width:10px;height:10px;border-radius:50%;
+      background:#f59e0b;border:2px solid #0f172a;
+      animation:pulseGlow 1.4s infinite;display:none;
+    }
+    @keyframes pulseGlow { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(245,158,11,.5)} 50%{opacity:.8;box-shadow:0 0 0 5px rgba(245,158,11,0)} }
     /* Alertas badge navbar */
     #navAlertaBadge { position:absolute;top:4px;right:4px;pointer-events:none; }
     .nav-item { position:relative; }
@@ -1379,6 +1401,23 @@
   <!-- ── DESPACHO RÁPIDO ──────────────────────── -->
   <section id="view-despacho" class="view slide-up">
 
+    <!-- Banner pedidos Cabanossi pendientes -->
+    <div id="despPickupBanner" style="display:none"
+         class="card mb-3 flex items-center justify-between gap-3"
+         style="border:1.5px solid rgba(245,158,11,.4);background:rgba(245,158,11,.08)">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-amber-400 text-lg flex-shrink-0">📥</span>
+        <div class="min-w-0">
+          <p class="font-bold text-sm text-amber-300" id="despPickupBannerTxt">—</p>
+          <p class="text-xs text-slate-400">Pedido de Cabanossi pendiente</p>
+        </div>
+      </div>
+      <button onclick="DespachoView.abrirPickupPendiente()"
+              class="btn btn-sm flex-shrink-0" style="background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.4)">
+        Cargar →
+      </button>
+    </div>
+
     <!-- Botón ESCANEAR principal -->
     <button onclick="DespachoView.escanear()" class="desp-scan-btn mb-4">
       <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
@@ -1606,7 +1645,7 @@
 
   <!-- ── PRODUCTOS ─────────────────────────────── -->
   <section id="view-productos" class="view slide-up">
-    <!-- Header: título + badge auditoría -->
+    <!-- Header: título + carrito despacho + badge auditoría -->
     <div class="flex items-center justify-between mb-2">
       <div class="flex items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" class="text-slate-400">
@@ -1614,10 +1653,21 @@
         </svg>
         <span class="font-bold text-sm text-slate-200 tracking-wide">PRODUCTOS</span>
       </div>
-      <button id="btnAuditoriaDia" onclick="ProductosView.toggleAuditoriaDia()"
-              class="audit-badge audit-badge-pending" style="display:none">
-        <!-- llenado por JS -->
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- Carrito de Despacho Rápido -->
+        <button id="btnDespCartFab" onclick="App.nav('despacho')" class="desp-cart-fab" title="Despacho Rápido">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+          </svg>
+          <span id="despCartFabN" class="desp-n" style="display:none">0</span>
+          <span id="despPickAlertDot" class="desp-pick-dot"></span>
+        </button>
+        <!-- Badge auditoría -->
+        <button id="btnAuditoriaDia" onclick="ProductosView.toggleAuditoriaDia()"
+                class="audit-badge audit-badge-pending" style="display:none">
+          <!-- llenado por JS -->
+        </button>
+      </div>
     </div>
 
     <div class="smart-srch mb-3">
@@ -1809,18 +1859,8 @@
     </button>
   </div>
 
-  <!-- ── Sector 5: Despacho Rápido ── -->
-  <div class="side-mod-row" style="grid-row:5">
-    <button class="nav-btn side-btn" data-view="despacho" onclick="App.nav('despacho')">
-      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
-      </svg>
-      <span class="side-btn-label">Despacho</span>
-    </button>
-  </div>
-
-  <!-- ── Sector 6: Vacío (reservado para menú de usuario) ── -->
-  <div class="side-spacer" style="grid-row:6"></div>
+  <!-- ── Sectores 5-6: Vacíos (reservados para menú de usuario) ── -->
+  <div class="side-spacer" style="grid-row:5/7"></div>
 
   <!-- ── Sector 7: Tarjeta de usuario ── -->
   <div id="sideUserCard" onclick="App.toggleSideUserMenu()">
@@ -1912,15 +1952,6 @@
       Tools
     </button>
 
-    <!-- Despacho -->
-    <button data-view="despacho" onclick="App.nav('despacho')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;position:relative;">
-      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M0 1.5A.5.5 0 0 1 .5 1H2a.5.5 0 0 1 .485.379L2.89 3H14.5a.5.5 0 0 1 .491.592l-1.5 8A.5.5 0 0 1 13 12H4a.5.5 0 0 1-.491-.408L2.01 3.607 1.61 2H.5a.5.5 0 0 1-.5-.5zM3.102 4l1.313 7h8.17l1.313-7H3.102zM5 12a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm7 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 13a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm7 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
-      </svg>
-      Despacho
-    </button>
 
   </div>
 </nav>
@@ -2331,6 +2362,47 @@
 
   <!-- Lista preingresos dentro del panel -->
   <div id="listPreingresosPanel" class="space-y-2"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET: DESPACHO — REVISAR PICKUP (Cabanossi)
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayDespPickup"></div>
+<div class="bottom-sheet" id="sheetDespPickup" style="max-height:82vh;overflow-y:auto">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <p class="font-bold text-base" id="despPickTitulo">Pedido —</p>
+      <p class="text-xs text-slate-400" id="despPickSub">—</p>
+    </div>
+    <button onclick="cerrarSheet('sheetDespPickup')" class="text-slate-500 px-2 py-1 text-sm">✕</button>
+  </div>
+
+  <!-- ✅ Exactos -->
+  <div id="despPickSecExactos" class="mb-3 hidden">
+    <p class="text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1">
+      ✅ CONFIRMADOS AUTOMÁTICAMENTE
+    </p>
+    <div id="despPickListExactos" class="space-y-1.5"></div>
+  </div>
+
+  <!-- ⚠ Parciales -->
+  <div id="despPickSecParciales" class="mb-3 hidden">
+    <p class="text-xs font-bold text-amber-400 mb-2">⚠ REVISAR — selecciona el producto correcto</p>
+    <div id="despPickListParciales" class="space-y-3"></div>
+  </div>
+
+  <!-- ❌ No encontrados -->
+  <div id="despPickSecNoFound" class="mb-4 hidden">
+    <p class="text-xs font-bold text-red-400 mb-2">❌ NO ENCONTRADOS — quedarán en nota de guía</p>
+    <div id="despPickListNoFound" class="space-y-1"></div>
+  </div>
+
+  <button onclick="DespachoView.confirmarPickup()" id="btnConfirmarPickup"
+          class="btn btn-primary w-full btn-lg">
+    Cargar al carrito
+  </button>
 </div>
 
 <!-- ════════════════════════════════════════════════

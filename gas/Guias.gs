@@ -331,6 +331,45 @@ function _actualizarLote(idLote, codigoProducto, cantidad, idGuia) {
   ]);
 }
 
+// ── PICKUPS (pedidos externos de Cabanossi / n8n) ──────────────
+function getPickups(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet || sheet.getLastRow() < 2) return { ok: true, data: [] };
+
+  var filtroEstado = params.estado || 'PENDIENTE';
+  var rows = _sheetToObjects(sheet);
+  var result = rows.filter(function(r) {
+    return !filtroEstado || r.estado === filtroEstado;
+  }).map(function(r) {
+    try { r.items = JSON.parse(r.items || '[]'); } catch(e) { r.items = []; }
+    return r;
+  });
+
+  return { ok: true, data: result };
+}
+
+function actualizarPickup(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h) { return String(h); });
+  var idxId   = headers.indexOf('idPickup');
+  var idxEst  = headers.indexOf('estado');
+  var idxAte  = headers.indexOf('fechaAtendido');
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === String(params.idPickup)) {
+      if (idxEst >= 0) sheet.getRange(i + 1, idxEst + 1).setValue(params.estado);
+      if (idxAte >= 0 && params.estado === 'COMPLETADO') {
+        sheet.getRange(i + 1, idxAte + 1).setValue(new Date());
+      }
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Pickup no encontrado' };
+}
+
 function crearDespachoRapido(params) {
   var idZona   = params.idZona   || '';
   var items    = params.items    || [];
