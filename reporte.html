@@ -327,19 +327,30 @@ function renderGuia(d) {
   // Detalle
   let detHtml = '';
   if (d.detalle && d.detalle.length) {
+    const nPN = d.detalle.filter(function(x){ return x.esProductoNuevo; }).length;
     const rows = d.detalle.map(function(it) {
-      const real = parseFloat(it.cantidadReal || 0);
-      const esp  = parseFloat(it.cantidadEsperada || 0);
-      const ok   = esp > 0 && real >= esp;
+      const real  = parseFloat(it.cantidadReal || 0);
+      const esp   = parseFloat(it.cantidadEsperada || 0);
+      const ok    = esp > 0 && real >= esp;
+      const esPN  = !!it.esProductoNuevo;
+      const badge = esPN
+        ? '<span style="display:inline-block;background:#78350f;color:#fde68a;font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;margin-right:5px;vertical-align:middle;letter-spacing:.04em">N</span>'
+        : '<span style="display:inline-block;background:#0c4a6e;color:#38bdf8;font-size:9px;font-weight:800;padding:1px 5px;border-radius:3px;margin-right:5px;vertical-align:middle;letter-spacing:.04em">I</span>';
+      const pnNote = esPN && it.estadoPN
+        ? ' <span style="font-size:9px;color:#f59e0b;font-weight:600">[' + esc(it.estadoPN) + ']</span>'
+        : '';
       return '<tr>' +
-        '<td>' + esc(it.descripcion || it.codigoProducto) + '</td>' +
+        '<td>' + badge + esc(it.descripcion || it.codigoProducto) + pnNote + '</td>' +
         '<td class="num">' + (it.cantidadEsperada || '—') + '</td>' +
         '<td class="num ' + (ok ? 'ok-num' : '') + '">' + (it.cantidadReal || '—') + '</td>' +
         '<td>' + (it.fechaVencimiento ? fmtDate(it.fechaVencimiento) : '—') + '</td>' +
         '</tr>';
     }).join('');
+    const pnNote = nPN > 0
+      ? ' <span style="background:rgba(245,158,11,.15);color:#fbbf24;font-size:9px;font-weight:700;padding:2px 7px;border-radius:99px;margin-left:8px">N ' + nPN + ' pendiente' + (nPN>1?'s':'') + '</span>'
+      : '';
     detHtml = '<div class="rpt-section" data-key="detalle">' +
-      '<div class="rpt-section-title">Productos (' + d.detalle.length + ')</div>' +
+      '<div class="rpt-section-title">Productos (' + d.detalle.length + ')' + pnNote + '</div>' +
       '<div style="overflow-x:auto"><table class="rpt-table">' +
       '<thead><tr><th>Producto</th><th>Esp.</th><th>Real</th><th>Venc.</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table></div></div>';
