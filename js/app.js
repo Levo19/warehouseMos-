@@ -3578,6 +3578,18 @@ const EnvasadorView = (() => {
     return '';
   }
 
+  // Extrae solo la parte diferenciadora del nombre del derivado respecto al base.
+  // Ej: base="AJO EN POLVO GRANEL", derivado="AJO EN POLVO 250GR" → "250GR"
+  function _sufijo(baseNomUp, derivDesc) {
+    const derUp  = derivDesc.toUpperCase();
+    const bWords = baseNomUp.replace(/GRANEL|BULK|BASE/g, '').trim().split(/\s+/).filter(Boolean);
+    const dWords = derUp.split(/\s+/).filter(Boolean);
+    // Eliminar palabras del base que aparezcan en el derivado (orden no importa)
+    const bSet   = new Set(bWords);
+    const resto  = dWords.filter(w => !bSet.has(w));
+    return resto.length > 0 ? resto.join(' ') : derivDesc;
+  }
+
   function _render() {
     const container = document.getElementById('listEnvasadorCatalog');
     if (!container) return;
@@ -3591,13 +3603,19 @@ const EnvasadorView = (() => {
     }
 
     container.innerHTML = list.map(base => {
-      const urgHdr = base.worstUrg ? _urgIcon(base.worstUrg) + ' ' : '';
+      const urgHdr  = base.worstUrg ? _urgIcon(base.worstUrg) + ' ' : '';
+      const baseNom = String(base.descripcion || '').toUpperCase();
+
       const derivRows = base.derivados
         .filter(d => !_filtroUrg || d.urgencia)
         .map(d => {
-          const urg = d.urgencia ? _urgIcon(d.urgencia) + ' ' : '';
+          const urg     = d.urgencia ? _urgIcon(d.urgencia) + ' ' : '';
+          const label   = _sufijo(baseNom, String(d.descripcion || d.idProducto));
+          const stockEl = d.stockD > 0
+            ? `<span class="font-bold text-slate-200" style="font-size:13px">${fmt(d.stockD,1)} ${escHtml(d.unidad||'')}</span>`
+            : `<span class="font-bold text-red-400" style="font-size:13px">0 ${escHtml(d.unidad||'')}</span>`;
           const posiblesHtml = d.posibles > 0
-            ? `<span class="text-emerald-400 text-xs">~${fmt(d.posibles)} uds posibles</span>`
+            ? `<span class="text-emerald-400 text-xs">~${fmt(d.posibles)} posibles</span>`
             : `<span class="text-slate-500 text-xs">Base insuficiente</span>`;
           const urgTag = d.urgencia
             ? `<span class="tag-${d.urgencia === 'CRITICA' ? 'danger' : 'warn'} text-xs">${d.urgencia}</span>`
@@ -3605,7 +3623,8 @@ const EnvasadorView = (() => {
           return `
           <div class="env-deriv-row">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-sm font-medium text-slate-200 flex-1 min-w-0 truncate">${urg}${escHtml(d.descripcion)}</span>
+              <span class="font-semibold text-sm text-slate-100 flex-1">${urg}${escHtml(label)}</span>
+              ${stockEl}
               ${urgTag}
             </div>
             <div class="flex items-center gap-2 mt-1">
@@ -3618,13 +3637,13 @@ const EnvasadorView = (() => {
 
       return `
       <div class="card env-base-card">
-        <div class="flex items-center justify-between cursor-pointer mb-1"
+        <div class="flex items-start justify-between cursor-pointer mb-1 gap-2"
              onclick="this.closest('.env-base-card').classList.toggle('env-collapsed')">
-          <div class="flex items-center gap-2 min-w-0">
-            <span class="font-bold text-base truncate">${urgHdr}${escHtml(base.descripcion)}</span>
-            <span class="text-xs text-slate-400 flex-shrink-0">${fmt(base.stockBase, 1)} ${escHtml(base.unidad)}</span>
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-base leading-snug">${urgHdr}${escHtml(base.descripcion)}</p>
+            <p class="text-xs text-slate-400 mt-0.5">${fmt(base.stockBase,1)} ${escHtml(base.unidad)} disponible</p>
           </div>
-          <svg class="env-chevron w-4 h-4 text-slate-400 flex-shrink-0 ml-2" viewBox="0 0 16 16" fill="currentColor">
+          <svg class="env-chevron w-4 h-4 text-slate-400 flex-shrink-0 mt-1" viewBox="0 0 16 16" fill="currentColor">
             <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
           </svg>
         </div>
