@@ -87,10 +87,13 @@ function _registrarJornadaEnMOS(nombre, rol, montoBase) {
   var sheet = ss.getSheetByName('JORNADAS');
   if (!sheet) return;
 
+  var tz2  = Session.getScriptTimeZone();
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][3]).toLowerCase() === nombre.toLowerCase() &&
-        String(data[i][1]).substring(0, 10) === fecha) return; // ya existe hoy
+    var fechaFila = data[i][1] instanceof Date
+      ? Utilities.formatDate(data[i][1], tz2, 'yyyy-MM-dd')
+      : String(data[i][1] || '').substring(0, 10);
+    if (String(data[i][3]).toLowerCase() === nombre.toLowerCase() && fechaFila === fecha) return;
   }
 
   sheet.appendRow([
