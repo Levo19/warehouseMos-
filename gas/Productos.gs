@@ -174,6 +174,48 @@ function getLotesVencimiento(params) {
 }
 
 // ── Producto Nuevo ──────────────────────────────────────────
+
+function _nextNLEVCode() {
+  var sheet  = getSheet('PRODUCTO_NUEVO');
+  var data   = sheet.getDataRange().getValues();
+  var hdrs   = data[0];
+  var idxCod = hdrs.indexOf('codigoBarra');
+  var maxNum = 0;
+  for (var i = 1; i < data.length; i++) {
+    var cod = String(data[i][idxCod] || '');
+    if (cod.indexOf('NLEV') === 0) {
+      var n = parseInt(cod.slice(4), 10) || 0;
+      if (n > maxNum) maxNum = n;
+    }
+  }
+  var s = String(maxNum + 1);
+  while (s.length < 5) s = '0' + s;
+  return 'NLEV' + s;
+}
+
+function _subirFotoProductoNuevo(codigoBarra, fotoBase64, mimeType) {
+  mimeType = mimeType || 'image/jpeg';
+  var folderId = PropertiesService.getScriptProperties().getProperty('FOTOS_PN_FOLDER_ID');
+  var folder;
+  if (folderId) {
+    folder = DriveApp.getFolderById(folderId);
+  } else {
+    var ssId   = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    var parent = DriveApp.getFileById(ssId).getParents().next();
+    folder = _getOrCreateFolder(_getOrCreateFolder(parent, 'imagenes'), 'productoimagenes');
+    folder.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    PropertiesService.getScriptProperties().setProperty('FOTOS_PN_FOLDER_ID', folder.getId());
+  }
+  var ext      = mimeType === 'image/png' ? 'png' : 'jpg';
+  var fileName = codigoBarra + '.' + ext;
+  var existing = folder.getFilesByName(fileName);
+  while (existing.hasNext()) { existing.next().setTrashed(true); }
+  var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, fileName);
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+}
+
 function getProductosNuevos(params) {
   var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
   if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
@@ -183,24 +225,59 @@ function getProductosNuevos(params) {
 function registrarProductoNuevo(params) {
   var sheet = getSheet('PRODUCTO_NUEVO');
   var id    = _generateId('PN');
+
+  // Generar NLEV si no viene código de barra
+  var codigoBarra = String(params.codigoBarra || '').trim();
+  if (!codigoBarra) codigoBarra = _nextNLEVCode();
+
+  // Subir foto a Drive si viene base64
+  var fotoUrl    = String(params.foto || '');
+  var fotoBase64 = String(params.fotoBase64 || '').trim();
+  if (fotoBase64) {
+    try {
+      fotoUrl = _subirFotoProductoNuevo(codigoBarra, fotoBase64, params.mimeType || 'image/jpeg');
+    } catch(e) {
+      Logger.log('Error subiendo foto PN: ' + e.message);
+    }
+  }
+
   sheet.appendRow([
     id,
-    params.idGuia            || '',
-    params.marca             || '',
-    params.descripcion       || '',
-    params.codigoBarra       || '',
-    params.idCategoria       || '',
-    params.unidad            || '',
+    params.idGuia           || '',
+    params.marca            || '',
+    params.descripcion      || '',
+    codigoBarra,
+    params.idCategoria      || '',
+    params.unidad           || '',
     parseFloat(params.cantidad) || 0,
-    params.fechaVencimiento  || '',
-    params.foto              || '',
+    params.fechaVencimiento || '',
+    fotoUrl,
     'PENDIENTE',
-    params.usuario           || '',
+    params.usuario          || '',
     new Date(),
     '',
     ''
   ]);
-  return { ok: true, data: { idProductoNuevo: id } };
+
+  // Si tiene guía → agregar al detalle automáticamente
+  if (params.idGuia) {
+    try {
+      agregarDetalleGuia({
+        idGuia:            params.idGuia,
+        codigoProducto:    codigoBarra,
+        cantidadEsperada:  0,
+        cantidadRecibida:  parseFloat(params.cantidad) || 1,
+        precioUnitario:    0,
+        fechaVencimiento:  params.fechaVencimiento || '',
+        usuario:           params.usuario  || '',
+        idSesion:          params.idSesion || ''
+      });
+    } catch(e) {
+      Logger.log('Error al agregar detalle de PN a guia: ' + e.message);
+    }
+  }
+
+  return { ok: true, data: { idProductoNuevo: id, codigoBarra: codigoBarra } };
 }
 
 function aprobarProductoNuevo(params) {

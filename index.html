@@ -2025,8 +2025,113 @@
     <div id="hidPickerList" style="max-height:180px;overflow-y:auto"></div>
   </div>
 
+  <!-- Oferta Producto Nuevo (aparece cuando scanner no encuentra el código) -->
+  <div id="pnOffer" style="display:none;margin-bottom:10px;padding:12px 14px;
+       border-radius:12px;border:1px solid rgba(245,158,11,.35);background:rgba(245,158,11,.07)">
+    <p style="font-size:.78em;font-weight:700;color:#fbbf24;margin-bottom:4px">
+      ⚠ Código no encontrado
+    </p>
+    <p style="font-size:.75em;color:#94a3b8;margin-bottom:10px">
+      <span id="pnOfferCod" style="color:#fde68a;font-family:monospace;font-weight:700"></span>
+      — no está en el catálogo
+    </p>
+    <div style="display:flex;gap:8px">
+      <button onclick="GuiasView.abrirModalPN()"
+              style="flex:1;padding:9px 0;border-radius:9px;border:none;cursor:pointer;
+                     background:#f59e0b;color:#0f172a;font-weight:800;font-size:.78em;
+                     letter-spacing:.04em;-webkit-tap-highlight-color:transparent">
+        + REGISTRAR COMO NUEVO
+      </button>
+      <button onclick="GuiasView._ocultarPNOffer()"
+              style="padding:9px 14px;border-radius:9px;border:1px solid #334155;
+                     background:transparent;color:#64748b;font-size:.78em;cursor:pointer;
+                     -webkit-tap-highlight-color:transparent">
+        Ignorar
+      </button>
+    </div>
+  </div>
+
   <!-- Lista de productos agregados en esta sesión -->
-  <div id="hidProductList" style="max-height:260px;overflow-y:auto"></div>
+  <div id="hidProductList" style="max-height:220px;overflow-y:auto"></div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     MODAL: PRODUCTO NUEVO
+═══════════════════════════════════════════════════ -->
+<div id="modalProductoNuevo" class="modal-overlay">
+  <div class="modal-box" style="max-width:460px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div>
+        <p style="font-weight:800;color:#f59e0b;font-size:.7rem;text-transform:uppercase;letter-spacing:.08em">Producto Nuevo</p>
+        <p style="font-weight:700;color:#f1f5f9;font-size:1rem;margin-top:2px">Registrar para aprobación</p>
+      </div>
+      <button onclick="GuiasView.cerrarModalPN()"
+              style="background:none;border:none;color:#64748b;cursor:pointer;font-size:1.3rem;line-height:1;padding:4px">✕</button>
+    </div>
+
+    <!-- Código -->
+    <div style="background:#0f172a;border-radius:8px;padding:10px 13px;margin-bottom:12px;
+                border:1px solid #1e293b">
+      <p style="font-size:.65rem;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Código de barras</p>
+      <p id="pnCodigoDisplay" style="font-family:monospace;color:#fbbf24;font-weight:700;font-size:1rem"></p>
+    </div>
+
+    <!-- Foto -->
+    <div style="margin-bottom:12px">
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Foto del producto</p>
+      <div id="pnFotoPreview" style="display:none;margin-bottom:8px">
+        <img id="pnFotoImg" style="width:100%;height:150px;object-fit:cover;border-radius:9px;border:1px solid #334155">
+      </div>
+      <button onclick="document.getElementById('pnFotoInput').click()"
+              style="width:100%;padding:11px;border:2px dashed #334155;background:#0f172a;
+                     border-radius:9px;color:#64748b;font-size:.8rem;cursor:pointer;
+                     display:flex;align-items:center;justify-content:center;gap:7px;
+                     -webkit-tap-highlight-color:transparent">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+          <circle cx="12" cy="13" r="4"/>
+        </svg>
+        <span id="pnFotoBtn">Tomar / elegir foto</span>
+      </button>
+      <input type="file" id="pnFotoInput" accept="image/*" capture="environment"
+             style="display:none" onchange="GuiasView._pnFotoSeleccionada(this)">
+    </div>
+
+    <!-- Cantidad -->
+    <div style="margin-bottom:12px">
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Cantidad recibida</p>
+      <input type="number" id="pnCantidad" min="0" step="1" value="1"
+             style="width:100%;padding:10px 13px;background:#0f172a;border:1px solid #334155;
+                    border-radius:8px;color:#f1f5f9;font-size:.95rem;box-sizing:border-box">
+    </div>
+
+    <!-- Fecha vencimiento -->
+    <div style="margin-bottom:12px">
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Fecha de vencimiento</p>
+      <input type="date" id="pnFechaVenc"
+             style="width:100%;padding:10px 13px;background:#0f172a;border:1px solid #334155;
+                    border-radius:8px;color:#f1f5f9;font-size:.95rem;box-sizing:border-box">
+    </div>
+
+    <!-- Observaciones (el almacenero puede describir el producto brevemente) -->
+    <div style="margin-bottom:18px">
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Descripción / observaciones</p>
+      <textarea id="pnObservaciones" rows="2" placeholder="Ej: caja grande color azul, sin etiqueta…"
+             style="width:100%;padding:10px 13px;background:#0f172a;border:1px solid #334155;
+                    border-radius:8px;color:#f1f5f9;font-size:.88rem;resize:none;box-sizing:border-box"></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button onclick="GuiasView.cerrarModalPN()"
+              class="btn btn-outline" style="flex:1;padding:13px">Cancelar</button>
+      <button onclick="GuiasView.confirmarRegistrarPN()"
+              style="flex:2;padding:13px;background:#f59e0b;color:#0f172a;font-weight:800;
+                     font-size:.9rem;border:none;border-radius:9px;cursor:pointer;
+                     letter-spacing:.04em;-webkit-tap-highlight-color:transparent">
+        REGISTRAR
+      </button>
+    </div>
+  </div>
 </div>
 
 <!-- ════════════════════════════════════════════════

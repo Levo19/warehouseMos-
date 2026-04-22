@@ -1542,6 +1542,11 @@ const GuiasView = (() => {
     const detCache = OfflineManager.getGuiaDetalleCache();
     const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
     const itemsTag = numItems > 0 ? ` <span class="text-slate-500">[${numItems}]</span>` : '';
+    const pnPend   = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
+    const pnBadge  = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
+      padding:1px 5px;border-radius:4px;flex-shrink:0;letter-spacing:.04em;cursor:pointer"
+      onclick="event.stopPropagation();GuiasView.abrirModalPN('',${JSON.stringify(g.idGuia)})"
+      title="${pnPend} producto(s) nuevo(s) pendiente(s)">N${pnPend > 1 ? ' ' + pnPend : ''}</span>` : '';
     const waGuiaBtn = `<button onclick="event.stopPropagation();GuiasView.compartirWA('${escAttr(g.idGuia)}')"
       style="background:none;border:none;cursor:pointer;padding:2px;color:#25d366;flex-shrink:0;line-height:0"
       title="Compartir por WhatsApp">
@@ -1558,7 +1563,7 @@ const GuiasView = (() => {
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
       <div class="flex items-center justify-between gap-1 overflow-hidden">
         <span class="text-xs font-bold truncate" style="color:${isIngreso ? '#4ade80' : '#60a5fd'}">${tipoLabel}</span>
-        <div class="flex items-center gap-1 flex-shrink-0">${preTag}${fotoTag}${waGuiaBtn}${printGuiaBtn}${estadoDot}</div>
+        <div class="flex items-center gap-1 flex-shrink-0">${pnBadge}${preTag}${fotoTag}${waGuiaBtn}${printGuiaBtn}${estadoDot}</div>
       </div>
       <p class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</p>
       <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}${itemsTag}</p>
@@ -1965,7 +1970,7 @@ const GuiasView = (() => {
         </button>
         <button onclick="GuiasView.abrirScannerItem()"
                 style="flex:1;min-height:52px;background:rgba(251,191,36,.06);
-                       border:none;cursor:pointer;
+                       border:none;border-right:1px solid rgba(124,58,237,.15);cursor:pointer;
                        display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;
                        color:#fbbf24;
                        -webkit-tap-highlight-color:transparent"
@@ -1974,6 +1979,17 @@ const GuiasView = (() => {
             <path d="M2 6h2v12H2zm4 0h1v12H6zm3 0h2v12H9zm4 0h1v12h-1zm3 0h2v12h-2zm3 0h1v12h-1z"/>
           </svg>
           <span style="font-size:.55em;font-weight:700;letter-spacing:.05em">SCANNER</span>
+        </button>
+        <button onclick="GuiasView.abrirPNSinCodigo()"
+                style="flex:1;min-height:52px;background:rgba(245,158,11,.06);
+                       border:none;cursor:pointer;
+                       display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;
+                       color:#f59e0b;
+                       -webkit-tap-highlight-color:transparent"
+                ontouchstart="this.style.background='rgba(245,158,11,.22)'" ontouchend="this.style.background='rgba(245,158,11,.06)'"
+                title="Registrar producto nuevo (sin barcode)">
+          <span style="font-weight:900;font-size:1.15em;line-height:1">N</span>
+          <span style="font-size:.55em;font-weight:700;letter-spacing:.05em">NUEVO</span>
         </button>
       </div>` : '';
 
@@ -2510,11 +2526,7 @@ const GuiasView = (() => {
 
     if (!candidatos.length) {
       _updateHidDisplay('⚠ No encontrado: ' + codStr);
-      toast('No encontrado: ' + codStr, 'warn', 2500);
-      setTimeout(() => {
-        _updateHidDisplay('— listo para escanear —');
-        _enfocarHid();
-      }, 1500);
+      _ofrecerPNEnScanner(codStr);
       return;
     }
 
@@ -2669,10 +2681,165 @@ const GuiasView = (() => {
     abrirCamaraItem();
   }
 
+  // ── Producto Nuevo ────────────────────────────────────────────
+  let _pnCodigo     = '';
+  let _pnFotoBase64 = '';
+  let _pnFotoMime   = 'image/jpeg';
+
+  function _ofrecerPNEnScanner(cod) {
+    _pnCodigo = cod;
+    const offer = document.getElementById('pnOffer');
+    if (offer) {
+      document.getElementById('pnOfferCod').textContent = cod;
+      offer.style.display = 'block';
+    }
+    setTimeout(() => _enfocarHid(), 100);
+  }
+
+  function _ocultarPNOffer() {
+    const offer = document.getElementById('pnOffer');
+    if (offer) offer.style.display = 'none';
+    _updateHidDisplay('— listo para escanear —');
+    setTimeout(() => _enfocarHid(), 100);
+  }
+
+  function abrirModalPN(codigoBarra, idGuia) {
+    _pnCodigo     = codigoBarra !== undefined ? codigoBarra : _pnCodigo;
+    const guiaId  = idGuia !== undefined ? idGuia : (_guiaActual?.idGuia || null);
+    _pnFotoBase64 = '';
+    _pnFotoMime   = 'image/jpeg';
+
+    const dispEl = document.getElementById('pnCodigoDisplay');
+    if (dispEl) dispEl.textContent = _pnCodigo || '(se generará automáticamente · NLEV...)';
+
+    const cant = document.getElementById('pnCantidad');
+    if (cant) cant.value = '1';
+    const fv = document.getElementById('pnFechaVenc');
+    if (fv) fv.value = '';
+    const obs = document.getElementById('pnObservaciones');
+    if (obs) obs.value = '';
+    const prev = document.getElementById('pnFotoPreview');
+    if (prev) prev.style.display = 'none';
+    const inp = document.getElementById('pnFotoInput');
+    if (inp) inp.value = '';
+    const btnTxt = document.getElementById('pnFotoBtn');
+    if (btnTxt) btnTxt.textContent = 'Tomar / elegir foto';
+
+    // Guardar idGuia en dataset del modal para recuperarlo al confirmar
+    const modal = document.getElementById('modalProductoNuevo');
+    if (modal) {
+      modal.dataset.pnGuia = guiaId || '';
+      modal.classList.add('open');
+    }
+  }
+
+  function cerrarModalPN() {
+    const modal = document.getElementById('modalProductoNuevo');
+    if (modal) modal.classList.remove('open');
+  }
+
+  function _pnFotoSeleccionada(input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = e => {
+      const dataUrl = e.target.result;
+      _pnFotoBase64 = dataUrl.split(',')[1] || '';
+      _pnFotoMime   = file.type || 'image/jpeg';
+      const img = document.getElementById('pnFotoImg');
+      if (img) img.src = dataUrl;
+      const prev = document.getElementById('pnFotoPreview');
+      if (prev) prev.style.display = 'block';
+      const btnTxt = document.getElementById('pnFotoBtn');
+      if (btnTxt) btnTxt.textContent = '✓ Foto lista — toca para cambiar';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function confirmarRegistrarPN() {
+    const modal    = document.getElementById('modalProductoNuevo');
+    const idGuia   = modal?.dataset.pnGuia || '';
+    const cantidad = parseFloat(document.getElementById('pnCantidad')?.value) || 1;
+    const fechaVenc = document.getElementById('pnFechaVenc')?.value || '';
+    const obs      = (document.getElementById('pnObservaciones')?.value || '').trim();
+
+    const params = {
+      codigoBarra:     _pnCodigo || '',
+      idGuia,
+      cantidad,
+      fechaVencimiento: fechaVenc,
+      descripcion:     obs,
+      usuario:         window.WH_CONFIG?.usuario || '',
+      idSesion:        window.WH_CONFIG?.idSesion || ''
+    };
+    if (_pnFotoBase64) {
+      params.fotoBase64 = _pnFotoBase64;
+      params.mimeType   = _pnFotoMime;
+    }
+
+    cerrarModalPN();
+    _ocultarPNOffer();
+    toast('Registrando producto nuevo...', 'ok', 2000);
+
+    try {
+      const res = await API.registrarPN(params);
+      if (res.ok || res.offline) {
+        const cod  = res.data?.codigoBarra || _pnCodigo || '';
+        const idPN = res.data?.idProductoNuevo || ('PN_L_' + Date.now());
+
+        // Persistir en cache local
+        const pnCache = OfflineManager.getPNCache();
+        pnCache.unshift({ idProductoNuevo: idPN, idGuia, codigoBarra: cod,
+          cantidad, fechaVencimiento: fechaVenc, descripcion: obs, estado: 'PENDIENTE',
+          fechaRegistro: new Date().toISOString() });
+        OfflineManager.setPNCache(pnCache);
+
+        toast(`✓ Producto nuevo registrado · ${cod || idPN}`, 'ok', 3500);
+        vibrate(20);
+
+        // Si la guía está abierta en detalle → agregar ítem optimista con badge N
+        if (idGuia && _guiaActual?.idGuia === idGuia) {
+          const itemOpt = {
+            idDetalle: 'DL_PN_' + Date.now(), idGuia,
+            codigoProducto: cod, descripcionProducto: (obs || cod || '(nuevo)') + ' ⬡N',
+            cantidadEsperada: 0, cantidadRecibida: cantidad,
+            precioUnitario: 0, fechaVencimiento: fechaVenc, observacion: '',
+            _local: true, _esPN: true
+          };
+          if (!_guiaActual.detalle) _guiaActual.detalle = [];
+          _guiaActual.detalle.push(itemOpt);
+          _mostrarDetalleSheet(_guiaActual, false);
+        }
+
+        // Refrescar lista de guías para actualizar badge N
+        if (typeof render === 'function' && typeof _filtrar === 'function') {
+          render(_filtrar(todas, filtroActual));
+        }
+
+        // Mantener foco en scanner si estaba abierto
+        if (document.getElementById('sheetScanInput')?.classList.contains('open')) {
+          setTimeout(() => _enfocarHid(), 250);
+        }
+      } else {
+        toast('Error: ' + (res.error || 'No se pudo registrar'), 'warn', 4000);
+      }
+    } catch(e) {
+      toast('Error al registrar producto nuevo', 'warn', 3000);
+    }
+  }
+
+  function abrirPNSinCodigo() {
+    abrirModalPN('', _guiaActual?.idGuia || null);
+  }
+
   async function confirmarCerrarGuia() {
     if (!_guiaActual) return;
     const det = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
     if (!det.length) { toast('Agrega al menos un ítem antes de cerrar', 'warn'); return; }
+
+    // Advertir si hay productos nuevos pendientes
+    const pnPend = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === _guiaActual.idGuia && p.estado === 'PENDIENTE').length;
+    if (pnPend) toast(`⚠ ${pnPend} producto(s) nuevo(s) sin aprobar en esta guía`, 'warn', 4000);
 
     // Optimista: actualizar estado en UI inmediatamente
     _guiaActual.estado = 'CERRADA';
@@ -3087,7 +3254,9 @@ const GuiasView = (() => {
     eliminarFotoGuia,
     filtrarChip,
     compartirWA,
-    imprimirTicket
+    imprimirTicket,
+    abrirModalPN, cerrarModalPN, _pnFotoSeleccionada, confirmarRegistrarPN,
+    abrirPNSinCodigo, _ocultarPNOffer
   };
 
   function imprimirTicket(idGuia) {

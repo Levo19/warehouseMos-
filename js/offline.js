@@ -21,7 +21,8 @@ const OfflineManager = (() => {
     AJUSTES:      'wh_ajustes',
     AUDITORIAS_C: 'wh_auditorias_c',
     ADMIN_PIN:    'wh_admin_pin',
-    LAST_MASTER:  'wh_last_master'
+    LAST_MASTER:  'wh_last_master',
+    PN:           'wh_pn'
   };
 
   // ── Estado ────────────────────────────────────────────────
@@ -260,6 +261,8 @@ const OfflineManager = (() => {
   const getAjustesCache       = () => cargar(KEYS.AJUSTES)       || [];
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;
+  const getPNCache            = () => cargar(KEYS.PN)            || [];
+  const setPNCache            = (v) => guardar(KEYS.PN, v);
 
   // ── Inyectar un preingreso recién creado en caché ────────────
   function inyectarPreingreso(item) {
@@ -299,6 +302,7 @@ const OfflineManager = (() => {
     getAjustesCache, getAuditoriasCache,
     getAdminPin,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso,
+    getPNCache, setPNCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
   };
