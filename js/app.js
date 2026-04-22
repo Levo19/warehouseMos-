@@ -5361,7 +5361,8 @@ const ProductosView = (() => {
 
     // 4. Construir grupos finales
     return Object.values(grp).map(g => {
-      // Nombre del grupo = descripción del primer producto (todos comparten nombre)
+      // Header = producto con menor idProducto (el primero registrado)
+      g.prods.sort((a, b) => Number(a.idProducto || 0) - Number(b.idProducto || 0));
       const base    = g.prods[0];
       const equivs2 = g.equivs || [];
 
