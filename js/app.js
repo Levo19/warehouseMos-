@@ -1065,6 +1065,11 @@ const App = (() => {
       viewName = 'envasador';
     }
 
+    // Pausar cámara de despacho al salir de esa vista
+    if (currentView === 'despacho' && viewName !== 'despacho') {
+      DespachoView.pauseCamera();
+    }
+
     closeUserMenu();
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
@@ -3707,13 +3712,35 @@ const EnvasadorView = (() => {
 // ════════════════════════════════════════════════
 const DespachoView = (() => {
   const CART_KEY = 'wh_despacho_cart';
-  let _cart = [];       // [{codigoBarra, descripcion, unidad, cantidad, stockDisp}]
-  let _active = null;   // producto en numpad activo
-  let _qty = '';
+  let _cart     = [];
+  let _camHidden = false;
 
   function _saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(_cart)); }
   function _loadCart() {
     try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
+  }
+
+  // ── Cámara continua ──────────────────────────────────────────
+  function _startCamera() {
+    const status = document.getElementById('despCamStatus');
+    Scanner.start('despVideo', cod => _procesarCodigo(String(cod).trim()),
+      err => { if (status) status.textContent = '⚠ ' + err; },
+      { continuous: true, cooldown: 1000 }
+    );
+    if (status) status.textContent = '● Escaneando';
+  }
+
+  function pauseCamera() { Scanner.stop(); }
+
+  function toggleCamera() {
+    _camHidden = !_camHidden;
+    document.getElementById('despCamPanel').style.display   = _camHidden ? 'none' : 'block';
+    document.getElementById('despCamShowBtn').style.display = _camHidden ? 'block' : 'none';
+    if (_camHidden) {
+      Scanner.stop();
+    } else {
+      _startCamera();
+    }
   }
 
   function cargar() {
@@ -3721,12 +3748,11 @@ const DespachoView = (() => {
     _renderCart();
     _updateFooter();
     badgeUpdate();
+    // Iniciar cámara si no estaba oculta
+    if (!_camHidden && !Scanner.isActive()) _startCamera();
   }
 
-  function escanear() {
-    abrirScanner(cod => _procesarCodigo(String(cod).trim()));
-  }
-
+  // ── Procesar código escaneado ────────────────────────────────
   function _procesarCodigo(cod) {
     if (!cod) return;
     const master = App.getProductosMaestro();
@@ -3734,153 +3760,136 @@ const DespachoView = (() => {
       String(p.codigoBarra || '').trim() === cod ||
       String(p.idProducto  || '').trim() === cod
     );
-
-    if (!prod) {
-      toast(`"${cod}" no encontrado en catálogo`, 'warn', 4000);
-      return;
-    }
+    if (!prod) { toast(`"${cod}" no encontrado`, 'warn', 3000); return; }
 
     const stockMap = {};
     OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
-    const st     = stockMap[prod.idProducto] || {};
-    const stockD = parseFloat(st.cantidadDisponible || 0);
+    const stockD = parseFloat((stockMap[prod.idProducto] || {}).cantidadDisponible || 0);
 
-    // Si ya está en el carrito → abrir numpad para editar
-    const existing = _cart.find(c => c.codigoBarra === (prod.idProducto));
-    _abrirNumpad({ ...prod, stockDisp: stockD }, existing?.cantidad || 0);
-  }
-
-  function _abrirNumpad(prod, cantActual) {
-    _active = prod;
-    _qty    = cantActual > 0 ? String(cantActual) : '';
-
-    document.getElementById('despItemNombre').textContent = prod.descripcion || prod.idProducto;
-    const st = prod.stockDisp || 0;
-    const un = prod.unidad || '';
-    document.getElementById('despItemInfo').textContent =
-      `Stock disponible: ${fmt(st, 1)} ${un}`.trim();
-
-    _updateNpDisplay();
-    abrirSheet('sheetDespItem');
-  }
-
-  function npKey(k) {
-    if (k === 'del') {
-      _qty = _qty.slice(0, -1);
-    } else if (k === 'ok') {
-      _confirmarItem();
-      return;
-    } else if (_qty.length < 5) {
-      if (k === '0' && _qty === '') return; // no leading zero
-      _qty += k;
-    }
-    _updateNpDisplay();
-  }
-
-  function _updateNpDisplay() {
-    const el  = document.getElementById('despNpDisplay');
-    if (!el) return;
-    const qty = parseInt(_qty) || 0;
-    el.textContent   = qty || (_qty === '' ? '0' : _qty);
-    const overStock  = _active && qty > (_active.stockDisp || 0) && (_active.stockDisp || 0) > 0;
-    el.style.color   = overStock ? '#f87171' : '#f0f9ff';
-  }
-
-  function cancelarItem() {
-    cerrarSheet('sheetDespItem');
-    _active = null;
-    _qty    = '';
-  }
-
-  function _confirmarItem() {
-    const qty = parseInt(_qty) || 0;
-    if (qty <= 0) { toast('Ingresa una cantidad mayor a 0', 'warn'); return; }
-
-    const cod = _active.idProducto;
-    const idx = _cart.findIndex(c => c.codigoBarra === cod);
-
-    const item = {
-      codigoBarra: cod,
-      descripcion: _active.descripcion || cod,
-      unidad:      _active.unidad || '',
-      cantidad:    qty,
-      stockDisp:   _active.stockDisp || 0
-    };
-
+    const idx = _cart.findIndex(c => c.codigoBarra === prod.idProducto);
     if (idx >= 0) {
-      _cart[idx] = item;
+      // Mismo producto → sumar 1
+      _cart[idx].cantidad = parseFloat((_cart[idx].cantidad || 0)) + 1;
     } else {
-      _cart.push(item);
+      _cart.push({
+        codigoBarra: prod.idProducto,
+        descripcion: prod.descripcion || prod.idProducto,
+        unidad:      prod.unidad || '',
+        cantidad:    1,
+        stockDisp:   stockD
+      });
     }
-
     _saveCart();
-    cerrarSheet('sheetDespItem');
-    _active = null;
-    _qty    = '';
     _renderCart();
     _updateFooter();
-    toast(idx >= 0 ? `✎ ${item.descripcion} actualizado` : `✅ ${item.descripcion} añadido`, 'ok', 2500);
+    badgeUpdate();
+
+    // Pulsar fila y focus en input de cantidad
+    requestAnimationFrame(() => {
+      const row = document.getElementById('despRow-' + CSS.escape(prod.idProducto));
+      if (row) {
+        row.classList.remove('desp-item-pulse');
+        void row.offsetWidth; // fuerza reflow
+        row.classList.add('desp-item-pulse');
+      }
+      const inp = document.getElementById('despQty-' + CSS.escape(prod.idProducto));
+      if (inp) inp.focus();
+    });
   }
 
+  // ── Render carrito ───────────────────────────────────────────
   function _renderCart() {
     const el = document.getElementById('despCartList');
     if (!el) return;
-
     if (!_cart.length) {
       el.innerHTML = `
         <div class="card text-center py-10">
           <p class="text-4xl mb-2">📦</p>
-          <p class="text-slate-400 text-sm">Escanea el primer producto</p>
+          <p class="text-slate-400 text-sm">Apunta la cámara al código de barras</p>
           <p class="text-slate-600 text-xs mt-1">El carrito se guarda automáticamente</p>
         </div>`;
       return;
     }
-
     el.innerHTML = _cart.map((item, i) => {
-      const over = item.cantidad > item.stockDisp && item.stockDisp > 0;
-      const qtyColor = over ? 'color:#f87171' : 'color:#34d399';
-      const overWarn = over
-        ? `<span class="text-xs text-red-400 block">⚠ stock: ${fmt(item.stockDisp, 1)}</span>` : '';
+      const over     = item.stockDisp > 0 && item.cantidad > item.stockDisp;
+      const safeId   = escAttr(item.codigoBarra);
+      const overWarn = over ? `<span class="text-xs text-red-400">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
       return `
-      <div class="card-sm desp-cart-item flex items-center gap-3" style="animation-delay:${i * 0.03}s">
+      <div class="card-sm desp-cart-item flex items-center gap-3"
+           id="despRow-${safeId}" style="animation-delay:${i*.03}s">
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-sm truncate">${escHtml(item.descripcion)}</p>
-          <p class="text-xs text-slate-400">${escHtml(item.unidad)}</p>
-          ${overWarn}
+          <p class="text-xs text-slate-400">${escHtml(item.unidad)} ${overWarn}</p>
         </div>
-        <div class="flex items-center gap-2 flex-shrink-0">
-          <span class="font-bold text-xl" style="${qtyColor}">${item.cantidad}</span>
-          <button onclick="DespachoView.editarItem('${escAttr(item.codigoBarra)}')"
-                  class="btn btn-outline btn-sm" style="min-width:34px">✎</button>
-          <button onclick="DespachoView.quitarItem('${escAttr(item.codigoBarra)}')"
-                  class="btn btn-outline btn-sm text-red-400" style="min-width:34px">✕</button>
+        <div class="desp-qty-wrap">
+          <button class="desp-qty-btn" onclick="DespachoView.decQty('${safeId}')">−</button>
+          <input  id="despQty-${safeId}" type="number" inputmode="decimal" step="0.1" min="0"
+                  value="${item.cantidad}"
+                  class="desp-qty-input${over?' over':''}"
+                  onblur="DespachoView.blurQty('${safeId}',this.value)"
+                  onfocus="this.select()">
+          <button class="desp-qty-btn" onclick="DespachoView.incQty('${safeId}')">+</button>
+          <button class="desp-qty-btn" style="border-color:rgba(239,68,68,.4);color:#f87171;margin-left:2px"
+                  onclick="DespachoView.quitarItem('${safeId}')">✕</button>
         </div>
       </div>`;
     }).join('');
   }
 
-  function _updateFooter() {
-    const n   = _cart.length;
-    const uds = _cart.reduce((s, c) => s + c.cantidad, 0);
-    document.getElementById('despProgress').textContent  = `${n} producto${n !== 1 ? 's' : ''}`;
-    document.getElementById('despTotalUds').textContent  = `${uds} unidades total`;
-    const btn = document.getElementById('despBtnFinalizar');
-    if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.4' : '1'; }
+  // ── Controles de cantidad ────────────────────────────────────
+  function incQty(cod) { _adjustQty(cod, q => q + 1); }
+  function decQty(cod) { _adjustQty(cod, q => Math.max(0, q - 1)); }
+
+  function _adjustQty(cod, fn) {
+    const idx = _cart.findIndex(c => c.codigoBarra === cod);
+    if (idx < 0) return;
+    const newQty = fn(parseFloat(_cart[idx].cantidad) || 0);
+    if (newQty <= 0) { quitarItem(cod); return; }
+    _cart[idx].cantidad = newQty;
+    _saveCart();
+    // Actualizar solo el input, sin re-render completo (evita perder foco)
+    const inp = document.getElementById('despQty-' + CSS.escape(cod));
+    if (inp) {
+      inp.value = newQty;
+      const over = _cart[idx].stockDisp > 0 && newQty > _cart[idx].stockDisp;
+      inp.classList.toggle('over', over);
+    }
+    _updateFooter();
+    badgeUpdate();
   }
 
-  function editarItem(codigoBarra) {
-    const item = _cart.find(c => c.codigoBarra === codigoBarra);
-    if (!item) return;
-    const master = App.getProductosMaestro();
-    const prod   = master.find(p => p.idProducto === codigoBarra) || item;
-    _abrirNumpad({ ...prod, stockDisp: item.stockDisp }, item.cantidad);
+  function blurQty(cod, val) {
+    const idx = _cart.findIndex(c => c.codigoBarra === cod);
+    if (idx < 0) return;
+    const newQty = parseFloat(val) || 0;
+    if (newQty <= 0) { quitarItem(cod); return; }
+    _cart[idx].cantidad = newQty;
+    _saveCart();
+    _updateFooter();
+    badgeUpdate();
+    // Actualizar clase over
+    const inp = document.getElementById('despQty-' + CSS.escape(cod));
+    if (inp) {
+      const over = _cart[idx].stockDisp > 0 && newQty > _cart[idx].stockDisp;
+      inp.classList.toggle('over', over);
+    }
   }
 
-  function quitarItem(codigoBarra) {
-    _cart = _cart.filter(c => c.codigoBarra !== codigoBarra);
+  function quitarItem(cod) {
+    _cart = _cart.filter(c => c.codigoBarra !== cod);
     _saveCart();
     _renderCart();
     _updateFooter();
+    badgeUpdate();
+  }
+
+  function _updateFooter() {
+    const n   = _cart.length;
+    const uds = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
+    document.getElementById('despProgress').textContent = `${n} producto${n !== 1 ? 's' : ''}`;
+    document.getElementById('despTotalUds').textContent = `${fmt(uds,2)} unidades total`;
+    const btn = document.getElementById('despBtnFinalizar');
+    if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.4' : '1'; }
   }
 
   function finalizar() {
@@ -3959,6 +3968,10 @@ const DespachoView = (() => {
     const n   = _cart.length;
     const hay = _pickupsPendientes.length > 0;
 
+    // Badge topbar 🛒DSP — visible cuando hay items en el carrito
+    const despBadge = document.getElementById('despModoIndicador');
+    if (despBadge) despBadge.classList.toggle('hidden', n === 0);
+
     // Botón FAB en vista Productos
     const fabN = document.getElementById('despCartFabN');
     const dot  = document.getElementById('despPickAlertDot');
@@ -3966,7 +3979,7 @@ const DespachoView = (() => {
     if (dot)  { dot.style.display = hay ? 'block' : 'none'; }
 
     // Banner en view-despacho
-    const banner = document.getElementById('despPickupBanner');
+    const banner    = document.getElementById('despPickupBanner');
     const bannerTxt = document.getElementById('despPickupBannerTxt');
     if (banner && _pickupsPendientes.length > 0) {
       const p = _pickupsPendientes[0];
@@ -4160,7 +4173,8 @@ const DespachoView = (() => {
     toast(`📥 ${n} producto${n !== 1 ? 's' : ''} cargados del pedido`, 'ok', 3000);
   }
 
-  return { cargar, escanear, npKey, cancelarItem, editarItem, quitarItem,
+  return { cargar, pauseCamera, toggleCamera,
+           incQty, decQty, blurQty, quitarItem,
            finalizar, confirmarDespacho, cancelar,
            badgeUpdate, startPoll,
            abrirPickupPendiente, elegirMatchParcial, confirmarPickup };

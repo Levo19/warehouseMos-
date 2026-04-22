@@ -178,30 +178,52 @@
     .env-urg-btn.active { background:rgba(239,68,68,.18);color:#fca5a5;
                           border-color:rgba(239,68,68,.4); }
     /* Despacho Rápido */
-    .desp-scan-btn {
-      width:100%;padding:20px;border-radius:16px;
-      background:linear-gradient(135deg,#0ea5e9 0%,#6366f1 100%);
-      color:#fff;font-size:18px;font-weight:800;letter-spacing:.06em;
-      display:flex;align-items:center;justify-content:center;gap:12px;
-      border:none;cursor:pointer;
-      box-shadow:0 6px 24px rgba(14,165,233,.35);
-      transition:transform .1s,box-shadow .1s;
-      -webkit-tap-highlight-color:transparent;
+    /* ── Despacho: panel cámara ─────────────────────── */
+    .desp-cam-panel {
+      border-radius:14px;overflow:hidden;background:#000;
+      position:relative;margin-bottom:10px;
+      transition:height .25s ease;
     }
-    .desp-scan-btn:active { transform:scale(.96);box-shadow:0 3px 12px rgba(14,165,233,.2); }
-    .desp-qty-display {
-      font-size:64px;font-weight:900;letter-spacing:-.04em;
-      color:#f0f9ff;text-align:center;min-height:90px;
-      display:flex;align-items:center;justify-content:center;
-      font-variant-numeric:tabular-nums;transition:color .1s;
+    .desp-cam-panel video {
+      width:100%;height:100%;object-fit:cover;display:block;
     }
+    .desp-cam-hide-btn {
+      position:absolute;top:6px;right:8px;
+      background:rgba(0,0,0,.55);border:none;border-radius:8px;
+      color:#fff;font-size:11px;font-weight:700;padding:4px 9px;cursor:pointer;
+    }
+    .desp-cam-show-btn {
+      width:100%;padding:9px;border-radius:10px;
+      background:rgba(14,165,233,.12);border:1.5px dashed rgba(14,165,233,.35);
+      color:#38bdf8;font-size:12px;font-weight:700;cursor:pointer;margin-bottom:10px;
+    }
+    /* ── Despacho: item del carrito ─────────────────── */
+    .desp-cart-item { animation:slideInItem .2s ease-out both; }
+    @keyframes despPulse { 0%{background:rgba(14,165,233,.25)} 100%{background:transparent} }
+    .desp-item-pulse { animation:despPulse .6s ease-out; }
+    /* ── Despacho: controles de cantidad inline ──────── */
+    .desp-qty-wrap { display:flex;align-items:center;gap:4px;flex-shrink:0; }
+    .desp-qty-btn {
+      width:30px;height:30px;border-radius:8px;border:1px solid #334155;
+      background:#1e293b;color:#f1f5f9;font-size:18px;font-weight:700;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      -webkit-tap-highlight-color:transparent;user-select:none;
+    }
+    .desp-qty-btn:active { background:#334155; }
+    .desp-qty-input {
+      width:58px;height:30px;border-radius:8px;border:1px solid #334155;
+      background:#0f172a;color:#34d399;font-size:15px;font-weight:800;
+      text-align:center;padding:0 4px;
+      font-variant-numeric:tabular-nums;
+    }
+    .desp-qty-input:focus { outline:none;border-color:#0ea5e9;color:#f0f9ff; }
+    .desp-qty-input.over  { color:#f87171 !important; }
     .desp-footer {
       position:sticky;bottom:8px;
       background:#0f172a;border:1px solid #1e293b;
       border-radius:14px;padding:14px 16px;
       box-shadow:0 -4px 24px rgba(0,0,0,.5);
     }
-    .desp-cart-item { animation:slideInItem .2s ease-out both; }
     /* Acceso al carrito desde Productos */
     .desp-cart-fab {
       position:relative;display:flex;align-items:center;gap:7px;
@@ -1144,7 +1166,8 @@
     </button>
     <!-- Separador visual -->
     <span id="topBarSep" class="text-slate-700 flex-shrink-0" style="font-size:16px;line-height:1">|</span>
-    <span id="modoIndicador" class="hidden modo-badge flex-shrink-0" onclick="App.nav('envasador')" title="Volver al modo Envasador">⚡ENV</span>
+    <span id="modoIndicador"     class="hidden modo-badge flex-shrink-0" onclick="App.nav('envasador')" title="Volver al modo Envasador">⚡ENV</span>
+    <span id="despModoIndicador" class="hidden modo-badge flex-shrink-0" onclick="App.nav('despacho')"  title="Volver al Despacho Rápido" style="background:#065f46">🛒DSP</span>
     <h1 id="pageTitle" class="font-semibold text-xs text-slate-400 truncate">Dashboard</h1>
   </div>
 
@@ -1427,24 +1450,31 @@
       </button>
     </div>
 
-    <!-- Botón ESCANEAR principal -->
-    <button onclick="DespachoView.escanear()" class="desp-scan-btn mb-4">
-      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/>
-      </svg>
-      ESCANEAR PRODUCTO
+    <!-- Panel cámara (1/6 viewport) — siempre activa, ocultar con ✕ -->
+    <div id="despCamPanel" class="desp-cam-panel" style="height:16vh">
+      <video id="despVideo" autoplay playsinline muted></video>
+      <div style="position:absolute;bottom:6px;left:8px;right:8px;display:flex;align-items:center;justify-content:space-between">
+        <span id="despCamStatus" style="font-size:10px;color:rgba(255,255,255,.5);font-weight:600">Iniciando cámara…</span>
+        <button onclick="DespachoView.toggleCamera()" class="desp-cam-hide-btn">✕ Ocultar</button>
+      </div>
+    </div>
+
+    <!-- Botón para mostrar cámara cuando está oculta -->
+    <button id="despCamShowBtn" onclick="DespachoView.toggleCamera()"
+            class="desp-cam-show-btn" style="display:none">
+      📷 Mostrar cámara
     </button>
 
-    <!-- Lista del carrito -->
+    <!-- Lista del carrito (5/6 restantes) -->
     <div id="despCartList" class="space-y-2 mb-4">
       <div class="card text-center py-10">
         <p class="text-4xl mb-2">📦</p>
-        <p class="text-slate-400 text-sm">Escanea el primer producto</p>
+        <p class="text-slate-400 text-sm">Apunta la cámara al código de barras</p>
         <p class="text-slate-600 text-xs mt-1">El carrito se guarda automáticamente</p>
       </div>
     </div>
 
-    <!-- Footer sticky: resumen + botón finalizar -->
+    <!-- Footer sticky: resumen + botón generar -->
     <div id="despFooter" class="desp-footer">
       <div class="flex items-center justify-between gap-3">
         <div>
@@ -2415,39 +2445,6 @@
 </div>
 
 <!-- ════════════════════════════════════════════════
-     SHEET: DESPACHO — CANTIDAD (numpad)
-═══════════════════════════════════════════════════ -->
-<div class="sheet-overlay" id="overlayDespItem" onclick="DespachoView.cancelarItem()"></div>
-<div class="bottom-sheet" id="sheetDespItem">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
-
-  <!-- Info del producto -->
-  <div class="text-center mb-1">
-    <p class="font-bold text-base leading-snug" id="despItemNombre">—</p>
-    <p class="text-xs text-slate-400 mt-0.5" id="despItemInfo">—</p>
-  </div>
-
-  <!-- Display cantidad -->
-  <div class="desp-qty-display" id="despNpDisplay">0</div>
-
-  <!-- Numpad -->
-  <div class="wh-numpad-wrap mb-4">
-    <button onclick="DespachoView.npKey('1')" class="pin-btn">1</button>
-    <button onclick="DespachoView.npKey('2')" class="pin-btn">2</button>
-    <button onclick="DespachoView.npKey('3')" class="pin-btn">3</button>
-    <button onclick="DespachoView.npKey('4')" class="pin-btn">4</button>
-    <button onclick="DespachoView.npKey('5')" class="pin-btn">5</button>
-    <button onclick="DespachoView.npKey('6')" class="pin-btn">6</button>
-    <button onclick="DespachoView.npKey('7')" class="pin-btn">7</button>
-    <button onclick="DespachoView.npKey('8')" class="pin-btn">8</button>
-    <button onclick="DespachoView.npKey('9')" class="pin-btn">9</button>
-    <button onclick="DespachoView.npKey('del')" class="pin-btn" style="font-size:18px;color:#94a3b8">⌫</button>
-    <button onclick="DespachoView.npKey('0')" class="pin-btn">0</button>
-    <button onclick="DespachoView.npKey('ok')" class="pin-btn"
-            style="background:#0ea5e9;color:#fff;font-size:15px;font-weight:800;border-color:#0ea5e9">✓ OK</button>
-  </div>
-</div>
-
 <!-- ════════════════════════════════════════════════
      SHEET: DESPACHO — FINALIZAR (zona + confirmar)
 ═══════════════════════════════════════════════════ -->
