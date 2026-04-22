@@ -1323,24 +1323,9 @@
     <div id="guiasMainCol">
 
     <!-- Chips de filtro (reemplaza el dropdown) -->
-    <div class="chip-row" id="guiaChips">
-      <button class="chip active" data-filtro="TODAS"  onclick="GuiasView.filtrarChip(this,'TODAS')">Todas</button>
-      <button class="chip"        data-filtro="ABIERTA" onclick="GuiasView.filtrarChip(this,'ABIERTA')">
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        Abiertas
-      </button>
-      <button class="chip"        data-filtro="INGRESO" onclick="GuiasView.filtrarChip(this,'INGRESO')">
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 15a.5.5 0 0 0 .5-.5V2.707l3.146 3.147a.5.5 0 0 0 .708-.708l-4-4a.5.5 0 0 0-.708 0l-4 4a.5.5 0 1 0 .708.708L7.5 2.707V14.5a.5.5 0 0 0 .5.5z"/></svg>
-        Ingresos
-      </button>
-      <button class="chip"        data-filtro="SALIDA"  onclick="GuiasView.filtrarChip(this,'SALIDA')">
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a.5.5 0 0 1 .5.5v11.793l3.146-3.147a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 .708-.708L7.5 13.293V1.5A.5.5 0 0 1 8 1z"/></svg>
-        Salidas
-      </button>
-    </div>
+    <!-- Fila única: dropdown filtro + refresh dot + botón preingreso -->
+    <div class="flex items-center justify-between mb-3">
 
-    <div class="flex items-center justify-between mb-3" style="display:none" id="guiasDropdownRow">
-      <!-- Filtro dropdown (oculto — chips lo reemplazan, mantenemos para compatibilidad JS) -->
       <div class="filter-dropdown">
         <button id="guiaFilterBtn" onclick="GuiasView.toggleFiltro()"
                 class="flex items-center gap-2 btn btn-outline text-sm font-bold tracking-wide">
@@ -1348,31 +1333,31 @@
             <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.128.334L10 8.692V13.5a.5.5 0 0 1-.342.474l-3 1A.5.5 0 0 1 6 14.5V8.692L1.628 3.834A.5.5 0 0 1 1.5 3.5z"/>
           </svg>
           <span id="guiaFilterLabel">TODAS</span>
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
+          </svg>
         </button>
         <div id="guiaFilterMenu" class="filter-menu" style="display:none">
-          <button onclick="GuiasView.filtrar('TODAS')"  data-filtro="TODAS"  class="guia-fopt sel">— TODAS</button>
+          <button onclick="GuiasView.filtrar('TODAS')"   data-filtro="TODAS"   class="guia-fopt sel">— TODAS</button>
+          <button onclick="GuiasView.filtrar('ABIERTA')" data-filtro="ABIERTA" class="guia-fopt">◌ ABIERTAS</button>
           <button onclick="GuiasView.filtrar('INGRESO')" data-filtro="INGRESO" class="guia-fopt">↓ INGRESOS</button>
           <button onclick="GuiasView.filtrar('SALIDA')"  data-filtro="SALIDA"  class="guia-fopt">↑ SALIDAS</button>
-          <button onclick="GuiasView.filtrar('ABIERTA')" data-filtro="ABIERTA" class="guia-fopt">◌ ABIERTAS</button>
         </div>
       </div>
-      <span id="guiaFilterLabel2"></span>
-    </div>
 
-    <div class="flex items-center justify-between mb-3">
-      <!-- Indicador refresh (punto azul) -->
-      <span id="guiasRefreshDot" style="opacity:0;transition:opacity .6s"
-            class="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0"></span>
+      <div class="flex items-center gap-2">
+        <span id="guiasRefreshDot" style="opacity:0;transition:opacity .6s"
+              class="w-2 h-2 rounded-full bg-blue-400 flex-shrink-0"></span>
+        <button onclick="App.nav('preingresos')" class="nav-sibling-btn">
+          PRE-ING
+          <span class="arrow-slide-r">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+            </svg>
+          </span>
+        </button>
+      </div>
 
-      <!-- Botón Pre-ingresos → navega a la vista completa -->
-      <button onclick="App.nav('preingresos')" class="nav-sibling-btn" style="margin-left:auto">
-        PRE-ING
-        <span class="arrow-slide-r">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-            <path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
-          </svg>
-        </span>
-      </button>
     </div>
 
     <!-- Barra de búsqueda inteligente guías + botón nueva (tablet inline) -->
