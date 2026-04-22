@@ -4,6 +4,200 @@
 // Acción: getReporte?tipo=preingreso|guia&id=xxx
 // ============================================================
 
+// ============================================================
+// imprimirTicketGuia — ESC/POS 80mm con QR al final
+// ============================================================
+function imprimirTicketGuia(params) {
+  var idGuia = String(params.idGuia || '');
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  var printerId;
+  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+  catch(e) { return { ok: false, error: e.message }; }
+
+  // ── Datos ────────────────────────────────────────────────────
+  var guias = _sheetToObjects(getSheet('GUIAS'));
+  var g     = guias.find(function(x) { return x.idGuia === idGuia; });
+  if (!g) return { ok: false, error: 'Guía no encontrada: ' + idGuia };
+
+  var TIPO_LABELS = {
+    INGRESO_PROVEEDOR:'Ingreso Proveedor', INGRESO_JEFATURA:'Ingreso Jefatura',
+    SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolucion',
+    SALIDA_JEFATURA:'Salida Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
+  };
+
+  var provName = '';
+  try {
+    var provs = _sheetToObjects(getProveedoresSheet());
+    var prov  = provs.find(function(p) { return p.idProveedor === g.idProveedor; });
+    if (prov) provName = String(prov.nombre || '');
+  } catch(e) {}
+
+  var dets = [];
+  try {
+    var prods   = _sheetToObjects(getProductosSheet());
+    var prodMap = {};
+    prods.forEach(function(p) { prodMap[p.idProducto] = p.descripcion || p.idProducto; });
+    dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
+      .filter(function(d) { return d.idGuia === idGuia && d.observacion !== 'ANULADO'; })
+      .map(function(d) {
+        return {
+          descripcion: prodMap[d.codigoProducto] || d.codigoProducto,
+          cantidad:    parseFloat(d.cantidadReal || d.cantidadRecibida || d.cantidadEsperada || 0)
+        };
+      });
+  } catch(e) {}
+
+  var tz     = Session.getScriptTimeZone();
+  var fecha  = Utilities.formatDate(new Date(g.fecha || new Date()), tz, 'dd MMM yyyy');
+  var hora   = Utilities.formatDate(new Date(), tz, 'HH:mm');
+  var tipoLabel = TIPO_LABELS[g.tipo] || String(g.tipo || '—');
+
+  // ── URL del reporte (para QR) ────────────────────────────────
+  var reporteUrl = String(params.reporteUrl || '');
+
+  // ── ESC/POS byte array ───────────────────────────────────────
+  var B = [];
+  function b1(v) { B.push(v & 0xff); }
+  function bStr(s) { for (var i = 0; i < s.length; i++) B.push(s.charCodeAt(i) & 0xff); }
+  function bLn(s) { bStr(s); b1(0x0a); }
+
+  // Alinear texto al ancho completo (48 chars)
+  // Nombre izquierda (41) + cantidad derecha (7)
+  function lineaProd(nombre, cant) {
+    var n  = String(nombre).substring(0, 41);
+    var c  = String(cant);
+    var pad = 48 - n.length - c.length;
+    if (pad < 1) pad = 1;
+    return n + Array(pad + 1).join(' ') + c;
+  }
+
+  // Línea etiqueta: label fijo 10 chars + valor
+  function lineaKV(label, valor) {
+    var l = String(label);
+    var v = String(valor).substring(0, 48 - l.length);
+    return l + v;
+  }
+
+  var SEP  = '================================================';
+  var SEP2 = '------------------------------------------------';
+
+  // Init
+  b1(0x1b); b1(0x40);
+
+  // Header centrado
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x21); b1(0x08);  // bold
+  bLn('ALMACEN CENTRAL - MOS');
+  b1(0x1b); b1(0x21); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);  // left
+
+  bLn(SEP);
+
+  bLn(lineaKV('GUIA    : ', idGuia));
+  bLn(lineaKV('TIPO    : ', tipoLabel));
+  bLn(lineaKV('FECHA   : ', fecha + '  ' + hora));
+  bLn(lineaKV('ESTADO  : ', g.estado || '—'));
+
+  bLn(SEP2);
+
+  if (provName) bLn(lineaKV('PROVEEDOR: ', provName));
+  bLn(lineaKV('USUARIO  : ', g.usuario || '—'));
+  if (g.comentario) {
+    bLn(SEP2);
+    bLn(lineaKV('NOTA     : ', String(g.comentario).substring(0, 37)));
+  }
+
+  bLn(SEP);
+
+  // Header detalle
+  b1(0x1b); b1(0x21); b1(0x08);  // bold
+  bLn(lineaProd('PRODUCTO', 'CANT'));
+  b1(0x1b); b1(0x21); b1(0x00);
+  bLn(SEP2);
+
+  // Items
+  dets.forEach(function(d) {
+    var nombre = String(d.descripcion || '').toUpperCase();
+    var cant   = d.cantidad % 1 === 0 ? String(Math.round(d.cantidad)) : String(d.cantidad);
+    // Si el nombre es largo, partir en dos líneas
+    if (nombre.length <= 41) {
+      bLn(lineaProd(nombre, cant));
+    } else {
+      bLn(lineaProd(nombre.substring(0, 41), cant));
+      bLn('  ' + nombre.substring(41, 79));
+    }
+  });
+
+  if (!dets.length) bLn('  (sin items registrados)');
+
+  bLn(SEP);
+
+  // QR Code
+  if (reporteUrl) {
+    b1(0x1b); b1(0x61); b1(0x01);  // centrar
+
+    var qrData = reporteUrl;
+    var qrLen  = qrData.length + 3;
+    var qrpL   = qrLen & 0xff;
+    var qrpH   = (qrLen >> 8) & 0xff;
+
+    // Modelo 2
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x04); b1(0x00); b1(0x31); b1(0x41); b1(0x32); b1(0x00);
+    // Tamaño módulo 4
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x04);
+    // Corrección de errores M
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x45); b1(0x31);
+    // Almacenar datos
+    b1(0x1d); b1(0x28); b1(0x6b); b1(qrpL); b1(qrpH); b1(0x31); b1(0x50); b1(0x30);
+    bStr(qrData);
+    // Imprimir
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x51); b1(0x30);
+
+    b1(0x1b); b1(0x21); b1(0x00);
+    bLn('Escanea para ver el reporte');
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // Feed + corte
+  b1(0x1b); b1(0x4a); b1(160);
+  b1(0x1d); b1(0x56); b1(0x00);
+
+  // Encode
+  var blob = Utilities.newBlob(B, 'application/octet-stream');
+  var b64  = Utilities.base64Encode(blob.getBytes());
+
+  var payload = {
+    printerId:   parseInt(printerId),
+    title:       'Ticket ' + idGuia,
+    contentType: 'raw_base64',
+    content:     b64,
+    source:      'warehouseMos'
+  };
+
+  try {
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method:  'post',
+      headers: {
+        'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+        'Content-Type':  'application/json'
+      },
+      payload:            JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    return code === 201
+      ? { ok: true }
+      : { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 function getReporte(params) {
   var tipo = String(params.tipo || '');
   var id   = String(params.id   || '');

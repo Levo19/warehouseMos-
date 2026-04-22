@@ -158,6 +158,7 @@ function _route(method, e) {
 
       // ── Reportes públicos ──────────────────────────────────
       case 'getReporte':          return getReporte(params);
+      case 'imprimirTicketGuia':  return imprimirTicketGuia(params);
 
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
