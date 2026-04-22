@@ -881,14 +881,26 @@ const Session = (() => {
 
   // ── Helpers ────────────────────────────────────────────────
   function _actualizarPuntos(prefix, n) {
+    const isLock = prefix === 'lpin';
     for (let i = 0; i < 4; i++) {
       const el = document.getElementById(prefix + i);
       if (el) {
         el.className = i < n
-          ? 'w-4 h-4 rounded-full bg-blue-500'
-          : 'w-4 h-4 rounded-full border-2 border-slate-600';
+          ? (isLock ? 'w-4 h-4 rounded-full bg-amber-500 transition-all' : 'w-4 h-4 rounded-full bg-sky-400 transition-all')
+          : (isLock ? 'w-4 h-4 rounded-full border-2 border-amber-900 transition-all' : 'w-4 h-4 rounded-full border-2 border-slate-600 transition-all');
       }
     }
+  }
+
+  function cerrarSesionDesdeLock() {
+    if (!confirm('¿Cerrar sesión? Se perderá el reporte de turno.')) return;
+    clearTimeout(lockTimer);
+    clearInterval(lockInterval);
+    _limpiarSesion();
+    sesionActual = null;
+    document.getElementById('lockScreen').style.display = 'none';
+    _ocultarApp();
+    mostrarLogin();
   }
 
   function _guardarSesion(ses) {
@@ -922,6 +934,7 @@ const Session = (() => {
   return { init, mostrarLogin,
            pinTecla, pinAtras, lockTecla, lockAtras,
            bloquear, confirmarCierre, cerrarTurnoFinal,
+           cerrarSesionDesdeLock,
            getSesion };
 })();
 

@@ -363,9 +363,45 @@
     .scroll-x > * { flex-shrink:0;scroll-snap-align:start; }
     /* PIN teclado */
     .pin-btn { background:#1e293b;color:#f1f5f9;font-size:22px;font-weight:700;
-               border-radius:12px;padding:18px 0;border:none;cursor:pointer;
-               transition:background .1s;width:100%; }
-    .pin-btn:active { background:#334155; }
+               border-radius:14px;height:66px;border:1px solid rgba(255,255,255,.07);
+               cursor:pointer;transition:background .1s,transform .08s;width:100%;
+               display:flex;align-items:center;justify-content:center;
+               -webkit-tap-highlight-color:transparent;user-select:none; }
+    .pin-btn:active { background:#334155;transform:scale(.91); }
+    /* Numpad wrapper — ancho fijo para que no se deforme en tablet */
+    .wh-numpad-wrap { width:252px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:10px; }
+    /* Login wordmark */
+    .wh-login-wordmark {
+      font-weight:900;font-size:1.8rem;letter-spacing:-.03em;line-height:1;display:inline-block;
+      background:linear-gradient(135deg,#38bdf8 0%,#7dd3fc 45%,#bae6fd 60%,#38bdf8 100%);
+      background-size:200% auto;
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+      animation:whShimmer 3s ease-in-out infinite,whPulse 4s ease-in-out infinite;
+    }
+    @keyframes whShimmer { 0%,100%{background-position:0% center} 50%{background-position:100% center} }
+    @keyframes whPulse {
+      0%,100%{filter:drop-shadow(0 0 7px rgba(56,189,248,.3))}
+      50%     {filter:drop-shadow(0 0 20px rgba(56,189,248,.75))}
+    }
+    /* Lock avatar ring */
+    .wh-lock-av-ring { position:relative;width:88px;height:88px; }
+    .wh-lock-av-ring::before {
+      content:'';position:absolute;inset:-4px;border-radius:50%;
+      background:conic-gradient(from 0deg,#f59e0b 0deg,#92400e 110deg,rgba(146,64,14,.06) 200deg,#92400e 280deg,#f59e0b 360deg);
+      animation:whRingSpin 3s linear infinite;
+    }
+    @keyframes whRingSpin { to{transform:rotate(360deg)} }
+    .wh-lock-av-inner {
+      position:relative;z-index:2;width:88px;height:88px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      font-size:2rem;font-weight:900;color:#fff;border:3px solid #0a0e17;
+    }
+    /* Lock icon pulse */
+    @keyframes whLockPulse {
+      0%,100%{filter:drop-shadow(0 0 5px rgba(245,158,11,.35));transform:scale(1)}
+      50%    {filter:drop-shadow(0 0 16px rgba(245,158,11,.75));transform:scale(1.08)}
+    }
+    .wh-lock-icon { animation:whLockPulse 2.6s ease-in-out infinite; }
     /* Pantallas full z-index */
     .z-80 { z-index:80; }
     /* Update overlay */
@@ -2557,36 +2593,43 @@
 <!-- ════════════════════════════════════════════════
      PANTALLA LOGIN
 ═══════════════════════════════════════════════════ -->
-<div id="loginScreen" class="fixed inset-0 z-80 flex flex-col"
-     style="background:#0f172a;display:none;">
+<div id="loginScreen" class="fixed inset-0 z-80 flex flex-col items-center justify-center"
+     style="background:#0a0e17;display:none;">
 
-  <!-- Header login -->
-  <div class="flex flex-col items-center pt-10 pb-6 px-4">
-    <div class="text-5xl mb-3">🏭</div>
-    <h1 class="text-2xl font-black text-white tracking-tight">warehouseMos</h1>
-    <p class="text-slate-400 text-sm mt-1">InversionMos — Almacén Central</p>
+  <!-- Logo -->
+  <div class="text-center mb-8">
+    <div class="mb-3">
+      <svg class="mx-auto" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+           style="filter:drop-shadow(0 0 12px rgba(56,189,248,.45))">
+        <defs>
+          <linearGradient id="whIconGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#38bdf8"/><stop offset="100%" stop-color="#7dd3fc"/>
+          </linearGradient>
+        </defs>
+        <path d="M3 9l9-6 9 6v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" stroke="url(#whIconGrad)"/>
+        <polyline points="9,22 9,12 15,12 15,22" stroke="url(#whIconGrad)"/>
+      </svg>
+    </div>
+    <span class="wh-login-wordmark">warehouseMos</span>
+    <div class="text-slate-500 text-xs tracking-widest uppercase mt-2">InversionMos · Almacén Central</div>
   </div>
 
-  <!-- Estado cargando (visible mientras no hay caché) -->
-  <div id="loginLoading" class="flex-1 flex-col items-center justify-center gap-4" style="display:none">
-    <div class="spinner" style="width:36px;height:36px;border-width:3px;border-top-color:#3b82f6"></div>
+  <!-- Estado cargando -->
+  <div id="loginLoading" class="flex flex-col items-center gap-4" style="display:none">
+    <div class="spinner" style="width:34px;height:34px;border-width:3px;border-top-color:#38bdf8"></div>
     <p class="text-slate-400 text-sm">Sincronizando personal...</p>
   </div>
 
-  <!-- PIN directo — el sistema identifica quién es por PIN -->
-  <div id="pinPadArea" class="flex-1 px-4 flex flex-col" style="display:none">
-    <p class="text-xs text-slate-400 uppercase tracking-wider mb-6 text-center">Ingresa tu PIN</p>
-
-    <!-- Puntos PIN -->
+  <!-- PIN pad -->
+  <div id="pinPadArea" class="flex flex-col items-center fade-in-up" style="display:none">
+    <p class="text-xs text-slate-400 uppercase tracking-widest mb-6">Ingresa tu PIN</p>
     <div class="flex justify-center gap-4 mb-6">
-      <div id="pin0" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-      <div id="pin1" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-      <div id="pin2" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-      <div id="pin3" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+      <div id="pin0" class="w-4 h-4 rounded-full border-2 border-slate-600 transition-all"></div>
+      <div id="pin1" class="w-4 h-4 rounded-full border-2 border-slate-600 transition-all"></div>
+      <div id="pin2" class="w-4 h-4 rounded-full border-2 border-slate-600 transition-all"></div>
+      <div id="pin3" class="w-4 h-4 rounded-full border-2 border-slate-600 transition-all"></div>
     </div>
-
-    <!-- Teclado PIN -->
-    <div class="grid grid-cols-3 gap-3 px-4">
+    <div class="wh-numpad-wrap">
       <button onclick="Session.pinTecla('1')" class="pin-btn">1</button>
       <button onclick="Session.pinTecla('2')" class="pin-btn">2</button>
       <button onclick="Session.pinTecla('3')" class="pin-btn">3</button>
@@ -2596,11 +2639,11 @@
       <button onclick="Session.pinTecla('7')" class="pin-btn">7</button>
       <button onclick="Session.pinTecla('8')" class="pin-btn">8</button>
       <button onclick="Session.pinTecla('9')" class="pin-btn">9</button>
-      <button onclick="Session.pinAtras()" class="pin-btn text-slate-400 text-lg">⌫</button>
+      <button onclick="Session.pinAtras()" class="pin-btn" style="color:#94a3b8">⌫</button>
       <button onclick="Session.pinTecla('0')" class="pin-btn">0</button>
       <div></div>
     </div>
-    <p id="loginError" class="text-red-400 text-center text-sm mt-4 h-5"></p>
+    <p id="loginError" class="text-red-400 text-center text-sm mt-5 h-5"></p>
   </div>
 </div>
 
@@ -2609,18 +2652,32 @@
 ═══════════════════════════════════════════════════ -->
 <div id="lockScreen" class="fixed inset-0 z-80 flex flex-col items-center justify-center"
      style="background:rgba(10,14,23,0.97);display:none;">
-  <div id="lockAvatar" class="w-20 h-20 rounded-full flex items-center justify-center text-white font-black text-3xl mb-3"></div>
+
+  <!-- Candado animado -->
+  <div class="mb-5">
+    <svg class="wh-lock-icon" width="34" height="34" viewBox="0 0 24 24" fill="none"
+         stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  </div>
+
+  <!-- Avatar con ring ámbar -->
+  <div class="wh-lock-av-ring mb-4">
+    <div id="lockAvatar" class="wh-lock-av-inner" style="background:#6366f1"></div>
+  </div>
   <p class="text-white font-bold text-xl mb-1" id="lockNombre"></p>
-  <p class="text-slate-400 text-sm mb-1">Pantalla bloqueada</p>
-  <p class="text-slate-500 text-xs mb-8" id="lockTiempo"></p>
+  <p class="text-amber-500 text-xs font-semibold tracking-widest uppercase mb-1">Pantalla bloqueada</p>
+  <p class="text-slate-500 text-xs mb-7" id="lockTiempo"></p>
 
   <div class="flex justify-center gap-4 mb-5">
-    <div id="lpin0" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-    <div id="lpin1" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-    <div id="lpin2" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
-    <div id="lpin3" class="w-4 h-4 rounded-full border-2 border-slate-600"></div>
+    <div id="lpin0" class="w-4 h-4 rounded-full border-2 border-amber-900 transition-all"></div>
+    <div id="lpin1" class="w-4 h-4 rounded-full border-2 border-amber-900 transition-all"></div>
+    <div id="lpin2" class="w-4 h-4 rounded-full border-2 border-amber-900 transition-all"></div>
+    <div id="lpin3" class="w-4 h-4 rounded-full border-2 border-amber-900 transition-all"></div>
   </div>
-  <div class="grid grid-cols-3 gap-3 px-10 w-full max-w-xs">
+
+  <div class="wh-numpad-wrap">
     <button onclick="Session.lockTecla('1')" class="pin-btn">1</button>
     <button onclick="Session.lockTecla('2')" class="pin-btn">2</button>
     <button onclick="Session.lockTecla('3')" class="pin-btn">3</button>
@@ -2630,11 +2687,14 @@
     <button onclick="Session.lockTecla('7')" class="pin-btn">7</button>
     <button onclick="Session.lockTecla('8')" class="pin-btn">8</button>
     <button onclick="Session.lockTecla('9')" class="pin-btn">9</button>
-    <button onclick="Session.lockAtras()"    class="pin-btn text-slate-400">⌫</button>
+    <button onclick="Session.lockAtras()" class="pin-btn" style="color:#94a3b8">⌫</button>
     <button onclick="Session.lockTecla('0')" class="pin-btn">0</button>
     <div></div>
   </div>
   <p id="lockError" class="text-red-400 text-sm mt-4 h-5"></p>
+  <button onclick="Session.cerrarSesionDesdeLock()" class="text-slate-700 text-xs mt-5 hover:text-red-400 transition-colors">
+    Cerrar sesión →
+  </button>
 </div>
 
 <!-- ════════════════════════════════════════════════
