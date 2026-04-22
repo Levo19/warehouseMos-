@@ -21,6 +21,13 @@ function getDashboard() {
   // Índices rápidos
   var stockMap = {};
   stock.forEach(function(s) { stockMap[s.codigoProducto] = parseFloat(s.cantidadDisponible) || 0; });
+  // Indexar también por skuBase para que codigoProductoBase=LEV319 resuelva stock
+  productos.forEach(function(p) {
+    if (!p.skuBase || p.skuBase === '') return;
+    if (stockMap[p.skuBase] !== undefined) return; // ya existe, no pisar
+    var val = stockMap[p.idProducto] || stockMap[p.codigoBarra] || 0;
+    if (val > 0) stockMap[p.skuBase] = val;
+  });
 
   var productosMap = {};
   productos.forEach(function(p) { productosMap[p.idProducto] = p; });
