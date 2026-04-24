@@ -289,6 +289,24 @@ const OfflineManager = (() => {
     guardar(KEYS.GUIA_DETALLE, cache);
   }
 
+  // ── Patch optimista de stock local ───────────────────────────
+  // Aplica delta a cantidadDisponible sin esperar a GAS.
+  // Si el producto no tiene fila en STOCK aún, crea una entrada temporal.
+  function patchStockCache(codigoBarra, delta) {
+    const stock = cargar(KEYS.STOCK) || [];
+    const cb  = String(codigoBarra);
+    const idx = stock.findIndex(s => String(s.codigoProducto) === cb);
+    if (idx >= 0) {
+      stock[idx] = {
+        ...stock[idx],
+        cantidadDisponible: (parseFloat(stock[idx].cantidadDisponible) || 0) + delta
+      };
+    } else {
+      stock.push({ idStock: 'STK_L' + Date.now(), codigoProducto: cb, cantidadDisponible: delta });
+    }
+    guardar(KEYS.STOCK, stock);
+  }
+
   return {
     precargar, sincronizar, encolar, getQueue,
     validarPinLocal, onStatusChange,
@@ -299,7 +317,7 @@ const OfflineManager = (() => {
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     getAdminPin,
-    actualizarDetallesGuia, addDetalleCache, inyectarPreingreso,
+    actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchStockCache,
     getPNCache, setPNCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine

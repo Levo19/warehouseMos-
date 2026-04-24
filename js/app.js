@@ -1079,9 +1079,10 @@ const App = (() => {
       const preingresosChanged = changed.includes('preingresos');
       const stockChanged       = changed.includes('stock') || changed.includes('ajustes') || changed.includes('auditorias');
       const productosChanged   = changed.includes('productos') || changed.includes('equivalencias') || stockChanged;
-      if (currentView === 'guias'       && guiasChanged)     GuiasView.silentRefresh();
+      if (currentView === 'guias'       && guiasChanged)       GuiasView.silentRefresh();
       if (currentView === 'preingresos' && preingresosChanged) PreingresosView.silentRefresh();
-      if (currentView === 'productos'   && productosChanged) ProductosView.silentRefresh();
+      if (currentView === 'productos'   && productosChanged)   ProductosView.silentRefresh();
+      if (currentView === 'envasador'   && stockChanged)       EnvasadorView.silentRefresh();
     });
 
     // Pull-to-refresh en la vista principal
@@ -3548,6 +3549,13 @@ const EnvasadosView = (() => {
     cerrarSheet('sheetEnvasado');
     cargar();
 
+    // Patch stock cache local para actualizar UI de inmediato
+    const factorBase = parseFloat(prod.factorConversionBase) || 0;
+    const cantBase   = producidas * factorBase;
+    if (prodBase?.codigoBarra) OfflineManager.patchStockCache(String(prodBase.codigoBarra), -cantBase);
+    OfflineManager.patchStockCache(String(prod.codigoBarra), producidas);
+    window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+
     // GAS en segundo plano
     API.registrarEnvasado({
       codigoBarra:        prod.codigoBarra,
@@ -3784,7 +3792,13 @@ const EnvasadorView = (() => {
     EnvasadosView.nuevo(idBase, idDerivado);
   }
 
-  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar };
+  function silentRefresh() {
+    _catalog = _buildCatalog();
+    _updateUrgBtn();
+    _render();
+  }
+
+  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh };
 })();
 
 // ════════════════════════════════════════════════
