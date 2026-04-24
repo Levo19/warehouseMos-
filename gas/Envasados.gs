@@ -231,19 +231,21 @@ function _truncate(str, max) {
   return str.length > max ? str.substring(0, max) : str;
 }
 
-// Devuelve la guía ABIERTA de ese tipo creada hoy, o crea una nueva.
-// Garantiza una sola guía por tipo por día.
+// Devuelve la guía de ese tipo creada hoy (cualquier estado), o crea+cierra una nueva.
+// Garantiza una sola guía por tipo por día; detalles se agregan a la existente.
 function _getOCrearGuiaDia(tipo, usuario) {
   var tz  = Session.getScriptTimeZone();
   var hoy = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   var guias = _sheetToObjects(getSheet('GUIAS'));
-  var existente = null;
   for (var i = 0; i < guias.length; i++) {
     var g = guias[i];
-    if (g.tipo !== tipo || g.estado !== 'ABIERTA') continue;
+    if (g.tipo !== tipo) continue;
     var fGuia = g.fecha ? String(g.fecha).substring(0, 10) : '';
-    if (fGuia === hoy) { existente = g; break; }
+    if (fGuia === hoy) return { ok: true, data: { idGuia: g.idGuia } };
   }
-  if (existente) return { ok: true, data: { idGuia: existente.idGuia } };
-  return crearGuia({ tipo: tipo, usuario: usuario, comentario: 'Envasados ' + hoy });
+  // No existe → crear y cerrar de inmediato (sin tocar stock)
+  var res = crearGuia({ tipo: tipo, usuario: usuario, comentario: 'Envasados ' + hoy });
+  if (!res.ok) return res;
+  _cerrarGuiaSinStock(res.data.idGuia);
+  return res;
 }
