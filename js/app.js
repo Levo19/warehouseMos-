@@ -3606,9 +3606,9 @@ const EnvasadorView = (() => {
     );
 
     return bases.map(base => {
-      const bs        = stockMap[base.idProducto] || {};
+      const bs        = stockMap[String(base.codigoBarra)] || {};
       const stockBase = parseFloat(bs.cantidadDisponible || 0);
-      const unidad    = bs.unidad || base.unidad || '';
+      const unidad    = base.unidad || bs.unidad || '';
 
       const derivados = master
         .filter(d =>
@@ -3616,13 +3616,13 @@ const EnvasadorView = (() => {
           d.estado !== '0' && d.estado !== 0
         )
         .map(d => {
-          const factor   = parseFloat(d.factorConversionBase || d.factorConversion || 1);
-          const merma    = parseFloat(d.mermaEsperadaPct || 0);
-          const posibles = Math.floor(stockBase * factor * (1 - merma / 100));
-          const ds       = stockMap[d.idProducto] || {};
-          const stockD   = parseFloat(ds.cantidadDisponible || 0);
+          const factorBase = parseFloat(d.factorConversionBase || 0);
+          const merma      = parseFloat(d.mermaEsperadaPct || 0);
+          const posibles   = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
+          const ds         = stockMap[String(d.codigoBarra)] || {};
+          const stockD     = parseFloat(ds.cantidadDisponible || 0);
           const stockMin = parseFloat(ds.stockMinimo || d.stockMinimo || 0);
-          return { ...d, stockD, stockMin, posibles, factor, merma,
+          return { ...d, stockD, stockMin, posibles, factorBase, merma,
                    urgencia: _urgencia(stockD, stockMin) };
         });
 

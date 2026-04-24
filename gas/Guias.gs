@@ -27,10 +27,13 @@ function getGuia(idGuia) {
 
   guia.detalle = detalles.filter(function(d){ return d.idGuia === idGuia; });
 
-  // Enriquecer con nombres de productos
+  // Enriquecer con nombres de productos (indexar por codigoBarra y por idProducto)
   var productos = _sheetToObjects(getProductosSheet());
   var prodMap = {};
-  productos.forEach(function(p){ prodMap[p.idProducto] = p.descripcion; });
+  productos.forEach(function(p){
+    if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p.descripcion;
+    prodMap[p.idProducto] = p.descripcion;
+  });
   guia.detalle.forEach(function(d){
     d.descripcionProducto = prodMap[d.codigoProducto] || d.codigoProducto;
   });
@@ -111,26 +114,26 @@ function agregarDetalleGuia(params) {
     }
   }
 
-  var nextRow = sheet.getLastRow() + 1;
+  var cbProd   = String(prod.codigoBarra || prod.idProducto);
+  var nextRow  = sheet.getLastRow() + 1;
   sheet.appendRow([
     idDetalle,
     params.idGuia,
-    prod.idProducto,
+    cbProd,
     cantEsperada,
     cantRecibida,
     precioUnit,
     idLote,
     params.observacion || ''
   ]);
-  // Forzar codigoProducto como texto para preservar ceros a la izquierda
-  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(String(prod.idProducto));
+  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(cbProd);
 
   return {
     ok: true,
     data: {
       idDetalle:          idDetalle,
       idGuia:             params.idGuia,
-      codigoProducto:     prod.idProducto,
+      codigoProducto:     cbProd,
       descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
       cantidadEsperada:   cantEsperada,
       cantidadRecibida:   cantRecibida,
