@@ -5877,11 +5877,18 @@ const ProductosView = (() => {
     if (local.length) _renderHistorial(local, true, stockTotal);
 
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
-    if (res.ok && res.data?.length) {
-      _renderHistorial(res.data, false, stockTotal);
-    } else if (!local.length) {
-      document.getElementById('histList').innerHTML =
-        '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+    if (res.ok) {
+      const gasData = res.data || [];
+      // Merge: GAS es autoritativo; agregar registros locales que GAS no incluye (timing o cache stale)
+      const gasIds  = new Set(gasData.map(m => m.idGuia).filter(Boolean));
+      const extras  = local.filter(m => m.idGuia && !gasIds.has(m.idGuia));
+      const merged  = [...gasData, ...extras].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+      if (merged.length) {
+        _renderHistorial(merged, false, stockTotal);
+      } else if (!local.length) {
+        document.getElementById('histList').innerHTML =
+          '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+      }
     }
   }
 

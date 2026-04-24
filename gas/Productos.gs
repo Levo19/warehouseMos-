@@ -341,6 +341,16 @@ function getHistorialStock(params) {
   var codSet  = {};
   codigos.forEach(function(c){ codSet[c] = true; });
 
+  // Ampliar codSet con idProducto de cada codigoBarra para cubrir registros históricos
+  // anteriores al fix (que guardaban idProducto en lugar de codigoBarra)
+  try {
+    var prods = _sheetToObjects(getProductosSheet());
+    codigos.forEach(function(cb) {
+      var p = prods.find(function(p) { return String(p.codigoBarra) === cb; });
+      if (p && p.idProducto) codSet[String(p.idProducto)] = true;
+    });
+  } catch(e) {}
+
   var guias    = _sheetToObjects(getSheet('GUIAS'));
   var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
   var guiaMap  = {};
