@@ -69,12 +69,8 @@ function registrarEnvasado(params) {
   var idEnvasado = _generateId('ENV');
   var idLote     = _generateId('LOT');
 
-  // 5. Guía SALIDA_ENVASADO — descuenta base, se cierra inmediatamente
-  var gsRes = crearGuia({
-    tipo:       'SALIDA_ENVASADO',
-    usuario:    usuario,
-    comentario: 'Envasado ' + prodDerivado.descripcion + ' x' + unidadesReales + ' uds'
-  });
+  // 5. Guía SALIDA_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
+  var gsRes = _getOCrearGuiaDia('SALIDA_ENVASADO', usuario);
   if (!gsRes.ok) return { ok: false, error: 'Error guía salida: ' + gsRes.error };
 
   agregarDetalleGuia({
@@ -84,15 +80,10 @@ function registrarEnvasado(params) {
     cantidadRecibida: cantBase,
     precioUnitario:   0
   });
-  _cerrarGuiaSinStock(gsRes.data.idGuia);
   _actualizarStock(prodBase.codigoBarra, -cantBase);
 
-  // 6. Guía INGRESO_ENVASADO — suma derivado, se cierra inmediatamente
-  var giRes = crearGuia({
-    tipo:       'INGRESO_ENVASADO',
-    usuario:    usuario,
-    comentario: 'Envasado ' + prodDerivado.descripcion + ' x' + unidadesReales + ' uds'
-  });
+  // 6. Guía INGRESO_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
+  var giRes = _getOCrearGuiaDia('INGRESO_ENVASADO', usuario);
   if (!giRes.ok) return { ok: false, error: 'Error guía ingreso: ' + giRes.error };
 
   agregarDetalleGuia({
@@ -104,7 +95,6 @@ function registrarEnvasado(params) {
     idLote:           idLote,
     fechaVencimiento: fechaVencimiento
   });
-  _cerrarGuiaSinStock(giRes.data.idGuia);
   _actualizarStock(prodDerivado.codigoBarra, unidadesReales);
 
   // 7. Registro en hoja ENVASADOS
@@ -239,4 +229,21 @@ function imprimirEtiqueta(params) {
 function _truncate(str, max) {
   if (!str) return '';
   return str.length > max ? str.substring(0, max) : str;
+}
+
+// Devuelve la guía ABIERTA de ese tipo creada hoy, o crea una nueva.
+// Garantiza una sola guía por tipo por día.
+function _getOCrearGuiaDia(tipo, usuario) {
+  var tz  = Session.getScriptTimeZone();
+  var hoy = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var guias = _sheetToObjects(getSheet('GUIAS'));
+  var existente = null;
+  for (var i = 0; i < guias.length; i++) {
+    var g = guias[i];
+    if (g.tipo !== tipo || g.estado !== 'ABIERTA') continue;
+    var fGuia = g.fecha ? String(g.fecha).substring(0, 10) : '';
+    if (fGuia === hoy) { existente = g; break; }
+  }
+  if (existente) return { ok: true, data: { idGuia: existente.idGuia } };
+  return crearGuia({ tipo: tipo, usuario: usuario, comentario: 'Envasados ' + hoy });
 }
