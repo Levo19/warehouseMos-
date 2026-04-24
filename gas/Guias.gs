@@ -100,6 +100,8 @@ function agregarDetalleGuia(params) {
   var cantRecibida  = parseFloat(params.cantidadRecibida !== undefined ? params.cantidadRecibida : cantEsperada);
   var precioUnit    = parseFloat(params.precioUnitario)    || 0;
 
+  var cbProd = String(prod.codigoBarra || prod.idProducto);
+
   // Lote: si viene fechaVencimiento, crear lote inmediatamente
   var idLote = params.idLote || '';
   var fechaVenc = params.fechaVencimiento || '';
@@ -107,14 +109,14 @@ function agregarDetalleGuia(params) {
     if (!idLote) idLote = _generateId('LOT');
     var loteSheet = getSheet('LOTES_VENCIMIENTO');
     if (loteSheet) {
+      var lotNextRow = loteSheet.getLastRow() + 1;
       loteSheet.appendRow([
-        idLote, prod.idProducto, fechaVenc, cantRecibida, cantRecibida,
+        idLote, cbProd, fechaVenc, cantRecibida, cantRecibida,
         params.idGuia, 'ACTIVO', new Date()
       ]);
+      loteSheet.getRange(lotNextRow, 2).setNumberFormat('@').setValue(cbProd);
     }
   }
-
-  var cbProd   = String(prod.codigoBarra || prod.idProducto);
   var nextRow  = sheet.getLastRow() + 1;
   sheet.appendRow([
     idDetalle,
