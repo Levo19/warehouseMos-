@@ -3415,12 +3415,12 @@ const EnvasadosView = (() => {
     }).join('');
   }
 
-  async function nuevo(preIdBase, preIdDerivado) {
+  function nuevo(preIdBase, preIdDerivado) {
     productosMaestro = App.getProductosMaestro();
     derivados = productosMaestro.filter(p => p.codigoProductoBase && p.codigoProductoBase !== '');
 
     const sel = document.getElementById('envProductoDerivado');
-    sel.innerHTML = '<option value="">— Seleccionar producto —</option>';
+    sel.innerHTML = '<option value="">— Seleccionar producto a envasar —</option>';
     derivados.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.idProducto;
@@ -3433,48 +3433,49 @@ const EnvasadosView = (() => {
     fv.setFullYear(fv.getFullYear() + 1);
     document.getElementById('envFechaVenc').value = fv.toISOString().split('T')[0];
 
-    // Reset unidades
-    document.getElementById('envUnidades').value = 0;
+    // Reset
+    document.getElementById('envUnidades').value = 1;
+    document.getElementById('envNombreProducto').textContent = '';
     document.getElementById('envasadoFactorInfo').classList.add('hidden');
 
     if (preIdDerivado) {
       sel.value = preIdDerivado;
       sel.disabled = true;
-      await onDerivadoChange(preIdDerivado);
+      sel.classList.add('hidden');
+      onDerivadoChange(preIdDerivado);
     } else {
       sel.disabled = false;
+      sel.classList.remove('hidden');
     }
 
     abrirSheet('sheetEnvasado');
   }
 
-  async function onDerivadoChange(idDerivado) {
+  function onDerivadoChange(idDerivado) {
     const prod = derivados.find(p => p.idProducto === idDerivado);
     if (!prod) {
+      document.getElementById('envNombreProducto').textContent = '';
       document.getElementById('envasadoFactorInfo').classList.add('hidden');
       return;
     }
 
     const factorBase = parseFloat(prod.factorConversionBase) || 0;
-    const merma      = parseFloat(prod.mermaEsperadaPct)     || 0;
 
-    // Buscar idProducto del base para consulta de stock correcta
     const prodBase = productosMaestro.find(p =>
       (p.skuBase && p.skuBase === prod.codigoProductoBase) ||
       p.idProducto === prod.codigoProductoBase
     );
-    const idBase = prodBase ? prodBase.idProducto : prod.codigoProductoBase;
 
-    const stockRes   = await API.getStockProducto(idBase).catch(() => ({ ok: false }));
-    const stockBase  = stockRes.ok ? stockRes.data.cantidad : 0;
-    const unidadBase = stockRes.ok ? stockRes.data.unidad   : '';
+    // Stock desde caché local usando codigoBarra del base
+    const cbBase     = prodBase ? String(prodBase.codigoBarra) : '';
+    const stockEntry = OfflineManager.getStockCache().find(s => String(s.codigoProducto) === cbBase);
+    const stockBase  = stockEntry ? (parseFloat(stockEntry.cantidadDisponible) || 0) : 0;
+    const unidadBase = prodBase ? (prodBase.unidad || '') : '';
+    const maxProd    = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
 
-    const maxProd = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
-
-    document.getElementById('envFactor').textContent    = factorBase > 0 ? `1 ud = ${factorBase} ${unidadBase}` : '—';
-    document.getElementById('envMerma').textContent     = merma + '%';
-    document.getElementById('envStockBase').textContent = `${fmt(stockBase, 1)} ${unidadBase}`;
-    document.getElementById('envMaxProd').textContent   = `${maxProd} uds`;
+    document.getElementById('envNombreProducto').textContent = prod.descripcion;
+    document.getElementById('envInfoStock').textContent      = `${fmt(stockBase, 1)} ${unidadBase}`;
+    document.getElementById('envInfoMax').textContent        = `${maxProd} uds`;
     document.getElementById('envasadoFactorInfo').classList.remove('hidden');
   }
 
@@ -3533,33 +3534,40 @@ const EnvasadosView = (() => {
       return;
     }
 
-    const prod = derivados.find(p => p.idProducto === idDerivado);
-    const btn  = document.getElementById('btnRegistrarEnvasado');
+    const prod     = derivados.find(p => p.idProducto === idDerivado);
+    const prodBase = productosMaestro.find(p =>
+      (p.skuBase && p.skuBase === prod.codigoProductoBase) ||
+      p.idProducto === prod.codigoProductoBase
+    );
+    const btn = document.getElementById('btnRegistrarEnvasado');
     btn.disabled = true;
-    btn.textContent = '⏳ Guardando...';
+    btn.textContent = 'Registrando...';
 
-    const res = await API.registrarEnvasado({
+    // Optimistic: cerrar modal y avisar de inmediato
+    toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
+    cerrarSheet('sheetEnvasado');
+    cargar();
+
+    // GAS en segundo plano
+    API.registrarEnvasado({
       codigoBarra:        prod.codigoBarra,
       unidadesProducidas: producidas,
       fechaVencimiento:   fechaVenc,
       imprimirEtiquetas:  imprimir,
       usuario:            window.WH_CONFIG.usuario
+    }).then(res => {
+      if (!res.ok) {
+        toast('Error al guardar envasado: ' + res.error, 'danger', 7000);
+      } else if (imprimir && res.data?.impresion && !res.data.impresion.ok) {
+        toast('Impresora: ' + res.data.impresion.error, 'warn', 5000);
+      }
+      OfflineManager.precargarOperacional(true).catch(() => {});
+    }).catch(() => {
+      toast('Sin conexion — reintenta en un momento', 'warn', 5000);
+    }).finally(() => {
+      btn.disabled = false;
+      btn.textContent = 'Registrar envasado';
     });
-
-    btn.disabled = false;
-    btn.textContent = '📦 Registrar + Imprimir etiquetas';
-
-    if (res.ok) {
-      const d = res.data;
-      const impMsg = imprimir
-        ? (d.impresion?.ok ? ` · ${producidas} etiquetas enviadas` : ' · ⚠️ Impresora no lista')
-        : '';
-      toast(`✅ ${producidas} uds registradas${impMsg}`, 'ok', 5000);
-      cerrarSheet('sheetEnvasado');
-      cargar();
-    } else {
-      toast('Error: ' + res.error, 'danger', 5000);
-    }
   }
 
   return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar };

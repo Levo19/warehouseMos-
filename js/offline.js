@@ -190,12 +190,10 @@ const OfflineManager = (() => {
   }
 
   // ── Precarga operacional (guías, preingresos, stock, ajustes, auditorías) ──
-  async function precargarOperacional() {
+  async function precargarOperacional(forzar = false) {
     if (!navigator.onLine) return;
-    // Guardia de concurrencia: si ya hay una llamada en vuelo, esperar a que termine
     if (_opLoading) return;
-    // Throttle: no disparar si la última llamada fue hace menos de OP_MIN_MS
-    if (Date.now() - _lastOpTs < OP_MIN_MS) return;
+    if (!forzar && Date.now() - _lastOpTs < OP_MIN_MS) return;
     _opLoading = true;
     _lastOpTs  = Date.now();
     try {

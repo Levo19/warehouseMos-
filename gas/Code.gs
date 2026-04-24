@@ -524,7 +524,7 @@ function imprimirBienvenida(params) {
 function _actualizarStock(codigo, delta) {
   var sheet = getSheet('STOCK');
   var info = _getStockProducto(codigo);
-  var nuevaCantidad = Math.max(0, info.cantidad + delta);
+  var nuevaCantidad = info.cantidad + delta;
   var now = new Date();
 
   if (info.fila > 0) {
@@ -540,4 +540,19 @@ function _actualizarStock(codigo, delta) {
     sheet.getRange(nextRow, 1, 1, stVals.length).setValues([stVals]);
   }
   return nuevaCantidad;
+}
+
+// Marca una guía CERRADA sin tocar stock (para envasados que gestionan stock directamente)
+function _cerrarGuiaSinStock(idGuia) {
+  var sheet = getSheet('GUIAS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId  = hdrs.indexOf('idGuia');
+  var idxEst = hdrs.indexOf('estado');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === String(idGuia)) {
+      sheet.getRange(i + 1, idxEst + 1).setValue('CERRADA');
+      return;
+    }
+  }
 }

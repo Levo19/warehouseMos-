@@ -65,12 +65,6 @@ function registrarEnvasado(params) {
   }
   var cantBase = unidadesReales * factorBase;
 
-  // 4. Validar stock base suficiente
-  var stockBase = _getStockProducto(prodBase.idProducto).cantidad;
-  if (stockBase < cantBase) {
-    return { ok: false, error: 'Stock insuficiente. Disponible: ' + stockBase + ' ' + prodBase.unidad + ', requerido: ' + cantBase };
-  }
-
   var fecha      = new Date();
   var idEnvasado = _generateId('ENV');
   var idLote     = _generateId('LOT');
@@ -90,7 +84,8 @@ function registrarEnvasado(params) {
     cantidadRecibida: cantBase,
     precioUnitario:   0
   });
-  cerrarGuia(gsRes.data.idGuia, usuario);
+  _cerrarGuiaSinStock(gsRes.data.idGuia);
+  _actualizarStock(prodBase.codigoBarra, -cantBase);
 
   // 6. Guía INGRESO_ENVASADO — suma derivado, se cierra inmediatamente
   var giRes = crearGuia({
@@ -109,7 +104,8 @@ function registrarEnvasado(params) {
     idLote:           idLote,
     fechaVencimiento: fechaVencimiento
   });
-  cerrarGuia(giRes.data.idGuia, usuario);
+  _cerrarGuiaSinStock(giRes.data.idGuia);
+  _actualizarStock(prodDerivado.codigoBarra, unidadesReales);
 
   // 7. Registro en hoja ENVASADOS
   getSheet('ENVASADOS').appendRow([

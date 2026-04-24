@@ -2610,64 +2610,61 @@
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayEnvasado" onclick="cerrarSheet('sheetEnvasado')"></div>
 <div class="bottom-sheet" id="sheetEnvasado">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-1">Registrar Envasado</p>
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
 
-  <!-- Info factor (se llena al seleccionar derivado) -->
-  <div id="envasadoFactorInfo" class="hidden card-sm mb-3 text-sm space-y-1">
-    <div class="flex justify-between">
-      <span class="text-slate-400">Factor conversión:</span>
-      <span id="envFactor" class="font-bold text-blue-400"></span>
+  <!-- Nombre del producto envasado -->
+  <p id="envNombreProducto" class="text-lg font-bold text-center text-white mb-2 min-h-[1.75rem] leading-tight"></p>
+
+  <!-- Selector (oculto si viene pre-seleccionado) -->
+  <select id="envProductoDerivado" class="input mb-3" onchange="EnvasadosView.onDerivadoChange(this.value)">
+    <option value="">— Seleccionar producto a envasar —</option>
+  </select>
+
+  <!-- Info pills: stock base + máx producibles -->
+  <div id="envasadoFactorInfo" class="hidden grid grid-cols-2 gap-2 mb-4">
+    <div class="bg-slate-800 rounded-xl px-3 py-2 text-center">
+      <p class="text-xs text-slate-400 mb-0.5">Stock base</p>
+      <p id="envInfoStock" class="text-sm font-bold text-emerald-400"></p>
     </div>
-    <div class="flex justify-between">
-      <span class="text-slate-400">Merma esperada:</span>
-      <span id="envMerma" class="text-amber-400"></span>
-    </div>
-    <div class="flex justify-between">
-      <span class="text-slate-400">Stock base disp.:</span>
-      <span id="envStockBase" class="text-emerald-400"></span>
-    </div>
-    <div class="flex justify-between font-semibold">
-      <span class="text-slate-300">Máx. producibles:</span>
-      <span id="envMaxProd" class="text-white"></span>
+    <div class="bg-slate-800 rounded-xl px-3 py-2 text-center">
+      <p class="text-xs text-slate-400 mb-0.5">Máx. producibles</p>
+      <p id="envInfoMax" class="text-sm font-bold text-white"></p>
     </div>
   </div>
 
-  <div class="space-y-3">
-    <div>
-      <label class="text-xs text-slate-400">Producto a envasar (derivado)</label>
-      <select id="envProductoDerivado" class="input mt-1" onchange="EnvasadosView.onDerivadoChange(this.value)">
-        <option value="">— Seleccionar —</option>
-      </select>
-    </div>
-    <div>
-      <label class="text-xs text-slate-400">Unidades producidas (real)</label>
-      <!-- Selector rápido + manual -->
-      <div class="flex gap-2 mt-1">
-        <button onclick="EnvasadosView.ajustarUnidades(-10)" class="btn btn-outline px-3 text-lg font-bold">−</button>
-        <input id="envUnidades" class="input text-center font-bold text-lg flex-1" type="number" min="1" value="0"/>
-        <button onclick="EnvasadosView.ajustarUnidades(+10)" class="btn btn-outline px-3 text-lg font-bold">+</button>
-      </div>
-      <div class="flex gap-2 mt-2 overflow-x-auto">
-        <button onclick="EnvasadosView.setUnidades(10)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">10</button>
-        <button onclick="EnvasadosView.setUnidades(25)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">25</button>
-        <button onclick="EnvasadosView.setUnidades(50)"  class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">50</button>
-        <button onclick="EnvasadosView.setUnidades(100)" class="btn btn-outline text-xs py-1 px-3 flex-shrink-0">100</button>
-      </div>
-    </div>
-    <div>
-      <label class="text-xs text-slate-400">Fecha de vencimiento (del producto envasado)</label>
-      <input id="envFechaVenc" class="input mt-1" type="date"/>
-    </div>
-    <div class="flex items-center gap-2">
+  <!-- Cantidad grande y centrada -->
+  <p class="text-xs text-slate-400 text-center mb-2">Unidades a envasar</p>
+  <div class="flex items-center gap-3 mb-3">
+    <button onclick="EnvasadosView.ajustarUnidades(-1)"
+            class="btn btn-outline flex-shrink-0 w-14 h-14 text-2xl font-bold">−</button>
+    <input id="envUnidades"
+           class="input text-center font-bold text-3xl flex-1 py-3"
+           type="number" min="1" value="1"/>
+    <button onclick="EnvasadosView.ajustarUnidades(+1)"
+            class="btn btn-outline flex-shrink-0 w-14 h-14 text-2xl font-bold">+</button>
+  </div>
+
+  <!-- Presets rápidos full-width -->
+  <div class="grid grid-cols-4 gap-2 mb-4">
+    <button onclick="EnvasadosView.setUnidades(10)"  class="btn btn-outline text-sm py-2">10</button>
+    <button onclick="EnvasadosView.setUnidades(25)"  class="btn btn-outline text-sm py-2">25</button>
+    <button onclick="EnvasadosView.setUnidades(50)"  class="btn btn-outline text-sm py-2">50</button>
+    <button onclick="EnvasadosView.setUnidades(100)" class="btn btn-outline text-sm py-2">100</button>
+  </div>
+
+  <!-- Fecha y checkbox en línea -->
+  <div class="flex items-center gap-3 mb-4">
+    <input id="envFechaVenc" class="input flex-1" type="date"/>
+    <label class="flex items-center gap-2 text-sm text-slate-300 whitespace-nowrap cursor-pointer">
       <input id="envImprimirEtiq" type="checkbox" checked class="w-4 h-4"/>
-      <label class="text-sm text-slate-300">Imprimir etiquetas adhesivas al guardar</label>
-    </div>
-    <button id="btnRegistrarEnvasado" onclick="EnvasadosView.registrar()"
-            class="btn btn-primary btn-lg w-full">
-      📦 Registrar + Imprimir etiquetas
-    </button>
+      Imprimir
+    </label>
   </div>
+
+  <button id="btnRegistrarEnvasado" onclick="EnvasadosView.registrar()"
+          class="btn btn-primary btn-lg w-full">
+    Registrar envasado
+  </button>
 </div>
 
 <!-- ════════════════════════════════════════════════
