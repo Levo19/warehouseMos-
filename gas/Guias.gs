@@ -413,7 +413,7 @@ function crearDespachoRapido(params) {
 }
 
 function _validarTipoGuia(tipo) {
-  var validos = ['INGRESO_PROVEEDOR','INGRESO_JEFATURA',
+  var validos = ['INGRESO_PROVEEDOR','INGRESO_JEFATURA','INGRESO_ENVASADO',
                  'SALIDA_DEVOLUCION','SALIDA_ZONA','SALIDA_JEFATURA',
                  'SALIDA_ENVASADO','SALIDA_MERMA'];
   return validos.indexOf(tipo) >= 0;

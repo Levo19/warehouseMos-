@@ -486,20 +486,47 @@ const Session = (() => {
   let cierreReporte = null;
   const MIN_INACTIVIDAD = 5; // minutos (se sobreescribe desde config)
 
+  function _hoy() {
+    return new Date().toISOString().split('T')[0];
+  }
+
   async function init() {
-    // Verificar sesión guardada
     const saved = _cargarSesion();
+
     if (saved) {
+      const hoy      = _hoy();
+      const fechaDia = saved.fechaDia || null;
+
+      if (fechaDia === hoy) {
+        // Misma jornada en este dispositivo → restaurar y bloquear
+        sesionActual = saved;
+        _aplicarSesion();
+        bloquear();
+        return;
+      }
+
+      if (fechaDia) {
+        // Sesión de otro día quedó abierta → cerrar en GAS y pedir login
+        const nombre = saved.nombre || 'usuario';
+        if (navigator.onLine && saved.idSesion && !saved.idSesion.startsWith('LOCAL_')) {
+          API.cerrarTurno({ idSesion: saved.idSesion, forzado: true }).catch(() => {});
+        }
+        _limpiarSesion();
+        await mostrarLogin();
+        setTimeout(() => toast(`⚠ La sesión de ${nombre} del ${fechaDia} quedó abierta. Se cerró automáticamente.`, 'warn', 7000), 800);
+        return;
+      }
+
+      // Sesión legacy sin fechaDia → validar con GAS
       const res = await API.getSesionActiva(saved.idSesion).catch(() => ({ ok: false }));
       if (res.ok) {
         sesionActual = saved;
         _aplicarSesion();
         return;
-      } else {
-        _limpiarSesion();
       }
+      _limpiarSesion();
     }
-    // Sin sesión → mostrar login
+
     await mostrarLogin();
   }
 
@@ -563,7 +590,7 @@ const Session = (() => {
     let localOp = OfflineManager.validarPinLocal(pinIntento);
     console.log('[Login] validarPinLocal result:', localOp ? localOp.nombre : null);
 
-    // Sin caché → validar directo en GAS (solo si hay red)
+    // Sin caché → esperar GAS (nuevo dispositivo o sin datos locales)
     if (!localOp && navigator.onLine) {
       const res = await API.loginPersonal(pinIntento);
       if (!res.ok || res.offline) {
@@ -575,7 +602,12 @@ const Session = (() => {
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
       _aplicarSesion();
-      _postLogin(res.data.sesionAnterior || null);
+      if (res.data.yaEnSesionHoy) {
+        // Continuación en nuevo dispositivo → pantalla de bloqueo
+        bloquear();
+      } else {
+        _postLogin(res.data.sesionAnterior || null, res.data.bienvenidaImpresa === true);
+      }
       return;
     }
 
@@ -585,7 +617,7 @@ const Session = (() => {
       return;
     }
 
-    // 2. Sesión optimista inmediata — entra al instante
+    // 2. Sesión optimista inmediata con caché local
     sesionActual = {
       idSesion:   'LOCAL_' + Date.now(),
       idPersonal: localOp.idPersonal,
@@ -598,32 +630,39 @@ const Session = (() => {
     _guardarSesion(sesionActual);
     document.getElementById('loginScreen').style.display = 'none';
     _aplicarSesion();
-    _postLogin(null); // aviso de sesión anterior solo si GAS responde
+    _postLogin(null, true); // ticket se decide solo tras respuesta GAS
 
-    // 3. Confirmar sesión con GAS en segundo plano
+    // 3. Confirmar con GAS en segundo plano
     API.loginPersonal(pinIntento).then(res => {
       if (res.ok && !res.offline) {
         sesionActual = { ...sesionActual, ...res.data };
         window.WH_CONFIG.idSesion = sesionActual.idSesion;
         _guardarSesion(sesionActual);
-        if (res.data.sesionAnterior) _mostrarAvisoSesionAnterior(res.data.sesionAnterior);
+        if (res.data.yaEnSesionHoy) {
+          bloquear();
+        } else {
+          if (res.data.sesionAnterior) _mostrarAvisoSesionAnterior(res.data.sesionAnterior);
+          if (!res.data.bienvenidaImpresa) _imprimirTicketBienvenida();
+        }
       }
     }).catch(() => {});
   }
 
-  // Acciones post-login: toast + aviso sesión anterior + ticket bienvenida
-  function _postLogin(sesionAnterior) {
+  // bienvenidaImpresa: true = ya se imprimió el ticket hoy → no imprimir
+  function _postLogin(sesionAnterior, bienvenidaImpresa) {
     toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
     if (sesionAnterior) _mostrarAvisoSesionAnterior(sesionAnterior);
-    // Ticket de bienvenida (fire-and-forget, no bloquea)
-    if (navigator.onLine) {
-      API.imprimirBienvenida({
-        nombre:     sesionActual.nombre,
-        apellido:   sesionActual.apellido,
-        rol:        sesionActual.rol,
-        horaInicio: sesionActual.horaInicio
-      }).catch(() => {});
-    }
+    if (!bienvenidaImpresa) _imprimirTicketBienvenida();
+  }
+
+  function _imprimirTicketBienvenida() {
+    if (!navigator.onLine) return;
+    API.imprimirBienvenida({
+      nombre:     sesionActual.nombre,
+      apellido:   sesionActual.apellido,
+      rol:        sesionActual.rol,
+      horaInicio: sesionActual.horaInicio
+    }).catch(() => {});
   }
 
   function _mostrarAvisoSesionAnterior(fecha) {
@@ -906,7 +945,11 @@ const Session = (() => {
   }
 
   function _guardarSesion(ses) {
-    localStorage.setItem('wh_sesion', JSON.stringify({ ...ses, fechaGuardado: new Date().toISOString() }));
+    localStorage.setItem('wh_sesion', JSON.stringify({
+      ...ses,
+      fechaDia:      _hoy(),
+      fechaGuardado: new Date().toISOString()
+    }));
   }
 
   function _cargarSesion() {
@@ -3381,13 +3424,25 @@ const EnvasadosView = (() => {
     derivados.forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.idProducto;
-      opt.textContent = p.descripcion + (preIdBase ? '' : ' (base: ' + p.codigoProductoBase + ')');
+      opt.textContent = p.descripcion;
       sel.appendChild(opt);
     });
 
+    // Auto-fill fecha vencimiento = hoy + 12 meses
+    const fv = new Date();
+    fv.setFullYear(fv.getFullYear() + 1);
+    document.getElementById('envFechaVenc').value = fv.toISOString().split('T')[0];
+
+    // Reset unidades
+    document.getElementById('envUnidades').value = 0;
+    document.getElementById('envasadoFactorInfo').classList.add('hidden');
+
     if (preIdDerivado) {
       sel.value = preIdDerivado;
+      sel.disabled = true;
       await onDerivadoChange(preIdDerivado);
+    } else {
+      sel.disabled = false;
     }
 
     abrirSheet('sheetEnvasado');
@@ -3400,24 +3455,27 @@ const EnvasadosView = (() => {
       return;
     }
 
-    const factor  = parseFloat(prod.factorConversion)  || 1;
-    const merma   = parseFloat(prod.mermaEsperadaPct)   || 0;
+    const factorBase = parseFloat(prod.factorConversionBase) || 0;
+    const merma      = parseFloat(prod.mermaEsperadaPct)     || 0;
 
-    // Cargar stock base en tiempo real
-    const stockRes = await API.getStockProducto(prod.codigoProductoBase).catch(() => ({ ok: false }));
-    const stockBase = stockRes.ok ? stockRes.data.cantidad : 0;
-    const unidadBase = stockRes.ok ? stockRes.data.unidad : '';
+    // Buscar idProducto del base para consulta de stock correcta
+    const prodBase = productosMaestro.find(p =>
+      (p.skuBase && p.skuBase === prod.codigoProductoBase) ||
+      p.idProducto === prod.codigoProductoBase
+    );
+    const idBase = prodBase ? prodBase.idProducto : prod.codigoProductoBase;
 
-    document.getElementById('envFactor').textContent       = `${factor} uds/${unidadBase || 'unidad base'}`;
-    document.getElementById('envMerma').textContent        = merma + '%';
-    document.getElementById('envStockBase').textContent    = `${fmt(stockBase, 1)} ${unidadBase}`;
-    document.getElementById('envUnidadBase').textContent   = unidadBase || 'unidades';
-    const maxProd = Math.floor(stockBase * factor * (1 - merma / 100));
-    document.getElementById('envMaxProd').textContent      = `${maxProd} uds`;
+    const stockRes   = await API.getStockProducto(idBase).catch(() => ({ ok: false }));
+    const stockBase  = stockRes.ok ? stockRes.data.cantidad : 0;
+    const unidadBase = stockRes.ok ? stockRes.data.unidad   : '';
+
+    const maxProd = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
+
+    document.getElementById('envFactor').textContent    = factorBase > 0 ? `1 ud = ${factorBase} ${unidadBase}` : '—';
+    document.getElementById('envMerma').textContent     = merma + '%';
+    document.getElementById('envStockBase').textContent = `${fmt(stockBase, 1)} ${unidadBase}`;
+    document.getElementById('envMaxProd').textContent   = `${maxProd} uds`;
     document.getElementById('envasadoFactorInfo').classList.remove('hidden');
-
-    // Sugerir cantidad base
-    document.getElementById('envCantBase').placeholder = `Máx. ${fmt(stockBase, 1)} ${unidadBase}`;
   }
 
   function calcularProyeccion() {
@@ -3458,23 +3516,20 @@ const EnvasadosView = (() => {
   function ajustarUnidades(delta) {
     const el = document.getElementById('envUnidades');
     el.value = Math.max(0, (parseInt(el.value) || 0) + delta);
-    actualizarResumen();
   }
 
   function setUnidades(n) {
     document.getElementById('envUnidades').value = n;
-    actualizarResumen();
   }
 
   async function registrar() {
     const idDerivado = document.getElementById('envProductoDerivado').value;
-    const cantBase   = parseFloat(document.getElementById('envCantBase').value)   || 0;
-    const producidas = parseInt(document.getElementById('envUnidades').value)     || 0;
+    const producidas = parseInt(document.getElementById('envUnidades').value) || 0;
     const fechaVenc  = document.getElementById('envFechaVenc').value;
     const imprimir   = document.getElementById('envImprimirEtiq').checked;
 
-    if (!idDerivado || cantBase <= 0 || producidas <= 0) {
-      toast('Completa todos los campos', 'warn');
+    if (!idDerivado || producidas <= 0) {
+      toast('Selecciona producto e ingresa las unidades producidas', 'warn');
       return;
     }
 
@@ -3484,13 +3539,11 @@ const EnvasadosView = (() => {
     btn.textContent = '⏳ Guardando...';
 
     const res = await API.registrarEnvasado({
-      codigoProductoBase:    prod.codigoProductoBase,
-      cantidadBase:          cantBase,
-      codigoProductoEnvasado: idDerivado,
-      unidadesProducidas:    producidas,
-      fechaVencimiento:      fechaVenc,
-      imprimirEtiquetas:     imprimir,
-      usuario:               window.WH_CONFIG.usuario
+      codigoBarra:        prod.codigoBarra,
+      unidadesProducidas: producidas,
+      fechaVencimiento:   fechaVenc,
+      imprimirEtiquetas:  imprimir,
+      usuario:            window.WH_CONFIG.usuario
     });
 
     btn.disabled = false;
@@ -3501,7 +3554,7 @@ const EnvasadosView = (() => {
       const impMsg = imprimir
         ? (d.impresion?.ok ? ` · ${producidas} etiquetas enviadas` : ' · ⚠️ Impresora no lista')
         : '';
-      toast(`✅ ${producidas} uds registradas. Efic: ${d.eficienciaPct}%${impMsg}`, 'ok', 5000);
+      toast(`✅ ${producidas} uds registradas${impMsg}`, 'ok', 5000);
       cerrarSheet('sheetEnvasado');
       cargar();
     } else {

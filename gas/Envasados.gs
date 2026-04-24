@@ -31,152 +31,129 @@ function getPendientesEnvasado() {
 //   4. Imprime etiquetas adhesivas vía PrintNode
 // ============================================================
 function registrarEnvasado(params) {
-  var codigoBase       = params.codigoProductoBase;
-  var cantBase         = parseFloat(params.cantidadBase) || 0;
-  var codigoDerivado   = params.codigoProductoEnvasado;
+  var codigoBarra      = String(params.codigoBarra || '').trim();
   var unidadesReales   = parseInt(params.unidadesProducidas) || 0;
   var fechaVencimiento = params.fechaVencimiento || '';
   var usuario          = params.usuario || 'sistema';
-  var imprimirEtiq     = params.imprimirEtiquetas !== false; // default true
+  var imprimirEtiq     = params.imprimirEtiquetas !== false;
 
-  if (!codigoBase || !codigoDerivado || cantBase <= 0 || unidadesReales <= 0) {
-    return { ok: false, error: 'Faltan datos: codigoProductoBase, codigoProductoEnvasado, cantidadBase, unidadesProducidas' };
+  if (!codigoBarra || unidadesReales <= 0) {
+    return { ok: false, error: 'Faltan datos: codigoBarra, unidadesProducidas' };
   }
 
-  // Cargar producto derivado para calcular factor
   var productos = _sheetToObjects(getProductosSheet());
-  var prodDerivado = productos.find(function(p){ return p.idProducto === codigoDerivado; });
-  var prodBase     = productos.find(function(p){ return p.idProducto === codigoBase; });
-  if (!prodDerivado) return { ok: false, error: 'Producto derivado no encontrado: ' + codigoDerivado };
-  if (!prodBase)     return { ok: false, error: 'Producto base no encontrado: ' + codigoBase };
 
-  // Validar stock base suficiente
-  var stockBaseActual = _getStockProducto(codigoBase).cantidad;
-  if (stockBaseActual < cantBase) {
-    return {
-      ok: false,
-      error: 'Stock insuficiente. Disponible: ' + stockBaseActual + ' ' + prodBase.unidad +
-             ', solicitado: ' + cantBase
-    };
+  // 1. Buscar derivado por codigoBarra
+  var prodDerivado = productos.find(function(p) {
+    return String(p.codigoBarra).trim() === codigoBarra;
+  });
+  if (!prodDerivado) return { ok: false, error: 'Producto envasado no encontrado: ' + codigoBarra };
+
+  // 2. Buscar base por skuBase === codigoProductoBase del derivado (fallback idProducto)
+  var claveBase = String(prodDerivado.codigoProductoBase || '').trim();
+  if (!claveBase) return { ok: false, error: 'El producto no tiene codigoProductoBase configurado' };
+
+  var prodBase = productos.find(function(p) {
+    return String(p.skuBase).trim() === claveBase || String(p.idProducto).trim() === claveBase;
+  });
+  if (!prodBase) return { ok: false, error: 'Producto base no encontrado: ' + claveBase };
+
+  // 3. Calcular cantidad base consumida: unidades × factorConversionBase
+  var factorBase = parseFloat(prodDerivado.factorConversionBase) || 0;
+  if (factorBase <= 0) {
+    return { ok: false, error: 'factorConversionBase no configurado para: ' + prodDerivado.descripcion };
+  }
+  var cantBase = unidadesReales * factorBase;
+
+  // 4. Validar stock base suficiente
+  var stockBase = _getStockProducto(prodBase.idProducto).cantidad;
+  if (stockBase < cantBase) {
+    return { ok: false, error: 'Stock insuficiente. Disponible: ' + stockBase + ' ' + prodBase.unidad + ', requerido: ' + cantBase };
   }
 
-  // factorConversionBase = unidades WH por 1 unidad de granel (transformación)
-  // factorConversion = fallback para compatibilidad con registros previos
-  var factor    = parseFloat(prodDerivado.factorConversionBase) || parseFloat(prodDerivado.factorConversion) || 1;
-  var merma     = parseFloat(prodDerivado.mermaEsperadaPct) || 0;
-  var unidadesEsperadas = Math.floor(cantBase * factor * (1 - merma / 100));
-  var mermaReal         = Math.max(0, unidadesEsperadas - unidadesReales);
-  var eficiencia        = unidadesEsperadas > 0
-    ? Math.round((unidadesReales / unidadesEsperadas) * 1000) / 10
-    : 100;
-
-  var fecha = new Date();
+  var fecha      = new Date();
   var idEnvasado = _generateId('ENV');
+  var idLote     = _generateId('LOT');
 
-  // ── Guía SALIDA (descuenta base) ───────────────────────────
-  var resultGS = crearGuia({
+  // 5. Guía SALIDA_ENVASADO — descuenta base, se cierra inmediatamente
+  var gsRes = crearGuia({
     tipo:       'SALIDA_ENVASADO',
     usuario:    usuario,
-    comentario: 'Auto: envasado ' + prodDerivado.descripcion + ' (' + unidadesReales + ' uds)'
+    comentario: 'Envasado ' + prodDerivado.descripcion + ' x' + unidadesReales + ' uds'
   });
-  if (!resultGS.ok) return { ok: false, error: 'Error al crear guía salida: ' + resultGS.error };
-  var idGuiaSalida = resultGS.data.idGuia;
+  if (!gsRes.ok) return { ok: false, error: 'Error guía salida: ' + gsRes.error };
 
   agregarDetalleGuia({
-    idGuia:           idGuiaSalida,
-    codigoProducto:   codigoBase,
+    idGuia:           gsRes.data.idGuia,
+    codigoProducto:   prodBase.idProducto,
     cantidadEsperada: cantBase,
     cantidadRecibida: cantBase,
     precioUnitario:   0
   });
-  cerrarGuia(idGuiaSalida, usuario);
+  cerrarGuia(gsRes.data.idGuia, usuario);
 
-  // ── Guía INGRESO (agrega derivado) ─────────────────────────
-  var resultGI = crearGuia({
-    tipo:       'INGRESO_JEFATURA',
+  // 6. Guía INGRESO_ENVASADO — suma derivado, se cierra inmediatamente
+  var giRes = crearGuia({
+    tipo:       'INGRESO_ENVASADO',
     usuario:    usuario,
-    comentario: 'Auto: ingreso envasado ' + prodDerivado.descripcion
+    comentario: 'Envasado ' + prodDerivado.descripcion + ' x' + unidadesReales + ' uds'
   });
-  if (!resultGI.ok) return { ok: false, error: 'Error al crear guía ingreso: ' + resultGI.error };
-  var idGuiaIngreso = resultGI.data.idGuia;
+  if (!giRes.ok) return { ok: false, error: 'Error guía ingreso: ' + giRes.error };
 
-  var idLoteNuevo = 'LOT' + new Date().getTime();
   agregarDetalleGuia({
-    idGuia:           idGuiaIngreso,
-    codigoProducto:   codigoDerivado,
-    cantidadEsperada: unidadesEsperadas,
+    idGuia:           giRes.data.idGuia,
+    codigoProducto:   prodDerivado.idProducto,
+    cantidadEsperada: unidadesReales,
     cantidadRecibida: unidadesReales,
     precioUnitario:   0,
-    idLote:           idLoteNuevo
+    idLote:           idLote,
+    fechaVencimiento: fechaVencimiento
   });
-  cerrarGuia(idGuiaIngreso, usuario);
+  cerrarGuia(giRes.data.idGuia, usuario);
 
-  // Actualizar fecha de vencimiento en el lote si se proporcionó
-  if (fechaVencimiento) {
-    var lotesSheet = getSheet('LOTES_VENCIMIENTO');
-    var lotesData  = lotesSheet.getDataRange().getValues();
-    var hdrs = lotesData[0];
-    var idxLoteId = hdrs.indexOf('idLote');
-    var idxFV     = hdrs.indexOf('fechaVencimiento');
-    for (var i = 1; i < lotesData.length; i++) {
-      if (lotesData[i][idxLoteId] === idLoteNuevo) {
-        lotesSheet.getRange(i + 1, idxFV + 1).setValue(new Date(fechaVencimiento));
-        break;
-      }
-    }
-  }
-
-  // ── Registro ENVASADOS ─────────────────────────────────────
+  // 7. Registro en hoja ENVASADOS
   getSheet('ENVASADOS').appendRow([
     idEnvasado,
-    codigoBase,
+    prodBase.idProducto,
     cantBase,
     prodBase.unidad,
-    codigoDerivado,
-    unidadesEsperadas,
+    prodDerivado.idProducto,
     unidadesReales,
-    mermaReal,
-    eficiencia,
+    unidadesReales,
+    0,
+    100,
     fecha,
     usuario,
     'COMPLETADO',
-    idGuiaSalida,
-    idGuiaIngreso,
-    params.observacion || ''
+    gsRes.data.idGuia,
+    giRes.data.idGuia,
+    ''
   ]);
 
-  // ── Registrar actividad en desempeño ──────────────────────
-  if (params.idSesion) {
-    registrarActividad(params.idSesion, 'ENVASADO_REGISTRADO', 1);
-    registrarActividad(params.idSesion, 'UNIDADES_ENVASADAS', unidadesReales);
-  }
-
-  // ── Imprimir etiquetas adhesivas ───────────────────────────
+  // 8. Imprimir etiquetas
   var resultImpresion = null;
   if (imprimirEtiq) {
     resultImpresion = _imprimirEtiquetasEnvasado({
-      codigoDerivado:   codigoDerivado,
+      codigoDerivado:   prodDerivado.idProducto,
       descripcion:      prodDerivado.descripcion,
       codigoBarra:      prodDerivado.codigoBarra,
       cantidad:         prodDerivado.unidad,
       unidades:         unidadesReales,
       fechaVencimiento: fechaVencimiento,
-      idLote:           idLoteNuevo
+      idLote:           idLote
     });
   }
 
   return {
     ok: true,
     data: {
-      idEnvasado:       idEnvasado,
-      idGuiaSalida:     idGuiaSalida,
-      idGuiaIngreso:    idGuiaIngreso,
-      unidadesEsperadas:unidadesEsperadas,
-      unidadesProducidas:unidadesReales,
-      mermaReal:        mermaReal,
-      eficienciaPct:    eficiencia,
-      idLote:           idLoteNuevo,
-      impresion:        resultImpresion
+      idEnvasado:        idEnvasado,
+      idGuiaSalida:      gsRes.data.idGuia,
+      idGuiaIngreso:     giRes.data.idGuia,
+      cantidadBase:      cantBase,
+      unidadesProducidas: unidadesReales,
+      idLote:            idLote,
+      impresion:         resultImpresion
     }
   };
 }

@@ -1073,6 +1073,93 @@
     pointer-events:all;
   }
   </style>
+
+  <style>
+  /* ── Banner de nueva versión disponible ── */
+  #whUpdateBanner {
+    position: fixed;
+    bottom: 76px;
+    left: 50%;
+    transform: translateX(-50%) translateY(140px);
+    z-index: 9997;
+    width: calc(100% - 32px);
+    max-width: 420px;
+    transition: transform .45s cubic-bezier(.34,1.56,.64,1);
+    pointer-events: none;
+  }
+  #whUpdateBanner.visible {
+    transform: translateX(-50%) translateY(0);
+    pointer-events: all;
+  }
+  .wh-upd-banner-inner {
+    background: linear-gradient(135deg,#0f2d52,#1e293b);
+    border: 1px solid #3b82f6;
+    border-radius: 16px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    box-shadow: 0 8px 32px rgba(59,130,246,.35);
+    animation: bannerGlow 3s ease-in-out infinite;
+  }
+  @keyframes bannerGlow {
+    0%,100% { box-shadow: 0 8px 32px rgba(59,130,246,.35); }
+    50%      { box-shadow: 0 8px 44px rgba(59,130,246,.65); }
+  }
+  .wh-upd-banner-icon {
+    font-size: 1.4rem;
+    flex-shrink: 0;
+    animation: rocketBounce 1.8s ease-in-out infinite;
+  }
+  @keyframes rocketBounce {
+    0%,100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
+  }
+  .wh-upd-banner-texts { flex: 1; min-width: 0; }
+  .wh-upd-banner-title {
+    font-size: .82rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .wh-upd-banner-sub {
+    font-size: .72rem;
+    color: #64748b;
+    margin-top: 2px;
+  }
+  .wh-upd-banner-btn {
+    background: linear-gradient(135deg,#2563eb,#3b82f6);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: .78rem;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+    letter-spacing: .02em;
+    animation: btnPulse 2.2s ease-in-out infinite;
+    transition: transform .12s, opacity .12s;
+  }
+  @keyframes btnPulse {
+    0%,100% { transform: scale(1); }
+    50%      { transform: scale(1.06); }
+  }
+  .wh-upd-banner-btn:active { transform: scale(.93) !important; opacity: .85; }
+  .wh-upd-banner-dismiss {
+    background: none;
+    border: none;
+    color: #475569;
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+  }
+  </style>
   <!-- ── PWA Install prompt ── -->
   <script>
   (function() {
@@ -1102,34 +1189,62 @@
   <script>
   (function() {
     if (!('serviceWorker' in navigator)) return;
-    let _reg = null;
+    let _reg            = null;
+    let _waitingWorker  = null;
 
     function _showOverlay() {
       const el = document.getElementById('whUpdateOverlay');
       if (el) el.classList.add('visible');
     }
 
-    function _activateWaiting(worker) {
-      _showOverlay();
-      worker.postMessage('SKIP_WAITING');
+    function _showUpdateBanner(worker) {
+      _waitingWorker = worker;
+      // Mostrar versión nueva desde version.json (siempre red)
+      fetch('./version.json?t=' + Date.now())
+        .then(r => r.json())
+        .then(v => {
+          const sub = document.getElementById('whUpdateBannerSub');
+          if (sub) sub.textContent = 'v' + v.version + (v.build ? ' · ' + v.build : '');
+        }).catch(() => {
+          const sub = document.getElementById('whUpdateBannerSub');
+          if (sub) sub.textContent = 'Lista para instalar';
+        });
+      const banner = document.getElementById('whUpdateBanner');
+      if (banner) setTimeout(() => banner.classList.add('visible'), 200);
     }
+
+    function _hideBanner() {
+      const banner = document.getElementById('whUpdateBanner');
+      if (banner) banner.classList.remove('visible');
+    }
+
+    window._applyUpdate = function() {
+      if (!_waitingWorker) return;
+      _hideBanner();
+      _showOverlay();
+      _waitingWorker.postMessage('SKIP_WAITING');
+    };
+
+    window._dismissUpdate = function() {
+      _hideBanner();
+    };
 
     window._SWCheck = async function() {
       if (!_reg) return;
       try {
         await _reg.update();
-        if (_reg.waiting) _activateWaiting(_reg.waiting);
+        if (_reg.waiting) _showUpdateBanner(_reg.waiting);
       } catch(e) {}
     };
 
     navigator.serviceWorker.register('./sw.js').then(reg => {
       _reg = reg;
-      if (reg.waiting) { _activateWaiting(reg.waiting); return; }
+      if (reg.waiting) { _showUpdateBanner(reg.waiting); return; }
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
         nw.addEventListener('statechange', () => {
           if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-            _activateWaiting(nw);
+            _showUpdateBanner(nw);
           }
         });
       });
@@ -1143,6 +1258,19 @@
   </script>
 </head>
 <body class="pb-20">
+<!-- Banner nueva versión disponible -->
+<div id="whUpdateBanner" role="alert" aria-live="polite">
+  <div class="wh-upd-banner-inner">
+    <span class="wh-upd-banner-icon">🚀</span>
+    <div class="wh-upd-banner-texts">
+      <p class="wh-upd-banner-title">Nueva versión disponible</p>
+      <p class="wh-upd-banner-sub" id="whUpdateBannerSub">Cargando…</p>
+    </div>
+    <button class="wh-upd-banner-btn" onclick="window._applyUpdate()">Actualizar</button>
+    <button class="wh-upd-banner-dismiss" onclick="window._dismissUpdate()" aria-label="Cerrar">✕</button>
+  </div>
+</div>
+
 <!-- Update overlay (fuera del app) -->
 <div id="whUpdateOverlay">
   <div class="wh-upd-ring"></div>
@@ -2513,15 +2641,6 @@
       </select>
     </div>
     <div>
-      <label class="text-xs text-slate-400">Cantidad base usada (<span id="envUnidadBase">unidades</span>)</label>
-      <div class="flex gap-2 mt-1">
-        <button onclick="(function(){var i=document.getElementById('envCantBase');var v=Math.max(0.5,(parseFloat(i.value)||1)-0.5);i.value=v;EnvasadosView.calcularProyeccion();})()" class="btn btn-outline px-3 text-lg font-bold">−</button>
-        <input id="envCantBase" class="input text-center font-bold flex-1" type="number" step="0.5" min="0.5"
-               inputmode="decimal" oninput="EnvasadosView.calcularProyeccion()"/>
-        <button onclick="(function(){var i=document.getElementById('envCantBase');var v=(parseFloat(i.value)||0)+0.5;i.value=v;EnvasadosView.calcularProyeccion();})()" class="btn btn-outline px-3 text-lg font-bold">+</button>
-      </div>
-    </div>
-    <div>
       <label class="text-xs text-slate-400">Unidades producidas (real)</label>
       <!-- Selector rápido + manual -->
       <div class="flex gap-2 mt-1">
@@ -2543,13 +2662,6 @@
     <div class="flex items-center gap-2">
       <input id="envImprimirEtiq" type="checkbox" checked class="w-4 h-4"/>
       <label class="text-sm text-slate-300">Imprimir etiquetas adhesivas al guardar</label>
-    </div>
-    <div id="envResumen" class="hidden card-sm text-sm space-y-1 border border-blue-900">
-      <p class="font-semibold text-blue-300">Resumen del lote</p>
-      <div class="flex justify-between"><span class="text-slate-400">Esperadas:</span><span id="rEsperadas">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-400">Producidas:</span><span id="rProducidas">—</span></div>
-      <div class="flex justify-between"><span class="text-slate-400">Merma real:</span><span id="rMerma">—</span></div>
-      <div class="flex justify-between font-bold"><span class="text-slate-300">Eficiencia:</span><span id="rEficiencia">—</span></div>
     </div>
     <button id="btnRegistrarEnvasado" onclick="EnvasadosView.registrar()"
             class="btn btn-primary btn-lg w-full">

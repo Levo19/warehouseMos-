@@ -8,47 +8,65 @@ function loginPersonal(params) {
   var pin = String(params.pin || '').trim();
   if (!pin) return { ok: false, error: 'PIN requerido' };
 
-  // Solo operadores de warehouseMos activos (appOrigen=warehouseMos, estado=1)
   var personal = _getPersonalWH();
   var operador = personal.find(function(p) {
     return String(p.pin) === pin;
   });
   if (!operador) return { ok: false, error: 'PIN incorrecto' };
 
-  // Cerrar sesiones anteriores y capturar si había una de otro día
+  var tz       = Session.getScriptTimeZone();
+  var ahora    = new Date();
+  var fechaStr = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
+  var horaStr  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
+
+  // ── Revisar si ya existe sesión hoy ───────────────────────────
+  var todasSesiones  = _sheetToObjects(getSheet('SESIONES'));
+  var sesionHoyActiva = null;
+  var tuvoPreviaHoy   = false;
+
+  for (var si = 0; si < todasSesiones.length; si++) {
+    var s = todasSesiones[si];
+    if (String(s.idPersonal) !== String(operador.idPersonal)) continue;
+    var sfec = String(s.fechaInicio || '').substring(0, 10);
+    if (sfec !== fechaStr) continue;
+    tuvoPreviaHoy = true;
+    if (s.estado === 'ACTIVA') { sesionHoyActiva = s; break; }
+  }
+
+  // Segundo dispositivo o reapertura en el día: devolver sesión existente
+  if (sesionHoyActiva) {
+    return {
+      ok: true,
+      data: {
+        idSesion:          sesionHoyActiva.idSesion,
+        idPersonal:        operador.idPersonal,
+        nombre:            operador.nombre,
+        apellido:          operador.apellido,
+        rol:               operador.rol,
+        color:             operador.color,
+        horaInicio:        sesionHoyActiva.horaInicio,
+        yaEnSesionHoy:     true,
+        bienvenidaImpresa: true
+      }
+    };
+  }
+
+  // ── Primera sesión del día (o re-login tras cierre) ───────────
   var huerfanas = _cerrarSesionesHuerfanas(operador.idPersonal);
 
-  // Crear sesión
-  var idSesion  = _generateId('SES');
-  var ahora     = new Date();
-  var horaStr   = Utilities.formatDate(ahora, Session.getScriptTimeZone(), 'HH:mm:ss');
-  var fechaStr  = Utilities.formatDate(ahora, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var idSesion    = _generateId('SES');
+  var idDesempeno = _generateId('DES');
 
   getSheet('SESIONES').appendRow([
-    idSesion,
-    operador.idPersonal,
-    fechaStr,
-    horaStr,
-    '', '', 0, 'ACTIVA'
+    idSesion, operador.idPersonal, fechaStr, horaStr, '', '', 0, 'ACTIVA'
   ]);
 
-  // Crear fila vacía en DESEMPENO para esta sesión
-  var idDesempeno = _generateId('DES');
   getSheet('DESEMPENO').appendRow([
     idDesempeno, operador.idPersonal, idSesion, fechaStr,
-    0, 0,       // minutos, horas
-    0, 0,       // guiasCreadas, guiasCerradas
-    0, 0,       // envasadosRegistrados, unidadesEnvasadas
-    0, 0,       // mermasRegistradas, auditoriaEjecutadas
-    0, 0,       // preingresoCreados, ajustesRealizados
-    0, 0,       // totalActividades, actividadesPorHora
-    0, '',      // puntuacion, calificacion
-    parseFloat(operador.montoBase) || 0,
-    0, 0,       // bonus, total
-    'ACTIVA'
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '',
+    parseFloat(operador.montoBase) || 0, 0, 0, 'ACTIVA'
   ]);
 
-  // ── Auto-registro de jornada en MOS (idempotente por nombre + fecha) ───────
   try {
     _registrarJornadaEnMOS(
       operador.nombre + ' ' + (operador.apellido || ''),
@@ -57,7 +75,6 @@ function loginPersonal(params) {
     );
   } catch(eJ) { Logger.log('Auto-jornada MOS: ' + eJ.message); }
 
-  // ── Push: notificar ingreso a MOS ─────────────────────────────
   try {
     _notificarMOS(
       '👤 ' + operador.nombre + ' ingresó a Almacén',
@@ -68,14 +85,16 @@ function loginPersonal(params) {
   return {
     ok: true,
     data: {
-      idSesion:       idSesion,
-      idPersonal:     operador.idPersonal,
-      nombre:         operador.nombre,
-      apellido:       operador.apellido,
-      rol:            operador.rol,
-      color:          operador.color,
-      horaInicio:     horaStr,
-      sesionAnterior: huerfanas.ultimaFecha || null   // fecha si había sesión de otro día
+      idSesion:          idSesion,
+      idPersonal:        operador.idPersonal,
+      nombre:            operador.nombre,
+      apellido:          operador.apellido,
+      rol:               operador.rol,
+      color:             operador.color,
+      horaInicio:        horaStr,
+      yaEnSesionHoy:     false,
+      bienvenidaImpresa: tuvoPreviaHoy,   // ya hubo sesión hoy → ticket ya fue impreso
+      sesionAnterior:    huerfanas.ultimaFecha || null
     }
   };
 }
@@ -372,13 +391,14 @@ function _cerrarSesionesHuerfanas(idPersonal) {
 // ── Notificar a ProyectoMOS vía push (requiere MOS_WEB_APP_URL en Script Properties) ──
 function _notificarMOS(titulo, cuerpo) {
   var url = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
-  if (!url) return;
+  if (!url) { Logger.log('[Push] MOS_WEB_APP_URL no configurada'); return; }
   try {
-    UrlFetchApp.fetch(url, {
+    var resp = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
       payload: JSON.stringify({ action: 'enviarPushNotif', titulo: titulo, cuerpo: cuerpo }),
       muteHttpExceptions: true
     });
-  } catch(e) { Logger.log('_notificarMOS: ' + e.message); }
+    Logger.log('[Push→MOS] HTTP ' + resp.getResponseCode() + ' | ' + resp.getContentText().substring(0, 120));
+  } catch(e) { Logger.log('[Push→MOS] excepcion: ' + e.message); }
 }
