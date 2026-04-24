@@ -1587,13 +1587,33 @@ const GuiasView = (() => {
   }
 
   function _renderGuiaCard(g) {
-    const isIngreso  = g.tipo?.startsWith('INGRESO');
-    const isAbierta  = g.estado === 'ABIERTA';
-    const borderColor = isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
-    const tipoLabel  = TIPO_LABELS[g.tipo] || g.tipo || '—';
-    const provNombre = _getProvNombre(g.idProveedor) || g.usuario || '—';
-    const hora       = _horaDesdeGuia(g);
-    const fechaCorta = _fmtCorta(g.fecha);
+    const isEnvasado  = g.tipo === 'SALIDA_ENVASADO' || g.tipo === 'INGRESO_ENVASADO';
+    const isIngreso   = g.tipo?.startsWith('INGRESO');
+    const isAbierta   = g.estado === 'ABIERTA';
+    const borderColor = isEnvasado ? '#475569' : isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
+    const tipoLabel   = TIPO_LABELS[g.tipo] || g.tipo || '—';
+    const provNombre  = _getProvNombre(g.idProveedor) || g.usuario || '—';
+    const hora        = _horaDesdeGuia(g);
+    const fechaCorta  = _fmtCorta(g.fecha);
+
+    // Guías de envasado: card gris, solo lectura, sin botones de acción
+    if (isEnvasado) {
+      const detCache = OfflineManager.getGuiaDetalleCache();
+      const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
+      const itemsTag = numItems > 0 ? ` <span style="color:#64748b">[${numItems}]</span>` : '';
+      return `
+      <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
+           style="border-left-color:#475569;opacity:.7;cursor:default"
+           onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
+        <div class="flex items-center justify-between gap-1 overflow-hidden">
+          <span class="text-xs font-bold truncate" style="color:#64748b">${tipoLabel}</span>
+          <span style="font-size:10px;color:#475569;flex-shrink:0">🔒 sistema</span>
+        </div>
+        <p class="text-sm font-semibold truncate" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
+        <p class="text-xs" style="color:#475569">${fechaCorta}${itemsTag}</p>
+      </div>`;
+    }
+
     const estadoDot  = isAbierta
       ? `<span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0"></span>`
       : `<span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>`;
@@ -1809,9 +1829,29 @@ const GuiasView = (() => {
   const SVG_LOCK_CLOSED = `<svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6v5H5z"/></svg>`;
 
   function _mostrarDetalleSheet(g, conAnimacion = true) {
-    const esIngreso = g.tipo?.startsWith('INGRESO');
-    const abierta   = g.estado === 'ABIERTA';
+    const esIngreso   = g.tipo?.startsWith('INGRESO');
+    const esEnvasado  = g.tipo === 'SALIDA_ENVASADO' || g.tipo === 'INGRESO_ENVASADO';
+    const abierta     = g.estado === 'ABIERTA';
     const esDiaAnterior = g.fecha && g.fecha < new Date().toISOString().split('T')[0];
+
+    // Guías de envasado: header bloqueado, sin acciones
+    if (esEnvasado) {
+      document.getElementById('guiaDetHeader').innerHTML = `
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <span class="text-xs" style="color:#64748b;background:#1e293b;border-radius:4px;padding:2px 6px">
+            ${TIPO_LABELS[g.tipo] || g.tipo}
+          </span>
+          <span style="font-size:11px;color:#475569;background:#1e293b;border-radius:4px;padding:2px 8px">
+            🔒 Generado por sistema
+          </span>
+        </div>
+        <p class="font-bold text-base leading-tight" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
+        <p class="text-xs mt-0.5" style="color:#475569">${fmtFecha(g.fecha)} · Solo lectura</p>`;
+      // Ocultar panel de foto/notas/editar y el add-item
+      document.getElementById('guiaDetFotoPanel')?.classList.add('hidden');
+      document.getElementById('guiaDetNotasPanel')?.classList.add('hidden');
+      document.getElementById('guiaDetAddItem')?.classList.add('hidden');
+    } else {
 
     // Lock button
     const lockBtn = `
@@ -1943,6 +1983,8 @@ const GuiasView = (() => {
         cEl.innerHTML = '';
       }
     }
+
+    } // end else (no esEnvasado)
 
     const items = (g.detalle || []).filter(d => d.observacion !== 'ANULADO');
     document.getElementById('guiaDetCount').textContent = `${items.length} ítem${items.length !== 1 ? 's' : ''}`;
