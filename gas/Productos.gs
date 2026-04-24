@@ -358,7 +358,7 @@ function getHistorialStock(params) {
         tipo:      g.tipo   || '—',
         esIngreso: tipo.indexOf('INGRESO') >= 0 || tipo.indexOf('ENTRADA') >= 0 ||
                    (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0),
-        cantidad:  Math.abs(parseFloat(d.cantidadReal || d.cantidadEsperada || d.cantidad || 0)),
+        cantidad:  Math.abs(parseFloat(d.cantidadRecibida || d.cantidadReal || d.cantidadEsperada || d.cantidad || 0)),
         usuario:   g.usuario || d.usuario || '—',
         origen:    g.idProveedor || g.destino || '',
         estado:    g.estado || '',

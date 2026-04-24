@@ -5819,7 +5819,7 @@ const ProductosView = (() => {
           tipo:      g.tipo   || '—',
           esIngreso: tipo.includes('INGRESO') || tipo.includes('ENTRADA') ||
                      (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0),
-          cantidad:  Math.abs(parseFloat(d.cantidad || d.cantidadReal || 0)),
+          cantidad:  Math.abs(parseFloat(d.cantidadRecibida || d.cantidadEsperada || d.cantidad || 0)),
           usuario:   g.usuario || d.usuario || '—',
           origen:    g.idProveedor || g.destino || '',
           estado:    g.estado || '',
