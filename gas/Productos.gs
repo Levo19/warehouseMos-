@@ -259,21 +259,26 @@ function registrarProductoNuevo(params) {
     ''
   ]);
 
-  // Si tiene guía → agregar al detalle automáticamente
+  // Si tiene guía → escribir directo a GUIA_DETALLE sin validar catálogo
+  // (el PN aún no está aprobado → no existe en PRODUCTOS_MASTER)
   if (params.idGuia) {
     try {
-      agregarDetalleGuia({
-        idGuia:            params.idGuia,
-        codigoProducto:    codigoBarra,
-        cantidadEsperada:  0,
-        cantidadRecibida:  parseFloat(params.cantidad) || 1,
-        precioUnitario:    0,
-        fechaVencimiento:  params.fechaVencimiento || '',
-        usuario:           params.usuario  || '',
-        idSesion:          params.idSesion || ''
-      });
+      var detSheet   = getSheet('GUIA_DETALLE');
+      var idDetalle  = _generateId('DET');
+      var nextDetRow = detSheet.getLastRow() + 1;
+      detSheet.appendRow([
+        idDetalle,
+        params.idGuia,
+        codigoBarra,
+        0,
+        parseFloat(params.cantidad) || 1,
+        0,
+        '',
+        'PN_PENDIENTE'
+      ]);
+      detSheet.getRange(nextDetRow, 3).setNumberFormat('@').setValue(codigoBarra);
     } catch(e) {
-      Logger.log('Error al agregar detalle de PN a guia: ' + e.message);
+      Logger.log('Error al agregar detalle PN a guia: ' + e.message);
     }
   }
 

@@ -2496,10 +2496,11 @@ const GuiasView = (() => {
     _renderCamList();
     _torchOn = false;
     const tb = document.getElementById('scanTorchBtn');
-    if (tb) tb.style.background = 'rgba(255,255,255,.15)';
+    if (tb) tb.style.background = 'rgba(255,255,255,.14)';
+    const picker = document.getElementById('camPicker');
+    if (picker) picker.style.display = 'none';
     document.getElementById('scannerModal').classList.add('open');
-    document.getElementById('camPicker').style.display = 'none';
-    document.getElementById('camToast').style.display  = 'none';
+    _setScanStatus('ready');
     Scanner.start('scanVideo', _onCamResult, err => {
       toast('Error cámara: ' + err, 'danger');
       document.getElementById('scannerModal').classList.remove('open');
@@ -2507,11 +2508,12 @@ const GuiasView = (() => {
   }
 
   function cerrarCamara() {
+    clearTimeout(_statusResetTimer);
     _torchOn = false;
     Scanner.stop();
     document.getElementById('scannerModal').classList.remove('open');
-    document.getElementById('camPicker').style.display = 'none';
-    document.getElementById('camToast').style.display  = 'none';
+    const picker = document.getElementById('camPicker');
+    if (picker) picker.style.display = 'none';
   }
 
   async function toggleTorch() {
@@ -2526,58 +2528,68 @@ const GuiasView = (() => {
       ? 'rgba(251,191,36,.9)' : 'rgba(255,255,255,.15)';
   }
 
+  // Barra de estado entre cámara y lista — feedback del último escaneo
+  let _statusResetTimer = null;
+
+  function _setScanStatus(type, text, rawCod) {
+    const bar = document.getElementById('scanStatusBar');
+    if (!bar) return;
+    clearTimeout(_statusResetTimer);
+
+    if (type === 'ready') {
+      bar.innerHTML = '<span style="color:#334155;font-size:.75em">— listo para escanear —</span>';
+      bar.style.background = '#0f172a';
+      return;
+    }
+
+    const guiaId = _guiaActual?.idGuia || '';
+    const cfgs = {
+      ok:       { bg: '#022c22', col: '#34d399', icon: '✓', dur: 2200 },
+      prefijo:  { bg: '#2c1a00', col: '#fb923c', icon: '↕', dur: 0   },
+      no_existe:{ bg: '#2d0a0a', col: '#f87171', icon: '⚠', dur: 0   }
+    };
+    const c = cfgs[type] || cfgs.ok;
+    const newBtn = type === 'no_existe'
+      ? `<button onclick="GuiasView.abrirModalPN('${escAttr(rawCod||text)}','${escAttr(guiaId)}')"
+           style="flex-shrink:0;background:#fff3f3;color:#dc2626;border:1px solid #fca5a5;
+                  border-radius:7px;padding:4px 10px;font-size:.71em;font-weight:700;cursor:pointer">
+           + Nuevo
+         </button>` : '';
+    bar.style.background = c.bg;
+    bar.innerHTML = `
+      <span style="color:${c.col};font-size:.82em;font-weight:700;flex-shrink:0">${c.icon}</span>
+      <span style="color:${c.col};font-size:.76em;flex:1;white-space:nowrap;overflow:hidden;
+                   text-overflow:ellipsis;margin-left:6px">${escHtml(text)}</span>
+      ${newBtn}`;
+    if (c.dur > 0) {
+      _statusResetTimer = setTimeout(() => _setScanStatus('ready'), c.dur);
+    }
+  }
+
   // Callback del scanner continuo — procesa código sin cerrar cámara
   function _onCamResult(cod) {
     const codStr = String(cod || '').trim();
     if (!codStr) return;
-    document.getElementById('camPicker').style.display = 'none';
+
+    const picker = document.getElementById('camPicker');
+    if (picker) picker.style.display = 'none';
 
     const candidatos = _buscarCandidatos(codStr);
 
     if (!candidatos.length) {
-      // No existe en catálogo → toast rojo + botón "Nuevo"
-      _camToast('no_existe', codStr);
+      _setScanStatus('no_existe', codStr + ' · no registrado', codStr);
       return;
     }
     if (candidatos[0]._exacto) {
       _agregarProductoDirecto(candidatos[0], false);
       _addToCamList(candidatos[0]);
-      _camToast('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
+      _setScanStatus('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
       return;
     }
-    // Prefijo → picker + toast informativo
-    _camToast('prefijo', codStr + ' · ' + candidatos.length + ' coincidencias');
+    // Prefijo → picker overlay
+    _setScanStatus('prefijo', 'Prefijo · ' + candidatos.length + ' productos coinciden');
     _mostrarCamPicker(candidatos, codStr);
   }
-
-  // type: 'ok' | 'prefijo' | 'no_existe'
-  function _camToast(type, text) {
-    const t = document.getElementById('camToast');
-    if (!t) return;
-    const cfgs = {
-      ok:       { bg: 'rgba(16,185,129,.95)', icon: '✓', dur: 2200 },
-      prefijo:  { bg: 'rgba(217,119,6,.95)',  icon: '↕', dur: 3500 },
-      no_existe:{ bg: 'rgba(220,38,38,.95)',  icon: '⚠', dur: 6000 }
-    };
-    const cfg = cfgs[type] || cfgs.ok;
-    const guiaId = _guiaActual?.idGuia || '';
-    const extraBtn = type === 'no_existe'
-      ? `<button onclick="GuiasView.abrirModalPN('${escAttr(text)}','${escAttr(guiaId)}');document.getElementById('camToast').style.display='none'"
-           style="flex-shrink:0;background:#fff;color:#dc2626;border:none;border-radius:7px;
-                  padding:5px 11px;font-size:.73em;font-weight:700;cursor:pointer;margin-left:6px">
-           + Nuevo
-         </button>` : '';
-    t.innerHTML = `
-      <span style="font-size:1.15em;flex-shrink:0">${cfg.icon}</span>
-      <p style="flex:1;font-weight:700;font-size:.8em;color:#fff;
-                white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(text)}</p>
-      ${extraBtn}`;
-    t.style.background = cfg.bg;
-    t.style.display = 'flex';
-    clearTimeout(_camToastTimer);
-    _camToastTimer = setTimeout(() => { if (t) t.style.display = 'none'; }, cfg.dur);
-  }
-  let _camToastTimer = null;
 
   function _mostrarCamPicker(candidatos, codStr) {
     document.getElementById('camPickerCod').textContent = codStr;
@@ -2587,31 +2599,40 @@ const GuiasView = (() => {
         ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
         : escHtml(cb);
       return `<button onclick="GuiasView.seleccionarItemCamara('${escAttr(cb)}')"
-              style="width:100%;text-align:left;padding:9px 11px;border-radius:10px;
-                     border:1px solid rgba(100,116,139,.3);margin-bottom:6px;
-                     background:rgba(15,23,42,.8);display:flex;align-items:center;gap:8px;
+              style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
+                     border:1px solid #1e293b;margin-bottom:7px;
+                     background:#1e293b;display:flex;align-items:center;gap:10px;
                      cursor:pointer;-webkit-tap-highlight-color:transparent"
-              ontouchstart="this.style.borderColor='#a78bfa'" ontouchend="this.style.borderColor='rgba(100,116,139,.3)'">
+              ontouchstart="this.style.borderColor='#7c3aed';this.style.background='#1e1b4b'"
+              ontouchend="this.style.borderColor='#1e293b';this.style.background='#1e293b'">
+        <div style="flex-shrink:0;width:32px;height:32px;border-radius:8px;background:#7c3aed22;
+                    display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.75em;color:#a78bfa;font-weight:700">CB</span>
+        </div>
         <div style="flex:1;min-width:0">
-          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
-          <p style="font-size:.69em;color:#64748b;font-family:monospace">${cbHtml}</p>
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace;margin-top:2px">${cbHtml}</p>
         </div>
       </button>`;
     }).join('');
-    document.getElementById('camPicker').style.display = 'block';
+    const picker = document.getElementById('camPicker');
+    picker.style.display = 'flex';
   }
 
   function cerrarCamPicker() {
-    document.getElementById('camPicker').style.display = 'none';
+    const picker = document.getElementById('camPicker');
+    if (picker) picker.style.display = 'none';
+    _setScanStatus('ready');
   }
 
   function seleccionarItemCamara(codigoBarra) {
-    document.getElementById('camPicker').style.display = 'none';
+    const picker = document.getElementById('camPicker');
+    if (picker) picker.style.display = 'none';
     const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
     _addToCamList(prod);
-    _camToast('ok', prod.descripcion || prod.codigoBarra);
+    _setScanStatus('ok', prod.descripcion || prod.codigoBarra);
   }
 
   // ── MODO SCANNER HID ─────────────────────────────────────────

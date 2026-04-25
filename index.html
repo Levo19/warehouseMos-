@@ -129,8 +129,10 @@
     /* Scanner overlay */
     #scannerModal { position:fixed;inset:0;background:#0f172a;z-index:70;display:none; }
     #scannerModal.open { display:flex;flex-direction:column; }
-    #scanCamArea { flex:0 0 18vh;position:relative;overflow:hidden;background:#000;min-height:120px; }
+    #scanCamArea { flex:0 0 26vh;position:relative;overflow:hidden;background:#000;min-height:150px; }
     #scanVideo { width:100%;height:100%;object-fit:cover;display:block; }
+    #scanStatusBar { flex:0 0 auto;display:flex;align-items:center;padding:7px 14px;
+      background:#0f172a;border-bottom:1px solid #1e293b;min-height:36px;gap:6px; }
     /* Guía de puntería del scanner — legacy (no usado en nuevo layout) */
     .scan-guide-wrap { position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center; }
     .scan-guide-box {
@@ -2130,81 +2132,90 @@
 ═══════════════════════════════════════════════════ -->
 <div id="scannerModal">
 
-  <!-- 1/6 superior: cámara compacta -->
+  <!-- Área cámara (26vh) -->
   <div id="scanCamArea">
     <video id="scanVideo" playsinline autoplay muted></video>
 
-    <!-- Guía de puntería (proporcional al área) -->
+    <!-- Guía de puntería centrada -->
     <div style="position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center">
-      <div style="width:60%;height:64%;border:2px solid rgba(59,130,246,.75);border-radius:8px;position:relative;overflow:hidden">
+      <div style="width:62%;height:60%;border:2px solid rgba(59,130,246,.8);border-radius:10px;
+                  position:relative;overflow:hidden;box-shadow:0 0 0 9999px rgba(0,0,0,.35)">
         <div class="scan-line" style="position:absolute;left:0;right:0;height:2px;
-             background:linear-gradient(90deg,transparent,#3b82f6,transparent);
+             background:linear-gradient(90deg,transparent,#60a5fa,transparent);
              animation:scanAnim 1.8s linear infinite"></div>
       </div>
     </div>
 
-    <!-- Toast encima del video -->
-    <div id="camToast" style="display:none;position:absolute;bottom:6px;left:8px;right:8px;
-         z-index:5;border-radius:10px;padding:7px 11px;
-         box-shadow:0 2px 12px rgba(0,0,0,.5);align-items:center;gap:8px">
-    </div>
-
-    <!-- Controles superpuestos -->
-    <div style="position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;
-                align-items:center;padding:5px 8px;z-index:6;
-                background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent)">
-      <span style="color:#fff;font-size:.68em;font-weight:700;opacity:.85">
-        &#x2316; Escáner
+    <!-- Barra de controles (top) -->
+    <div style="position:absolute;top:0;left:0;right:0;padding:6px 10px;z-index:6;
+                display:flex;justify-content:space-between;align-items:center;
+                background:linear-gradient(to bottom,rgba(0,0,0,.65) 0%,transparent 100%)">
+      <span style="color:rgba(255,255,255,.8);font-size:.68em;font-weight:600;letter-spacing:.03em">
+        ESCÁNER ACTIVO
       </span>
       <div style="display:flex;gap:5px">
         <button id="scanTorchBtn" onclick="GuiasView.toggleTorch()"
-                style="background:rgba(255,255,255,.15);border:none;border-radius:7px;
-                       padding:4px 9px;color:#fff;font-size:.72em;cursor:pointer;
-                       transition:background .2s">&#128294;</button>
+                title="Linterna"
+                style="background:rgba(255,255,255,.14);border:none;border-radius:8px;
+                       padding:5px 10px;color:#fff;font-size:.75em;cursor:pointer;transition:background .2s">
+          &#128294;
+        </button>
         <button onclick="GuiasView.cerrarCamara()"
-                style="background:rgba(255,255,255,.15);border:none;border-radius:7px;
-                       padding:4px 9px;color:#fff;font-size:.82em;cursor:pointer">&#10005;</button>
+                style="background:rgba(255,255,255,.14);border:none;border-radius:8px;
+                       padding:5px 10px;color:#fff;font-size:.78em;font-weight:700;cursor:pointer">
+          &#10005;
+        </button>
       </div>
     </div>
   </div>
 
-  <!-- 5/6 inferior: lista de productos escaneados -->
-  <div style="flex:1;display:flex;flex-direction:column;background:#0f172a;min-height:0;overflow:hidden">
+  <!-- Barra de estado: feedback visual del último escaneo -->
+  <div id="scanStatusBar">
+    <span style="color:#334155;font-size:.75em">— listo para escanear —</span>
+  </div>
 
-    <!-- Cabecera -->
+  <!-- Área lista (flex:1) -->
+  <div style="flex:1;display:flex;flex-direction:column;background:#0f172a;min-height:0;overflow:hidden;position:relative">
+
+    <!-- Cabecera lista -->
     <div style="display:flex;align-items:center;justify-content:space-between;
                 padding:8px 14px;border-bottom:1px solid #1e293b;flex-shrink:0">
-      <span style="font-size:.75em;font-weight:700;color:#94a3b8">Productos escaneados</span>
-      <span id="scanListCount" style="font-size:.75em;color:#64748b;font-family:monospace">0 unid.</span>
+      <span style="font-size:.74em;font-weight:700;color:#94a3b8">Escaneados</span>
+      <span id="scanListCount" style="font-size:.74em;font-weight:700;color:#7c3aed;font-family:monospace">0 unid.</span>
     </div>
 
-    <!-- Picker: múltiples coincidencias (prefijo) -->
-    <div id="camPicker" style="display:none;border-bottom:1px solid rgba(124,58,237,.3);
-         padding:12px 14px;flex-shrink:0;background:#0f172a">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <p style="font-size:.73em;color:#a78bfa;font-weight:700">
-          Prefijo <span id="camPickerCod" style="color:#fbbf24;font-family:monospace"></span> · elige el producto:
-        </p>
+    <!-- Lista de productos escaneados (auto-suma) -->
+    <div id="camScannedList" style="flex:1;overflow-y:auto;padding:10px 12px;-webkit-overflow-scrolling:touch"></div>
+
+    <!-- Picker — overlay absoluto sobre toda el área lista (prefijo) -->
+    <div id="camPicker" style="display:none;position:absolute;inset:0;z-index:10;
+         background:#0f172a;flex-direction:column;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:12px 14px;border-bottom:1px solid rgba(124,58,237,.3);flex-shrink:0">
+        <div>
+          <p style="font-size:.72em;color:#a78bfa;font-weight:700;margin-bottom:2px">Elige el producto</p>
+          <p style="font-size:.68em;color:#64748b;font-family:monospace">
+            prefijo: <span id="camPickerCod" style="color:#fbbf24"></span>
+          </p>
+        </div>
         <button onclick="GuiasView.cerrarCamPicker()"
-                style="color:#64748b;font-size:.75em;background:none;border:none;cursor:pointer;padding:2px 6px">&#10005;</button>
+                style="background:#1e293b;border:none;border-radius:8px;padding:6px 11px;
+                       color:#94a3b8;font-size:.78em;cursor:pointer">&#10005; cerrar</button>
       </div>
-      <div id="camPickerList" style="max-height:180px;overflow-y:auto"></div>
+      <div id="camPickerList" style="flex:1;overflow-y:auto;padding:10px 12px;-webkit-overflow-scrolling:touch"></div>
     </div>
-
-    <!-- Lista escaneados (auto-suma) -->
-    <div id="camScannedList" style="flex:1;overflow-y:auto;padding:10px 12px"></div>
 
     <!-- Footer -->
     <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #1e293b;flex-shrink:0">
       <button onclick="GuiasView.abrirPNSinCodigo()"
-              style="flex:1;padding:9px;border-radius:10px;border:1px dashed #334155;
-                     background:transparent;color:#64748b;font-size:.78em;cursor:pointer">
+              style="flex:1;padding:9px 6px;border-radius:10px;border:1px dashed #334155;
+                     background:transparent;color:#64748b;font-size:.76em;cursor:pointer">
         + Producto nuevo
       </button>
       <button onclick="GuiasView.cerrarCamara()"
-              style="flex:1;padding:9px;border-radius:10px;background:#7c3aed;
+              style="flex:2;padding:9px 6px;border-radius:10px;background:#7c3aed;
                      border:none;color:#fff;font-size:.78em;font-weight:700;cursor:pointer">
-        Listo
+        Listo &#10003;
       </button>
     </div>
   </div>
