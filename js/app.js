@@ -5591,18 +5591,26 @@ const PreingresosView = (() => {
   }
 
   function filtrar(estado) {
-    // Actualizar UI del dropdown
     const menu = document.getElementById('preFilterMenu');
     if (menu) menu.style.display = 'none';
-    const label = document.getElementById('preFilterLabel');
-    if (label) {
-      const map = { '': 'TODOS', 'PENDIENTE': 'SIN GUÍA', 'PROCESADO': 'CON GUÍA' };
-      label.textContent = map[estado] || 'TODOS';
-    }
     document.querySelectorAll('.pre-fopt').forEach(b => {
       b.classList.toggle('sel', b.dataset.pfiltro === estado);
     });
+    const dot = document.getElementById('preFilterDot');
+    if (dot) dot.style.display = estado ? 'block' : 'none';
     cargar(estado);
+  }
+
+  function _searchFocusPre(focused) {
+    const toolbar = document.getElementById('preToolbar');
+    if (!toolbar) return;
+    if (focused) {
+      toolbar.classList.add('srch-focused');
+      const menu = document.getElementById('preFilterMenu');
+      if (menu) menu.style.display = 'none';
+    } else {
+      setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
+    }
   }
 
   // ── Panel de preingresos (accesible desde Guías) ────────
@@ -6405,7 +6413,7 @@ const PreingresosView = (() => {
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
 
-  return { cargar, filtrar, toggleFiltro, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
+  return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
            onFotosSeleccionadas, quitarFoto, verFotos,

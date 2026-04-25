@@ -96,14 +96,15 @@
     #tabletPrePanel { display:none; }
     #tabletNuevaGuia { display:none; }
     #guiasMainCol { min-width:0; }
-    /* Guías toolbar — una sola fila: filtro + búsqueda + preingreso */
-    #guiasToolbar { display:flex;align-items:center;gap:8px;margin-bottom:10px; }
-    #guiasToolbar .smart-srch { flex:1;min-width:0;margin-bottom:0; }
-    .gtb-side { flex-shrink:0;max-width:200px;opacity:1;
+    /* Toolbars de una sola fila: guías + preingresos */
+    #guiasToolbar, #preToolbar { display:flex;align-items:center;gap:8px;margin-bottom:10px; }
+    #guiasToolbar .smart-srch, #preToolbar .smart-srch { flex:1;min-width:0;margin-bottom:0; }
+    .gtb-side, .ptb-side { flex-shrink:0;max-width:200px;opacity:1;
                 transition:max-width .22s ease, opacity .18s ease, margin .22s ease; }
     #guiasToolbar.srch-focused .gtb-side { max-width:0;opacity:0;overflow:hidden;pointer-events:none;margin:0; }
-    /* Funnel icon-only button */
-    #guiaFilterBtn { display:flex;align-items:center;justify-content:center;
+    #preToolbar.srch-focused .ptb-side   { max-width:0;opacity:0;overflow:hidden;pointer-events:none;margin:0; }
+    /* Funnel icon-only buttons */
+    #guiaFilterBtn, #preFilterBtn { display:flex;align-items:center;justify-content:center;
                      width:38px;height:38px;border-radius:10px;flex-shrink:0; }
     /* Mobile: keep old search row hidden */
     #guiasSearchRow { display:none; }
@@ -1758,55 +1759,61 @@
 
   <!-- ── PREINGRESOS ────────────────────────────── -->
   <section id="view-preingresos" class="view slide-up">
-    <div class="flex items-center justify-between mb-3">
 
-      <!-- Filtro dropdown (igual que Guías) -->
-      <div class="filter-dropdown">
-        <button id="preFilterBtn" onclick="PreingresosView.toggleFiltro()"
-                class="flex items-center gap-2 btn btn-outline text-sm font-bold tracking-wide">
-          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.128.334L10 8.692V13.5a.5.5 0 0 1-.342.474l-3 1A.5.5 0 0 1 6 14.5V8.692L1.628 3.834A.5.5 0 0 1 1.5 3.5z"/>
-          </svg>
-          <span id="preFilterLabel">TODOS</span>
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
-          </svg>
-        </button>
-        <div id="preFilterMenu" class="filter-menu" style="display:none">
-          <button onclick="PreingresosView.filtrar('')"          data-pfiltro=""          class="pre-fopt sel">— TODOS</button>
-          <button onclick="PreingresosView.filtrar('PENDIENTE')" data-pfiltro="PENDIENTE" class="pre-fopt">Sin guía</button>
-          <button onclick="PreingresosView.filtrar('PROCESADO')" data-pfiltro="PROCESADO" class="pre-fopt">Con guía</button>
+    <!-- Toolbar única: embudo + búsqueda + guías -->
+    <div id="preToolbar">
+
+      <!-- Izquierda: filtro (solo ícono embudo) -->
+      <div class="ptb-side">
+        <div class="filter-dropdown" style="position:relative">
+          <button id="preFilterBtn" onclick="PreingresosView.toggleFiltro()"
+                  class="btn btn-outline" style="position:relative" title="Filtrar">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.128.334L10 8.692V13.5a.5.5 0 0 1-.342.474l-3 1A.5.5 0 0 1 6 14.5V8.692L1.628 3.834A.5.5 0 0 1 1.5 3.5z"/>
+            </svg>
+            <span id="preFilterDot" style="display:none;position:absolute;top:5px;right:5px;
+                  width:7px;height:7px;border-radius:50%;background:#3b82f6"></span>
+          </button>
+          <div id="preFilterMenu" class="filter-menu" style="display:none">
+            <button onclick="PreingresosView.filtrar('')"          data-pfiltro=""          class="pre-fopt sel">— TODOS</button>
+            <button onclick="PreingresosView.filtrar('PENDIENTE')" data-pfiltro="PENDIENTE" class="pre-fopt">Sin guía</button>
+            <button onclick="PreingresosView.filtrar('PROCESADO')" data-pfiltro="PROCESADO" class="pre-fopt">Con guía</button>
+          </div>
         </div>
       </div>
 
-      <!-- Botón GUÍAS ← (espejo del PRE-ING → en guías) -->
-      <button onclick="App.nav('guias')" class="nav-sibling-btn">
-        <span class="arrow-slide-l">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-            <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
-          </svg>
+      <!-- Centro: barra de búsqueda -->
+      <div class="smart-srch">
+        <span class="smart-srch-ico">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
         </span>
-        GUÍAS
-      </button>
+        <input type="text" id="inputBuscarPre" class="smart-srch-input"
+               placeholder="Nombre o código de proveedor…"
+               oninput="PreingresosView.buscar(this.value)"
+               onfocus="PreingresosView._searchFocusPre(true)"
+               onblur="PreingresosView._searchFocusPre(false)"
+               autocomplete="off" spellcheck="false"/>
+        <div class="smart-srch-actions">
+          <button id="clearBuscarPre" class="smart-srch-clear" onclick="PreingresosView.buscarClear()">✕</button>
+          <button class="smart-srch-btn" title="Escanear código"
+                  onclick="abrirScanner(c=>{document.getElementById('inputBuscarPre').value=c;PreingresosView.buscar(c);})">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
+          </button>
+        </div>
+      </div>
 
-    </div>
-
-    <!-- Barra de búsqueda inteligente preingresos -->
-    <div class="smart-srch mb-3">
-      <span class="smart-srch-ico">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
-      </span>
-      <input type="text" id="inputBuscarPre" class="smart-srch-input"
-             placeholder="Nombre o código de proveedor…"
-             oninput="PreingresosView.buscar(this.value)"
-             autocomplete="off" spellcheck="false"/>
-      <div class="smart-srch-actions">
-        <button id="clearBuscarPre" class="smart-srch-clear" onclick="PreingresosView.buscarClear()">✕</button>
-        <button class="smart-srch-btn" title="Escanear código"
-                onclick="abrirScanner(c=>{document.getElementById('inputBuscarPre').value=c;PreingresosView.buscar(c);})">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
+      <!-- Derecha: botón GUÍAS -->
+      <div class="ptb-side">
+        <button onclick="App.nav('guias')" class="nav-sibling-btn">
+          <span class="arrow-slide-l">
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+              <path fill-rule="evenodd" d="M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z"/>
+            </svg>
+          </span>
+          GUÍAS
         </button>
       </div>
+
     </div>
 
     <div id="listPreingresos" class="pb-20"></div>
