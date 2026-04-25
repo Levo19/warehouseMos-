@@ -375,15 +375,20 @@ function actualizarPickup(params) {
 
 function crearDespachoRapido(params) {
   var idZona   = params.idZona   || '';
+  var tipo     = params.tipo     || 'SALIDA_ZONA';
   var items    = params.items    || [];
   var usuario  = params.usuario  || '';
+  var nota     = params.nota     || '';
   var imprimir = params.imprimir !== false;
 
-  if (!idZona)       return { ok: false, error: 'idZona requerido' };
+  // idZona solo requerido cuando el tipo es SALIDA_ZONA
+  if (tipo === 'SALIDA_ZONA' && !idZona) return { ok: false, error: 'idZona requerido' };
   if (!items.length) return { ok: false, error: 'Carrito vacío' };
 
-  // 1. Crear guía SALIDA_ZONA
-  var guiaRes = crearGuia({ tipo: 'SALIDA_ZONA', idZona: idZona, usuario: usuario, comentario: 'Despacho rápido' });
+  var comentario = nota || ('Despacho rápido' + (tipo !== 'SALIDA_ZONA' ? ' · ' + tipo : ''));
+
+  // 1. Crear guía con el tipo correcto
+  var guiaRes = crearGuia({ tipo: tipo, idZona: idZona || null, usuario: usuario, comentario: comentario });
   if (!guiaRes.ok) return guiaRes;
   var idGuia = guiaRes.data.idGuia;
 

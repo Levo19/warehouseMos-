@@ -5038,12 +5038,12 @@ const DespachoView = (() => {
       usuario: window.WH_CONFIG?.usuario || '',
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
     };
-    // Timeout de 15s
+    // Timeout generoso — GAS puede tardar 30-40s con varios ítems
     const res = await Promise.race([
       API.crearDespachoRapido(payload),
-      new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 15000))
+      new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
     ]).catch(e => e?.timeout
-      ? { ok: false, error: 'Tiempo agotado (15s) — verifica tu conexión y reintenta' }
+      ? { ok: false, error: 'Tiempo agotado — verifica tu conexión y reintenta' }
       : { ok: false, error: 'Sin conexión' });
     btn.disabled    = false;
     btn.textContent = '📦 Generar guía de salida + Imprimir';
