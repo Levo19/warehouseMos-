@@ -2494,38 +2494,27 @@ const GuiasView = (() => {
     const list  = document.getElementById('camScannedList');
     const count = document.getElementById('scanListCount');
     if (!list) return;
-    const items = Object.values(_camSession);
-    const total = items.reduce((s, i) => s + i.qty, 0);
+    const items  = Object.values(_camSession);
+    const total  = items.reduce((s, i) => s + i.qty, 0);
     if (count) count.textContent = total ? total + ' unid.' : '0 unid.';
     const hasItems = total > 0;
     const undoBtn  = document.getElementById('camUndoBtn');
     const clearBtn = document.getElementById('camClearBtn');
     if (undoBtn)  undoBtn.style.display  = _lastScanHistory.length > 0 ? 'inline-block' : 'none';
     if (clearBtn) clearBtn.style.display = hasItems ? 'inline-block' : 'none';
-    if (!items.length) {
-      list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;
-          justify-content:center;padding:32px 20px;gap:10px;color:#334155">
-        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
-          <rect x="7" y="7" width="10" height="10" rx="1"/>
-        </svg>
-        <p style="font-size:.78em;text-align:center;line-height:1.5">
-          Apunta la cámara al código de barras<br>
-          <span style="color:#1e293b;font-size:.9em">Los productos aparecerán aquí</span>
-        </p>
-      </div>`;
-      return;
-    }
+
+    // Ítems ya existentes en la guía que NO están en la sesión actual
+    const detalleCompleto = _guiaActual?.detalle || [];
+    const btnStyle = `width:32px;height:32px;border-radius:8px;border:1px solid #334155;
+      background:#0f172a;color:#94a3b8;font-size:1.05em;font-weight:700;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;flex-shrink:0;
+      -webkit-tap-highlight-color:transparent`;
+
     // saving = ítem pendiente de confirmación GAS (aún _local)
-    const detalle = _guiaActual?.detalle || [];
-    list.innerHTML = items.map(({ prod, qty }) => {
+    let html = items.map(({ prod, qty }) => {
       const cb     = String(prod.codigoBarra || '');
       const cbE    = escAttr(cb);
-      const saving = detalle.some(d => d.codigoProducto === cb && d._local === true);
-      const btnStyle = `width:32px;height:32px;border-radius:8px;border:1px solid #334155;
-        background:#0f172a;color:#94a3b8;font-size:1.05em;font-weight:700;cursor:pointer;
-        display:flex;align-items:center;justify-content:center;flex-shrink:0;
-        -webkit-tap-highlight-color:transparent`;
+      const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;
                 border:1px solid ${saving ? '#475569' : '#334155'};
@@ -2553,6 +2542,50 @@ const GuiasView = (() => {
         </div>
       </div>`;
     }).join('');
+
+    // Sección "Ya en guía" — ítems confirmados no presentes en la sesión actual
+    const previos = detalleCompleto.filter(d =>
+      d.observacion !== 'ANULADO' &&
+      !d._local &&
+      !_camSession[String(d.codigoProducto || '')]
+    );
+    if (previos.length) {
+      if (items.length) {
+        html += `<p style="font-size:.62em;color:#475569;text-transform:uppercase;
+                   letter-spacing:.07em;margin:10px 2px 6px;font-weight:700">Ya en guía</p>`;
+      }
+      html += previos.map(d => {
+        const cb  = escHtml(d.codigoProducto || '');
+        const nom = escHtml(d.descripcionProducto || d.codigoProducto || '');
+        const qty = parseFloat(d.cantidadRecibida) || 0;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;
+                  border-radius:11px;background:#0f172a;border:1px solid #1e293b;
+                  margin-bottom:6px;opacity:.72">
+          <div style="flex:1;min-width:0">
+            <p style="font-size:.83em;font-weight:700;color:#94a3b8;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nom}</p>
+            <p style="font-size:.67em;color:#475569;font-family:monospace">${cb}</p>
+          </div>
+          <span style="font-size:.8em;color:#475569;font-weight:700;flex-shrink:0">×${qty}</span>
+        </div>`;
+      }).join('');
+    }
+
+    if (!html) {
+      list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;
+          justify-content:center;padding:32px 20px;gap:10px;color:#334155">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+          <rect x="7" y="7" width="10" height="10" rx="1"/>
+        </svg>
+        <p style="font-size:.78em;text-align:center;line-height:1.5">
+          Apunta la cámara al código de barras<br>
+          <span style="color:#1e293b;font-size:.9em">Los productos aparecerán aquí</span>
+        </p>
+      </div>`;
+      return;
+    }
+    list.innerHTML = html;
   }
 
   // ── MODO CÁMARA ──────────────────────────────────────────────
