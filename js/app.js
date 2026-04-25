@@ -4279,92 +4279,329 @@ const EnvasadorView = (() => {
 // ════════════════════════════════════════════════
 const DespachoView = (() => {
   const CART_KEY = 'wh_despacho_cart';
-  let _cart     = [];
-  let _camHidden = false;
+  let _cart = [];
 
   function _saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(_cart)); }
   function _loadCart() {
     try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
   }
 
-  // ── Cámara continua ──────────────────────────────────────────
-  function _startCamera() {
-    const status = document.getElementById('despCamStatus');
-    Scanner.start('despVideo', cod => _procesarCodigo(String(cod).trim()),
-      err => { if (status) status.textContent = '⚠ ' + err; },
-      { continuous: true, cooldown: 1000 }
-    );
-    if (status) status.textContent = '● Escaneando';
-  }
-
-  function pauseCamera() { Scanner.stop(); }
-
-  function toggleCamera() {
-    _camHidden = !_camHidden;
-    document.getElementById('despCamPanel').style.display   = _camHidden ? 'none' : 'block';
-    document.getElementById('despCamShowBtn').style.display = _camHidden ? 'block' : 'none';
-    if (_camHidden) {
-      Scanner.stop();
-    } else {
-      _startCamera();
-    }
-  }
+  // ── Estado sesión cámara despacho ────────────────────────────
+  let _despLastHistory = [];
+  let _despTorchOn     = false;
+  let _despStatusTimer = null;
 
   function cargar() {
     _cart = _loadCart();
     _renderCart();
     _updateFooter();
     badgeUpdate();
-    // Iniciar cámara si no estaba oculta
-    if (!_camHidden && !Scanner.isActive()) _startCamera();
   }
 
-  // ── Procesar código escaneado ────────────────────────────────
-  function _procesarCodigo(cod) {
-    if (!cod) return;
-    const master = App.getProductosMaestro();
-    const prod   = master.find(p =>
-      String(p.codigoBarra || '').trim() === cod ||
-      String(p.idProducto  || '').trim() === cod
-    );
-    if (!prod) { toast(`"${cod}" no encontrado`, 'warn', 3000); return; }
+  function pauseCamera() { Scanner.stop(); }
 
-    const stockMap = {};
-    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
-    const stockD = parseFloat((stockMap[prod.idProducto] || {}).cantidadDisponible || 0);
+  // ── Abrir / cerrar modal cámara ──────────────────────────────
+  function abrirDespCamara() {
+    _despLastHistory = [];
+    const picker = document.getElementById('despCamPicker');
+    if (picker) picker.style.display = 'none';
+    _despTorchOn = false;
+    const tb = document.getElementById('despScanTorchBtn');
+    if (tb) tb.style.background = 'rgba(255,255,255,.14)';
+    const zoomWrap  = document.getElementById('despScanZoomWrap');
+    const zoomRange = document.getElementById('despScanZoomRange');
+    if (zoomWrap)  zoomWrap.style.display = 'none';
+    if (zoomRange) { zoomRange.value = 1; document.getElementById('despScanZoomLabel').textContent = '1×'; }
+    _renderDespList();
+    document.getElementById('despScannerModal').style.display = 'flex';
+    _setDespStatus('ready');
+    Scanner.start('despScanVideo', _onDespResult, err => {
+      toast('Error cámara: ' + err, 'danger');
+      document.getElementById('despScannerModal').style.display = 'none';
+    }, { continuous: true, cooldown: 1500 });
+    // Auto-torch + zoom init
+    setTimeout(async () => {
+      if (!Scanner.isActive()) return;
+      const zoomCaps = Scanner.getZoomCaps();
+      if (zoomCaps && zoomWrap && zoomRange) {
+        zoomRange.min = zoomCaps.min; zoomRange.max = zoomCaps.max;
+        zoomRange.step = zoomCaps.step || 0.1; zoomRange.value = zoomCaps.min;
+        zoomWrap.style.display = 'flex';
+      }
+      const ok = await Scanner.toggleTorch(true);
+      if (ok) { _despTorchOn = true; if (tb) tb.style.background = 'rgba(251,191,36,.9)'; }
+    }, 900);
+  }
 
-    const idx = _cart.findIndex(c => c.codigoBarra === prod.idProducto);
-    if (idx >= 0) {
-      // Mismo producto → sumar 1
-      _cart[idx].cantidad = parseFloat((_cart[idx].cantidad || 0)) + 1;
-    } else {
-      _cart.push({
-        codigoBarra: prod.idProducto,
-        descripcion: prod.descripcion || prod.idProducto,
-        unidad:      prod.unidad || '',
-        cantidad:    1,
-        stockDisp:   stockD
-      });
-    }
-    _saveCart();
+  function cerrarDespCamara() {
+    clearTimeout(_despStatusTimer);
+    _despTorchOn = false;
+    Scanner.stop();
+    document.getElementById('despScannerModal').style.display = 'none';
+    const picker = document.getElementById('despCamPicker');
+    if (picker) picker.style.display = 'none';
+    const total = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
+    if (total > 0) { SoundFX.done(); vibrate(25); }
     _renderCart();
     _updateFooter();
     badgeUpdate();
-
-    // Pulsar fila y focus en input de cantidad
-    requestAnimationFrame(() => {
-      const row = document.getElementById('despRow-' + CSS.escape(prod.idProducto));
-      if (row) {
-        row.classList.remove('desp-item-pulse');
-        void row.offsetWidth; // fuerza reflow
-        row.classList.add('desp-item-pulse');
-      }
-      const inp = document.getElementById('despQty-' + CSS.escape(prod.idProducto));
-      if (inp) inp.focus();
-    });
   }
 
-  // ── Render carrito ───────────────────────────────────────────
+  function cerrarDespYFinalizar() {
+    cerrarDespCamara();
+    setTimeout(() => finalizar(), 200);
+  }
+
+  // ── Torch y zoom ─────────────────────────────────────────────
+  async function toggleDespTorch() {
+    _despTorchOn = !_despTorchOn;
+    const ok = await Scanner.toggleTorch(_despTorchOn);
+    const btn = document.getElementById('despScanTorchBtn');
+    if (!ok) { _despTorchOn = false; toast('Linterna no disponible', 'warn', 2000); }
+    if (btn) btn.style.background = (_despTorchOn && ok) ? 'rgba(251,191,36,.9)' : 'rgba(255,255,255,.15)';
+  }
+
+  function despSetZoom(val) {
+    const v = parseFloat(val);
+    Scanner.setZoom(v);
+    const lbl = document.getElementById('despScanZoomLabel');
+    if (lbl) lbl.textContent = v.toFixed(1) + '×';
+  }
+
+  // ── Barra de estado ──────────────────────────────────────────
+  function _setDespStatus(type, text) {
+    const bar = document.getElementById('despScanStatusBar');
+    if (!bar) return;
+    clearTimeout(_despStatusTimer);
+    if (type === 'ready') {
+      bar.innerHTML = '<span style="color:#334155;font-size:.75em">— listo para escanear —</span>';
+      bar.style.background = '#0f172a';
+      return;
+    }
+    const cfgs = {
+      ok:       { bg: '#022c22', col: '#34d399', icon: '✓', dur: 2200 },
+      prefijo:  { bg: '#2c1a00', col: '#fb923c', icon: '↕', dur: 0   },
+      no_existe:{ bg: '#2d0a0a', col: '#f87171', icon: '⚠', dur: 3000 }
+    };
+    const c = cfgs[type] || cfgs.ok;
+    bar.style.background = c.bg;
+    // Despacho: sin botón "+ Nuevo" en ningún caso
+    bar.innerHTML = `
+      <span style="color:${c.col};font-size:.82em;font-weight:700;flex-shrink:0">${c.icon}</span>
+      <span style="color:${c.col};font-size:.76em;flex:1;white-space:nowrap;overflow:hidden;
+                   text-overflow:ellipsis;margin-left:6px">${escHtml(text)}</span>`;
+    if (c.dur > 0) _despStatusTimer = setTimeout(() => _setDespStatus('ready'), c.dur);
+  }
+
+  // ── Callback scanner ─────────────────────────────────────────
+  function _onDespResult(cod) {
+    const codStr = String(cod || '').trim();
+    if (!codStr) return;
+    const picker = document.getElementById('despCamPicker');
+    if (picker?.style.display === 'flex') return;
+    const candidatos = _buscarDespCandidatos(codStr);
+    if (!candidatos.length) {
+      _setDespStatus('no_existe', codStr + ' · no existe en catálogo');
+      SoundFX.warn(); vibrate([60, 30, 60]);
+      return;
+    }
+    if (candidatos[0]._exacto) {
+      _agregarDespDirecto(candidatos[0]);
+      _setDespStatus('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
+      SoundFX.beep(); vibrate(15);
+      return;
+    }
+    _setDespStatus('prefijo', 'Prefijo · ' + candidatos.length + ' productos coinciden');
+    _mostrarDespPicker(candidatos, codStr);
+  }
+
+  // ── Búsqueda solo por codigoBarra — exacto o prefijo, nunca nuevo ─
+  function _buscarDespCandidatos(codStr) {
+    const prods = OfflineManager.getProductosCache();
+    const cNorm = String(codStr).trim();
+    if (!cNorm) return [];
+    const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
+    if (exacto) { exacto._exacto = true; return [exacto]; }
+    if (cNorm.length >= 3) {
+      const porPrefijo = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+      if (porPrefijo.length) return porPrefijo.slice(0, 10);
+    }
+    return [];
+  }
+
+  // ── Agregar al carrito (auto-suma) ───────────────────────────
+  function _agregarDespDirecto(prod) {
+    const cb   = String(prod.codigoBarra || '');
+    const desc = prod.descripcion || cb;
+    if (!cb) return;
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    const stockD = parseFloat((stockMap[prod.idProducto] || stockMap[cb] || {}).cantidadDisponible || 0);
+    const idx = _cart.findIndex(c => c.codigoBarra === cb);
+    if (idx >= 0) {
+      _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) + 1;
+      SoundFX.beepDouble(); vibrate(12);
+    } else {
+      _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD });
+    }
+    _despLastHistory.push(cb);
+    _saveCart();
+    _renderDespList();
+  }
+
+  // ── Picker prefijo ───────────────────────────────────────────
+  function _mostrarDespPicker(candidatos, codStr) {
+    document.getElementById('despCamPickerCod').textContent = codStr;
+    document.getElementById('despCamPickerList').innerHTML = candidatos.map(p => {
+      const cb     = String(p.codigoBarra || '');
+      const cbHtml = cb.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
+        : escHtml(cb);
+      return `<button onclick="DespachoView.seleccionarItemDesp('${escAttr(cb)}')"
+              style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
+                     border:1px solid #1e293b;margin-bottom:7px;
+                     background:#1e293b;display:flex;align-items:center;gap:10px;
+                     cursor:pointer;-webkit-tap-highlight-color:transparent"
+              ontouchstart="this.style.borderColor='#0ea5e9';this.style.background='#0c1e30'"
+              ontouchend="this.style.borderColor='#1e293b';this.style.background='#1e293b'">
+        <div style="flex-shrink:0;width:32px;height:32px;border-radius:8px;background:#0ea5e922;
+                    display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.75em;color:#38bdf8;font-weight:700">CB</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace;margin-top:2px">${cbHtml}</p>
+        </div>
+      </button>`;
+    }).join('');
+    document.getElementById('despCamPicker').style.display = 'flex';
+  }
+
+  function cerrarDespPicker() {
+    const picker = document.getElementById('despCamPicker');
+    if (picker) picker.style.display = 'none';
+    _setDespStatus('ready');
+  }
+
+  function seleccionarItemDesp(codigoBarra) {
+    const picker = document.getElementById('despCamPicker');
+    if (picker) picker.style.display = 'none';
+    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+    if (!prod) return;
+    _agregarDespDirecto(prod);
+    _setDespStatus('ok', prod.descripcion || prod.codigoBarra);
+    SoundFX.beep(); vibrate(15);
+  }
+
+  // ── Render lista en modal cámara ─────────────────────────────
+  function _renderDespList() {
+    const list  = document.getElementById('despCamScannedList');
+    const count = document.getElementById('despScanListCount');
+    if (!list) return;
+    const total = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
+    if (count) count.textContent = total ? fmt(total, 2) + ' unid.' : '0 unid.';
+    const undoBtn  = document.getElementById('despUndoBtn');
+    const clearBtn = document.getElementById('despClearBtn');
+    if (undoBtn)  undoBtn.style.display  = _despLastHistory.length > 0 ? 'inline-block' : 'none';
+    if (clearBtn) clearBtn.style.display = _cart.length > 0 ? 'inline-block' : 'none';
+    if (!_cart.length) {
+      list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;
+          justify-content:center;padding:32px 20px;gap:10px;color:#334155">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+          <rect x="7" y="7" width="10" height="10" rx="1"/>
+        </svg>
+        <p style="font-size:.78em;text-align:center;line-height:1.5;color:#334155">
+          Apunta la cámara al código de barras
+        </p>
+      </div>`;
+      return;
+    }
+    const btnStyle = `width:32px;height:32px;border-radius:8px;border:1px solid #334155;
+      background:#0f172a;color:#94a3b8;font-size:1.05em;font-weight:700;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;flex-shrink:0;
+      -webkit-tap-highlight-color:transparent`;
+    list.innerHTML = _cart.map(item => {
+      const cb    = escAttr(item.codigoBarra);
+      const over  = item.stockDisp > 0 && item.cantidad > item.stockDisp;
+      const overW = over ? `<span style="font-size:.63em;color:#f87171;margin-left:4px">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+                border-radius:11px;background:#1e293b;border:1px solid ${over?'#7f1d1d':'#334155'};
+                margin-bottom:7px">
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(item.descripcion)}</p>
+          <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(item.codigoBarra)}${overW}</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+          <button onclick="DespachoView.despDecQty('${cb}')" style="${btnStyle}">−</button>
+          <button onclick="DespachoView.despEditQty('${cb}')"
+                  style="min-width:46px;height:32px;border-radius:8px;padding:0 10px;
+                         background:#0ea5e9;border:1px solid transparent;
+                         color:#fff;font-size:.85em;font-weight:800;cursor:pointer;
+                         -webkit-tap-highlight-color:transparent">
+            ×${fmt(item.cantidad, 2)}
+          </button>
+          <button onclick="DespachoView.despIncQty('${cb}')" style="${btnStyle}">+</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Controles cantidad en modal cámara ───────────────────────
+  function despIncQty(cb) {
+    const item = _cart.find(c => c.codigoBarra === cb);
+    if (!item) return;
+    item.cantidad = (parseFloat(item.cantidad) || 0) + 1;
+    _despLastHistory.push(cb);
+    _saveCart(); _renderDespList();
+    SoundFX.beepDouble(); vibrate(10);
+  }
+
+  function despDecQty(cb) {
+    const idx = _cart.findIndex(c => c.codigoBarra === cb);
+    if (idx < 0) return;
+    if (_cart[idx].cantidad <= 1) {
+      _cart.splice(idx, 1);
+    } else {
+      _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) - 1;
+    }
+    _saveCart(); _renderDespList(); vibrate(8);
+  }
+
+  function despEditQty(cb) {
+    const item = _cart.find(c => c.codigoBarra === cb);
+    if (!item) return;
+    const input = prompt((item.descripcion || cb) + '\nNueva cantidad (decimales: usa punto):', String(item.cantidad));
+    if (input === null) return;
+    const newQty = parseFloat(input.replace(',', '.'));
+    if (isNaN(newQty) || newQty < 0) { toast('Cantidad inválida', 'warn', 2000); return; }
+    if (newQty === 0) { despDecQty(cb); return; }
+    item.cantidad = newQty;
+    _saveCart(); _renderDespList();
+    SoundFX.beep(); vibrate(10);
+  }
+
+  // ── Undo / Limpiar ───────────────────────────────────────────
+  function despUndoLast() {
+    if (!_despLastHistory.length) return;
+    const cb  = _despLastHistory.pop();
+    const idx = _cart.findIndex(c => c.codigoBarra === cb);
+    if (idx < 0) { _renderDespList(); return; }
+    if (_cart[idx].cantidad <= 1) { _cart.splice(idx, 1); }
+    else                         { _cart[idx].cantidad--; }
+    _saveCart(); _renderDespList(); vibrate(15);
+    toast('↩ Deshecho', 'warn', 1200);
+  }
+
+  function despLimpiarTodo() {
+    if (!_cart.length) return;
+    if (!confirm('¿Vaciar el carrito de despacho?')) return;
+    _cart = []; _despLastHistory = [];
+    _saveCart(); _renderDespList(); vibrate(20);
+  }
+
+  // ── Render carrito en vista principal ────────────────────────
   function _renderCart() {
     const el = document.getElementById('despCartList');
     if (!el) return;
@@ -4372,7 +4609,7 @@ const DespachoView = (() => {
       el.innerHTML = `
         <div class="card text-center py-10">
           <p class="text-4xl mb-2">📦</p>
-          <p class="text-slate-400 text-sm">Apunta la cámara al código de barras</p>
+          <p class="text-slate-400 text-sm">Abre la cámara para escanear productos</p>
           <p class="text-slate-600 text-xs mt-1">El carrito se guarda automáticamente</p>
         </div>`;
       return;
@@ -4403,7 +4640,7 @@ const DespachoView = (() => {
     }).join('');
   }
 
-  // ── Controles de cantidad ────────────────────────────────────
+  // ── Controles de cantidad en vista principal ─────────────────
   function incQty(cod) { _adjustQty(cod, q => q + 1); }
   function decQty(cod) { _adjustQty(cod, q => Math.max(0, q - 1)); }
 
@@ -4414,7 +4651,6 @@ const DespachoView = (() => {
     if (newQty <= 0) { quitarItem(cod); return; }
     _cart[idx].cantidad = newQty;
     _saveCart();
-    // Actualizar solo el input, sin re-render completo (evita perder foco)
     const inp = document.getElementById('despQty-' + CSS.escape(cod));
     if (inp) {
       inp.value = newQty;
@@ -4434,7 +4670,6 @@ const DespachoView = (() => {
     _saveCart();
     _updateFooter();
     badgeUpdate();
-    // Actualizar clase over
     const inp = document.getElementById('despQty-' + CSS.escape(cod));
     if (inp) {
       const over = _cart[idx].stockDisp > 0 && newQty > _cart[idx].stockDisp;
@@ -4461,58 +4696,49 @@ const DespachoView = (() => {
 
   function finalizar() {
     if (!_cart.length) return;
-    const zonas   = OfflineManager.getZonasCache();
-    const sel     = document.getElementById('despZonaSelect');
+    const zonas = OfflineManager.getZonasCache();
+    const sel   = document.getElementById('despZonaSelect');
     sel.innerHTML = '<option value="">— Seleccionar zona —</option>' +
       zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('');
-
-    // Pre-seleccionar zona si viene del pickup
     const preZona = _pickupActivo?.idZona;
     if (preZona) sel.value = preZona;
-
     const n   = _cart.length;
-    const uds = _cart.reduce((s, c) => s + c.cantidad, 0);
+    const uds = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
     document.getElementById('despResumenProds').textContent = `${n} producto${n !== 1 ? 's' : ''}`;
-    document.getElementById('despResumenUds').textContent   = `${uds} unidades`;
-
+    document.getElementById('despResumenUds').textContent   = `${fmt(uds,2)} unidades`;
     abrirSheet('sheetDespFinalizar');
   }
 
   async function confirmarDespacho() {
     const idZona = document.getElementById('despZonaSelect').value;
     if (!idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
-
     const btn = document.getElementById('btnConfirmarDespacho');
-    btn.disabled     = true;
-    btn.textContent  = '⏳ Generando guía...';
-
+    btn.disabled    = true;
+    btn.textContent = '⏳ Generando guía...';
+    // Envía codigoBarra real del producto (no idProducto)
     const res = await API.crearDespachoRapido({
       idZona,
       usuario: window.WH_CONFIG?.usuario || '',
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
     }).catch(() => ({ ok: false, error: 'Sin conexión' }));
-
     btn.disabled    = false;
     btn.textContent = '📦 Generar guía de salida + Imprimir';
-
     if (res.ok) {
       const d = res.data;
       const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
       toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
       if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
-      // Si vino de un pickup, marcarlo como COMPLETADO
+      SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
       if (_pickupActivo) {
         API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'COMPLETADO' }).catch(() => {});
         _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
         _pickupActivo = null;
       }
-      _cart = [];
-      _saveCart();
+      _cart = []; _saveCart();
       cerrarSheet('sheetDespFinalizar');
-      _renderCart();
-      _updateFooter();
-      badgeUpdate();
+      _renderCart(); _updateFooter(); badgeUpdate();
     } else {
+      SoundFX.error(); vibrate([80, 40, 80]);
       toast('Error: ' + (res.error || 'No se pudo crear la guía'), 'danger', 6000);
     }
   }
@@ -4520,10 +4746,7 @@ const DespachoView = (() => {
   function cancelar() {
     if (!_cart.length) return;
     if (!confirm('¿Vaciar el carrito de despacho?')) return;
-    _cart = [];
-    _saveCart();
-    _renderCart();
-    _updateFooter();
+    _cart = []; _saveCart(); _renderCart(); _updateFooter();
   }
 
   // ── Badge global (carrito + pickups pendientes) ─────────────
@@ -4740,7 +4963,12 @@ const DespachoView = (() => {
     toast(`📥 ${n} producto${n !== 1 ? 's' : ''} cargados del pedido`, 'ok', 3000);
   }
 
-  return { cargar, pauseCamera, toggleCamera,
+  return { cargar, pauseCamera,
+           abrirDespCamara, cerrarDespCamara, cerrarDespYFinalizar,
+           toggleDespTorch, despSetZoom,
+           cerrarDespPicker, seleccionarItemDesp,
+           despIncQty, despDecQty, despEditQty,
+           despUndoLast, despLimpiarTodo,
            incQty, decQty, blurQty, quitarItem,
            finalizar, confirmarDespacho, cancelar,
            badgeUpdate, startPoll,
