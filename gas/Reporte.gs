@@ -40,7 +40,11 @@ function imprimirTicketGuia(params) {
   try {
     var prods   = _sheetToObjects(getProductosSheet());
     var prodMap = {};
-    prods.forEach(function(p) { prodMap[p.idProducto] = p.descripcion || p.idProducto; });
+    prods.forEach(function(p) {
+      var desc = p.descripcion || p.idProducto;
+      prodMap[p.idProducto] = desc;
+      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+    });
 
     var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
     var pnMap = {};
@@ -316,7 +320,11 @@ function _reporteGuia(id) {
   try {
     var prods   = _sheetToObjects(getProductosSheet());
     var prodMap = {};
-    prods.forEach(function(p) { prodMap[p.idProducto] = p.descripcion || p.idProducto; });
+    prods.forEach(function(p) {
+      var desc = p.descripcion || p.idProducto;
+      prodMap[p.idProducto] = desc;
+      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+    });
 
     var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
     var pnMap = {};
