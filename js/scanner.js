@@ -206,7 +206,25 @@ const Scanner = (() => {
     } catch (e) { return false; }
   }
 
+  async function setZoom(value) {
+    if (!_stream) return false;
+    const track = _stream.getVideoTracks()[0];
+    if (!track) return false;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: value }] });
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function getZoomCaps() {
+    if (!_stream) return null;
+    const track = _stream.getVideoTracks()[0];
+    if (!track) return null;
+    const caps = track.getCapabilities?.();
+    return caps?.zoom || null; // { min, max, step } o null si no soportado
+  }
+
   function isActive() { return _active; }
 
-  return { start, stop, isActive, toggleTorch };
+  return { start, stop, isActive, toggleTorch, setZoom, getZoomCaps };
 })();

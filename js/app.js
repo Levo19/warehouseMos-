@@ -1856,12 +1856,19 @@ const GuiasView = (() => {
     // Lock button
     const lockBtn = `
       <button onclick="GuiasView.toggleEstadoGuia()"
-              class="flex items-center gap-1 px-3 py-1 rounded-lg border font-bold text-xs tracking-wide transition-colors
-                     ${abierta ? 'border-amber-700 text-amber-300 bg-amber-900/30 hover:bg-amber-800/40'
-                               : 'border-slate-600 text-slate-400 hover:bg-slate-700'}"
+              style="display:flex;align-items:center;justify-content:center;
+                     width:36px;height:36px;border-radius:10px;border:1.5px solid
+                     ${abierta ? 'rgba(245,158,11,.6)' : 'rgba(100,116,139,.4)'};
+                     background:${abierta ? 'rgba(245,158,11,.12)' : 'rgba(30,41,59,.6)'};
+                     cursor:pointer;flex-shrink:0;transition:all .2s"
               title="${abierta ? 'Cerrar guía' : 'Reabrir (admin)'}">
-        ${abierta ? SVG_LOCK_OPEN : SVG_LOCK_CLOSED}
-        ${abierta ? 'ABIERTA' : 'CERRADA'}
+        ${abierta
+          ? `<svg width="18" height="18" viewBox="0 0 16 16" fill="${'#fbbf24'}">
+               <path d="M8 1a2 2 0 0 1 2 2v2h.5A1.5 1.5 0 0 1 12 6.5V14a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 14V6.5A1.5 1.5 0 0 1 5.5 5H6V3a2 2 0 0 1 2-2zm0 1a1 1 0 0 0-1 1v2h2V3a1 1 0 0 0-1-1z"/>
+             </svg>`
+          : `<svg width="18" height="18" viewBox="0 0 16 16" fill="${'#64748b'}">
+               <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6v5H5z"/>
+             </svg>`}
       </button>`;
 
     const provNombreHdr = (() => {
@@ -2045,7 +2052,7 @@ const GuiasView = (() => {
             : '';
           return `
           <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
-               data-det-id="${d.idDetalle || ''}" onclick="GuiasView.selectItem(${idx})">
+               data-det-id="${d.idDetalle || ''}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
               <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
@@ -2060,7 +2067,14 @@ const GuiasView = (() => {
     document.getElementById('guiaDetMontoVal').textContent = monto > 0 ? `S/. ${fmt(monto, 2)}` : '—';
     document.getElementById('guiaDetMonto').style.display = monto > 0 ? 'block' : 'none';
 
+    if (abierta) requestAnimationFrame(_initSwipeGuia);
+
     const acciones = document.getElementById('guiaDetAcciones');
+    const _camItemCount = ((g.detalle || []).filter(d => d.observacion !== 'ANULADO')).length;
+    const _camBadge = _camItemCount > 0
+      ? `<span style="background:#7c3aed;color:#fff;border-radius:9px;padding:1px 6px;
+                      font-size:.65em;font-weight:900;line-height:1.4;margin-left:2px">${_camItemCount}</span>`
+      : '';
     acciones.innerHTML = abierta ? `
       <div style="display:flex;gap:0;border-radius:14px;overflow:hidden;border:1px solid rgba(124,58,237,.25);width:100%">
         <button onclick="GuiasView.abrirCamaraItem()"
@@ -2074,7 +2088,7 @@ const GuiasView = (() => {
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          CÁMARA
+          CÁMARA${_camBadge}
         </button>
         <button onclick="GuiasView.abrirScannerItem()"
                 style="flex:1;min-height:52px;background:rgba(251,191,36,.06);
@@ -2450,16 +2464,18 @@ const GuiasView = (() => {
   function abrirAgregarItem() { abrirCamaraItem(); }
 
   // ── Estado sesión cámara (items escaneados en esta apertura) ─
-  let _camSession = {}; // { codigoBarra: { prod, qty } }
-  let _torchOn    = false;
+  let _camSession     = {}; // { codigoBarra: { prod, qty } }
+  let _lastScanHistory = []; // [codigoBarra, ...] — orden cronológico para undo
+  let _torchOn        = false;
 
-  function _clearCamSession() { _camSession = {}; }
+  function _clearCamSession() { _camSession = {}; _lastScanHistory = []; }
 
   function _addToCamList(prod) {
     const cb = String(prod.codigoBarra || '');
     if (!cb) return;
     if (_camSession[cb]) { _camSession[cb].qty++; }
     else                 { _camSession[cb] = { prod, qty: 1 }; }
+    _lastScanHistory.push(cb);
     _renderCamList();
   }
 
@@ -2470,6 +2486,11 @@ const GuiasView = (() => {
     const items = Object.values(_camSession);
     const total = items.reduce((s, i) => s + i.qty, 0);
     if (count) count.textContent = total ? total + ' unid.' : '0 unid.';
+    const hasItems = total > 0;
+    const undoBtn  = document.getElementById('camUndoBtn');
+    const clearBtn = document.getElementById('camClearBtn');
+    if (undoBtn)  undoBtn.style.display  = _lastScanHistory.length > 0 ? 'inline-block' : 'none';
+    if (clearBtn) clearBtn.style.display = hasItems ? 'inline-block' : 'none';
     if (!items.length) {
       list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;
           justify-content:center;padding:32px 20px;gap:10px;color:#334155">
@@ -2533,12 +2554,36 @@ const GuiasView = (() => {
     if (tb) tb.style.background = 'rgba(255,255,255,.14)';
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
+    // Reset zoom slider
+    const zoomWrap = document.getElementById('scanZoomWrap');
+    const zoomRange = document.getElementById('scanZoomRange');
+    if (zoomWrap) zoomWrap.style.display = 'none';
+    if (zoomRange) { zoomRange.value = 1; document.getElementById('scanZoomLabel').textContent = '1×'; }
     document.getElementById('scannerModal').classList.add('open');
     _setScanStatus('ready');
     Scanner.start('scanVideo', _onCamResult, err => {
       toast('Error cámara: ' + err, 'danger');
       document.getElementById('scannerModal').classList.remove('open');
     }, { continuous: true, cooldown: 1500 });
+    // Auto-torch: intentar encender linterna al abrir (útil en almacén)
+    setTimeout(async () => {
+      if (!Scanner.isActive()) return;
+      // Inicializar zoom si el dispositivo lo soporta
+      const zoomCaps = Scanner.getZoomCaps();
+      if (zoomCaps && zoomWrap && zoomRange) {
+        zoomRange.min   = zoomCaps.min;
+        zoomRange.max   = zoomCaps.max;
+        zoomRange.step  = zoomCaps.step || 0.1;
+        zoomRange.value = zoomCaps.min;
+        zoomWrap.style.display = 'flex';
+      }
+      // Auto-torch silencioso
+      const ok = await Scanner.toggleTorch(true);
+      if (ok) {
+        _torchOn = true;
+        if (tb) tb.style.background = 'rgba(251,191,36,.9)';
+      }
+    }, 900);
   }
 
   function cerrarCamara() {
@@ -2626,6 +2671,7 @@ const GuiasView = (() => {
     if (!candidatos.length) {
       _setScanStatus('no_existe', codStr + ' · no registrado', codStr);
       SoundFX.warn();
+      vibrate([60, 30, 60]);
       return;
     }
     if (candidatos[0]._exacto) {
@@ -2968,6 +3014,7 @@ const GuiasView = (() => {
         const errMsg  = res.error === 'PRODUCTO_NO_ENCONTRADO'
           ? 'No registrado en catálogo' : (res.error || res.mensaje || 'Error al guardar');
         SoundFX.error();
+        vibrate([80, 40, 80]);
         if (camOpen) {
           _setScanStatus('no_existe', errMsg + ' · ' + desc);
         } else {
@@ -3063,6 +3110,113 @@ const GuiasView = (() => {
 
   function _rescanear() {
     abrirCamaraItem();
+  }
+
+  // ── Controles adicionales cámara ──────────────────────────────
+
+  function camUndoLast() {
+    if (!_lastScanHistory.length) return;
+    const cb = _lastScanHistory.pop();
+    const entry = _camSession[cb];
+    if (!entry) { _renderCamList(); return; }
+    if (entry.qty <= 1) {
+      delete _camSession[cb];
+      // Revertir en detalle
+      const item = (_guiaActual?.detalle || []).find(d =>
+        d.codigoProducto === cb && d.observacion !== 'ANULADO'
+      );
+      if (item) {
+        if (item.idDetalle && !item._local) {
+          item.observacion = 'ANULADO'; item.cantidadRecibida = 0;
+          API.anularDetalle({ idDetalle: item.idDetalle }).catch(() => {});
+        } else {
+          _guiaActual.detalle = _guiaActual.detalle.filter(d => d !== item);
+        }
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    } else {
+      entry.qty--;
+      const item = (_guiaActual?.detalle || []).find(d =>
+        d.codigoProducto === cb && d.observacion !== 'ANULADO'
+      );
+      if (item) {
+        item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
+        if (item.idDetalle && !item._local) {
+          API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+        }
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    }
+    _renderCamList();
+    vibrate(15);
+    toast('↩ Deshecho', 'warn', 1200);
+  }
+
+  function camLimpiarTodo() {
+    if (!Object.keys(_camSession).length) return;
+    const total = Object.values(_camSession).reduce((s, i) => s + i.qty, 0);
+    if (!confirm(`¿Limpiar los ${total} ítems de esta sesión?\n(Los ya guardados en GAS quedan en la guía.)`)) return;
+    // Anular solo los locales (aún no confirmados por GAS)
+    if (_guiaActual?.detalle) {
+      const cbs = new Set(Object.keys(_camSession));
+      _guiaActual.detalle = _guiaActual.detalle.map(d => {
+        if (cbs.has(d.codigoProducto) && d._local) return null; // quitar local
+        return d;
+      }).filter(Boolean);
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+    _clearCamSession();
+    _renderCamList();
+    vibrate(20);
+  }
+
+  function camSetZoom(val) {
+    const v = parseFloat(val);
+    Scanner.setZoom(v);
+    const lbl = document.getElementById('scanZoomLabel');
+    if (lbl) lbl.textContent = v.toFixed(1) + '×';
+  }
+
+  // Swipe-left en ítems del detalle de guía → anular
+  function _initSwipeGuia() {
+    const container = document.getElementById('guiaDetItems');
+    if (!container || container._swipeInit) return;
+    container._swipeInit = true;
+    let sx = 0, sy = 0, el = null, moved = false;
+    container.addEventListener('touchstart', e => {
+      const item = e.target.closest('[data-det-idx]');
+      if (!item) { el = null; return; }
+      sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+      el = item; moved = false;
+      el.style.transition = 'none';
+    }, { passive: true });
+    container.addEventListener('touchmove', e => {
+      if (!el) return;
+      const dx = e.touches[0].clientX - sx;
+      const dy = e.touches[0].clientY - sy;
+      if (Math.abs(dy) > Math.abs(dx) + 8) { el.style.transform = ''; el = null; return; }
+      if (dx > 0) { el.style.transform = ''; el = null; return; }
+      moved = true;
+      const clamped = Math.max(dx, -110);
+      el.style.transform = `translateX(${clamped}px)`;
+      el.style.background = dx < -55 ? 'rgba(220,38,38,.22)' : '';
+    }, { passive: true });
+    container.addEventListener('touchend', e => {
+      if (!el) return;
+      const dx = e.changedTouches[0].clientX - sx;
+      el.style.transition = 'transform .18s ease, background .18s';
+      if (moved && dx < -80) {
+        el.style.transform = 'translateX(-110%)';
+        el.style.opacity = '0';
+        const idx = parseInt(el.dataset.detIdx);
+        vibrate([40, 20, 40]);
+        setTimeout(() => { if (!isNaN(idx)) inlineDelete(idx); }, 180);
+      } else {
+        el.style.transform = '';
+        el.style.background = '';
+      }
+      el = null;
+    }, { passive: true });
   }
 
   // ── Producto Nuevo ────────────────────────────────────────────
@@ -3620,7 +3774,7 @@ const GuiasView = (() => {
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
     cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
-    camQtyPlus, camQtyMinus, camQtyEdit,
+    camQtyPlus, camQtyMinus, camQtyEdit, camUndoLast, camLimpiarTodo, camSetZoom,
     cerrarScannerItem, _enfocarHid,
     seleccionarItemHid,
     // compat stubs
