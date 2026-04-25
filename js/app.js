@@ -2482,7 +2482,7 @@ const GuiasView = (() => {
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; }
 
   function _addToCamList(prod) {
-    const cb = String(prod.codigoBarra || '');
+    const cb = String(prod._scannedCb || prod.codigoBarra || '');
     if (!cb) return;
     if (_camSession[cb]) { _camSession[cb].qty++; }
     else                 { _camSession[cb] = { prod, qty: 1 }; }
@@ -2733,10 +2733,11 @@ const GuiasView = (() => {
   function _mostrarCamPicker(candidatos, codStr) {
     document.getElementById('camPickerCod').textContent = codStr;
     document.getElementById('camPickerList').innerHTML = candidatos.map(p => {
-      const cb     = String(p.codigoBarra || '');
-      const cbHtml = cb.startsWith(codStr)
-        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
-        : escHtml(cb);
+      const cb      = String(p._scannedCb || p.codigoBarra || '');
+      const display = String(p.codigoBarra || cb);
+      const cbHtml  = display.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(display.slice(codStr.length))}`
+        : escHtml(display);
       return `<button onclick="GuiasView.seleccionarItemCamara('${escAttr(cb)}')"
               style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
                      border:1px solid #1e293b;margin-bottom:7px;
@@ -2764,14 +2765,15 @@ const GuiasView = (() => {
     _setScanStatus('ready');
   }
 
-  function seleccionarItemCamara(codigoBarra) {
+  function seleccionarItemCamara(scannedCb) {
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
-    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+    const candidatos = _buscarCandidatos(scannedCb);
+    const prod = candidatos[0];
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
     _addToCamList(prod);
-    _setScanStatus('ok', prod.descripcion || prod.codigoBarra);
+    _setScanStatus('ok', prod.descripcion || (prod._scannedCb || prod.codigoBarra));
   }
 
   // ── MODO SCANNER HID ─────────────────────────────────────────
@@ -2882,10 +2884,11 @@ const GuiasView = (() => {
     // Prefijo → picker dentro del sheet
     document.getElementById('hidPickerCod').textContent = codStr;
     document.getElementById('hidPickerList').innerHTML = candidatos.map(p => {
-      const cb     = String(p.codigoBarra || '');
-      const cbHtml = cb.startsWith(codStr)
-        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
-        : escHtml(cb);
+      const cb      = String(p._scannedCb || p.codigoBarra || '');
+      const display = String(p.codigoBarra || cb);
+      const cbHtml  = display.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(display.slice(codStr.length))}`
+        : escHtml(display);
       return `<button onclick="GuiasView.seleccionarItemHid('${escAttr(cb)}')"
               style="width:100%;text-align:left;padding:8px 10px;border-radius:9px;
                      border:1px solid rgba(124,58,237,.2);margin-bottom:5px;
@@ -2900,9 +2903,10 @@ const GuiasView = (() => {
     document.getElementById('hidPicker').style.display = 'block';
   }
 
-  function seleccionarItemHid(codigoBarra) {
-    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+  function seleccionarItemHid(scannedCb) {
     document.getElementById('hidPicker').style.display = 'none';
+    const candidatos = _buscarCandidatos(scannedCb);
+    const prod = candidatos[0];
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
     _agregarItemHidList(prod);
@@ -2914,7 +2918,7 @@ const GuiasView = (() => {
   function _agregarItemHidList(prod) {
     const list = document.getElementById('hidProductList');
     if (!list) return;
-    const cb = String(prod.codigoBarra || prod.idProducto || '');
+    const cb = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
     const existing = list.querySelector(`[data-hid-cb="${CSS.escape(cb)}"]`);
     if (existing) {
       const countEl = existing.querySelector('.hid-count');
@@ -2940,21 +2944,19 @@ const GuiasView = (() => {
   }
 
   // ── Búsqueda de candidatos — codigoBarra de PRODUCTOS_MASTER + EQUIVALENCIAS ─
-  // 1. Exacto en maestro → disparo directo
-  // 2. Exacto en equivalencias → resuelve al producto maestro (guarda codigoBarra maestro)
-  // 3. Prefijo en maestro o equivalencias → picker
-  // 4. Vacío → toast "no existe" + oferta de producto nuevo
+  // Siempre devuelve copias (no muta el caché).
+  // _scannedCb: código que físicamente se escaneó (puede ser equiv.codigoBarra ≠ prod.codigoBarra)
   function _buscarCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     const cNorm  = String(codStr).trim();
     if (!cNorm) return [];
 
-    // 1. Exacto en PRODUCTOS_MASTER
+    // 1. Exacto en PRODUCTOS_MASTER → código escaneado ES el canónico
     const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
-    if (exacto) { exacto._exacto = true; return [exacto]; }
+    if (exacto) return [{ ...exacto, _exacto: true }];
 
-    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim();
@@ -2962,31 +2964,33 @@ const GuiasView = (() => {
         String(p.idProducto || '').trim() === skuB ||
         String(p.skuBase    || '').trim() === skuB
       );
-      if (prod) { prod._exacto = true; return [prod]; }
+      if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
 
     // 3. Prefijo en PRODUCTOS_MASTER (mín. 3 chars)
     if (cNorm.length >= 3) {
-      const porMaestro = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+      const porMaestro = prods
+        .filter(p => String(p.codigoBarra || '').startsWith(cNorm))
+        .map(p => ({ ...p })); // copias
 
-      // Prefijo en EQUIVALENCIAS → resolver cada una al producto maestro (sin duplicar)
+      // Prefijo en EQUIVALENCIAS → resolver al producto maestro (sin duplicar por idProducto)
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
       equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
-        const skuB = String(e.skuBase || '').trim();
-        const prod = prods.find(p =>
+        const skuB  = String(e.skuBase || '').trim();
+        const base  = prods.find(p =>
           String(p.idProducto || '').trim() === skuB ||
           String(p.skuBase    || '').trim() === skuB
         );
-        if (prod && !idsYa.has(prod.idProducto)) {
-          porMaestro.push(prod);
-          idsYa.add(prod.idProducto);
+        if (base && !idsYa.has(base.idProducto)) {
+          porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });
+          idsYa.add(base.idProducto);
         }
       });
 
       if (porMaestro.length) return porMaestro.slice(0, 10);
     }
 
-    return []; // 4. No encontrado
+    return [];
   }
 
   // ── Legacy: procesarHidInput (compat con sheetScanInput anterior) ─
@@ -2997,7 +3001,7 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    const cb   = String(prod.codigoBarra || prod.idProducto || '');
+    const cb   = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
     const desc = prod.descripcion || prod.nombre || cb;
 
     // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
@@ -4595,9 +4599,9 @@ const DespachoView = (() => {
 
     // 1. Exacto en PRODUCTOS_MASTER
     const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
-    if (exacto) { exacto._exacto = true; return [exacto]; }
+    if (exacto) return [{ ...exacto, _exacto: true }];
 
-    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim();
@@ -4605,22 +4609,24 @@ const DespachoView = (() => {
         String(p.idProducto || '').trim() === skuB ||
         String(p.skuBase    || '').trim() === skuB
       );
-      if (prod) { prod._exacto = true; return [prod]; }
+      if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
 
     // 3. Prefijo en maestro + equivalencias (mín. 3 chars)
     if (cNorm.length >= 3) {
-      const porMaestro = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+      const porMaestro = prods
+        .filter(p => String(p.codigoBarra || '').startsWith(cNorm))
+        .map(p => ({ ...p }));
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
       equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
         const skuB = String(e.skuBase || '').trim();
-        const prod = prods.find(p =>
+        const base = prods.find(p =>
           String(p.idProducto || '').trim() === skuB ||
           String(p.skuBase    || '').trim() === skuB
         );
-        if (prod && !idsYa.has(prod.idProducto)) {
-          porMaestro.push(prod);
-          idsYa.add(prod.idProducto);
+        if (base && !idsYa.has(base.idProducto)) {
+          porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });
+          idsYa.add(base.idProducto);
         }
       });
       if (porMaestro.length) return porMaestro.slice(0, 10);
@@ -4631,7 +4637,7 @@ const DespachoView = (() => {
 
   // ── Agregar al carrito (auto-suma) ───────────────────────────
   function _agregarDespDirecto(prod) {
-    const cb   = String(prod.codigoBarra || '');
+    const cb   = String(prod._scannedCb || prod.codigoBarra || '');
     const desc = prod.descripcion || cb;
     if (!cb) return;
     const stockMap = {};
@@ -4662,10 +4668,11 @@ const DespachoView = (() => {
   function _mostrarDespPicker(candidatos, codStr) {
     document.getElementById('despCamPickerCod').textContent = codStr;
     document.getElementById('despCamPickerList').innerHTML = candidatos.map(p => {
-      const cb     = String(p.codigoBarra || '');
-      const cbHtml = cb.startsWith(codStr)
-        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
-        : escHtml(cb);
+      const cb      = String(p._scannedCb || p.codigoBarra || '');
+      const display = String(p.codigoBarra || cb);
+      const cbHtml  = display.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(display.slice(codStr.length))}`
+        : escHtml(display);
       return `<button onclick="DespachoView.seleccionarItemDesp('${escAttr(cb)}')"
               style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
                      border:1px solid #1e293b;margin-bottom:7px;
@@ -4692,17 +4699,19 @@ const DespachoView = (() => {
     _setDespStatus('ready');
   }
 
-  function seleccionarItemDesp(codigoBarra) {
+  function seleccionarItemDesp(scannedCb) {
     const picker = document.getElementById('despCamPicker');
     if (picker) picker.style.display = 'none';
-    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+    const candidatos = _buscarDespCandidatos(scannedCb);
+    const prod = candidatos[0];
     if (!prod) return;
     _agregarDespDirecto(prod);
-    const item   = _cart.find(c => c.codigoBarra === codigoBarra);
+    const cb     = String(prod._scannedCb || prod.codigoBarra || scannedCb);
+    const item   = _cart.find(c => c.codigoBarra === cb);
     const stockD = item?.stockDisp || 0;
     if (!item || stockD === 0 || item.cantidad <= stockD) {
       const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
-      _setDespStatus('ok', (prod.descripcion || codigoBarra) + stockTxt);
+      _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
       SoundFX.beep(); vibrate(15);
     }
   }
