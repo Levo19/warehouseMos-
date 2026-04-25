@@ -2449,14 +2449,57 @@ const GuiasView = (() => {
   // Compat: abrirAgregarItem legacy → usa cámara
   function abrirAgregarItem() { abrirCamaraItem(); }
 
+  // ── Estado sesión cámara (items escaneados en esta apertura) ─
+  let _camSession = {}; // { codigoBarra: { prod, qty } }
+  let _torchOn    = false;
+
+  function _clearCamSession() { _camSession = {}; }
+
+  function _addToCamList(prod) {
+    const cb = String(prod.codigoBarra || '');
+    if (!cb) return;
+    if (_camSession[cb]) { _camSession[cb].qty++; }
+    else                 { _camSession[cb] = { prod, qty: 1 }; }
+    _renderCamList();
+  }
+
+  function _renderCamList() {
+    const list  = document.getElementById('camScannedList');
+    const count = document.getElementById('scanListCount');
+    if (!list) return;
+    const items = Object.values(_camSession);
+    const total = items.reduce((s, i) => s + i.qty, 0);
+    if (count) count.textContent = total ? total + ' unid.' : '0 unid.';
+    if (!items.length) {
+      list.innerHTML = '<p style="text-align:center;color:#475569;font-size:.8em;padding:28px 0">Centra el código de barras en la cámara</p>';
+      return;
+    }
+    list.innerHTML = items.map(({ prod, qty }) => {
+      const cb = String(prod.codigoBarra || '');
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+                border-radius:11px;background:#1e293b;border:1px solid #334155;margin-bottom:7px">
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.84em;font-weight:700;color:#f1f5f9">${escHtml(prod.descripcion || cb)}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+        </div>
+        <div style="background:#7c3aed;border-radius:8px;padding:5px 12px;flex-shrink:0">
+          <span style="font-size:.92em;font-weight:800;color:#fff">×${qty}</span>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
   // ── MODO CÁMARA ──────────────────────────────────────────────
   function abrirCamaraItem() {
     if (!_guiaActual) return;
+    _clearCamSession();
+    _renderCamList();
+    _torchOn = false;
+    const tb = document.getElementById('scanTorchBtn');
+    if (tb) tb.style.background = 'rgba(255,255,255,.15)';
     document.getElementById('scannerModal').classList.add('open');
-    // Ocultar picker y toast previos
     document.getElementById('camPicker').style.display = 'none';
     document.getElementById('camToast').style.display  = 'none';
-    // Iniciar scanner en modo continuo
     Scanner.start('scanVideo', _onCamResult, err => {
       toast('Error cámara: ' + err, 'danger');
       document.getElementById('scannerModal').classList.remove('open');
@@ -2464,79 +2507,111 @@ const GuiasView = (() => {
   }
 
   function cerrarCamara() {
+    _torchOn = false;
     Scanner.stop();
     document.getElementById('scannerModal').classList.remove('open');
     document.getElementById('camPicker').style.display = 'none';
     document.getElementById('camToast').style.display  = 'none';
   }
 
+  async function toggleTorch() {
+    _torchOn = !_torchOn;
+    const ok = await Scanner.toggleTorch(_torchOn);
+    const btn = document.getElementById('scanTorchBtn');
+    if (!ok) {
+      _torchOn = false;
+      toast('Linterna no disponible en este dispositivo', 'warn', 2500);
+    }
+    if (btn) btn.style.background = (_torchOn && ok)
+      ? 'rgba(251,191,36,.9)' : 'rgba(255,255,255,.15)';
+  }
+
   // Callback del scanner continuo — procesa código sin cerrar cámara
   function _onCamResult(cod) {
     const codStr = String(cod || '').trim();
     if (!codStr) return;
-
-    // Ocultar picker anterior
     document.getElementById('camPicker').style.display = 'none';
 
     const candidatos = _buscarCandidatos(codStr);
 
     if (!candidatos.length) {
-      _camToast('⚠ No encontrado: ' + codStr, '', '#ef4444', '#fca5a5');
+      // No existe en catálogo → toast rojo + botón "Nuevo"
+      _camToast('no_existe', codStr);
       return;
     }
-    if (candidatos.length === 1 || candidatos[0]._exacto) {
+    if (candidatos[0]._exacto) {
       _agregarProductoDirecto(candidatos[0], false);
-      _camToast('✓ ' + String(candidatos[0].descripcion || candidatos[0].idProducto),
-                candidatos[0].idProducto, 'rgba(16,185,129,.94)', '#fff');
+      _addToCamList(candidatos[0]);
+      _camToast('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
       return;
     }
-    // Múltiples → mostrar picker (cámara sigue activa detrás)
+    // Prefijo → picker + toast informativo
+    _camToast('prefijo', codStr + ' · ' + candidatos.length + ' coincidencias');
     _mostrarCamPicker(candidatos, codStr);
   }
 
-  function _camToast(desc, id, bg, col) {
+  // type: 'ok' | 'prefijo' | 'no_existe'
+  function _camToast(type, text) {
     const t = document.getElementById('camToast');
-    const d = document.getElementById('camToastDesc');
-    const i = document.getElementById('camToastId');
     if (!t) return;
-    d.textContent = desc;
-    i.textContent = id;
-    t.style.background = bg;
-    d.style.color = col;
+    const cfgs = {
+      ok:       { bg: 'rgba(16,185,129,.95)', icon: '✓', dur: 2200 },
+      prefijo:  { bg: 'rgba(217,119,6,.95)',  icon: '↕', dur: 3500 },
+      no_existe:{ bg: 'rgba(220,38,38,.95)',  icon: '⚠', dur: 6000 }
+    };
+    const cfg = cfgs[type] || cfgs.ok;
+    const guiaId = _guiaActual?.idGuia || '';
+    const extraBtn = type === 'no_existe'
+      ? `<button onclick="GuiasView.abrirModalPN('${escAttr(text)}','${escAttr(guiaId)}');document.getElementById('camToast').style.display='none'"
+           style="flex-shrink:0;background:#fff;color:#dc2626;border:none;border-radius:7px;
+                  padding:5px 11px;font-size:.73em;font-weight:700;cursor:pointer;margin-left:6px">
+           + Nuevo
+         </button>` : '';
+    t.innerHTML = `
+      <span style="font-size:1.15em;flex-shrink:0">${cfg.icon}</span>
+      <p style="flex:1;font-weight:700;font-size:.8em;color:#fff;
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(text)}</p>
+      ${extraBtn}`;
+    t.style.background = cfg.bg;
     t.style.display = 'flex';
     clearTimeout(_camToastTimer);
-    _camToastTimer = setTimeout(() => { if (t) t.style.display = 'none'; }, 2500);
+    _camToastTimer = setTimeout(() => { if (t) t.style.display = 'none'; }, cfg.dur);
   }
   let _camToastTimer = null;
 
   function _mostrarCamPicker(candidatos, codStr) {
     document.getElementById('camPickerCod').textContent = codStr;
-    document.getElementById('camPickerList').innerHTML = candidatos.map(p => `
-      <button onclick="GuiasView.seleccionarItemCamara('${escAttr(p.idProducto)}')"
+    document.getElementById('camPickerList').innerHTML = candidatos.map(p => {
+      const cb     = String(p.codigoBarra || '');
+      const cbHtml = cb.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
+        : escHtml(cb);
+      return `<button onclick="GuiasView.seleccionarItemCamara('${escAttr(cb)}')"
               style="width:100%;text-align:left;padding:9px 11px;border-radius:10px;
                      border:1px solid rgba(100,116,139,.3);margin-bottom:6px;
                      background:rgba(15,23,42,.8);display:flex;align-items:center;gap:8px;
                      cursor:pointer;-webkit-tap-highlight-color:transparent"
               ontouchstart="this.style.borderColor='#a78bfa'" ontouchend="this.style.borderColor='rgba(100,116,139,.3)'">
         <div style="flex:1;min-width:0">
-          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || p.idProducto))}</p>
-          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
+          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace">${cbHtml}</p>
         </div>
-      </button>`).join('');
+      </button>`;
+    }).join('');
     document.getElementById('camPicker').style.display = 'block';
   }
 
   function cerrarCamPicker() {
     document.getElementById('camPicker').style.display = 'none';
-    // Scanner ya está corriendo — no hace falta reiniciar
   }
 
-  function seleccionarItemCamara(idProducto) {
+  function seleccionarItemCamara(codigoBarra) {
     document.getElementById('camPicker').style.display = 'none';
-    const prod = OfflineManager.getProductosCache().find(p => p.idProducto === idProducto);
+    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
-    _camToast('✓ ' + String(prod.descripcion || prod.idProducto), prod.idProducto, 'rgba(16,185,129,.94)', '#fff');
+    _addToCamList(prod);
+    _camToast('ok', prod.descripcion || prod.codigoBarra);
   }
 
   // ── MODO SCANNER HID ─────────────────────────────────────────
@@ -2629,15 +2704,13 @@ const GuiasView = (() => {
 
   function _procesarCodigoHid(codStr) {
     const candidatos = _buscarCandidatos(codStr);
-
     document.getElementById('hidPicker').style.display = 'none';
 
     if (!candidatos.length) {
-      _updateHidDisplay('⚠ No encontrado: ' + codStr);
+      _updateHidDisplay('⚠ No existe: ' + codStr);
       _ofrecerPNEnScanner(codStr);
       return;
     }
-
     if (candidatos.length === 1 || candidatos[0]._exacto) {
       const prod = candidatos[0];
       _agregarProductoDirecto(prod, false);
@@ -2646,25 +2719,29 @@ const GuiasView = (() => {
       setTimeout(() => _enfocarHid(), 100);
       return;
     }
-
-    // Múltiples → picker dentro del sheet
+    // Prefijo → picker dentro del sheet
     document.getElementById('hidPickerCod').textContent = codStr;
-    document.getElementById('hidPickerList').innerHTML = candidatos.map(p => `
-      <button onclick="GuiasView.seleccionarItemHid('${escAttr(p.idProducto)}')"
+    document.getElementById('hidPickerList').innerHTML = candidatos.map(p => {
+      const cb     = String(p.codigoBarra || '');
+      const cbHtml = cb.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(cb.slice(codStr.length))}`
+        : escHtml(cb);
+      return `<button onclick="GuiasView.seleccionarItemHid('${escAttr(cb)}')"
               style="width:100%;text-align:left;padding:8px 10px;border-radius:9px;
                      border:1px solid rgba(124,58,237,.2);margin-bottom:5px;
                      background:rgba(124,58,237,.06);display:flex;align-items:center;gap:8px;
                      cursor:pointer;-webkit-tap-highlight-color:transparent">
         <div style="flex:1;min-width:0">
-          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || p.idProducto))}</p>
-          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(p.idProducto)}${p.codigoBarra ? ' · ' + p.codigoBarra : ''}</p>
+          <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.69em;color:#64748b;font-family:monospace">${cbHtml}</p>
         </div>
-      </button>`).join('');
+      </button>`;
+    }).join('');
     document.getElementById('hidPicker').style.display = 'block';
   }
 
-  function seleccionarItemHid(idProducto) {
-    const prod = OfflineManager.getProductosCache().find(p => p.idProducto === idProducto);
+  function seleccionarItemHid(codigoBarra) {
+    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
     document.getElementById('hidPicker').style.display = 'none';
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
@@ -2673,53 +2750,56 @@ const GuiasView = (() => {
     setTimeout(() => _enfocarHid(), 100);
   }
 
-  // Muestra card del producto agregado en la lista del sheet HID
+  // Lista HID: auto-suma si el mismo producto se escanea de nuevo
   function _agregarItemHidList(prod) {
     const list = document.getElementById('hidProductList');
     if (!list) return;
+    const cb = String(prod.codigoBarra || prod.idProducto || '');
+    const existing = list.querySelector(`[data-hid-cb="${CSS.escape(cb)}"]`);
+    if (existing) {
+      const countEl = existing.querySelector('.hid-count');
+      const cur = parseInt(countEl?.textContent?.replace('×', '') || '1');
+      if (countEl) countEl.textContent = '×' + (cur + 1);
+      existing.classList.remove('item-slide-in');
+      requestAnimationFrame(() => existing.classList.add('item-slide-in'));
+      return;
+    }
     const div = document.createElement('div');
     div.className = 'item-slide-in';
+    div.dataset.hidCb = cb;
     div.style.cssText = 'display:flex;align-items:center;gap:9px;padding:9px 11px;' +
       'border-radius:11px;background:#1e293b;border:1px solid #334155;margin-bottom:6px';
     div.innerHTML = `<span style="color:#10b981;font-size:1.1em;flex-shrink:0">✓</span>
       <div style="flex:1;min-width:0">
-        <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(prod.descripcion || prod.idProducto))}</p>
-        <p style="font-size:.69em;color:#64748b;font-family:monospace">${escAttr(prod.idProducto)}</p>
-      </div>`;
+        <p style="font-size:.82em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(prod.descripcion || cb))}</p>
+        <p style="font-size:.69em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+      </div>
+      <span class="hid-count" style="background:#7c3aed;border-radius:6px;padding:3px 9px;
+            font-size:.8em;font-weight:700;color:#fff;flex-shrink:0">×1</span>`;
     list.insertBefore(div, list.firstChild);
   }
 
-  // ── Búsqueda de candidatos (shared entre cámara y HID) ───────
+  // ── Búsqueda de candidatos — SOLO por codigoBarra ────────────
+  // Los scanners siempre leen códigos de barra, nunca idProducto.
+  // 1. Exacto → disparo directo
+  // 2. Prefijo → picker con resaltado
+  // 3. Vacío  → toast "no existe" + oferta de producto nuevo
   function _buscarCandidatos(codStr) {
     const prods = OfflineManager.getProductosCache();
-    const cLow  = codStr.toLowerCase();
-    const cUp   = codStr.toUpperCase();
+    const cNorm = String(codStr).trim();
+    if (!cNorm) return [];
 
-    // 1. Exacta
-    const exacto = prods.find(p =>
-      p.idProducto === codStr ||
-      String(p.codigoBarra || '') === codStr ||
-      (p.idProducto || '').toLowerCase() === cLow ||
-      String(p.codigoBarra || '').toLowerCase() === cLow
-    );
+    // 1. Exacto
+    const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
     if (exacto) { exacto._exacto = true; return [exacto]; }
 
-    // 2. Prefijo (ej: "12345" → "12345A","12345B")
-    const porPrefijo = prods.filter(p =>
-      (p.idProducto || '').toUpperCase().startsWith(cUp) ||
-      String(p.codigoBarra || '').startsWith(codStr)
-    );
+    // 2. Prefijo (mín. 3 chars para evitar falsos)
+    if (cNorm.length >= 3) {
+      const porPrefijo = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+      if (porPrefijo.length) return porPrefijo.slice(0, 10);
+    }
 
-    // 3. Parcial (descripción / código)
-    const porParcial = prods.filter(p =>
-      !porPrefijo.includes(p) && (
-        (p.idProducto || '').toLowerCase().includes(cLow) ||
-        String(p.codigoBarra || '').toLowerCase().includes(cLow) ||
-        String(p.descripcion || '').toLowerCase().includes(cLow)
-      )
-    ).slice(0, 6);
-
-    return [...porPrefijo, ...porParcial].slice(0, 10);
+    return []; // 3. No encontrado
   }
 
   // ── Legacy: procesarHidInput (compat con sheetScanInput anterior) ─
@@ -2730,33 +2810,51 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    const cod          = prod.idProducto;
-    const descCapturada = prod.descripcion || prod.nombre || cod;
-    const localId      = 'DL' + Date.now();
+    const cb   = String(prod.codigoBarra || prod.idProducto || '');
+    const desc = prod.descripcion || prod.nombre || cb;
 
+    // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
+    if (!_guiaActual.detalle) _guiaActual.detalle = [];
+    const existing = _guiaActual.detalle.find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (existing) {
+      existing.cantidadRecibida = (parseFloat(existing.cantidadRecibida) || 0) + 1;
+      _mostrarDetalleSheet(_guiaActual, false);
+      toast('↑ +1 · ' + desc, 'ok', 1200);
+      vibrate(15);
+      // Sync a GAS si el detalle ya tiene ID real
+      if (existing.idDetalle && !existing._local) {
+        API.actualizarCantidadDetalle({
+          idDetalle: existing.idDetalle,
+          cantidadRecibida: existing.cantidadRecibida
+        }).catch(() => {});
+      }
+      return;
+    }
+
+    const localId = 'DL' + Date.now();
     const itemOptimista = {
       idDetalle: localId, idGuia: _guiaActual.idGuia,
-      codigoProducto: cod,
-      descripcionProducto: descCapturada,
+      codigoProducto: cb,
+      descripcionProducto: desc,
       cantidadEsperada: 0, cantidadRecibida: 1,
       precioUnitario: 0, fechaVencimiento: '', observacion: '',
-      _local: true,
-      _indirect: !!indirecto
+      _local: true, _indirect: !!indirecto
     };
-    if (!_guiaActual.detalle) _guiaActual.detalle = [];
     _guiaActual.detalle.push(itemOptimista);
     _mostrarDetalleSheet(_guiaActual, false);
-    // Animar el nuevo ítem en la lista
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-det-id="${localId}"]`);
       if (el) el.classList.add('item-slide-in');
     });
-    toast((indirecto ? '↕ ' : '✓ ') + descCapturada, 'ok', 1500);
+    toast((indirecto ? '↕ ' : '✓ ') + desc, 'ok', 1500);
+    vibrate(15);
 
-    const _idGuiaParaDetalle = _guiaActual.idGuia;
+    const _idGuia = _guiaActual.idGuia;
     API.agregarDetalle({
-      idGuia: _idGuiaParaDetalle,
-      codigoProducto: cod,
+      idGuia: _idGuia,
+      codigoProducto: cb,
       cantidadEsperada: 0, cantidadRecibida: 1,
       precioUnitario: 0, fechaVencimiento: ''
     }).then(res => {
@@ -2765,14 +2863,12 @@ const GuiasView = (() => {
         if (idx >= 0) {
           const itemFinal = {
             ...res.data,
-            idGuia: res.data.idGuia || _idGuiaParaDetalle,
-            descripcionProducto: res.data.descripcionProducto || descCapturada,
-            _local: false,
-            _indirect: !!indirecto
+            idGuia: res.data.idGuia || _idGuia,
+            descripcionProducto: res.data.descripcionProducto || desc,
+            _local: false, _indirect: !!indirecto
           };
           _guiaActual.detalle[idx] = itemFinal;
           _mostrarDetalleSheet(_guiaActual, false);
-          // Guardar en cache local para reaperturas rápidas
           OfflineManager.addDetalleCache(itemFinal);
         }
       } else if (!res.offline) {
@@ -3343,7 +3439,7 @@ const GuiasView = (() => {
     cargar, filtrar, toggleFiltro, silentRefresh, verDetalle,
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
-    cerrarCamara, cerrarCamPicker, seleccionarItemCamara,
+    cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
     cerrarScannerItem, _enfocarHid,
     seleccionarItemHid,
     // compat stubs

@@ -127,10 +127,11 @@
     .modal-box { background:#1e293b;border-radius:16px;padding:20px;width:92%;max-width:420px;
                  max-height:88vh;overflow-y:auto; }
     /* Scanner overlay */
-    #scannerModal { position:fixed;inset:0;background:#000;z-index:70;display:none; }
+    #scannerModal { position:fixed;inset:0;background:#0f172a;z-index:70;display:none; }
     #scannerModal.open { display:flex;flex-direction:column; }
-    #scanVideo { width:100%;height:100%;object-fit:cover;flex:1;min-height:0; }
-    /* Guía de puntería del scanner */
+    #scanCamArea { flex:0 0 18vh;position:relative;overflow:hidden;background:#000;min-height:120px; }
+    #scanVideo { width:100%;height:100%;object-fit:cover;display:block; }
+    /* Guía de puntería del scanner — legacy (no usado en nuevo layout) */
     .scan-guide-wrap { position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center; }
     .scan-guide-box {
       width:72%;max-width:280px;height:160px;
@@ -2128,46 +2129,86 @@
      SCANNER OVERLAY
 ═══════════════════════════════════════════════════ -->
 <div id="scannerModal">
-  <div class="flex items-center justify-between px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
-    <span class="text-white font-bold text-sm flex items-center gap-2">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
-      Escanear código de barras
-    </span>
-    <button onclick="if(typeof GuiasView!=='undefined'&&GuiasView.cerrarCamara)GuiasView.cerrarCamara();else cerrarScanner();"
-            class="text-white text-2xl leading-none px-2">✕</button>
-  </div>
-  <div style="position:relative;flex:1;min-height:0;overflow:hidden">
-    <video id="scanVideo" playsinline autoplay muted style="width:100%;height:100%;object-fit:cover;display:block"></video>
-    <div class="scan-guide-wrap">
-      <div class="scan-guide-box">
-        <span></span>
-        <div class="scan-line"></div>
+
+  <!-- 1/6 superior: cámara compacta -->
+  <div id="scanCamArea">
+    <video id="scanVideo" playsinline autoplay muted></video>
+
+    <!-- Guía de puntería (proporcional al área) -->
+    <div style="position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center">
+      <div style="width:60%;height:64%;border:2px solid rgba(59,130,246,.75);border-radius:8px;position:relative;overflow:hidden">
+        <div class="scan-line" style="position:absolute;left:0;right:0;height:2px;
+             background:linear-gradient(90deg,transparent,#3b82f6,transparent);
+             animation:scanAnim 1.8s linear infinite"></div>
       </div>
     </div>
-    <!-- Toast: último ítem agregado (aparece encima del video) -->
-    <div id="camToast" style="display:none;position:absolute;top:12px;left:12px;right:12px;
-         z-index:5;border-radius:14px;padding:11px 14px;
-         background:linear-gradient(135deg,rgba(16,185,129,.94),rgba(5,150,105,.94));
-         box-shadow:0 4px 20px rgba(0,0,0,.5);align-items:center;gap:10px">
-      <span style="font-size:1.35em;flex-shrink:0">✓</span>
-      <div style="flex:1;min-width:0">
-        <p id="camToastDesc" style="font-weight:800;font-size:.84em;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></p>
-        <p id="camToastId"   style="font-size:.7em;color:rgba(255,255,255,.75);font-family:monospace"></p>
+
+    <!-- Toast encima del video -->
+    <div id="camToast" style="display:none;position:absolute;bottom:6px;left:8px;right:8px;
+         z-index:5;border-radius:10px;padding:7px 11px;
+         box-shadow:0 2px 12px rgba(0,0,0,.5);align-items:center;gap:8px">
+    </div>
+
+    <!-- Controles superpuestos -->
+    <div style="position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;
+                align-items:center;padding:5px 8px;z-index:6;
+                background:linear-gradient(to bottom,rgba(0,0,0,.55),transparent)">
+      <span style="color:#fff;font-size:.68em;font-weight:700;opacity:.85">
+        &#x2316; Escáner
+      </span>
+      <div style="display:flex;gap:5px">
+        <button id="scanTorchBtn" onclick="GuiasView.toggleTorch()"
+                style="background:rgba(255,255,255,.15);border:none;border-radius:7px;
+                       padding:4px 9px;color:#fff;font-size:.72em;cursor:pointer;
+                       transition:background .2s">&#128294;</button>
+        <button onclick="GuiasView.cerrarCamara()"
+                style="background:rgba(255,255,255,.15);border:none;border-radius:7px;
+                       padding:4px 9px;color:#fff;font-size:.82em;cursor:pointer">&#10005;</button>
       </div>
     </div>
-    <!-- Picker: múltiples coincidencias (cámara sigue activa detrás) -->
-    <div id="camPicker" style="display:none;position:absolute;bottom:0;left:0;right:0;z-index:4;
-         background:rgba(2,6,23,.97);border-top:1px solid rgba(124,58,237,.4);padding:14px 16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <p style="font-size:.75em;color:#a78bfa;font-weight:700">Elige el producto (código: <span id="camPickerCod" style="color:#fbbf24;font-family:monospace"></span>):</p>
-        <button onclick="GuiasView.cerrarCamPicker()" style="color:#64748b;font-size:.75em;background:none;border:none;cursor:pointer;padding:2px 6px">✕</button>
+  </div>
+
+  <!-- 5/6 inferior: lista de productos escaneados -->
+  <div style="flex:1;display:flex;flex-direction:column;background:#0f172a;min-height:0;overflow:hidden">
+
+    <!-- Cabecera -->
+    <div style="display:flex;align-items:center;justify-content:space-between;
+                padding:8px 14px;border-bottom:1px solid #1e293b;flex-shrink:0">
+      <span style="font-size:.75em;font-weight:700;color:#94a3b8">Productos escaneados</span>
+      <span id="scanListCount" style="font-size:.75em;color:#64748b;font-family:monospace">0 unid.</span>
+    </div>
+
+    <!-- Picker: múltiples coincidencias (prefijo) -->
+    <div id="camPicker" style="display:none;border-bottom:1px solid rgba(124,58,237,.3);
+         padding:12px 14px;flex-shrink:0;background:#0f172a">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <p style="font-size:.73em;color:#a78bfa;font-weight:700">
+          Prefijo <span id="camPickerCod" style="color:#fbbf24;font-family:monospace"></span> · elige el producto:
+        </p>
+        <button onclick="GuiasView.cerrarCamPicker()"
+                style="color:#64748b;font-size:.75em;background:none;border:none;cursor:pointer;padding:2px 6px">&#10005;</button>
       </div>
-      <div id="camPickerList" style="max-height:220px;overflow-y:auto"></div>
+      <div id="camPickerList" style="max-height:180px;overflow-y:auto"></div>
+    </div>
+
+    <!-- Lista escaneados (auto-suma) -->
+    <div id="camScannedList" style="flex:1;overflow-y:auto;padding:10px 12px"></div>
+
+    <!-- Footer -->
+    <div style="display:flex;gap:8px;padding:10px 14px;border-top:1px solid #1e293b;flex-shrink:0">
+      <button onclick="GuiasView.abrirPNSinCodigo()"
+              style="flex:1;padding:9px;border-radius:10px;border:1px dashed #334155;
+                     background:transparent;color:#64748b;font-size:.78em;cursor:pointer">
+        + Producto nuevo
+      </button>
+      <button onclick="GuiasView.cerrarCamara()"
+              style="flex:1;padding:9px;border-radius:10px;background:#7c3aed;
+                     border:none;color:#fff;font-size:.78em;font-weight:700;cursor:pointer">
+        Listo
+      </button>
     </div>
   </div>
-  <div class="flex items-center justify-center px-4 py-3" style="background:rgba(0,0,0,.9);flex-shrink:0">
-    <span class="text-slate-400 text-xs">Centra el código dentro del recuadro azul</span>
-  </div>
+
 </div>
 
 <!-- ════════════════════════════════════════════════
