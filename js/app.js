@@ -2895,27 +2895,54 @@ const GuiasView = (() => {
     list.insertBefore(div, list.firstChild);
   }
 
-  // ── Búsqueda de candidatos — SOLO por codigoBarra ────────────
-  // Los scanners siempre leen códigos de barra, nunca idProducto.
-  // 1. Exacto → disparo directo
-  // 2. Prefijo → picker con resaltado
-  // 3. Vacío  → toast "no existe" + oferta de producto nuevo
+  // ── Búsqueda de candidatos — codigoBarra de PRODUCTOS_MASTER + EQUIVALENCIAS ─
+  // 1. Exacto en maestro → disparo directo
+  // 2. Exacto en equivalencias → resuelve al producto maestro (guarda codigoBarra maestro)
+  // 3. Prefijo en maestro o equivalencias → picker
+  // 4. Vacío → toast "no existe" + oferta de producto nuevo
   function _buscarCandidatos(codStr) {
-    const prods = OfflineManager.getProductosCache();
-    const cNorm = String(codStr).trim();
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    const cNorm  = String(codStr).trim();
     if (!cNorm) return [];
 
-    // 1. Exacto
+    // 1. Exacto en PRODUCTOS_MASTER
     const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
     if (exacto) { exacto._exacto = true; return [exacto]; }
 
-    // 2. Prefijo (mín. 3 chars para evitar falsos)
-    if (cNorm.length >= 3) {
-      const porPrefijo = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
-      if (porPrefijo.length) return porPrefijo.slice(0, 10);
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro
+    const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
+    if (equiv) {
+      const skuB = String(equiv.skuBase || '').trim();
+      const prod = prods.find(p =>
+        String(p.idProducto || '').trim() === skuB ||
+        String(p.skuBase    || '').trim() === skuB
+      );
+      if (prod) { prod._exacto = true; return [prod]; }
     }
 
-    return []; // 3. No encontrado
+    // 3. Prefijo en PRODUCTOS_MASTER (mín. 3 chars)
+    if (cNorm.length >= 3) {
+      const porMaestro = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+
+      // Prefijo en EQUIVALENCIAS → resolver cada una al producto maestro (sin duplicar)
+      const idsYa = new Set(porMaestro.map(p => p.idProducto));
+      equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
+        const skuB = String(e.skuBase || '').trim();
+        const prod = prods.find(p =>
+          String(p.idProducto || '').trim() === skuB ||
+          String(p.skuBase    || '').trim() === skuB
+        );
+        if (prod && !idsYa.has(prod.idProducto)) {
+          porMaestro.push(prod);
+          idsYa.add(prod.idProducto);
+        }
+      });
+
+      if (porMaestro.length) return porMaestro.slice(0, 10);
+    }
+
+    return []; // 4. No encontrado
   }
 
   // ── Legacy: procesarHidInput (compat con sheetScanInput anterior) ─
@@ -4462,17 +4489,46 @@ const DespachoView = (() => {
     _mostrarDespPicker(candidatos, codStr);
   }
 
-  // ── Búsqueda solo por codigoBarra — exacto o prefijo, nunca nuevo ─
+  // ── Búsqueda por codigoBarra — maestro + equivalencias, exacto o prefijo, nunca nuevo ─
   function _buscarDespCandidatos(codStr) {
-    const prods = OfflineManager.getProductosCache();
-    const cNorm = String(codStr).trim();
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    const cNorm  = String(codStr).trim();
     if (!cNorm) return [];
+
+    // 1. Exacto en PRODUCTOS_MASTER
     const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
     if (exacto) { exacto._exacto = true; return [exacto]; }
-    if (cNorm.length >= 3) {
-      const porPrefijo = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
-      if (porPrefijo.length) return porPrefijo.slice(0, 10);
+
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro
+    const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
+    if (equiv) {
+      const skuB = String(equiv.skuBase || '').trim();
+      const prod = prods.find(p =>
+        String(p.idProducto || '').trim() === skuB ||
+        String(p.skuBase    || '').trim() === skuB
+      );
+      if (prod) { prod._exacto = true; return [prod]; }
     }
+
+    // 3. Prefijo en maestro + equivalencias (mín. 3 chars)
+    if (cNorm.length >= 3) {
+      const porMaestro = prods.filter(p => String(p.codigoBarra || '').startsWith(cNorm));
+      const idsYa = new Set(porMaestro.map(p => p.idProducto));
+      equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
+        const skuB = String(e.skuBase || '').trim();
+        const prod = prods.find(p =>
+          String(p.idProducto || '').trim() === skuB ||
+          String(p.skuBase    || '').trim() === skuB
+        );
+        if (prod && !idsYa.has(prod.idProducto)) {
+          porMaestro.push(prod);
+          idsYa.add(prod.idProducto);
+        }
+      });
+      if (porMaestro.length) return porMaestro.slice(0, 10);
+    }
+
     return [];
   }
 
