@@ -81,9 +81,7 @@ function agregarDetalleGuia(params) {
   // Validar que el código de producto existe
   var productos = _sheetToObjects(getProductosSheet());
   var prod = productos.find(function(p) {
-    return p.idProducto === codigoBuscado ||
-           String(p.codigoBarra) === codigoBuscado ||
-           String(p.idProducto).toLowerCase() === codigoBuscado.toLowerCase();
+    return String(p.codigoBarra).trim() === codigoBuscado;
   });
 
   // Si no existe → sugerir ProductoNuevo
@@ -100,7 +98,7 @@ function agregarDetalleGuia(params) {
   var cantRecibida  = parseFloat(params.cantidadRecibida !== undefined ? params.cantidadRecibida : cantEsperada);
   var precioUnit    = parseFloat(params.precioUnitario)    || 0;
 
-  var cbProd = String(prod.codigoBarra || prod.idProducto);
+  var cbProd = String(prod.codigoBarra);
 
   // Lote: si viene fechaVencimiento, crear lote inmediatamente
   var idLote = params.idLote || '';
