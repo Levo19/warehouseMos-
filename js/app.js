@@ -1834,13 +1834,13 @@ const GuiasView = (() => {
     // 2. Refrescar desde GAS en background (actualiza si hay cambios)
     if (navigator.onLine) {
       API.getGuia(idGuia).then(res => {
-        if (res.ok && !res.offline) {
-          _guiaActual = res.data;
-          _mostrarDetalleSheet(_guiaActual, false); // re-render sin animación
-          // Mantener cache local en sync para reaperturas rápidas
-          if (Array.isArray(_guiaActual.detalle)) {
-            OfflineManager.actualizarDetallesGuia(idGuia, _guiaActual.detalle);
-          }
+        if (!res.ok || res.offline) return;
+        // Guard: si el usuario ya abrió otra guía, descartar esta respuesta stale
+        if (_guiaActual?.idGuia !== idGuia) return;
+        _guiaActual = res.data;
+        _mostrarDetalleSheet(_guiaActual, false);
+        if (Array.isArray(_guiaActual.detalle)) {
+          OfflineManager.actualizarDetallesGuia(idGuia, _guiaActual.detalle);
         }
       }).catch(() => {});
     }
