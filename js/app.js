@@ -3274,8 +3274,23 @@ const GuiasView = (() => {
     _pnFotoBase64 = '';
     _pnFotoMime   = 'image/jpeg';
 
-    const dispEl = document.getElementById('pnCodigoDisplay');
-    if (dispEl) dispEl.textContent = _pnCodigo || '(se generará automáticamente · NLEV...)';
+    // Barcode input + toggle
+    const codInput    = document.getElementById('pnCodigoBarra');
+    const autoWrap    = document.getElementById('pnAutoGenWrap');
+    const autoToggle  = document.getElementById('pnAutoGenToggle');
+    const autoThumb   = document.getElementById('pnAutoGenThumb');
+    const hasCode     = !!_pnCodigo;
+
+    if (codInput) {
+      codInput.value    = _pnCodigo || '';
+      codInput.readOnly = false;
+      codInput.style.opacity = '1';
+    }
+    // Si viene con código escaneado: ocultar toggle; si es manual: mostrar toggle
+    if (autoWrap)   autoWrap.style.display  = hasCode ? 'none' : 'flex';
+    // Siempre resetear toggle a OFF
+    if (autoToggle) { autoToggle.dataset.on = '0'; autoToggle.style.background = '#334155'; }
+    if (autoThumb)  { autoThumb.style.left = '2px'; autoThumb.style.background = '#64748b'; }
 
     const cant = document.getElementById('pnCantidad');
     if (cant) cant.value = '1';
@@ -3296,6 +3311,43 @@ const GuiasView = (() => {
       modal.dataset.pnGuia = guiaId || '';
       modal.classList.add('open');
     }
+  }
+
+  function _pnCodigoChanged() {
+    const v = (document.getElementById('pnCodigoBarra')?.value || '').trim();
+    _pnCodigo = v;
+    // Si el usuario escribe manualmente, apagar auto-gen
+    const toggle = document.getElementById('pnAutoGenToggle');
+    if (toggle?.dataset.on === '1') _pnResetAutoGen();
+  }
+
+  function _pnToggleAutoGen() {
+    const toggle  = document.getElementById('pnAutoGenToggle');
+    const thumb   = document.getElementById('pnAutoGenThumb');
+    const codInput = document.getElementById('pnCodigoBarra');
+    if (!toggle) return;
+    const isOn = toggle.dataset.on === '1';
+    if (!isOn) {
+      // Activar: generar código NLEV + timestamp
+      const gen = 'NLEV' + Date.now();
+      _pnCodigo = gen;
+      if (codInput) { codInput.value = gen; codInput.readOnly = true; codInput.style.opacity = '.55'; }
+      toggle.dataset.on  = '1';
+      toggle.style.background = '#f59e0b';
+      if (thumb) { thumb.style.left = '20px'; thumb.style.background = '#0f172a'; }
+    } else {
+      _pnResetAutoGen();
+    }
+  }
+
+  function _pnResetAutoGen() {
+    const toggle  = document.getElementById('pnAutoGenToggle');
+    const thumb   = document.getElementById('pnAutoGenThumb');
+    const codInput = document.getElementById('pnCodigoBarra');
+    _pnCodigo = (codInput?.value || '').trim();
+    if (codInput) { codInput.readOnly = false; codInput.style.opacity = '1'; }
+    if (toggle) { toggle.dataset.on = '0'; toggle.style.background = '#334155'; }
+    if (thumb)  { thumb.style.left = '2px'; thumb.style.background = '#64748b'; }
   }
 
   function cerrarModalPN() {
@@ -3822,6 +3874,7 @@ const GuiasView = (() => {
     compartirWA,
     imprimirTicket,
     abrirModalPN, cerrarModalPN, _pnFotoSeleccionada, confirmarRegistrarPN,
+    _pnCodigoChanged, _pnToggleAutoGen,
     abrirPNSinCodigo, _ocultarPNOffer
   };
 

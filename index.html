@@ -2617,8 +2617,25 @@
     <!-- Código -->
     <div style="background:#0f172a;border-radius:8px;padding:10px 13px;margin-bottom:12px;
                 border:1px solid #1e293b">
-      <p style="font-size:.65rem;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px">Código de barras</p>
-      <p id="pnCodigoDisplay" style="font-family:monospace;color:#fbbf24;font-weight:700;font-size:1rem"></p>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+        <p style="font-size:.65rem;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.06em">Código de barras</p>
+        <div id="pnAutoGenWrap" style="display:none;align-items:center;gap:5px">
+          <span style="font-size:.63rem;color:#64748b;white-space:nowrap">Auto-generar</span>
+          <div id="pnAutoGenToggle" data-on="0" onclick="GuiasView._pnToggleAutoGen()"
+               style="width:38px;height:20px;border-radius:10px;background:#334155;cursor:pointer;
+                      position:relative;transition:background .2s;flex-shrink:0">
+            <div id="pnAutoGenThumb"
+                 style="position:absolute;top:2px;left:2px;width:16px;height:16px;
+                        border-radius:50%;background:#64748b;transition:left .2s,background .2s"></div>
+          </div>
+        </div>
+      </div>
+      <input type="text" id="pnCodigoBarra" placeholder="Escribe o escanea el código…"
+             autocomplete="off" spellcheck="false"
+             oninput="GuiasView._pnCodigoChanged()"
+             style="width:100%;background:transparent;border:none;outline:none;
+                    color:#fbbf24;font-family:monospace;font-weight:700;font-size:1rem;
+                    box-sizing:border-box;-webkit-tap-highlight-color:transparent">
     </div>
 
     <!-- Foto -->
