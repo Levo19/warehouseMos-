@@ -1570,14 +1570,26 @@ const GuiasView = (() => {
 
   function filtrar(f) {
     filtroActual = f || 'TODAS';
-    // Update label
-    const lbl = document.getElementById('guiaFilterLabel');
-    if (lbl) lbl.textContent = FILTRO_LABELS[filtroActual] || 'TODAS';
+    // Dot azul en el embudo cuando el filtro no es "TODAS"
+    const dot = document.getElementById('guiaFilterDot');
+    if (dot) dot.style.display = filtroActual !== 'TODAS' ? 'block' : 'none';
     // Update active state in dropdown
     document.querySelectorAll('.guia-fopt').forEach(b =>
       b.classList.toggle('sel', b.dataset.filtro === filtroActual));
     _cerrarFiltroMenu();
     render(_filtrarYBuscar());
+  }
+
+  function _searchFocus(focused) {
+    const toolbar = document.getElementById('guiasToolbar');
+    if (!toolbar) return;
+    if (focused) {
+      toolbar.classList.add('srch-focused');
+      _cerrarFiltroMenu();
+    } else {
+      // Delay para que clicks en botones no se cancelen
+      setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
+    }
   }
 
   function _getProvNombre(idProveedor) {
@@ -1624,10 +1636,15 @@ const GuiasView = (() => {
                class="pre-qtag pre-qtag-blue" title="Ver preingreso"
                style="cursor:pointer;user-select:none">📋</span>`
       : '';
-    // Cantidad de ítems desde la caché de detalle
-    const detCache = OfflineManager.getGuiaDetalleCache();
-    const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
-    const itemsTag = numItems > 0 ? ` <span class="text-slate-500">[${numItems}]</span>` : '';
+    // Totalizador desde la caché de detalle
+    const detCache  = OfflineManager.getGuiaDetalleCache();
+    const detItems  = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO');
+    const numItems  = detItems.length;
+    const totalUds  = detItems.reduce((s, d) => s + (parseFloat(d.cantidadRecibida) || 0), 0);
+    const udsStr    = totalUds % 1 === 0 ? String(totalUds) : fmt(totalUds, 1);
+    const itemsTag  = numItems > 0
+      ? ` <span class="text-slate-500">${numItems} prod · ${udsStr} uds</span>`
+      : '';
     const pnPend   = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
     const pnBadge  = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
       padding:1px 5px;border-radius:4px;flex-shrink:0;letter-spacing:.04em;cursor:pointer"
@@ -2004,8 +2021,21 @@ const GuiasView = (() => {
 
     } // end else (no esEnvasado)
 
-    const items = (g.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const items    = (g.detalle || []).filter(d => d.observacion !== 'ANULADO');
+    const totalUds = items.reduce((s, d) => s + (parseFloat(d.cantidadRecibida) || 0), 0);
     document.getElementById('guiaDetCount').textContent = `${items.length} ítem${items.length !== 1 ? 's' : ''}`;
+    // Footer totales
+    const footerEl  = document.getElementById('guiaDetFooter');
+    const footerVal = document.getElementById('guiaDetFooterVal');
+    if (footerEl && footerVal) {
+      if (items.length) {
+        const udsStr = totalUds % 1 === 0 ? String(totalUds) : fmt(totalUds, 1);
+        footerVal.textContent = `${items.length} prod · ${udsStr} uds`;
+        footerEl.style.display = 'flex';
+      } else {
+        footerEl.style.display = 'none';
+      }
+    }
 
     // Resetear selección si la guía cambió
     if (_selGuiaId !== g.idGuia) { _selIdx = -1; _selGuiaId = g.idGuia; }
@@ -2055,21 +2085,32 @@ const GuiasView = (() => {
           }
 
           // ── Tarjeta colapsada ──────────────────────────────
-          const venc  = d.fechaVencimiento ? `<span class="text-xs text-amber-400 block mt-0.5">Venc: ${d.fechaVencimiento}</span>` : '';
+          const hoy       = new Date().toISOString().split('T')[0];
+          const vf        = d.fechaVencimiento || '';
+          const isVencido = vf && vf < hoy;
+          const isSoon    = vf && !isVencido && vf <= new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
+          const venc      = vf
+            ? `<span style="font-size:.68rem;${isVencido ? 'color:#f87171;font-weight:700' : 'color:#fbbf24'} " class="block mt-0.5">
+                ${isVencido ? '⚠ VENCIDO' : isSoon ? '⚠ Venc próx:'  : 'Venc:'} ${vf}</span>`
+            : '';
+          const qtyZero   = parseFloat(d.cantidadRecibida) === 0;
+          const qtyColor  = qtyZero ? '#f87171' : '#fff';
           const iTag  = d._indirect
             ? `<span style="font-size:9px;font-weight:800;padding:1px 4px;border-radius:3px;
                             background:rgba(124,58,237,.18);color:#a78bfa;
                             border:1px solid rgba(124,58,237,.4);margin-right:4px;flex-shrink:0;vertical-align:middle">i</span>`
             : '';
+          const rowBg = isVencido ? 'rgba(239,68,68,.07)' : '';
           return `
           <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
+               style="${rowBg ? 'background:' + rowBg + ';border-radius:8px' : ''}"
                data-det-id="${d.idDetalle || ''}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
               <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
               ${venc}
             </div>
-            <span class="text-base font-black text-white flex-shrink-0">${fmt(d.cantidadRecibida)}</span>
+            <span class="text-base font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : fmt(d.cantidadRecibida)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -2719,10 +2760,10 @@ const GuiasView = (() => {
       return;
     }
     if (candidatos[0]._exacto) {
-      _agregarProductoDirecto(candidatos[0], false);
+      const autoSum = _agregarProductoDirecto(candidatos[0], false);
       _addToCamList(candidatos[0]);
-      _setScanStatus('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
-      SoundFX.beep();
+      _setScanStatus('ok', candidatos[0].descripcion || (candidatos[0]._scannedCb || candidatos[0].codigoBarra));
+      if (!autoSum) SoundFX.beep(); // beepDouble ya sonó en auto-suma
       return;
     }
     // Prefijo → picker overlay
@@ -3014,14 +3055,13 @@ const GuiasView = (() => {
       _mostrarDetalleSheet(_guiaActual, false);
       vibrate(12);
       SoundFX.beepDouble();
-      // Sync a GAS si el detalle ya tiene ID real
       if (existing.idDetalle && !existing._local) {
         API.actualizarCantidadDetalle({
           idDetalle: existing.idDetalle,
           cantidadRecibida: existing.cantidadRecibida
         }).catch(() => {});
       }
-      return;
+      return true; // auto-suma: el caller no debe reproducir beep adicional
     }
 
     const localId = 'DL' + Date.now();
@@ -3897,7 +3937,7 @@ const GuiasView = (() => {
   }
 
   return {
-    cargar, filtrar, toggleFiltro, silentRefresh, verDetalle,
+    cargar, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
     cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
