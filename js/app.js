@@ -4279,11 +4279,51 @@ const EnvasadorView = (() => {
 // ════════════════════════════════════════════════
 const DespachoView = (() => {
   const CART_KEY = 'wh_despacho_cart';
+  const ZONA_KEY = 'wh_despacho_zona';
+  const HIST_KEY = 'wh_despacho_hist';
   let _cart = [];
+  let _tipoSalida = 'SALIDA_ZONA';
 
   function _saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(_cart)); }
   function _loadCart() {
     try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
+  }
+  function _saveZona(id) { if (id) localStorage.setItem(ZONA_KEY, id); }
+  function _loadZona()   { return localStorage.getItem(ZONA_KEY) || ''; }
+  function _saveHist(entry) {
+    try {
+      const h = JSON.parse(localStorage.getItem(HIST_KEY) || '[]');
+      h.unshift(entry);
+      localStorage.setItem(HIST_KEY, JSON.stringify(h.slice(0, 5)));
+    } catch {}
+  }
+  function _loadHist() {
+    try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch { return []; }
+  }
+  function _fmtHistTs(ts) {
+    if (!ts) return '';
+    const d = new Date(ts), now = new Date();
+    if (d.toDateString() === now.toDateString())
+      return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
+  }
+  function _renderHist() {
+    const el = document.getElementById('despHistorial');
+    if (!el) return;
+    const hist = _loadHist();
+    if (!hist.length) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    const TIPO_SHORT = { SALIDA_ZONA: 'Zona', SALIDA_JEFATURA: 'Jefatura', SALIDA_DEVOLUCION: 'Devolución' };
+    el.innerHTML = `
+      <p style="font-size:.68em;font-weight:800;color:#334155;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase">Últimas guías</p>
+      ${hist.map(h => `
+        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1e293b">
+          <div style="flex:1;min-width:0">
+            <p style="font-size:.78em;font-weight:700;color:#94a3b8">${escHtml(h.idGuia || '—')}</p>
+            <p style="font-size:.65em;color:#475569">${h.n} prod · ${escHtml(TIPO_SHORT[h.tipo] || h.tipo || 'Zona')} · ${_fmtHistTs(h.ts)}</p>
+          </div>
+          <span style="font-size:.72em;font-weight:800;color:${h.ok ? '#34d399' : '#f87171'}">${h.ok ? '✓' : '✗'}</span>
+        </div>`).join('')}`;
   }
 
   // ── Estado sesión cámara despacho ────────────────────────────
@@ -4295,6 +4335,7 @@ const DespachoView = (() => {
     _cart = _loadCart();
     _renderCart();
     _updateFooter();
+    _renderHist();
     badgeUpdate();
   }
 
@@ -4379,13 +4420,13 @@ const DespachoView = (() => {
       return;
     }
     const cfgs = {
-      ok:       { bg: '#022c22', col: '#34d399', icon: '✓', dur: 2200 },
-      prefijo:  { bg: '#2c1a00', col: '#fb923c', icon: '↕', dur: 0   },
-      no_existe:{ bg: '#2d0a0a', col: '#f87171', icon: '⚠', dur: 3000 }
+      ok:         { bg: '#022c22', col: '#34d399', icon: '✓', dur: 2500 },
+      sobrestock: { bg: '#2c0d00', col: '#fb923c', icon: '⚠', dur: 0   },
+      prefijo:    { bg: '#2c1a00', col: '#fb923c', icon: '↕', dur: 0   },
+      no_existe:  { bg: '#2d0a0a', col: '#f87171', icon: '⚠', dur: 3000 }
     };
     const c = cfgs[type] || cfgs.ok;
     bar.style.background = c.bg;
-    // Despacho: sin botón "+ Nuevo" en ningún caso
     bar.innerHTML = `
       <span style="color:${c.col};font-size:.82em;font-weight:700;flex-shrink:0">${c.icon}</span>
       <span style="color:${c.col};font-size:.76em;flex:1;white-space:nowrap;overflow:hidden;
@@ -4406,9 +4447,15 @@ const DespachoView = (() => {
       return;
     }
     if (candidatos[0]._exacto) {
-      _agregarDespDirecto(candidatos[0]);
-      _setDespStatus('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
-      SoundFX.beep(); vibrate(15);
+      const prod = candidatos[0];
+      _agregarDespDirecto(prod); // maneja sobrestock internamente
+      const item = _cart.find(c => c.codigoBarra === String(prod.codigoBarra || ''));
+      const stockD = item?.stockDisp || 0;
+      if (!item || stockD === 0 || item.cantidad <= stockD) {
+        const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+        _setDespStatus('ok', (prod.descripcion || prod.codigoBarra) + stockTxt);
+        SoundFX.beep(); vibrate(15);
+      }
       return;
     }
     _setDespStatus('prefijo', 'Prefijo · ' + candidatos.length + ' productos coinciden');
@@ -4447,6 +4494,15 @@ const DespachoView = (() => {
     _despLastHistory.push(cb);
     _saveCart();
     _renderDespList();
+    // Mostrar stock en barra de estado
+    const item = _cart.find(c => c.codigoBarra === cb);
+    const qty  = item ? parseFloat(item.cantidad) : 1;
+    const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD, 1)}` : '';
+    if (stockD > 0 && qty > stockD) {
+      _setDespStatus('sobrestock', desc + stockTxt + ` — pides ${fmt(qty,1)}`);
+      SoundFX.warn(); vibrate([40, 20, 40]);
+    }
+    // (si ok o sobrestock, el status ya se muestra — el caller sigue usando _setDespStatus('ok') si quiere)
   }
 
   // ── Picker prefijo ───────────────────────────────────────────
@@ -4489,8 +4545,93 @@ const DespachoView = (() => {
     const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
     if (!prod) return;
     _agregarDespDirecto(prod);
-    _setDespStatus('ok', prod.descripcion || prod.codigoBarra);
-    SoundFX.beep(); vibrate(15);
+    const item   = _cart.find(c => c.codigoBarra === codigoBarra);
+    const stockD = item?.stockDisp || 0;
+    if (!item || stockD === 0 || item.cantidad <= stockD) {
+      const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+      _setDespStatus('ok', (prod.descripcion || codigoBarra) + stockTxt);
+      SoundFX.beep(); vibrate(15);
+    }
+  }
+
+  // ── Búsqueda manual por nombre ───────────────────────────────
+  function abrirDespBusqueda() {
+    const panel = document.getElementById('despSearchPanel');
+    if (panel) panel.style.display = 'flex';
+    setTimeout(() => {
+      const inp = document.getElementById('despSearchInput');
+      if (inp) { inp.value = ''; inp.focus(); }
+      despBuscarInput('');
+    }, 80);
+  }
+
+  function cerrarDespBusqueda() {
+    const panel = document.getElementById('despSearchPanel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  function despBuscarInput(q) {
+    const prods = OfflineManager.getProductosCache();
+    const qL    = String(q || '').toLowerCase().trim();
+    const list  = document.getElementById('despSearchList');
+    if (!list) return;
+    if (qL.length < 2) {
+      list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Escribe al menos 2 caracteres</p>';
+      return;
+    }
+    const results = prods.filter(p => (p.descripcion || '').toLowerCase().includes(qL)).slice(0, 15);
+    if (!results.length) {
+      list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Sin resultados</p>';
+      return;
+    }
+    list.innerHTML = results.map(p => {
+      const cb = String(p.codigoBarra || '');
+      return `<button onclick="DespachoView.seleccionarDespBusqueda('${escAttr(cb)}')"
+              style="width:100%;text-align:left;padding:10px 12px;border-radius:10px;
+                     border:1px solid #1e293b;margin-bottom:6px;background:#1e293b;
+                     display:flex;align-items:center;gap:10px;cursor:pointer;
+                     -webkit-tap-highlight-color:transparent"
+              ontouchstart="this.style.background='#0c1e30'" ontouchend="this.style.background='#1e293b'">
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.descripcion || cb)}</p>
+          <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+        </div>
+      </button>`;
+    }).join('');
+  }
+
+  function seleccionarDespBusqueda(codigoBarra) {
+    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+    if (!prod) return;
+    cerrarDespBusqueda();
+    _agregarDespDirecto(prod);
+    const item   = _cart.find(c => c.codigoBarra === codigoBarra);
+    const stockD = item?.stockDisp || 0;
+    if (!item || stockD === 0 || item.cantidad <= stockD) {
+      const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+      _setDespStatus('ok', (prod.descripcion || codigoBarra) + stockTxt);
+      SoundFX.beep(); vibrate(15);
+    }
+  }
+
+  // ── Tipo de salida ───────────────────────────────────────────
+  function selTipo(tipo) {
+    _tipoSalida = tipo;
+    const chips = {
+      SALIDA_ZONA:       { id: 'despChipZona',     bc: '#0284c7', bg: 'rgba(14,165,233,.2)',    col: '#38bdf8'  },
+      SALIDA_JEFATURA:   { id: 'despChipJefatura', bc: '#7c3aed', bg: 'rgba(124,58,237,.18)',   col: '#a78bfa'  },
+      SALIDA_DEVOLUCION: { id: 'despChipDev',      bc: '#b45309', bg: 'rgba(180,83,9,.2)',       col: '#fbbf24'  }
+    };
+    Object.entries(chips).forEach(([t, cfg]) => {
+      const el = document.getElementById(cfg.id);
+      if (!el) return;
+      const active = t === tipo;
+      el.style.borderColor = active ? cfg.bc : '#334155';
+      el.style.background  = active ? cfg.bg : 'transparent';
+      el.style.color       = active ? cfg.col : '#475569';
+    });
+    const zonaWrap = document.getElementById('despZonaWrap');
+    if (zonaWrap) zonaWrap.style.display = tipo === 'SALIDA_ZONA' ? 'block' : 'none';
   }
 
   // ── Render lista en modal cámara ─────────────────────────────
@@ -4696,31 +4837,61 @@ const DespachoView = (() => {
 
   function finalizar() {
     if (!_cart.length) return;
+    // Zona select
     const zonas = OfflineManager.getZonasCache();
     const sel   = document.getElementById('despZonaSelect');
     sel.innerHTML = '<option value="">— Seleccionar zona —</option>' +
       zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('');
-    const preZona = _pickupActivo?.idZona;
-    if (preZona) sel.value = preZona;
+    sel.value = _pickupActivo?.idZona || _loadZona();
+    // Resumen
     const n   = _cart.length;
     const uds = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
     document.getElementById('despResumenProds').textContent = `${n} producto${n !== 1 ? 's' : ''}`;
     document.getElementById('despResumenUds').textContent   = `${fmt(uds,2)} unidades`;
+    // Tipo chips
+    selTipo(_tipoSalida);
+    // Limpiar nota
+    const notaEl = document.getElementById('despNotaFinal');
+    if (notaEl) notaEl.value = '';
+    // Conflictos de stock
+    const conflictos = _cart.filter(c => c.stockDisp > 0 && c.cantidad > c.stockDisp);
+    const conflPanel = document.getElementById('despConflictoPanel');
+    const conflList  = document.getElementById('despConflictoList');
+    if (conflPanel && conflList) {
+      if (conflictos.length) {
+        conflList.innerHTML = conflictos.map(c =>
+          `<div>• ${escHtml(c.descripcion)}: pides <b>${fmt(c.cantidad,2)}</b>, stock <b>${fmt(c.stockDisp,1)}</b></div>`
+        ).join('');
+        conflPanel.style.display = 'block';
+      } else {
+        conflPanel.style.display = 'none';
+      }
+    }
     abrirSheet('sheetDespFinalizar');
   }
 
   async function confirmarDespacho() {
-    const idZona = document.getElementById('despZonaSelect').value;
-    if (!idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
-    const btn = document.getElementById('btnConfirmarDespacho');
+    const idZona = _tipoSalida === 'SALIDA_ZONA' ? document.getElementById('despZonaSelect').value : '';
+    if (_tipoSalida === 'SALIDA_ZONA' && !idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
+    if (idZona) _saveZona(idZona);
+    const nota = document.getElementById('despNotaFinal')?.value?.trim() || '';
+    const btn  = document.getElementById('btnConfirmarDespacho');
     btn.disabled    = true;
     btn.textContent = '⏳ Generando guía...';
-    // Envía codigoBarra real del producto (no idProducto)
-    const res = await API.crearDespachoRapido({
+    const payload = {
       idZona,
+      tipo:    _tipoSalida,
+      nota,
       usuario: window.WH_CONFIG?.usuario || '',
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
-    }).catch(() => ({ ok: false, error: 'Sin conexión' }));
+    };
+    // Timeout de 15s
+    const res = await Promise.race([
+      API.crearDespachoRapido(payload),
+      new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 15000))
+    ]).catch(e => e?.timeout
+      ? { ok: false, error: 'Tiempo agotado (15s) — verifica tu conexión y reintenta' }
+      : { ok: false, error: 'Sin conexión' });
     btn.disabled    = false;
     btn.textContent = '📦 Generar guía de salida + Imprimir';
     if (res.ok) {
@@ -4729,16 +4900,19 @@ const DespachoView = (() => {
       toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
       if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
       SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
+      _saveHist({ idGuia: d.idGuia, ts: Date.now(), n: _cart.length, tipo: _tipoSalida, ok: true });
       if (_pickupActivo) {
         API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'COMPLETADO' }).catch(() => {});
         _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
         _pickupActivo = null;
       }
-      _cart = []; _saveCart();
+      _cart = []; _tipoSalida = 'SALIDA_ZONA'; _saveCart();
       cerrarSheet('sheetDespFinalizar');
-      _renderCart(); _updateFooter(); badgeUpdate();
+      _renderCart(); _updateFooter(); _renderHist(); badgeUpdate();
     } else {
       SoundFX.error(); vibrate([80, 40, 80]);
+      _saveHist({ idGuia: '—', ts: Date.now(), n: _cart.length, tipo: _tipoSalida, ok: false });
+      _renderHist();
       toast('Error: ' + (res.error || 'No se pudo crear la guía'), 'danger', 6000);
     }
   }
@@ -4969,6 +5143,8 @@ const DespachoView = (() => {
            cerrarDespPicker, seleccionarItemDesp,
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
+           abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
+           selTipo,
            incQty, decQty, blurQty, quitarItem,
            finalizar, confirmarDespacho, cancelar,
            badgeUpdate, startPoll,
