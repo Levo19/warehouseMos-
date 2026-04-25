@@ -1783,7 +1783,13 @@ const GuiasView = (() => {
     const detalles = OfflineManager.getGuiaDetalleCache();
     const prods    = OfflineManager.getProductosCache();
     const prodMap  = {};
-    prods.forEach(p => { prodMap[p.idProducto] = p.descripcion || p.nombre || p.idProducto; });
+    prods.forEach(p => {
+      const name = p.descripcion || p.nombre || '';
+      if (name) {
+        prodMap[p.idProducto] = name;
+        if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
+      }
+    });
 
     let guia = guias.find(g => g.idGuia === idGuia);
     if (!guia) {
@@ -1794,7 +1800,12 @@ const GuiasView = (() => {
 
     const detalle = detalles
       .filter(d => d.idGuia === idGuia)
-      .map(d => ({ ...d, descripcionProducto: prodMap[d.codigoProducto] || d.codigoProducto }));
+      .map(d => ({
+        ...d,
+        descripcionProducto: prodMap[d.codigoProducto]   // lookup por idProducto o codigoBarra
+          || d.descripcionProducto                        // preservar el nombre ya cacheado
+          || d.codigoProducto                             // fallback: código crudo
+      }));
 
     _guiaActual = { ...guia, detalle };
     _mostrarDetalleSheet(_guiaActual);
