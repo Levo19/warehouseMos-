@@ -99,10 +99,9 @@
     /* Guías toolbar — una sola fila: filtro + búsqueda + preingreso */
     #guiasToolbar { display:flex;align-items:center;gap:8px;margin-bottom:10px; }
     #guiasToolbar .smart-srch { flex:1;min-width:0;margin-bottom:0; }
-    .gtb-side { flex-shrink:0;overflow:hidden;
-                max-width:160px;opacity:1;
+    .gtb-side { flex-shrink:0;max-width:200px;opacity:1;
                 transition:max-width .22s ease, opacity .18s ease, margin .22s ease; }
-    #guiasToolbar.srch-focused .gtb-side { max-width:0;opacity:0;pointer-events:none;margin:0; }
+    #guiasToolbar.srch-focused .gtb-side { max-width:0;opacity:0;overflow:hidden;pointer-events:none;margin:0; }
     /* Funnel icon-only button */
     #guiaFilterBtn { display:flex;align-items:center;justify-content:center;
                      width:38px;height:38px;border-radius:10px;flex-shrink:0; }
