@@ -2471,19 +2471,40 @@ const GuiasView = (() => {
     const total = items.reduce((s, i) => s + i.qty, 0);
     if (count) count.textContent = total ? total + ' unid.' : '0 unid.';
     if (!items.length) {
-      list.innerHTML = '<p style="text-align:center;color:#475569;font-size:.8em;padding:28px 0">Centra el código de barras en la cámara</p>';
+      list.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;
+          justify-content:center;padding:32px 20px;gap:10px;color:#334155">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/>
+          <rect x="7" y="7" width="10" height="10" rx="1"/>
+        </svg>
+        <p style="font-size:.78em;text-align:center;line-height:1.5">
+          Apunta la cámara al código de barras<br>
+          <span style="color:#1e293b;font-size:.9em">Los productos aparecerán aquí</span>
+        </p>
+      </div>`;
       return;
     }
+    // _local check: producto tiene ítem pendiente de confirmación GAS
+    const detalle = _guiaActual?.detalle || [];
     list.innerHTML = items.map(({ prod, qty }) => {
-      const cb = String(prod.codigoBarra || '');
+      const cb     = String(prod.codigoBarra || '');
+      const saving = detalle.some(d => d.codigoProducto === cb && d._local === true);
       return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
-                border-radius:11px;background:#1e293b;border:1px solid #334155;margin-bottom:7px">
+                border-radius:11px;background:#1e293b;
+                border:1px solid ${saving ? '#475569' : '#334155'};
+                margin-bottom:7px;transition:border-color .4s">
         <div style="flex:1;min-width:0">
-          <p style="font-size:.84em;font-weight:700;color:#f1f5f9">${escHtml(prod.descripcion || cb)}</p>
+          <p style="font-size:.84em;font-weight:700;color:#f1f5f9;
+                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(prod.descripcion || cb)}</p>
           <p style="font-size:.69em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
         </div>
-        <div style="background:#7c3aed;border-radius:8px;padding:5px 12px;flex-shrink:0">
-          <span style="font-size:.92em;font-weight:800;color:#fff">×${qty}</span>
+        <div style="background:${saving ? '#1e293b' : '#7c3aed'};
+                    border:${saving ? '1px solid #475569' : '1px solid transparent'};
+                    border-radius:8px;padding:5px 12px;flex-shrink:0;
+                    min-width:40px;text-align:center;transition:background .4s">
+          <span style="font-size:.88em;font-weight:800;color:${saving ? '#64748b' : '#fff'}">
+            ${saving ? '⏳' : '×' + qty}
+          </span>
         </div>
       </div>`;
     }).join('');
@@ -2514,6 +2535,13 @@ const GuiasView = (() => {
     document.getElementById('scannerModal').classList.remove('open');
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
+    // Toast resumen al cerrar
+    const sessionItems = Object.values(_camSession);
+    const total = sessionItems.reduce((s, i) => s + i.qty, 0);
+    if (total > 0) {
+      const prods = sessionItems.length;
+      toast(`✓ ${total} ítem${total !== 1 ? 's' : ''} · ${prods} producto${prods !== 1 ? 's' : ''} agregados`, 'ok', 2800);
+    }
   }
 
   async function toggleTorch() {
@@ -2570,9 +2598,9 @@ const GuiasView = (() => {
   function _onCamResult(cod) {
     const codStr = String(cod || '').trim();
     if (!codStr) return;
-
+    // Si el picker está abierto, no interrumpir — el usuario está eligiendo
     const picker = document.getElementById('camPicker');
-    if (picker) picker.style.display = 'none';
+    if (picker?.style.display === 'flex') return;
 
     const candidatos = _buscarCandidatos(codStr);
 
@@ -2882,22 +2910,49 @@ const GuiasView = (() => {
       if (res.ok && !res.offline) {
         const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
         if (idx >= 0) {
+          // Preservar cantidad local: puede haberse incrementado mientras GAS respondía
+          const localQty = parseFloat(_guiaActual.detalle[idx].cantidadRecibida) || 1;
+          const gasQty   = parseFloat(res.data.cantidadRecibida) || 1;
           const itemFinal = {
             ...res.data,
             idGuia: res.data.idGuia || _idGuia,
             descripcionProducto: res.data.descripcionProducto || desc,
+            cantidadRecibida: localQty,
             _local: false, _indirect: !!indirecto
           };
           _guiaActual.detalle[idx] = itemFinal;
           _mostrarDetalleSheet(_guiaActual, false);
           OfflineManager.addDetalleCache(itemFinal);
+          // Si el local fue incrementado mientras GAS estaba en vuelo → sincronizar
+          if (localQty > gasQty) {
+            API.actualizarCantidadDetalle({
+              idDetalle: res.data.idDetalle,
+              cantidadRecibida: localQty
+            }).catch(() => {});
+          }
         }
+        _renderCamList(); // quitar ⏳
       } else if (!res.offline) {
+        // GAS rechazó → revertir detalle y limpiar sesión cámara
         _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);
         _mostrarDetalleSheet(_guiaActual, false);
-        toast(res.error === 'PRODUCTO_NO_ENCONTRADO'
-          ? 'Producto no registrado en el sistema' : 'Error: ' + (res.error || res.mensaje),
-          res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
+        // Descontar de la lista de sesión
+        if (_camSession[cb]) {
+          _camSession[cb].qty = Math.max(0, _camSession[cb].qty - 1);
+          if (_camSession[cb].qty === 0) delete _camSession[cb];
+        }
+        _renderCamList();
+        // Feedback: barra de estado si cámara abierta, toast si no
+        const camOpen = document.getElementById('scannerModal')?.classList.contains('open');
+        const errMsg  = res.error === 'PRODUCTO_NO_ENCONTRADO'
+          ? 'No registrado en catálogo' : (res.error || res.mensaje || 'Error al guardar');
+        if (camOpen) {
+          _setScanStatus('no_existe', errMsg + ' · ' + desc);
+        } else {
+          toast(res.error === 'PRODUCTO_NO_ENCONTRADO'
+            ? 'Producto no registrado en el sistema' : 'Error: ' + errMsg,
+            res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
+        }
       }
     }).catch(() => {});
   }
