@@ -1608,68 +1608,72 @@ const GuiasView = (() => {
     const hora        = _horaDesdeGuia(g);
     const fechaCorta  = _fmtCorta(g.fecha);
 
-    // Guías de envasado: card gris, solo lectura, sin botones de acción
+    // Guías de envasado: card gris, solo lectura
     if (isEnvasado) {
       const detCache = OfflineManager.getGuiaDetalleCache();
       const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
-      const itemsTag = numItems > 0 ? ` <span style="color:#64748b">[${numItems}]</span>` : '';
       return `
       <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
-           style="border-left-color:#475569;opacity:.7;cursor:default"
+           style="border-left-color:#475569;opacity:.65;cursor:default"
            onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
-        <div class="flex items-center justify-between gap-1 overflow-hidden">
-          <span class="text-xs font-bold truncate" style="color:#64748b">${tipoLabel}</span>
-          <span style="font-size:10px;color:#475569;flex-shrink:0">🔒 sistema</span>
+        <div class="card-row-top">
+          <span class="card-tipo-chip" style="background:rgba(71,85,105,.2);color:#64748b">${tipoLabel}</span>
+          <span style="font-size:10px;color:#475569">🔒 sistema</span>
         </div>
-        <p class="text-sm font-semibold truncate" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
-        <p class="text-xs" style="color:#475569">${fechaCorta}${itemsTag}</p>
+        <p class="card-name" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
+        <div class="card-row-bottom">
+          <span class="card-meta">${fechaCorta}${numItems ? ' · ' + numItems + ' prod' : ''}</span>
+        </div>
       </div>`;
     }
 
-    const estadoDot  = isAbierta
-      ? `<span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0"></span>`
-      : `<span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0"></span>`;
+    const chipBg  = isAbierta ? 'rgba(245,158,11,.15)' : isIngreso ? 'rgba(34,197,94,.15)' : 'rgba(59,130,246,.15)';
+    const chipCol = isAbierta ? '#fbbf24' : isIngreso ? '#4ade80' : '#60a5fa';
+    const estadoDot = isAbierta
+      ? `<span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0" title="Abierta"></span>`
+      : `<span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0" title="Cerrada"></span>`;
+
     const fotoTag = g.foto ? `<span class="pre-qtag pre-qtag-slate">📷</span>` : '';
-    // Icono de preingreso vinculado — al tap navega al preingreso
     const preTag  = g.idPreingreso
       ? `<span onclick="event.stopPropagation();GuiasView.irAPreingreso('${escAttr(g.idPreingreso)}')"
-               class="pre-qtag pre-qtag-blue" title="Ver preingreso"
-               style="cursor:pointer;user-select:none">📋</span>`
+             class="pre-qtag pre-qtag-blue" title="Ver preingreso" style="cursor:pointer;user-select:none">📋</span>`
       : '';
-    // Totalizador desde la caché de detalle
+
     const detCache  = OfflineManager.getGuiaDetalleCache();
     const detItems  = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO');
     const numItems  = detItems.length;
     const totalUds  = detItems.reduce((s, d) => s + (parseFloat(d.cantidadRecibida) || 0), 0);
     const udsStr    = totalUds % 1 === 0 ? String(totalUds) : fmt(totalUds, 1);
-    const itemsTag  = numItems > 0
-      ? ` <span class="text-slate-500">${numItems} prod · ${udsStr} uds</span>`
-      : '';
-    const pnPend   = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
-    const pnBadge  = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
-      padding:1px 5px;border-radius:4px;flex-shrink:0;letter-spacing:.04em;cursor:pointer"
+    const metaExtra = numItems > 0 ? ` · ${numItems} prod · ${udsStr} uds` : '';
+
+    const pnPend  = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
+    const pnBadge = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
+      padding:2px 6px;border-radius:4px;flex-shrink:0;letter-spacing:.04em;cursor:pointer"
       onclick="event.stopPropagation();GuiasView.abrirModalPN('',${JSON.stringify(g.idGuia)})"
       title="${pnPend} producto(s) nuevo(s) pendiente(s)">N${pnPend > 1 ? ' ' + pnPend : ''}</span>` : '';
-    const waGuiaBtn = `<button onclick="event.stopPropagation();GuiasView.compartirWA('${escAttr(g.idGuia)}')"
-      style="background:none;border:none;cursor:pointer;padding:2px;color:#25d366;flex-shrink:0;line-height:0"
-      title="Compartir por WhatsApp">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+
+    const waBtn = `<button onclick="event.stopPropagation();GuiasView.compartirWA('${escAttr(g.idGuia)}')"
+      class="card-act card-act-wa" title="Compartir por WhatsApp">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
     </button>`;
-    const printGuiaBtn = `<button onclick="event.stopPropagation();GuiasView.imprimirTicket('${escAttr(g.idGuia)}')"
-      style="background:none;border:none;cursor:pointer;padding:2px;color:#94a3b8;flex-shrink:0;line-height:0"
-      title="Imprimir ticket">
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg>
+    const printBtn = `<button onclick="event.stopPropagation();GuiasView.imprimirTicket('${escAttr(g.idGuia)}')"
+      class="card-act card-act-print" title="Imprimir ticket">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg>
     </button>`;
+
     return `
     <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
-      <div class="flex items-center justify-between gap-1 overflow-hidden">
-        <span class="text-xs font-bold truncate" style="color:${isIngreso ? '#4ade80' : '#60a5fd'}">${tipoLabel}</span>
-        <div class="flex items-center gap-1 flex-shrink-0">${pnBadge}${preTag}${fotoTag}${waGuiaBtn}${printGuiaBtn}${estadoDot}</div>
+      <div class="card-row-top">
+        <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${tipoLabel}</span>
+        <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${fotoTag}${estadoDot}</div>
       </div>
-      <p class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</p>
-      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}${itemsTag}</p>
+      <p class="card-name">${escAttr(provNombre)}</p>
+      <div class="card-row-bottom">
+        <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${metaExtra}</span>
+        <div class="card-actions">${waBtn}${printBtn}</div>
+      </div>
     </div>`;
   }
 
@@ -5440,7 +5444,6 @@ const PreingresosView = (() => {
     return prov ? (prov.nombre || idProveedor) : idProveedor;
   }
 
-  // ── Un card individual (altura fija, grid 3 filas) ───────
   function _renderCard(p) {
     const tieneGuia   = !!(p.idGuia && String(p.idGuia).trim());
     const nFotos      = p.fotos ? String(p.fotos).split(',').filter(Boolean).length : 0;
@@ -5450,43 +5453,50 @@ const PreingresosView = (() => {
     const hora        = _horaDesdeId(p.idPreingreso);
     const fechaCorta  = _fmtCorta(p.fecha);
 
-    // Tags top-right (compactos)
+    const chipBg  = tieneGuia ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)';
+    const chipCol = tieneGuia ? '#4ade80' : '#fbbf24';
+    const chipTxt = tieneGuia ? 'Con guía' : 'Sin guía';
+
     let nCargadores = 0;
     try { const c = JSON.parse(p.cargadores || '[]'); nCargadores = Array.isArray(c) ? c.length : 0; } catch {}
     const tagHtml = [
       tags.compl === 'si' ? '<span class="pre-qtag pre-qtag-green">Completo</span>'   : '',
       tags.compl === 'no' ? '<span class="pre-qtag pre-qtag-amber">Incompleto</span>' : '',
-      tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comprobante</span>' : '',
+      tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comp.</span>'       : '',
       nFotos > 0          ? `<span class="pre-qtag pre-qtag-slate">📷${nFotos}</span>` : '',
       nCargadores > 0     ? `<span class="pre-qtag" style="background:#451a03;color:#fbbf24">🛺${nCargadores}</span>` : '',
     ].filter(Boolean).join('');
 
-    // Bottom-right: crear guía OR guía icon
-    const actionHtml = tieneGuia
-      ? `<svg width="14" height="14" viewBox="0 0 16 16" fill="#22c55e" title="${escAttr(p.idGuia)}">
-           <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
-         </svg>`
-      : `<button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(p.idPreingreso)}')"
-                 class="pre-guia-btn">+ Guía</button>`;
+    const montoStr = p.monto ? ' · S/. ' + fmt(p.monto, 2) : '';
 
-    const waPreBtn = `<button onclick="event.stopPropagation();PreingresosView.compartirWA('${escAttr(p.idPreingreso)}')"
-      style="background:none;border:none;cursor:pointer;padding:3px 2px;color:#25d366;flex-shrink:0;line-height:0"
-      title="Compartir por WhatsApp">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
+    const waBtn = `<button onclick="event.stopPropagation();PreingresosView.compartirWA('${escAttr(p.idPreingreso)}')"
+      class="card-act card-act-wa" title="Compartir por WhatsApp">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
     </button>`;
+
+    const actionBtn = tieneGuia
+      ? `<button onclick="event.stopPropagation();App.nav('guias');GuiasView.verDetalle('${escAttr(p.idGuia)}')"
+           class="card-act card-act-done" title="${escAttr(p.idGuia)}">
+           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/></svg>
+           Guía
+         </button>`
+      : `<button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(p.idPreingreso)}')"
+           class="card-act card-act-guia">
+           + Guía
+         </button>`;
 
     return `
     <div class="pre-card" id="pre-${(p.idPreingreso||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
          onclick="PreingresosView.abrirDetalle('${escAttr(p.idPreingreso)}')">
-      <div class="flex items-center justify-between gap-1 overflow-hidden">
-        <span class="text-sm font-bold text-slate-100 truncate">${provNombre}</span>
+      <div class="card-row-top">
+        <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${chipTxt}</span>
         <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
       </div>
-      <p class="text-xs text-slate-400">${fechaCorta}${hora ? ' · ' + hora : ''}</p>
-      <div class="flex items-center justify-between gap-1">
-        <p class="text-sm font-bold ${p.monto ? 'text-emerald-400' : 'opacity-0'} leading-none">${p.monto ? 'S/. ' + fmt(p.monto, 2) : '—'}</p>
-        <div class="flex items-center gap-1">${waPreBtn}${actionHtml}</div>
+      <p class="card-name">${escAttr(provNombre)}</p>
+      <div class="card-row-bottom">
+        <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${montoStr}</span>
+        <div class="card-actions">${waBtn}${actionBtn}</div>
       </div>
     </div>`;
   }

@@ -309,22 +309,44 @@
       0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,.9); transform:scale(1); }
       55%     { box-shadow:0 0 0 7px rgba(239,68,68,0); transform:scale(1.15); }
     }
-    /* ── Preingreso tags ─────────────────────────────── */
-    /* ── Preingreso / Guía cards grid ───────────────── */
-    .pre-card {
-      background:#1e293b; border-radius:10px; padding:12px 13px;
-      display:grid; grid-template-rows:24px 18px 26px;
-      row-gap:5px; cursor:pointer; border-left:3px solid #f59e0b;
-      transition:opacity .1s,transform .1s; overflow:hidden;
+    /* ── Guía / Preingreso cards — v2 ───────────────── */
+    .guia-card, .pre-card {
+      background:#1e293b; border-radius:12px; padding:13px 14px;
+      display:flex; flex-direction:column; gap:7px;
+      cursor:pointer; border-left:4px solid #334155; min-height:96px;
+      transition:opacity .1s,transform .1s;
     }
-    .pre-card:active { opacity:.85; transform:scale(.99); }
-    .guia-card {
-      background:#1e293b; border-radius:10px; padding:12px 13px;
-      display:grid; grid-template-rows:18px 24px 18px;
-      row-gap:5px; cursor:pointer; border-left:3px solid #334155;
-      transition:opacity .1s,transform .1s; overflow:hidden;
+    .guia-card:active, .pre-card:active { opacity:.85; transform:scale(.99); }
+    .card-row-top {
+      display:flex; align-items:center; justify-content:space-between; gap:6px;
     }
-    .guia-card:active { opacity:.85; transform:scale(.99); }
+    .card-tipo-chip {
+      font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase;
+      padding:3px 9px; border-radius:20px; flex-shrink:0; line-height:1.4;
+    }
+    .card-name {
+      font-size:15px; font-weight:700; color:#f1f5f9;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2;
+    }
+    .card-row-bottom {
+      display:flex; align-items:center; justify-content:space-between;
+      gap:6px; margin-top:auto;
+    }
+    .card-meta { font-size:11px; color:#64748b; flex:1; min-width:0;
+                 white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .card-actions { display:flex; align-items:center; gap:5px; flex-shrink:0; }
+    /* Botones de acción en cards */
+    .card-act {
+      display:inline-flex; align-items:center; justify-content:center; gap:4px;
+      padding:5px 10px; border-radius:8px; border:1px solid transparent;
+      cursor:pointer; font-size:11px; font-weight:700; line-height:1;
+      flex-shrink:0; transition:opacity .12s,transform .1s;
+    }
+    .card-act:active { opacity:.7; transform:scale(.94); }
+    .card-act-wa    { background:rgba(37,211,102,.12); color:#25d366; border-color:rgba(37,211,102,.22); }
+    .card-act-print { background:rgba(100,116,139,.12); color:#94a3b8; border-color:rgba(100,116,139,.22); }
+    .card-act-guia  { background:rgba(245,158,11,.12); color:#fbbf24; border-color:rgba(245,158,11,.22); }
+    .card-act-done  { background:rgba(34,197,94,.12); color:#4ade80; border-color:rgba(34,197,94,.22); }
     /* Date group separator */
     .pre-date-hdr {
       font-size:10px; font-weight:700; color:#475569;
@@ -333,22 +355,14 @@
       display:flex; align-items:center; gap:8px;
     }
     .pre-date-hdr::after { content:''; flex:1; height:1px; background:#1e293b; }
-    .pre-date-group { display:flex; flex-direction:column; gap:6px; }
+    .pre-date-group { display:flex; flex-direction:column; gap:8px; }
     /* Quick micro-tags */
-    .pre-qtag { font-size:9px; font-weight:700; padding:1px 5px;
-      border-radius:3px; line-height:1.3; white-space:nowrap; }
+    .pre-qtag { font-size:9px; font-weight:700; padding:2px 6px;
+      border-radius:4px; line-height:1.3; white-space:nowrap; }
     .pre-qtag-green { background:#14532d; color:#86efac; }
     .pre-qtag-amber { background:#78350f; color:#fde68a; }
     .pre-qtag-blue  { background:#1e3a8a; color:#93c5fd; }
     .pre-qtag-slate { background:#0f172a; color:#64748b; border:1px solid #334155; }
-    /* Create-guía quick button on card */
-    .pre-guia-btn {
-      font-size:10px; font-weight:700; padding:3px 7px;
-      border-radius:5px; border:none; cursor:pointer;
-      background:#166534; color:#86efac; line-height:1.2;
-      transition:transform .12s,opacity .12s; flex-shrink:0;
-    }
-    .pre-guia-btn:active { transform:scale(.94); opacity:.85; }
     /* Optimistic card */
     @keyframes pulse-border {
       0%,100% { border-left-color:#3b82f6;box-shadow:0 0 0 0 rgba(59,130,246,.4); }
@@ -747,13 +761,15 @@
       /* FAB de pre-ingreso: sube porque no hay bottom nav */
       .pre-fab-ico { bottom:20px; right:20px; }
 
-      /* Cards iguales en tablet — pocas al día, no hay que achicarlas */
-      .pre-card  { padding:16px 18px; grid-template-rows:30px 22px 34px; row-gap:8px; font-size:13px; }
-      .guia-card { padding:16px 18px; grid-template-rows:30px 22px 34px; row-gap:8px; font-size:13px; }
+      /* Cards en tablet — más espaciosas */
+      .pre-card, .guia-card { padding:16px 18px; min-height:108px; gap:9px; font-size:13px; }
+      .card-name { font-size:16px; }
+      .card-meta { font-size:12px; }
+      .card-act  { padding:6px 12px; font-size:12px; }
       .pre-date-hdr { font-size:11px; padding:12px 2px 6px; }
 
       /* Grid de cards: 2 columnas en tablet (más espaciosas) */
-      #listPreingresos, #listGuias { gap:10px; }
+      #listPreingresos, #listGuias { gap:12px; }
 
       /* Textos base más grandes en vistas */
       .view .text-sm  { font-size:14px !important; }
@@ -1713,7 +1729,7 @@
       </button>
     </div>
 
-    <div id="listGuias"></div>
+    <div id="listGuias" style="display:flex;flex-direction:column;gap:8px"></div>
 
     <!-- FAB elegante -->
     <button onclick="GuiasView.nueva()" class="fab-pill">
@@ -1823,7 +1839,7 @@
 
     </div>
 
-    <div id="listPreingresos" class="pb-20"></div>
+    <div id="listPreingresos" class="pb-20" style="display:flex;flex-direction:column;gap:8px"></div>
 
     <!-- FAB icono pequeño (se expande en hover/focus) -->
     <button onclick="PreingresosView.nuevo()" class="pre-fab-ico" aria-label="Nuevo preingreso">
