@@ -2484,27 +2484,40 @@ const GuiasView = (() => {
       </div>`;
       return;
     }
-    // _local check: producto tiene ítem pendiente de confirmación GAS
+    // saving = ítem pendiente de confirmación GAS (aún _local)
     const detalle = _guiaActual?.detalle || [];
     list.innerHTML = items.map(({ prod, qty }) => {
       const cb     = String(prod.codigoBarra || '');
+      const cbE    = escAttr(cb);
       const saving = detalle.some(d => d.codigoProducto === cb && d._local === true);
-      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;
+      const btnStyle = `width:32px;height:32px;border-radius:8px;border:1px solid #334155;
+        background:#0f172a;color:#94a3b8;font-size:1.05em;font-weight:700;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;flex-shrink:0;
+        -webkit-tap-highlight-color:transparent`;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;
                 border:1px solid ${saving ? '#475569' : '#334155'};
                 margin-bottom:7px;transition:border-color .4s">
         <div style="flex:1;min-width:0">
-          <p style="font-size:.84em;font-weight:700;color:#f1f5f9;
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;
                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(prod.descripcion || cb)}</p>
-          <p style="font-size:.69em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+          <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
         </div>
-        <div style="background:${saving ? '#1e293b' : '#7c3aed'};
-                    border:${saving ? '1px solid #475569' : '1px solid transparent'};
-                    border-radius:8px;padding:5px 12px;flex-shrink:0;
-                    min-width:40px;text-align:center;transition:background .4s">
-          <span style="font-size:.88em;font-weight:800;color:${saving ? '#64748b' : '#fff'}">
+        <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+          <button onclick="GuiasView.camQtyMinus('${cbE}')"
+                  ${saving ? 'disabled' : ''}
+                  style="${btnStyle};${saving ? 'opacity:.3;cursor:default' : ''}">−</button>
+          <button onclick="GuiasView.camQtyEdit('${cbE}')"
+                  title="Toca para editar cantidad"
+                  style="min-width:46px;height:32px;border-radius:8px;padding:0 10px;
+                         background:${saving ? '#1e293b' : '#7c3aed'};
+                         border:${saving ? '1px solid #475569' : '1px solid transparent'};
+                         color:${saving ? '#64748b' : '#fff'};font-size:.85em;font-weight:800;
+                         cursor:pointer;transition:background .4s;-webkit-tap-highlight-color:transparent">
             ${saving ? '⏳' : '×' + qty}
-          </span>
+          </button>
+          <button onclick="GuiasView.camQtyPlus('${cbE}')"
+                  style="${btnStyle}">+</button>
         </div>
       </div>`;
     }).join('');
@@ -2535,11 +2548,17 @@ const GuiasView = (() => {
     document.getElementById('scannerModal').classList.remove('open');
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
-    // Toast resumen al cerrar
+    // Mostrar detalle de la guía al volver
+    if (_guiaActual) {
+      abrirSheet('sheetGuiaDetalle');
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+    // Toast + sonido resumen
     const sessionItems = Object.values(_camSession);
     const total = sessionItems.reduce((s, i) => s + i.qty, 0);
     if (total > 0) {
       const prods = sessionItems.length;
+      SoundFX.done();
       toast(`✓ ${total} ítem${total !== 1 ? 's' : ''} · ${prods} producto${prods !== 1 ? 's' : ''} agregados`, 'ok', 2800);
     }
   }
@@ -2606,12 +2625,14 @@ const GuiasView = (() => {
 
     if (!candidatos.length) {
       _setScanStatus('no_existe', codStr + ' · no registrado', codStr);
+      SoundFX.warn();
       return;
     }
     if (candidatos[0]._exacto) {
       _agregarProductoDirecto(candidatos[0], false);
       _addToCamList(candidatos[0]);
       _setScanStatus('ok', candidatos[0].descripcion || candidatos[0].codigoBarra);
+      SoundFX.beep();
       return;
     }
     // Prefijo → picker overlay
@@ -2870,8 +2891,8 @@ const GuiasView = (() => {
     if (existing) {
       existing.cantidadRecibida = (parseFloat(existing.cantidadRecibida) || 0) + 1;
       _mostrarDetalleSheet(_guiaActual, false);
-      toast('↑ +1 · ' + desc, 'ok', 1200);
-      vibrate(15);
+      vibrate(12);
+      SoundFX.beepDouble();
       // Sync a GAS si el detalle ya tiene ID real
       if (existing.idDetalle && !existing._local) {
         API.actualizarCantidadDetalle({
@@ -2946,6 +2967,7 @@ const GuiasView = (() => {
         const camOpen = document.getElementById('scannerModal')?.classList.contains('open');
         const errMsg  = res.error === 'PRODUCTO_NO_ENCONTRADO'
           ? 'No registrado en catálogo' : (res.error || res.mensaje || 'Error al guardar');
+        SoundFX.error();
         if (camOpen) {
           _setScanStatus('no_existe', errMsg + ' · ' + desc);
         } else {
@@ -2955,6 +2977,88 @@ const GuiasView = (() => {
         }
       }
     }).catch(() => {});
+  }
+
+  // ── Controles de cantidad en la lista de sesión cámara ───────
+
+  function camQtyPlus(cb) {
+    const entry = _camSession[cb];
+    if (!entry) return;
+    entry.qty++;
+    const item = (_guiaActual?.detalle || []).find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (item) {
+      item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
+      if (item.idDetalle && !item._local) {
+        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+      }
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+    _renderCamList();
+    SoundFX.beepDouble();
+    vibrate(10);
+  }
+
+  function camQtyMinus(cb) {
+    const entry = _camSession[cb];
+    if (!entry) return;
+    const item = (_guiaActual?.detalle || []).find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (entry.qty <= 1) {
+      delete _camSession[cb];
+      if (item) {
+        if (item.idDetalle && !item._local) {
+          item.observacion = 'ANULADO'; item.cantidadRecibida = 0;
+          API.anularDetalle({ idDetalle: item.idDetalle }).catch(() => {});
+        } else {
+          _guiaActual.detalle = _guiaActual.detalle.filter(d => d !== item);
+        }
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    } else {
+      entry.qty--;
+      if (item) {
+        item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
+        if (item.idDetalle && !item._local) {
+          API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+        }
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    }
+    _renderCamList();
+    vibrate(8);
+  }
+
+  function camQtyEdit(cb) {
+    const entry = _camSession[cb];
+    if (!entry) return;
+    // prompt() bloquea el hilo → el scanner no dispara mientras el diálogo está abierto
+    const input = prompt(
+      (entry.prod.descripcion || cb) + '\nNueva cantidad (decimales: usa punto):',
+      String(entry.qty)
+    );
+    if (input === null) return; // cancelado
+    const newQty = parseFloat(input.replace(',', '.'));
+    if (isNaN(newQty) || newQty < 0) { toast('Cantidad inválida', 'warn', 2000); return; }
+    if (newQty === 0) { camQtyMinus(cb); return; }
+    const diff = newQty - entry.qty;
+    if (diff === 0) return;
+    entry.qty = newQty;
+    const item = (_guiaActual?.detalle || []).find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (item) {
+      item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) + diff);
+      if (item.idDetalle && !item._local) {
+        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+      }
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+    _renderCamList();
+    SoundFX.beep();
+    vibrate(10);
   }
 
   function _rescanear() {
@@ -3516,6 +3620,7 @@ const GuiasView = (() => {
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
     cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
+    camQtyPlus, camQtyMinus, camQtyEdit,
     cerrarScannerItem, _enfocarHid,
     seleccionarItemHid,
     // compat stubs
