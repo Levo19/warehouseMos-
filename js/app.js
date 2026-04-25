@@ -2512,7 +2512,7 @@ const GuiasView = (() => {
 
     // saving = ítem pendiente de confirmación GAS (aún _local)
     let html = items.map(({ prod, qty }) => {
-      const cb     = String(prod.codigoBarra || '');
+      const cb     = String(prod._scannedCb || prod.codigoBarra || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
@@ -4577,11 +4577,12 @@ const DespachoView = (() => {
     if (candidatos[0]._exacto) {
       const prod = candidatos[0];
       _agregarDespDirecto(prod); // maneja sobrestock internamente
-      const item = _cart.find(c => c.codigoBarra === String(prod.codigoBarra || ''));
+      const cb   = String(prod._scannedCb || prod.codigoBarra || '');
+      const item = _cart.find(c => c.codigoBarra === cb);
       const stockD = item?.stockDisp || 0;
       if (!item || stockD === 0 || item.cantidad <= stockD) {
         const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
-        _setDespStatus('ok', (prod.descripcion || prod.codigoBarra) + stockTxt);
+        _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
         SoundFX.beep(); vibrate(15);
       }
       return;
