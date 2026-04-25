@@ -7141,21 +7141,26 @@ const ProductosView = (() => {
   function _actualizarBadge() {
     const btn = document.getElementById('btnAuditoriaDia');
     if (!btn || !_auditDia) return;
-    btn.style.display = '';
     const pend = _pendientesCount();
     const total = _auditDia.skus.length;
     if (pend === 0) {
-      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg> Listo`;
-      btn.className = 'audit-badge audit-badge-done' + (_auditModo ? ' active' : '');
+      btn.style.display = 'none'; // ocultar cuando todas completadas
     } else {
+      btn.style.display = '';
       btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5.5 2A3.5 3.5 0 0 0 2 5.5v5A3.5 3.5 0 0 0 5.5 14h5a3.5 3.5 0 0 0 3.5-3.5V8a.5.5 0 0 1 1 0v2.5a4.5 4.5 0 0 1-4.5 4.5h-5A4.5 4.5 0 0 1 1 10.5v-5A4.5 4.5 0 0 1 5.5 1H8a.5.5 0 0 1 0 1H5.5z"/><path d="M16 3a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></svg> ${pend}&nbsp;<span style="opacity:.6;font-weight:400">/ ${total}</span>`;
       btn.className = 'audit-badge audit-badge-pending' + (_auditModo ? ' active' : '');
     }
-    // Punto naranja en el nav (bottom + sidebar)
     const dot = document.getElementById('navDotAudit');
     if (dot) dot.style.display = pend > 0 ? '' : 'none';
     const sideDot = document.getElementById('sideNavDotAudit');
     if (sideDot) sideDot.style.display = pend > 0 ? '' : 'none';
+  }
+
+  function _searchFocusProd(focused) {
+    const toolbar = document.getElementById('prodToolbar');
+    if (!toolbar) return;
+    if (focused) toolbar.classList.add('srch-focused');
+    else setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
   }
 
   function toggleAuditoriaDia() {
@@ -7348,7 +7353,7 @@ const ProductosView = (() => {
     _aplicarQuery();
   }
 
-  return { cargar, silentRefresh, buscar, buscarClear, toggleGrupo, toggleAuditoriaDia,
+  return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial };
