@@ -93,9 +93,11 @@ function agregarDetalleGuia(params) {
         return String(e.codigoBarra || '').trim().toUpperCase() === codigoBuscado && _esActivo(e.activo);
       });
       if (equiv) {
-        var skuB = String(equiv.skuBase || '').trim();
+        var skuB = String(equiv.skuBase || '').trim().toUpperCase();
         prod = productos.find(function(p) {
-          return String(p.idProducto || '').trim() === skuB || String(p.skuBase || '').trim() === skuB;
+          return String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+                 String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+                 String(p.codigoBarra || '').trim().toUpperCase() === skuB;
         });
       }
     }

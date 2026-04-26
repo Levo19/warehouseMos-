@@ -197,8 +197,12 @@ function _route(method, e) {
 // Campos que deben forzarse a string (evita pérdida de ceros a la izquierda en Sheets)
 var _STRING_FIELDS = { codigoBarra: true, barcode: true, ean: true, pin: true, adminPin: true };
 
-// Sheets booleans llegan como true/false (no '1'/'0') — normalizar
-function _esActivo(v) { return v === true || v === 1 || String(v) === '1'; }
+// Sheets booleans llegan como true/false, 1/0, o strings 'TRUE'/'1'/'YES' — normalizar todos
+function _esActivo(v) {
+  if (v === true || v === 1) return true;
+  var s = String(v || '').trim().toUpperCase();
+  return s === '1' || s === 'TRUE' || s === 'YES' || s === 'SI' || s === 'S';
+}
 
 function _sheetToObjects(sheet) {
   var data = sheet.getDataRange().getValues();

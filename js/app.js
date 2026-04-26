@@ -1863,7 +1863,23 @@ const GuiasView = (() => {
         if (!res.ok || res.offline) return;
         // Guard: si el usuario ya abrió otra guía, descartar esta respuesta stale
         if (_guiaActual?.idGuia !== idGuia) return;
+
+        // Rescatar ítems locales pendientes que se agregaron mientras GAS respondía.
+        // Si los borramos sobreescribiendo _guiaActual, el siguiente escaneo
+        // no los encontraría y crearía una segunda fila duplicada en GAS.
+        const pendingLocal = (_guiaActual.detalle || []).filter(d => d._local);
+
         _guiaActual = res.data;
+
+        if (pendingLocal.length && Array.isArray(_guiaActual.detalle)) {
+          pendingLocal.forEach(p => {
+            // Solo re-inyectar si GAS aún no lo confirmó (agregarDetalle puede haber llegado antes)
+            if (!_guiaActual.detalle.some(d => d.idDetalle === p.idDetalle)) {
+              _guiaActual.detalle.push(p);
+            }
+          });
+        }
+
         _mostrarDetalleSheet(_guiaActual, false);
         if (Array.isArray(_guiaActual.detalle)) {
           OfflineManager.actualizarDetallesGuia(idGuia, _guiaActual.detalle);
@@ -2089,12 +2105,14 @@ const GuiasView = (() => {
                 <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
                   <button onclick="GuiasView.inlineQtyDelta(-1)"
                           class="text-slate-300 text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md active:bg-slate-600 select-none">−</button>
+                  <span id="inlineQtyDisplay"
+                        class="text-base font-black text-white w-14 text-center select-none cursor-pointer"
+                        onclick="GuiasView.inlineQtyTap()">${_selQty}</span>
                   <input id="inlineQtyInput" type="number" step="any" inputmode="decimal"
-                         value="${_selQty}"
-                         class="text-base font-black text-white bg-transparent border-b border-slate-500 text-center w-14 focus:outline-none focus:border-blue-400"
+                         value="${_selQty}" readonly tabindex="-1"
+                         class="text-base font-black text-white bg-transparent border-b border-slate-500 text-center w-14 focus:outline-none focus:border-blue-400 hidden"
                          oninput="GuiasView.inlineQtyInput(this.value)"
-                         onblur="GuiasView.inlineQtyBlur(this.value)"
-                         onfocus="this.select()"/>
+                         onblur="GuiasView.inlineQtyBlurFull(this.value)"/>
                   <button onclick="GuiasView.inlineQtyDelta(1)"
                           class="text-blue-400 text-xl leading-none w-7 h-7 flex items-center justify-center rounded-md active:bg-slate-600 select-none">+</button>
                 </div>
@@ -2226,11 +2244,6 @@ const GuiasView = (() => {
     _selOrigQty  = _selQty;
     _selOrigVenc = _selVenc;
     _mostrarDetalleSheet(_guiaActual, false);
-    setTimeout(() => {
-      const el = document.getElementById('inlineQtyInput');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      el?.focus();
-    }, 60);
   }
 
   function deselectItem() {
@@ -2257,12 +2270,14 @@ const GuiasView = (() => {
     const idDetalle = d.idDetalle;
     if (_selQty <= 0) {
       d.observacion = 'ANULADO';
+      OfflineManager.addDetalleCache(d);
       API.anularDetalle({ idDetalle }).catch(() => {});
       toast('Ítem eliminado', 'warn', 1200);
       return;
     }
     d.cantidadRecibida = _selQty;
     d.fechaVencimiento = _selVenc;
+    OfflineManager.addDetalleCache(d);
     if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }).catch(() => {});
     if (vencChanged) API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }).catch(() => {});
     toast('Guardado', 'ok', 1000);
@@ -2270,8 +2285,23 @@ const GuiasView = (() => {
 
   function inlineQtyDelta(delta) {
     _selQty = Math.max(0, parseFloat(_selQty || 0) + delta);
-    const el = document.getElementById('inlineQtyInput');
-    if (el) el.value = _selQty;
+    const inp  = document.getElementById('inlineQtyInput');
+    const span = document.getElementById('inlineQtyDisplay');
+    if (inp)  inp.value        = _selQty;
+    if (span) span.textContent = _selQty;
+  }
+
+  // El usuario toca el número → ocultar span, mostrar input con foco
+  function inlineQtyTap() {
+    const inp  = document.getElementById('inlineQtyInput');
+    const span = document.getElementById('inlineQtyDisplay');
+    if (!inp || !span) return;
+    inp.removeAttribute('readonly');
+    inp.removeAttribute('tabindex');
+    span.classList.add('hidden');
+    inp.classList.remove('hidden');
+    inp.focus();
+    inp.select();
   }
 
   function inlineQtyInput(val) {
@@ -2279,9 +2309,14 @@ const GuiasView = (() => {
     _selQty = isNaN(n) ? 0 : Math.max(0, n);
   }
 
-  function inlineQtyBlur(val) {
+  // Al salir del input: volver a mostrar el span con el valor actualizado
+  function inlineQtyBlurFull(val) {
     const n = parseFloat(val);
     if (!isNaN(n)) _selQty = Math.max(0, n);
+    const inp  = document.getElementById('inlineQtyInput');
+    const span = document.getElementById('inlineQtyDisplay');
+    if (inp) { inp.setAttribute('readonly', ''); inp.setAttribute('tabindex', '-1'); inp.classList.add('hidden'); }
+    if (span) { span.textContent = _selQty; span.classList.remove('hidden'); }
   }
 
   function inlinePickVenc() {
@@ -2307,6 +2342,7 @@ const GuiasView = (() => {
     const d = items[idx];
     if (!d) return;
     d.observacion = 'ANULADO';
+    OfflineManager.addDetalleCache(d);
     _selIdx = -1;
     _mostrarDetalleSheet(_guiaActual, false);
     API.anularDetalle({ idDetalle: d.idDetalle }).catch(() => {});
@@ -2391,6 +2427,7 @@ const GuiasView = (() => {
     if (qtyFinal <= 0) {
       // Eliminar
       d.observacion = 'ANULADO';
+      OfflineManager.addDetalleCache(d);
       _mostrarDetalleSheet(_guiaActual, false);
       API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
       toast('Ítem eliminado', 'warn', 1500);
@@ -2399,6 +2436,7 @@ const GuiasView = (() => {
 
     d.cantidadRecibida = qtyFinal;
     d.fechaVencimiento = _editItemVenc;
+    OfflineManager.addDetalleCache(d);
     _mostrarDetalleSheet(_guiaActual, false);
 
     if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal }).catch(() => {});
@@ -2440,6 +2478,7 @@ const GuiasView = (() => {
     const d = (_guiaActual?.detalle || []).filter(x => x.observacion !== 'ANULADO')[_editItemIdx];
     if (!d) return;
     d.observacion = 'ANULADO';
+    OfflineManager.addDetalleCache(d);
     cerrarSheet('sheetEditItem');
     _mostrarDetalleSheet(_guiaActual, false);
     API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
@@ -3089,10 +3128,11 @@ const GuiasView = (() => {
     // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
-      const skuB = String(equiv.skuBase || '').trim();
+      const skuB = String(equiv.skuBase || '').trim().toUpperCase();
       const prod = prods.find(p =>
-        String(p.idProducto || '').trim() === skuB ||
-        String(p.skuBase    || '').trim() === skuB
+        String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+        String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+        String(p.codigoBarra || '').trim().toUpperCase() === skuB
       );
       if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
@@ -3106,10 +3146,11 @@ const GuiasView = (() => {
       // Prefijo en EQUIVALENCIAS → resolver al producto maestro (sin duplicar por idProducto)
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
       equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
-        const skuB  = String(e.skuBase || '').trim();
+        const skuB = String(e.skuBase || '').trim().toUpperCase();
         const base  = prods.find(p =>
-          String(p.idProducto || '').trim() === skuB ||
-          String(p.skuBase    || '').trim() === skuB
+          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+          String(p.codigoBarra || '').trim().toUpperCase() === skuB
         );
         if (base && !idsYa.has(base.idProducto)) {
           porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });
@@ -3218,20 +3259,29 @@ const GuiasView = (() => {
         // GAS rechazó → revertir detalle y limpiar sesión cámara
         _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);
         _mostrarDetalleSheet(_guiaActual, false);
-        // Descontar de la lista de sesión
-        if (_camSession[cb]) {
+
+        const isNotFound = res.error === 'PRODUCTO_NO_ENCONTRADO';
+        if (isNotFound) {
+          // Producto no existe en GAS: eliminar TODA la entrada de sesión
+          // (auto-sums sobre un local que nunca se confirmó también son inválidos)
+          delete _camSession[cb];
+          // Mover a la lista de desconocidos para que el usuario pueda registrarlo
+          if (!_camUnknownList.find(u => u.code === cb)) _camUnknownList.push({ code: cb });
+        } else if (_camSession[cb]) {
+          // Otro error (red, GAS caído, etc.) → solo descontar 1 del optimista
           _camSession[cb].qty = Math.max(0, _camSession[cb].qty - 1);
           if (_camSession[cb].qty === 0) delete _camSession[cb];
         }
         _renderCamList();
         // Feedback: barra de estado si cámara abierta, toast si no
         const camOpen = document.getElementById('scannerModal')?.classList.contains('open');
-        const errMsg  = res.error === 'PRODUCTO_NO_ENCONTRADO'
+        const errMsg  = isNotFound
           ? 'No registrado en catálogo' : (res.error || res.mensaje || 'Error al guardar');
         SoundFX.error();
         vibrate([80, 40, 80]);
         if (camOpen) {
-          _setScanStatus('no_existe', errMsg + ' · ' + desc);
+          // Pasar cb como rawCod para que el botón "+Nuevo" use el código real
+          _setScanStatus('no_existe', errMsg + ' · ' + desc, cb);
         } else {
           toast(res.error === 'PRODUCTO_NO_ENCONTRADO'
             ? 'Producto no registrado en el sistema' : 'Error: ' + errMsg,
@@ -4097,7 +4147,7 @@ const GuiasView = (() => {
     toggleTagGuia, cerrarGuiaDetalle, irAPreingreso,
     injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia,
     selectItem, deselectItem,
-    inlineQtyDelta, inlineQtyInput, inlineQtyBlur,
+    inlineQtyDelta, inlineQtyInput, inlineQtyBlurFull, inlineQtyTap,
     inlinePickVenc, inlineVencChanged, inlineDelete,
     toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia,
     eliminarFotoGuia,
@@ -6747,6 +6797,7 @@ const ProductosView = (() => {
   let _stockMap     = {};
   let _histTarget   = null;  // { codigo, nombre }
   let _queryActual  = '';    // búsqueda activa (para sobrevivir bg-refresh)
+  let _renderGen    = 0;     // cancela chunks de render anteriores
 
   // ── Estado de ajuste manual ───────────────────────────────
   let _ajusteTarget = null; // { codigoBarra, nombre }
@@ -6855,6 +6906,9 @@ const ProductosView = (() => {
     const el = document.getElementById('listProductos');
     if (!grupos.length) { el.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>'; return; }
 
+    // Invalidar cualquier render chunked anterior
+    const gen = ++_renderGen;
+
     const detalles = OfflineManager.getGuiaDetalleCache();
     const guias    = OfflineManager.getGuiasCache();
     const hace30   = Date.now() - 30 * 86400000;
@@ -6872,7 +6926,22 @@ const ProductosView = (() => {
       if (fecha && new Date(fecha) >= hace30) cbCount[cb] = (cbCount[cb] || 0) + 1;
     });
 
-    el.innerHTML = grupos.map(g => _cardGrupo(g, cbCount, cbFecha)).join('');
+    const CHUNK = 40;
+    // Primer bloque: render síncrono — el usuario ve contenido de inmediato
+    el.innerHTML = grupos.slice(0, CHUNK).map(g => _cardGrupo(g, cbCount, cbFecha)).join('');
+
+    if (grupos.length <= CHUNK) return;
+
+    // Bloques restantes: se agregan progresivamente sin bloquear el hilo principal
+    let i = CHUNK;
+    const renderNext = () => {
+      if (gen !== _renderGen) return; // render más reciente en curso, cancelar
+      if (i >= grupos.length) return;
+      el.insertAdjacentHTML('beforeend', grupos.slice(i, i + CHUNK).map(g => _cardGrupo(g, cbCount, cbFecha)).join(''));
+      i += CHUNK;
+      if (i < grupos.length) setTimeout(renderNext, 0);
+    };
+    setTimeout(renderNext, 0);
   }
 
   function _cardGrupo(g, cbCount, cbFecha) {
@@ -7612,16 +7681,21 @@ const ProductosView = (() => {
   // ── Cargar ──────────────────────────────────────
   async function cargar() {
     loading('listProductos', true);
-    // Ceder al browser para que pinte el tab activo y el spinner antes del trabajo pesado
-    await new Promise(r => requestAnimationFrame(r));
-    const prods  = OfflineManager.getProductosCache();
-    const equivs = OfflineManager.getEquivalenciasCache();
-    _buildMap(OfflineManager.getStockCache());
-    _grupos = _agrupar(prods, equivs);
+    // setTimeout(0): cede al browser DESPUÉS del paint, así el tab y el skeleton se ven antes del trabajo pesado
+    // (requestAnimationFrame dispara ANTES del paint — incorrecto para este caso)
+    await new Promise(r => setTimeout(r, 0));
+
+    // Si ya tenemos grupos de la sesión actual, los re-usamos — _agrupar cuesta tiempo con muchos productos
+    if (!_grupos.length) {
+      const prods  = OfflineManager.getProductosCache();
+      const equivs = OfflineManager.getEquivalenciasCache();
+      _buildMap(OfflineManager.getStockCache());
+      _grupos = _agrupar(prods, equivs);
+    }
     _initAuditDia();
     _aplicarQuery();
 
-    // Refrescar stock via endpoint compartido (throttled) — evita llamada individual a getStock
+    // Refrescar datos en background — actualiza _grupos y re-renderiza si hubo cambios
     OfflineManager.precargarOperacional().then(() => {
       _buildMap(OfflineManager.getStockCache());
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
