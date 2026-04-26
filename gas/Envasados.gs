@@ -102,10 +102,10 @@ function registrarEnvasado(params) {
   // 7. Registro en hoja ENVASADOS
   getSheet('ENVASADOS').appendRow([
     idEnvasado,
-    prodBase.idProducto,
+    prodBase.codigoBarra || prodBase.idProducto,
     cantBase,
     prodBase.unidad,
-    prodDerivado.idProducto,
+    prodDerivado.codigoBarra || prodDerivado.idProducto,
     unidadesReales,
     unidadesReales,
     0,
