@@ -2554,7 +2554,7 @@ const GuiasView = (() => {
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; _camUnknownList = []; }
 
   function _addToCamList(prod) {
-    const cb       = String(prod.codigoBarra || prod._scannedCb || '');
+    const cb       = String(prod._scannedCb || prod.codigoBarra || '');
     if (!cb) return;
     const autoSum  = !!_camSession[cb];
     if (_camSession[cb]) { _camSession[cb].qty++; }
@@ -2603,7 +2603,7 @@ const GuiasView = (() => {
     const guiaId = _guiaActual?.idGuia || '';
     // saving = ítem aún pendiente de GAS — solo cambia borde, no bloquea UX
     let html = items.map(({ prod, qty }) => {
-      const cb     = String(prod.codigoBarra || prod._scannedCb || '');
+      const cb     = String(prod._scannedCb || prod.codigoBarra || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
       return `<div data-cam-cb="${cbE}" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
@@ -3122,8 +3122,8 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    // Siempre usar codigoBarra canónico como clave — _scannedCb solo como fallback
-    const cb   = String(prod.codigoBarra || prod._scannedCb || prod.idProducto || '');
+    // Usar el código escaneado como clave — si es equivalencia, _scannedCb es el código del operador
+    const cb   = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
     const desc = prod.descripcion || prod.nombre || cb;
 
     // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
