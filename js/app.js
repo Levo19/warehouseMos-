@@ -2553,7 +2553,7 @@ const GuiasView = (() => {
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; }
 
   function _addToCamList(prod) {
-    const cb = String(prod._scannedCb || prod.codigoBarra || '');
+    const cb = String(prod.codigoBarra || prod._scannedCb || '');
     if (!cb) return;
     if (_camSession[cb]) { _camSession[cb].qty++; }
     else                 { _camSession[cb] = { prod, qty: 1 }; }
@@ -2583,7 +2583,7 @@ const GuiasView = (() => {
 
     // saving = ítem pendiente de confirmación GAS (aún _local)
     let html = items.map(({ prod, qty }) => {
-      const cb     = String(prod._scannedCb || prod.codigoBarra || '');
+      const cb     = String(prod.codigoBarra || prod._scannedCb || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
       return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
@@ -3073,7 +3073,8 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    const cb   = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
+    // Siempre usar codigoBarra canónico como clave — _scannedCb solo como fallback
+    const cb   = String(prod.codigoBarra || prod._scannedCb || prod.idProducto || '');
     const desc = prod.descripcion || prod.nombre || cb;
 
     // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
@@ -3082,7 +3083,17 @@ const GuiasView = (() => {
       d.codigoProducto === cb && d.observacion !== 'ANULADO'
     );
     if (existing) {
-      existing.cantidadRecibida = (parseFloat(existing.cantidadRecibida) || 0) + 1;
+      // Si el ítem está en edición inline, usar _selQty como base (puede haber cambios no guardados)
+      const activeItems = _guiaActual.detalle.filter(d => d.observacion !== 'ANULADO');
+      const existingIdx = activeItems.indexOf(existing);
+      const baseQty = (_selIdx >= 0 && existingIdx === _selIdx)
+        ? (parseFloat(_selQty) || parseFloat(existing.cantidadRecibida) || 0)
+        : (parseFloat(existing.cantidadRecibida) || 0);
+      existing.cantidadRecibida = baseQty + 1;
+      if (_selIdx >= 0 && existingIdx === _selIdx) {
+        _selQty = existing.cantidadRecibida;
+        _selOrigQty = existing.cantidadRecibida;
+      }
       _mostrarDetalleSheet(_guiaActual, false);
       vibrate(12);
       SoundFX.beepDouble();
