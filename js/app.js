@@ -4056,6 +4056,46 @@ const GuiasView = (() => {
 })();
 
 // ════════════════════════════════════════════════
+// Historial de envasados agrupado por día (últimos 7 días, desc)
+function _renderEnvasadosPorDia(list, container) {
+  if (!list.length) {
+    container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin envasados en los últimos 7 días</p>';
+    return;
+  }
+  const grupos = {};
+  list.forEach(e => {
+    const key = String(e.fecha || '').substring(0, 10);
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(e);
+  });
+  const dias = Object.keys(grupos).sort((a, b) => b.localeCompare(a));
+  container.innerHTML = dias.map(dia => {
+    const items = grupos[dia].map(e => {
+      const efPct   = parseFloat(e.eficienciaPct) || 0;
+      const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
+      return `<div class="card-sm">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs tag-blue">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}</span>
+          <span class="${efColor} font-bold text-sm">${efPct}%</span>
+        </div>
+        <p class="text-xs text-slate-400">${escHtml(e.usuario || '—')}</p>
+        <div class="flex gap-4 mt-1 text-xs text-slate-300">
+          <span>Base: ${fmt(e.cantidadBase, 1)} ${escHtml(e.unidadBase || '')}</span>
+          <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
+          <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
+        </div>
+      </div>`;
+    }).join('');
+    return `<p class="text-xs font-semibold text-slate-400 mt-3 mb-1 px-1 uppercase tracking-wide">${fmtFecha(dia)}</p>${items}`;
+  }).join('');
+}
+
+function _fechaDesde7Dias() {
+  const d = new Date();
+  d.setDate(d.getDate() - 6);
+  return d.toISOString().split('T')[0];
+}
+
 // ENVASADOS VIEW
 // ════════════════════════════════════════════════
 const EnvasadosView = (() => {
@@ -4064,29 +4104,9 @@ const EnvasadosView = (() => {
 
   async function cargar() {
     loading('listEnvasados', true);
-    const res = await API.getEnvasados({ limit: 30 }).catch(() => ({ ok: false }));
+    const res = await API.getEnvasados({ fechaDesde: _fechaDesde7Dias() }).catch(() => ({ ok: false }));
     const list = res.ok ? res.data : [];
-    const container = document.getElementById('listEnvasados');
-
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin envasados hoy</p>'; return; }
-
-    container.innerHTML = list.map(e => {
-      const efPct = parseFloat(e.eficienciaPct) || 0;
-      const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
-      return `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs tag-blue">${e.codigoProductoBase} → ${e.codigoProductoEnvasado}</span>
-          <span class="${efColor} font-bold text-sm">${efPct}%</span>
-        </div>
-        <p class="text-xs text-slate-400">${fmtFecha(e.fecha)} · ${e.usuario}</p>
-        <div class="flex gap-4 mt-1 text-xs text-slate-300">
-          <span>Base: ${fmt(e.cantidadBase, 1)} ${e.unidadBase}</span>
-          <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
-          <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
-        </div>
-      </div>`;
-    }).join('');
+    _renderEnvasadosPorDia(list, document.getElementById('listEnvasados'));
   }
 
   function nuevo(preIdBase, preIdDerivado) {
@@ -4434,26 +4454,9 @@ const EnvasadorView = (() => {
     document.getElementById('envHistorialPanel').classList.remove('hidden');
     const container = document.getElementById('listEnvasadorHistorial');
     container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
-    const res = await API.getEnvasados({ limit: 30 }).catch(() => ({ ok: false }));
+    const res = await API.getEnvasados({ fechaDesde: _fechaDesde7Dias() }).catch(() => ({ ok: false }));
     const list = res.ok ? res.data : [];
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin historial</p>'; return; }
-    container.innerHTML = list.map(e => {
-      const efPct   = parseFloat(e.eficienciaPct) || 0;
-      const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
-      return `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs tag-blue">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}</span>
-          <span class="${efColor} font-bold text-sm">${efPct}%</span>
-        </div>
-        <p class="text-xs text-slate-400">${fmtFecha(e.fecha)} · ${escHtml(e.usuario)}</p>
-        <div class="flex gap-4 mt-1 text-xs text-slate-300">
-          <span>Base: ${fmt(e.cantidadBase, 1)}</span>
-          <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
-          <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
-        </div>
-      </div>`;
-    }).join('');
+    _renderEnvasadosPorDia(list, container);
   }
 
   function verCatalogo() {

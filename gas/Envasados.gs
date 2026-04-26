@@ -6,9 +6,10 @@
 
 function getEnvasados(params) {
   var rows = _sheetToObjects(getSheet('ENVASADOS'));
-  if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
-  if (params.fecha)  rows = rows.filter(function(r){ return r.fecha  === params.fecha; });
-  if (params.limit)  rows = rows.slice(0, parseInt(params.limit));
+  if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
+  if (params.fecha)      rows = rows.filter(function(r){ return r.fecha === params.fecha; });
+  if (params.fechaDesde) rows = rows.filter(function(r){ return String(r.fecha) >= String(params.fechaDesde); });
+  if (params.limit)      rows = rows.slice(0, parseInt(params.limit));
   return { ok: true, data: rows };
 }
 
