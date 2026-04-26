@@ -73,28 +73,30 @@ function registrarEnvasado(params) {
   var gsRes = _getOCrearGuiaDia('SALIDA_ENVASADO', usuario);
   if (!gsRes.ok) return { ok: false, error: 'Error guía salida: ' + gsRes.error };
 
-  agregarDetalleGuia({
+  var detSalida = agregarDetalleGuia({
     idGuia:           gsRes.data.idGuia,
-    codigoProducto:   prodBase.idProducto,
+    codigoProducto:   prodBase.codigoBarra,
     cantidadEsperada: cantBase,
     cantidadRecibida: cantBase,
     precioUnitario:   0
   });
+  if (!detSalida.ok) return { ok: false, error: 'Detalle salida: ' + detSalida.error };
   _actualizarStock(prodBase.codigoBarra, -cantBase);
 
   // 6. Guía INGRESO_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
   var giRes = _getOCrearGuiaDia('INGRESO_ENVASADO', usuario);
   if (!giRes.ok) return { ok: false, error: 'Error guía ingreso: ' + giRes.error };
 
-  agregarDetalleGuia({
+  var detIngreso = agregarDetalleGuia({
     idGuia:           giRes.data.idGuia,
-    codigoProducto:   prodDerivado.idProducto,
+    codigoProducto:   prodDerivado.codigoBarra,
     cantidadEsperada: unidadesReales,
     cantidadRecibida: unidadesReales,
     precioUnitario:   0,
     idLote:           idLote,
     fechaVencimiento: fechaVencimiento
   });
+  if (!detIngreso.ok) return { ok: false, error: 'Detalle ingreso: ' + detIngreso.error };
   _actualizarStock(prodDerivado.codigoBarra, unidadesReales);
 
   // 7. Registro en hoja ENVASADOS

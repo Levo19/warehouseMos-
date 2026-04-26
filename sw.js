@@ -2,7 +2,7 @@
 // warehouseMos — Service Worker
 // Cambia VERSION en cada deploy para invalidar caché
 // ============================================================
-const VERSION = '1.5.5';
+const VERSION = '1.5.14';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -16,6 +16,7 @@ const LOCAL_ASSETS = [
   './js/api.js',
   './js/offline.js',
   './js/scanner.js',
+  './js/sounds.js',
 ];
 
 // ── Instalar: cachear cada asset individualmente (un fallo no mata el install)

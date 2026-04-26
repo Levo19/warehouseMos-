@@ -6,7 +6,14 @@
 function getProductos(params) {
   var rows = _sheetToObjects(getProductosSheet());
   if (params.categoria) rows = rows.filter(function(r){ return r.idCategoria === params.categoria; });
-  if (params.estado)    rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
+  if (params.estado) {
+    var estadoBuscado = String(params.estado);
+    rows = rows.filter(function(r) {
+      // Normalizar: boolean true → "1", boolean false → "0" (Sheets checkbox)
+      var estadoNorm = (r.estado === true) ? '1' : (r.estado === false) ? '0' : String(r.estado);
+      return estadoNorm === estadoBuscado;
+    });
+  }
   if (params.soloBase)  rows = rows.filter(function(r){ return r.esEnvasable === '1'; });
   if (params.q) {
     var q = params.q.toLowerCase();
@@ -26,13 +33,13 @@ function getProducto(codigo) {
   });
   if (!prod) return { ok: false, error: 'Producto no encontrado: ' + codigo };
 
-  // Enriquecer con stock actual
-  prod.stockActual = _getStockProducto(prod.idProducto).cantidad;
+  // Enriquecer con stock actual (STOCK usa codigoBarra como clave)
+  prod.stockActual = _getStockProducto(prod.codigoBarra || prod.idProducto).cantidad;
 
-  // Lotes vigentes
+  // Lotes vigentes (LOTES usa codigoBarra)
   var lotes = _sheetToObjects(getSheet('LOTES_VENCIMIENTO'));
   prod.lotes = lotes.filter(function(l){
-    return l.codigoProducto === prod.idProducto && l.estado === 'ACTIVO' &&
+    return (l.codigoProducto === prod.codigoBarra || l.codigoProducto === prod.idProducto) && l.estado === 'ACTIVO' &&
            parseFloat(l.cantidadActual) > 0;
   });
 
@@ -41,13 +48,13 @@ function getProducto(codigo) {
 
 function getStock(params) {
   var rows = _sheetToObjects(getSheet('STOCK'));
-  // Enriquecer con info de producto
+  // Enriquecer con info de producto (STOCK usa codigoBarra como clave)
   var productos = _sheetToObjects(getProductosSheet());
   var prodMap = {};
-  productos.forEach(function(p){ prodMap[p.idProducto] = p; });
+  productos.forEach(function(p){ if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p; });
 
   rows = rows.map(function(s) {
-    var p = prodMap[s.codigoProducto] || {};
+    var p = prodMap[String(s.codigoProducto)] || {};
     s.descripcion    = p.descripcion   || s.codigoProducto;
     s.stockMinimo    = p.stockMinimo   || 0;
     s.stockMaximo    = p.stockMaximo   || 0;
@@ -945,12 +952,12 @@ function aprobarPreingreso(params) {
         comentario:    data[i][hdrs.indexOf('comentario')]
       });
 
-      sheet.getRange(i + 1, hdrs.indexOf('estado') + 1).setValue('PROCESADO');
-      if (resultGuia.ok) {
-        sheet.getRange(i + 1, hdrs.indexOf('idGuia') + 1).setValue(resultGuia.data.idGuia);
-      }
+      if (!resultGuia.ok) return { ok: false, error: 'Error al crear guía: ' + resultGuia.error };
 
-      return { ok: true, data: { idGuia: resultGuia.data ? resultGuia.data.idGuia : null } };
+      sheet.getRange(i + 1, hdrs.indexOf('estado') + 1).setValue('PROCESADO');
+      sheet.getRange(i + 1, hdrs.indexOf('idGuia') + 1).setValue(resultGuia.data.idGuia);
+
+      return { ok: true, data: { idGuia: resultGuia.data.idGuia } };
     }
   }
   return { ok: false, error: 'Preingreso no encontrado' };

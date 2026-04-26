@@ -76,12 +76,12 @@ function agregarDetalleGuia(params) {
   var idDetalle = _generateId('DET');
 
   // Forzar codigoBarra a string para preservar ceros a la izquierda
-  var codigoBuscado = String(params.codigoProducto || '').trim();
+  var codigoBuscado = String(params.codigoProducto || '').trim().toUpperCase();
 
-  // Validar que el código de producto existe
+  // Validar que el código de producto existe (comparación case-insensitive)
   var productos = _sheetToObjects(getProductosSheet());
   var prod = productos.find(function(p) {
-    return String(p.codigoBarra).trim() === codigoBuscado;
+    return String(p.codigoBarra || '').trim().toUpperCase() === codigoBuscado;
   });
 
   // Si no existe → sugerir ProductoNuevo
@@ -306,7 +306,7 @@ function cerrarGuia(idGuia, usuario, idSesion) {
 
     // Si es ingreso → crear/actualizar lote de vencimiento si tiene fecha
     if (esIngreso && d.idLote && d.idLote !== '') {
-      _actualizarLote(d.idLote, d.codigoProducto, cantidad, idGuia);
+      _actualizarLote(d.idLote, d.codigoProducto, cantidad, d.fechaVencimiento || '', idGuia);
     }
   });
 
@@ -319,18 +319,26 @@ function cerrarGuia(idGuia, usuario, idSesion) {
   return { ok: true, data: { idGuia: idGuia, estado: 'CERRADA', montoTotal: montoTotal } };
 }
 
-function _actualizarLote(idLote, codigoProducto, cantidad, idGuia) {
-  var sheet = getSheet('LOTES_VENCIMIENTO');
-  var data  = sheet.getDataRange().getValues();
+function _actualizarLote(idLote, codigoProducto, cantidad, fechaVencimiento, idGuia) {
+  var sheet   = getSheet('LOTES_VENCIMIENTO');
+  var data    = sheet.getDataRange().getValues();
   var headers = data[0];
   var idxId   = headers.indexOf('idLote');
 
   for (var i = 1; i < data.length; i++) {
-    if (data[i][idxId] === idLote) return; // ya existe
+    if (data[i][idxId] !== idLote) continue;
+    // Actualizar cantidad final y fechaVencimiento en fila existente
+    var idxQI = headers.indexOf('cantidadInicial');
+    var idxQA = headers.indexOf('cantidadActual');
+    var idxFV = headers.indexOf('fechaVencimiento');
+    if (idxQI >= 0) sheet.getRange(i + 1, idxQI + 1).setValue(cantidad);
+    if (idxQA >= 0) sheet.getRange(i + 1, idxQA + 1).setValue(cantidad);
+    if (idxFV >= 0 && fechaVencimiento) sheet.getRange(i + 1, idxFV + 1).setValue(fechaVencimiento);
+    return;
   }
-  // Crear nuevo lote (sin fecha de vencimiento — se llena desde GuiaDetalle si se tiene)
+  // No existe → crear con cantidad y fecha confirmadas
   sheet.appendRow([
-    idLote, codigoProducto, '', cantidad, cantidad, idGuia, 'ACTIVO', new Date()
+    idLote, codigoProducto, fechaVencimiento || '', cantidad, cantidad, idGuia, 'ACTIVO', new Date()
   ]);
 }
 

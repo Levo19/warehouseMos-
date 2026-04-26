@@ -212,7 +212,7 @@ function _calcularPendientesEnvasado(productos, stockMap) {
   pendientes.sort(function(a,b) {
     if (a.urgencia === 'CRITICA' && b.urgencia !== 'CRITICA') return -1;
     if (b.urgencia === 'CRITICA' && a.urgencia !== 'CRITICA') return 1;
-    return b.faltan - a.faltan;
+    return b.necesitaProducir - a.necesitaProducir;
   });
 
   return pendientes;

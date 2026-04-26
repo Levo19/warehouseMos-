@@ -357,6 +357,8 @@ function _horaDesdeId(id) {
 // Escapa para insertar en atributos onclick="..." (evita romper comillas)
 function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 function escHtml(s)  { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
+function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim().toUpperCase(); }
 
 // Hora desde campo fecha de guía — solo si tiene componente de hora explícito
 function _horaDesdeGuia(g) {
@@ -759,8 +761,11 @@ const Session = (() => {
   }
 
   // ── Bloqueo por inactividad ────────────────────────────────
+  let _timerListenersDone = false;
   function _iniciarTimerBloqueo() {
     _resetTimerBloqueo();
+    if (_timerListenersDone) return;
+    _timerListenersDone = true;
     ['touchstart','click','keydown','scroll'].forEach(ev =>
       document.addEventListener(ev, _resetTimerBloqueo, { passive: true })
     );
@@ -1291,7 +1296,7 @@ const App = (() => {
     if (sideArrow)     sideArrow.classList.toggle('visible',     totalAlertas > 0);
 
     // Badges en nav: guías abiertas
-    const guiasAbiertas = (alertas.guiasAbiertas ?? contadores.guiasAbiertas ?? 0);
+    const guiasAbiertas = (alertas.guiasAbiertasTardias?.length ?? 0);
     actualizarBadges({ guiasAbiertas });
 
     // Historial rápido (últimas guías del caché)
@@ -1511,6 +1516,8 @@ const GuiasView = (() => {
     _busquedaQ = (q || '').trim();
     const cl = document.getElementById('clearBuscarGuia');
     if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
+    const clT = document.getElementById('clearGuiaTabletSearch');
+    if (clT) clT.style.display = _busquedaQ ? 'flex' : 'none';
     const lista = _filtrarYBuscar();
     render(lista);
 
@@ -1553,6 +1560,10 @@ const GuiasView = (() => {
     if (inp) inp.value = '';
     const cl = document.getElementById('clearBuscarGuia');
     if (cl) cl.style.display = 'none';
+    const inpT = document.getElementById('guiaTabletSearch');
+    if (inpT) inpT.value = '';
+    const clT = document.getElementById('clearGuiaTabletSearch');
+    if (clT) clT.style.display = 'none';
     render(_filtrarYBuscar());
   }
 
@@ -1570,13 +1581,16 @@ const GuiasView = (() => {
 
   function filtrar(f) {
     filtroActual = f || 'TODAS';
-    // Dot azul en el embudo cuando el filtro no es "TODAS"
+    const active = filtroActual !== 'TODAS';
+    // Mobile dot + dropdown
     const dot = document.getElementById('guiaFilterDot');
-    if (dot) dot.style.display = filtroActual !== 'TODAS' ? 'block' : 'none';
-    // Update active state in dropdown
+    if (dot) dot.style.display = active ? 'block' : 'none';
     document.querySelectorAll('.guia-fopt').forEach(b =>
       b.classList.toggle('sel', b.dataset.filtro === filtroActual));
     _cerrarFiltroMenu();
+    // Tablet chips
+    document.querySelectorAll('[data-gtfiltro]').forEach(b =>
+      b.classList.toggle('active', b.dataset.gtfiltro === filtroActual));
     render(_filtrarYBuscar());
   }
 
@@ -1587,9 +1601,21 @@ const GuiasView = (() => {
       toolbar.classList.add('srch-focused');
       _cerrarFiltroMenu();
     } else {
-      // Delay para que clicks en botones no se cancelen
       setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
     }
+  }
+
+  // ── Tablet chips filter (panel #guiaTabletToolbar) ────────────────────
+  function filtrarTablet(f) {
+    // Toggle: click active chip → back to TODAS
+    filtrar(filtroActual === f ? 'TODAS' : f);
+  }
+
+  function _searchFocusGuiaTablet(focused) {
+    const toolbar = document.getElementById('guiaTabletToolbar');
+    if (!toolbar) return;
+    if (focused) toolbar.classList.add('srch-focused');
+    else setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
   }
 
   function _getProvNombre(idProveedor) {
@@ -1620,7 +1646,7 @@ const GuiasView = (() => {
           <span class="card-tipo-chip" style="background:rgba(71,85,105,.2);color:#64748b">${tipoLabel}</span>
           <span style="font-size:10px;color:#475569">🔒 sistema</span>
         </div>
-        <p class="card-name" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
+        <p class="card-name" style="color:#64748b">${escHtml(g.usuario || '—')}</p>
         <div class="card-row-bottom">
           <span class="card-meta">${fechaCorta}${numItems ? ' · ' + numItems + ' prod' : ''}</span>
         </div>
@@ -1669,7 +1695,7 @@ const GuiasView = (() => {
         <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${tipoLabel}</span>
         <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${fotoTag}${estadoDot}</div>
       </div>
-      <p class="card-name">${escAttr(provNombre)}</p>
+      <p class="card-name">${escHtml(provNombre)}</p>
       <div class="card-row-bottom">
         <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${metaExtra}</span>
         <div class="card-actions">${waBtn}${printBtn}</div>
@@ -1764,7 +1790,7 @@ const GuiasView = (() => {
         <div class="spinner" style="width:12px;height:12px;border-width:2px"></div>
         <span class="text-xs text-slate-400 italic">Creando guía…</span>
       </div>
-      <p class="text-xs text-slate-400 truncate">${escAttr(provNombre || 'Sin proveedor')}</p>`;
+      <p class="text-xs text-slate-400 truncate">${escHtml(provNombre || 'Sin proveedor')}</p>`;
     container.insertBefore(div, container.firstChild);
   }
 
@@ -1778,11 +1804,11 @@ const GuiasView = (() => {
       const label = TIPO_LABELS[tipo] || tipo || '';
       el.innerHTML = `
         <div class="flex items-center justify-between gap-1">
-          <span class="text-xs ${esI ? 'tag-ok' : 'tag-blue'}">${escAttr(label)}</span>
+          <span class="text-xs ${esI ? 'tag-ok' : 'tag-blue'}">${escHtml(label)}</span>
           <span class="text-xs text-emerald-400 font-bold">ABIERTA</span>
         </div>
-        <p class="text-sm font-bold text-slate-100 truncate mt-1">${escAttr(provNombre || 'Sin proveedor')}</p>
-        <p class="text-xs text-slate-500 font-mono">${escAttr(idGuia || '')}</p>`;
+        <p class="text-sm font-bold text-slate-100 truncate mt-1">${escHtml(provNombre || 'Sin proveedor')}</p>
+        <p class="text-xs text-slate-500 font-mono">${escHtml(idGuia || '')}</p>`;
     }
     // Refrescar en background — render() descartará el opt card cuando el ID real llegue
     setTimeout(() => {
@@ -1877,7 +1903,7 @@ const GuiasView = (() => {
             🔒 Generado por sistema
           </span>
         </div>
-        <p class="font-bold text-base leading-tight" style="color:#64748b">${escAttr(g.usuario || '—')}</p>
+        <p class="font-bold text-base leading-tight" style="color:#64748b">${escHtml(g.usuario || '—')}</p>
         <p class="text-xs mt-0.5" style="color:#475569">${fmtFecha(g.fecha)} · Solo lectura</p>`;
       // Ocultar panel de foto/notas/editar y el add-item
       document.getElementById('guiaDetFotoPanel')?.classList.add('hidden');
@@ -1914,7 +1940,7 @@ const GuiasView = (() => {
         <span class="text-xs ${esIngreso ? 'tag-ok' : 'tag-blue'}">${TIPO_LABELS[g.tipo] || g.tipo}</span>
         <span onclick="event.stopPropagation()">${lockBtn}</span>
       </div>
-      <p class="font-black text-lg text-white leading-tight" onclick="GuiasView.deselectItem()">${escAttr(provNombreHdr)}</p>
+      <p class="font-black text-lg text-white leading-tight" onclick="GuiasView.deselectItem()">${escHtml(provNombreHdr)}</p>
       <p class="text-xs text-slate-500 mt-0.5" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
       ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}
       <div class="flex gap-2 mt-2 mb-1">
@@ -2017,7 +2043,7 @@ const GuiasView = (() => {
                     placeholder="Notas adicionales…">${textoLibre}</textarea>
           <p class="text-xs text-slate-600 mt-1">Se guarda al cerrar.</p>`;
       } else if (g.comentario) {
-        cEl.innerHTML = `<p class="text-xs text-slate-400 italic mb-3">${escAttr(g.comentario)}</p>`;
+        cEl.innerHTML = `<p class="text-xs text-slate-400 italic mb-3">${escHtml(g.comentario)}</p>`;
       } else {
         cEl.innerHTML = '';
       }
@@ -2057,8 +2083,8 @@ const GuiasView = (() => {
                  onclick="event.stopPropagation()">
               <div class="flex items-start gap-3 mb-2.5">
                 <div class="flex-1">
-                  <p class="text-base font-bold text-white leading-snug">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
-                  <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}</p>
+                  <p class="text-base font-bold text-white leading-snug">${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
+                  <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}</p>
                 </div>
                 <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
                   <button onclick="GuiasView.inlineQtyDelta(-1)"
@@ -2078,7 +2104,7 @@ const GuiasView = (() => {
                 <button onclick="GuiasView.inlinePickVenc()" id="inlineVencBtn"
                         class="flex-1 py-2 rounded-lg border ${vencTxt ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-xs flex items-center justify-center gap-1.5">
                   <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg>
-                  ${escAttr(vencTxt || 'Vencimiento')}
+                  ${escHtml(vencTxt || 'Vencimiento')}
                 </button>` : ''}
                 <button onclick="GuiasView.inlineDelete(${idx})"
                         class="py-2 px-3 rounded-lg border border-red-800/60 text-red-400 text-xs flex items-center justify-center">
@@ -2110,8 +2136,8 @@ const GuiasView = (() => {
                style="${rowBg ? 'background:' + rowBg + ';border-radius:8px' : ''}"
                data-det-id="${d.idDetalle || ''}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
-              <p class="text-xs text-slate-500 font-mono mt-0.5">${escAttr(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
+              <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
+              <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
               ${venc}
             </div>
             <span class="text-base font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : fmt(d.cantidadRecibida)}</span>
@@ -2272,7 +2298,7 @@ const GuiasView = (() => {
     const btn = document.getElementById('inlineVencBtn');
     if (btn) {
       btn.className = `flex-1 py-2 rounded-lg border ${_selVenc ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-xs flex items-center justify-center gap-1.5`;
-      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg> ${_selVenc ? escAttr(_selVenc) : 'Vencimiento'}`;
+      btn.innerHTML = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/></svg> ${_selVenc ? escHtml(_selVenc) : 'Vencimiento'}`;
     }
   }
 
@@ -2306,8 +2332,8 @@ const GuiasView = (() => {
 
     document.getElementById('editItemContent').innerHTML = `
       <div class="mb-5">
-        <p class="font-bold text-white text-base">${escAttr(d.descripcionProducto || d.codigoProducto)}</p>
-        <p class="text-xs text-slate-500 font-mono">${escAttr(d.codigoProducto)}</p>
+        <p class="font-bold text-white text-base">${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
+        <p class="text-xs text-slate-500 font-mono">${escHtml(d.codigoProducto)}</p>
       </div>
       ${abierta ? `
       <div class="flex items-center justify-center gap-5 mb-5">
@@ -2405,7 +2431,7 @@ const GuiasView = (() => {
       btn.textContent = '';
       btn.innerHTML = `<svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
         <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
-      </svg> ${val ? escAttr(val) : 'Agregar vencimiento'}`;
+      </svg> ${val ? escHtml(val) : 'Agregar vencimiento'}`;
       btn.className = `w-full py-3 rounded-xl border ${val ? 'border-amber-500 text-amber-300' : 'border-slate-600 text-slate-400'} text-sm font-bold mb-3 flex items-center justify-center gap-2`;
     }
   }
@@ -2505,7 +2531,7 @@ const GuiasView = (() => {
       }
       // Update in list
       const idx = todas.findIndex(g => g.idGuia === _pinGuiaTarget);
-      if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrar(todas, filtroActual)); }
+      if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrarYBuscar()); }
       toast('Guía reabierta', 'ok');
     } else {
       toast('Error: ' + res.error, 'danger');
@@ -2749,7 +2775,7 @@ const GuiasView = (() => {
 
   // Callback del scanner continuo — procesa código sin cerrar cámara
   function _onCamResult(cod) {
-    const codStr = String(cod || '').trim();
+    const codStr = normCb(cod);
     if (!codStr) return;
     // Si el picker está abierto, no interrumpir — el usuario está eligiendo
     const picker = document.getElementById('camPicker');
@@ -2910,6 +2936,7 @@ const GuiasView = (() => {
   }
 
   function _procesarCodigoHid(codStr) {
+    codStr = normCb(codStr);
     const candidatos = _buscarCandidatos(codStr);
     document.getElementById('hidPicker').style.display = 'none';
 
@@ -2994,15 +3021,15 @@ const GuiasView = (() => {
   function _buscarCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
-    const cNorm  = String(codStr).trim();
+    const cNorm  = normCb(codStr);
     if (!cNorm) return [];
 
     // 1. Exacto en PRODUCTOS_MASTER → código escaneado ES el canónico
-    const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
+    const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (exacto) return [{ ...exacto, _exacto: true }];
 
     // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
-    const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
+    const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim();
       const prod = prods.find(p =>
@@ -3015,12 +3042,12 @@ const GuiasView = (() => {
     // 3. Prefijo en PRODUCTOS_MASTER (mín. 3 chars)
     if (cNorm.length >= 3) {
       const porMaestro = prods
-        .filter(p => String(p.codigoBarra || '').startsWith(cNorm))
+        .filter(p => String(p.codigoBarra || '').trim().toUpperCase().startsWith(cNorm))
         .map(p => ({ ...p })); // copias
 
       // Prefijo en EQUIVALENCIAS → resolver al producto maestro (sin duplicar por idProducto)
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
-      equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
+      equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
         const skuB  = String(e.skuBase || '').trim();
         const base  = prods.find(p =>
           String(p.idProducto || '').trim() === skuB ||
@@ -3554,7 +3581,7 @@ const GuiasView = (() => {
     _guiaActual.estado = 'CERRADA';
     _mostrarDetalleSheet(_guiaActual, false);
     const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
-    if (idx >= 0) { todas[idx].estado = 'CERRADA'; render(_filtrar(todas, filtroActual)); }
+    if (idx >= 0) { todas[idx].estado = 'CERRADA'; render(_filtrarYBuscar()); }
 
     const res = await API.cerrarGuia(_guiaActual.idGuia, window.WH_CONFIG.usuario);
     if (res.ok || res.offline) {
@@ -3564,14 +3591,14 @@ const GuiasView = (() => {
         _guiaActual.montoTotal = monto || 0;
         if (idx >= 0) todas[idx].montoTotal = monto || 0;
         _mostrarDetalleSheet(_guiaActual, false);
-        render(_filtrar(todas, filtroActual));
+        render(_filtrarYBuscar());
       }
     } else {
       // Revertir si GAS rechazó
       _guiaActual.estado = 'ABIERTA';
       if (idx >= 0) todas[idx].estado = 'ABIERTA';
       _mostrarDetalleSheet(_guiaActual, false);
-      render(_filtrar(todas, filtroActual));
+      render(_filtrarYBuscar());
       toast('Error: ' + res.error, 'danger');
     }
   }
@@ -3942,6 +3969,7 @@ const GuiasView = (() => {
 
   return {
     cargar, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
+    filtrarTablet, _searchFocusGuiaTablet,
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
     cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
@@ -4608,7 +4636,7 @@ const DespachoView = (() => {
 
   // ── Callback scanner ─────────────────────────────────────────
   function _onDespResult(cod) {
-    const codStr = String(cod || '').trim();
+    const codStr = normCb(cod);
     if (!codStr) return;
     const picker = document.getElementById('despCamPicker');
     if (picker?.style.display === 'flex') return;
@@ -4639,15 +4667,15 @@ const DespachoView = (() => {
   function _buscarDespCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
-    const cNorm  = String(codStr).trim();
+    const cNorm  = normCb(codStr);
     if (!cNorm) return [];
 
     // 1. Exacto en PRODUCTOS_MASTER
-    const exacto = prods.find(p => String(p.codigoBarra || '').trim() === cNorm);
+    const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (exacto) return [{ ...exacto, _exacto: true }];
 
     // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
-    const equiv = equivs.find(e => String(e.codigoBarra || '').trim() === cNorm);
+    const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim();
       const prod = prods.find(p =>
@@ -4660,10 +4688,10 @@ const DespachoView = (() => {
     // 3. Prefijo en maestro + equivalencias (mín. 3 chars)
     if (cNorm.length >= 3) {
       const porMaestro = prods
-        .filter(p => String(p.codigoBarra || '').startsWith(cNorm))
+        .filter(p => String(p.codigoBarra || '').trim().toUpperCase().startsWith(cNorm))
         .map(p => ({ ...p }));
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
-      equivs.filter(e => String(e.codigoBarra || '').startsWith(cNorm)).forEach(e => {
+      equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
         const skuB = String(e.skuBase || '').trim();
         const base = prods.find(p =>
           String(p.idProducto || '').trim() === skuB ||
@@ -5365,6 +5393,7 @@ const PreingresosView = (() => {
   let _filtroEstado      = '';
   let _busquedaQ         = '';
   let _tppBusq           = '';   // búsqueda del panel tablet
+  let _tppFiltro         = '';   // filtro estado del panel tablet
   let _tags              = { comp: null, compl: null };   // 'si' | 'no' | null
   let _fotosSeleccionadas = [];                           // [{ file, objectUrl }]
   // Edit modal state
@@ -5493,7 +5522,7 @@ const PreingresosView = (() => {
         <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${chipTxt}</span>
         <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
       </div>
-      <p class="card-name">${escAttr(provNombre)}</p>
+      <p class="card-name">${escHtml(provNombre)}</p>
       <div class="card-row-bottom">
         <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${montoStr}</span>
         <div class="card-actions">${waBtn}${actionBtn}</div>
@@ -5780,7 +5809,7 @@ const PreingresosView = (() => {
     if (provSel) {
       const provs = OfflineManager.getProveedoresCache();
       provSel.innerHTML = '<option value="">— Seleccionar —</option>' +
-        provs.map(pv => `<option value="${escAttr(pv.idProveedor)}"${pv.idProveedor === p.idProveedor ? ' selected' : ''}>${escAttr(pv.nombre || pv.idProveedor)}</option>`).join('');
+        provs.map(pv => `<option value="${escAttr(pv.idProveedor)}"${pv.idProveedor === p.idProveedor ? ' selected' : ''}>${escHtml(pv.nombre || pv.idProveedor)}</option>`).join('');
     }
     // Header
     const idEl = document.getElementById('piDetId');
@@ -5834,7 +5863,7 @@ const PreingresosView = (() => {
     list.innerHTML = _cargadoresEdit.map((c, i) => `
       <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
         <span class="text-amber-400 text-xs">🛺</span>
-        <span class="text-amber-200 text-xs flex-1">${escAttr(c.nombre)}</span>
+        <span class="text-amber-200 text-xs flex-1">${escHtml(c.nombre)}</span>
         <div class="flex items-center gap-1">
           <button onclick="PreingresosView.cambiarCarretasEdit(${i},-1)"
                   class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
@@ -5855,10 +5884,8 @@ const PreingresosView = (() => {
     _editItem.cargadores = cargadores;
     await API.actualizarPreingreso({ idPreingreso: _editItem.idPreingreso, cargadores })
       .catch(() => {});
-    // Actualizar en caché local
-    const cache = OfflineManager.getPreingresosCache();
-    const idx = cache.findIndex(x => x.idPreingreso === _editItem.idPreingreso);
-    if (idx >= 0) { cache[idx].cargadores = cargadores; OfflineManager.inyectarPreingreso && null; }
+    // Persistir en caché local
+    OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { cargadores });
   }
 
   function cambiarCarretasEdit(idx, delta) {
@@ -6106,7 +6133,7 @@ const PreingresosView = (() => {
       const provNombre = _getProveedorNombre(data.idProveedor || '');
       el.innerHTML = `
         <div class="flex items-center justify-between gap-1 overflow-hidden">
-          <span class="text-sm font-bold text-slate-100 truncate">${escAttr(provNombre)}</span>
+          <span class="text-sm font-bold text-slate-100 truncate">${escHtml(provNombre)}</span>
           <span class="pre-qtag pre-qtag-amber">PENDIENTE</span>
         </div>
         <p class="text-xs text-slate-400">${fmtFecha(new Date())}</p>
@@ -6167,7 +6194,7 @@ const PreingresosView = (() => {
     list.innerHTML = _cargadores.map((c, i) => `
       <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
         <span class="text-amber-400 text-xs">🛺</span>
-        <span class="text-amber-200 text-xs flex-1">${escAttr(c.nombre)}</span>
+        <span class="text-amber-200 text-xs flex-1">${escHtml(c.nombre)}</span>
         <div class="flex items-center gap-1">
           <button onclick="PreingresosView.cambiarCarretas(${i},-1)"
                   class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
@@ -6354,17 +6381,17 @@ const PreingresosView = (() => {
     const container = document.getElementById('tppList');
     if (!container || !container.offsetParent) return;
     const todos = OfflineManager.getPreingresosCache();
-    const list = _tppBusq
-      ? todos.filter(p =>
-          _getProveedorNombre(p.idProveedor).toLowerCase().includes(_tppBusq) ||
-          (p.idPreingreso || '').toLowerCase().includes(_tppBusq) ||
-          (p.idProveedor  || '').toLowerCase().includes(_tppBusq)
-        )
-      : todos;
+    let list = _tppFiltro ? todos.filter(p => p.estado === _tppFiltro) : todos;
+    if (_tppBusq) list = list.filter(p =>
+      _getProveedorNombre(p.idProveedor).toLowerCase().includes(_tppBusq) ||
+      (p.idPreingreso || '').toLowerCase().includes(_tppBusq) ||
+      (p.idProveedor  || '').toLowerCase().includes(_tppBusq)
+    );
     if (!list.length) {
       container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin preingresos</p>';
       return;
     }
+
     const sorted = [...list].sort((a, b) => {
       const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
       const td = db - da;
@@ -6373,7 +6400,41 @@ const PreingresosView = (() => {
       const nb = parseInt((b.idPreingreso || '').replace(/\D/g, '')) || 0;
       return nb - na;
     });
-    container.innerHTML = sorted.slice(0, 40).map(_renderCard).join('');
+
+    const today     = new Date(); today.setHours(0,0,0,0);
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+    function _dateKey(p) {
+      if (!p.fecha) return '0000-00-00';
+      const d = _parseLocalDate(p.fecha);
+      if (isNaN(d)) return '0000-00-00';
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+    function _dateLabel(key) {
+      if (!key || key === '0000-00-00') return 'Sin fecha';
+      const d = new Date(key + 'T12:00:00');
+      const dMid = new Date(d); dMid.setHours(0,0,0,0);
+      if (dMid.getTime() === today.getTime())     return 'Hoy';
+      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
+      return d.getFullYear() === today.getFullYear()
+        ? `${d.getDate()} ${months[d.getMonth()]}`
+        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+    }
+
+    const groupMap = {};
+    sorted.forEach(p => {
+      const k = _dateKey(p);
+      if (!groupMap[k]) groupMap[k] = [];
+      groupMap[k].push(p);
+    });
+
+    container.innerHTML = Object.entries(groupMap)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) =>
+        `<div class="pre-date-hdr">${_dateLabel(key)}</div>
+         <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`
+      ).join('');
   }
 
   function buscarEnPanel(q) {
@@ -6390,6 +6451,37 @@ const PreingresosView = (() => {
     const btn = document.getElementById('clearTppSearch');
     if (btn) btn.style.display = 'none';
     renderTppList();
+  }
+
+  function toggleTppFiltro() {
+    const menu = document.getElementById('tppFilterMenu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    if (menu.style.display !== 'none') {
+      setTimeout(() => { document.addEventListener('click', _closeTppFiltroOutside, { once: true }); }, 0);
+    }
+  }
+
+  function _closeTppFiltroOutside(e) {
+    if (!e.target.closest('#tppFilterMenu') && !e.target.closest('#tppFilterBtn')) {
+      const menu = document.getElementById('tppFilterMenu');
+      if (menu) menu.style.display = 'none';
+    }
+  }
+
+  function filtrarTpp(estado) {
+    // Toggle: click active chip → back to todos
+    _tppFiltro = (_tppFiltro === estado && estado !== '') ? '' : (estado || '');
+    document.querySelectorAll('[data-tppfiltro]').forEach(b =>
+      b.classList.toggle('active', _tppFiltro !== '' && b.dataset.tppfiltro === _tppFiltro));
+    renderTppList();
+  }
+
+  function _searchFocusTpp(focused) {
+    const toolbar = document.getElementById('tppToolbar');
+    if (!toolbar) return;
+    if (focused) toolbar.classList.add('srch-focused');
+    else setTimeout(() => toolbar.classList.remove('srch-focused'), 160);
   }
 
   function compartirWA(idPreingreso) {
@@ -6432,7 +6524,8 @@ const PreingresosView = (() => {
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
-           renderTppList, buscarEnPanel, limpiarBuscarPanel, compartirWA };
+           renderTppList, buscarEnPanel, limpiarBuscarPanel,
+           toggleTppFiltro, filtrarTpp, _searchFocusTpp, compartirWA };
 })();
 
 // ════════════════════════════════════════════════
@@ -6950,7 +7043,7 @@ const ProductosView = (() => {
 
   function _renderHistorial(movs, esLocal, stockActual) {
     if (!movs.length && esLocal) return;
-    const stock = stockActual ?? codigos.reduce((s, c) => s + (_s(c).cantidadDisponible || 0), 0);
+    const stock = stockActual ?? 0;
 
     // Balance corriente hacia atrás desde stock actual
     let bal = stock;

@@ -173,8 +173,12 @@ function cerrarTurno(params) {
   var horaInicio  = sesRow[sesHdrs.indexOf('horaInicio')];
   var fechaInicio = sesRow[sesHdrs.indexOf('fechaInicio')];
 
+  // Normalizar fechaInicio: Sheets puede devolverla como objeto Date
+  var fechaInicioStr = (fechaInicio instanceof Date)
+    ? Utilities.formatDate(fechaInicio, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    : String(fechaInicio).substring(0, 10);
   // Calcular minutos trabajados
-  var inicio = new Date(fechaInicio + 'T' + horaInicio);
+  var inicio = new Date(fechaInicioStr + 'T' + horaInicio);
   var minutos = Math.round((ahora - inicio) / 60000);
   var horas   = Math.round(minutos / 60 * 100) / 100;
 

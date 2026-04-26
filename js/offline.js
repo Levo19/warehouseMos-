@@ -205,7 +205,8 @@ const OfflineManager = (() => {
       function _hayDiff(newArr, key) {
         if (!newArr?.length) return false;
         const old = cargar(key);
-        return !old || old.length !== newArr.length;
+        if (!old || old.length !== newArr.length) return true;
+        return JSON.stringify(newArr) !== JSON.stringify(old);
       }
 
       if (d.guias       != null) { if (_hayDiff(d.guias,       KEYS.GUIAS))        { guardar(KEYS.GUIAS,        d.guias);       changed.push('guias'); }       else guardar(KEYS.GUIAS, d.guias); }
@@ -262,6 +263,13 @@ const OfflineManager = (() => {
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);
 
+  // ── Patch de un preingreso existente en caché ───────────────
+  function patchPreingresosCache(id, changes) {
+    const cache = cargar(KEYS.PREINGRESOS) || [];
+    const idx   = cache.findIndex(x => x.idPreingreso === id);
+    if (idx >= 0) { Object.assign(cache[idx], changes); guardar(KEYS.PREINGRESOS, cache); }
+  }
+
   // ── Inyectar un preingreso recién creado en caché ────────────
   function inyectarPreingreso(item) {
     const cache = getPreingresosCache();
@@ -317,7 +325,7 @@ const OfflineManager = (() => {
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     getAdminPin,
-    actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchStockCache,
+    actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
     getPNCache, setPNCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
