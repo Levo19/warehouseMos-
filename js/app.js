@@ -6850,16 +6850,41 @@ const ProductosView = (() => {
   }
 
   // ── Render lista de grupos ──────────────────────
+  // Precomputa rotación y último movimiento UNA vez para todos los grupos (O(m+n), no O(m×n))
   function _render(grupos) {
     const el = document.getElementById('listProductos');
     if (!grupos.length) { el.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>'; return; }
-    el.innerHTML = grupos.map(_cardGrupo).join('');
+
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const hace30   = Date.now() - 30 * 86400000;
+    const gMap = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+    const cbCount = {}; // codigoBarra → nº movimientos últimos 30 días
+    const cbFecha = {}; // codigoBarra → fecha último movimiento
+    detalles.forEach(d => {
+      const cb   = d.codigoProducto;
+      if (!cb) return;
+      const guia = gMap[d.idGuia];
+      if (!guia) return;
+      const fecha = guia.fecha;
+      if (fecha && (!cbFecha[cb] || fecha > cbFecha[cb])) cbFecha[cb] = fecha;
+      if (fecha && new Date(fecha) >= hace30) cbCount[cb] = (cbCount[cb] || 0) + 1;
+    });
+
+    el.innerHTML = grupos.map(g => _cardGrupo(g, cbCount, cbFecha)).join('');
   }
 
-  function _cardGrupo(g) {
+  function _cardGrupo(g, cbCount, cbFecha) {
     const codigos = g.children.map(c => c.codigoBarra).filter(Boolean);
-    const rot  = _rotacionMulti(codigos);
-    const ulti = _ultimoMovMulti(codigos);
+    // Rotación: suma de movimientos de todos los barcodes del grupo en los últimos 30 días
+    const nRot = codigos.reduce((s, cb) => s + (cbCount[cb] || 0), 0);
+    const rot  = nRot >= 10 ? { nivel: 'ALTA',  color: 'text-emerald-400', dot: 'bg-emerald-400' }
+               : nRot >= 4  ? { nivel: 'MEDIA', color: 'text-amber-400',   dot: 'bg-amber-400'   }
+               :               { nivel: 'BAJA',  color: 'text-slate-500',   dot: 'bg-slate-600'   };
+    // Último movimiento: la fecha más reciente entre todos los barcodes del grupo
+    const ulti = codigos.map(cb => cbFecha[cb]).filter(Boolean)
+                        .sort((a, b) => b.localeCompare(a))[0] || null;
     const mn   = parseFloat(g.base.stockMinimo || 0);
     const mx   = parseFloat(g.base.stockMaximo || 0);
     const pct  = mx > 0 ? Math.min(100, g.stockTotal / mx * 100) : 0;
@@ -7587,6 +7612,8 @@ const ProductosView = (() => {
   // ── Cargar ──────────────────────────────────────
   async function cargar() {
     loading('listProductos', true);
+    // Ceder al browser para que pinte el tab activo y el spinner antes del trabajo pesado
+    await new Promise(r => requestAnimationFrame(r));
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     _buildMap(OfflineManager.getStockCache());
