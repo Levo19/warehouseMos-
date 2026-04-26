@@ -84,7 +84,24 @@ function agregarDetalleGuia(params) {
     return String(p.codigoBarra || '').trim().toUpperCase() === codigoBuscado;
   });
 
-  // Si no existe → sugerir ProductoNuevo
+  // Si no está en PRODUCTOS_MASTER, buscar en EQUIVALENCIAS → resolver al master
+  if (!prod) {
+    var equivSheet = getSheet('EQUIVALENCIAS');
+    if (equivSheet) {
+      var equivs = _sheetToObjects(equivSheet);
+      var equiv  = equivs.find(function(e) {
+        return String(e.codigoBarra || '').trim().toUpperCase() === codigoBuscado && _esActivo(e.activo);
+      });
+      if (equiv) {
+        var skuB = String(equiv.skuBase || '').trim();
+        prod = productos.find(function(p) {
+          return String(p.idProducto || '').trim() === skuB || String(p.skuBase || '').trim() === skuB;
+        });
+      }
+    }
+  }
+
+  // Si no existe en ninguna tabla → sugerir ProductoNuevo
   if (!prod) {
     return {
       ok: false,

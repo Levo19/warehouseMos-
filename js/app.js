@@ -2554,7 +2554,7 @@ const GuiasView = (() => {
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; _camUnknownList = []; }
 
   function _addToCamList(prod) {
-    const cb       = String(prod._scannedCb || prod.codigoBarra || '');
+    const cb       = String(prod.codigoBarra || prod._scannedCb || '');
     if (!cb) return;
     const autoSum  = !!_camSession[cb];
     if (_camSession[cb]) { _camSession[cb].qty++; }
@@ -2602,10 +2602,13 @@ const GuiasView = (() => {
 
     const guiaId = _guiaActual?.idGuia || '';
     // saving = ítem aún pendiente de GAS — solo cambia borde, no bloquea UX
+    // totalQty = cantidad real en detalle (no el contador de sesión)
     let html = items.map(({ prod, qty }) => {
-      const cb     = String(prod._scannedCb || prod.codigoBarra || '');
+      const cb     = String(prod.codigoBarra || prod._scannedCb || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
+      const det    = detalleCompleto.find(d => d.codigoProducto === cb && d.observacion !== 'ANULADO');
+      const totalQty = det ? (parseFloat(det.cantidadRecibida) || qty) : qty;
       return `<div data-cam-cb="${cbE}" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;
                 border:1px solid ${saving ? '#475569' : '#334155'};
@@ -2624,7 +2627,7 @@ const GuiasView = (() => {
                          background:#7c3aed;border:1px solid transparent;
                          color:#fff;font-size:.85em;font-weight:800;
                          cursor:pointer;-webkit-tap-highlight-color:transparent">
-            ×${qty}
+            ×${totalQty}
           </button>
           <button onclick="GuiasView.camQtyPlus('${cbE}')"
                   style="${btnStyle}">+</button>
@@ -2644,18 +2647,24 @@ const GuiasView = (() => {
                    letter-spacing:.07em;margin:10px 2px 6px;font-weight:700">Ya en guía</p>`;
       }
       html += previos.map(d => {
-        const cb  = escHtml(d.codigoProducto || '');
-        const nom = escHtml(d.descripcionProducto || d.codigoProducto || '');
+        const cb  = String(d.codigoProducto || '');
+        const cbE = escAttr(cb);
+        const nom = escHtml(d.descripcionProducto || cb);
         const qty = parseFloat(d.cantidadRecibida) || 0;
         return `<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;
                   border-radius:11px;background:#0f172a;border:1px solid #1e293b;
-                  margin-bottom:6px;opacity:.72">
+                  margin-bottom:6px">
           <div style="flex:1;min-width:0">
             <p style="font-size:.83em;font-weight:700;color:#94a3b8;
                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nom}</p>
-            <p style="font-size:.67em;color:#475569;font-family:monospace">${cb}</p>
+            <p style="font-size:.67em;color:#475569;font-family:monospace">${escHtml(cb)}</p>
           </div>
-          <span style="font-size:.8em;color:#475569;font-weight:700;flex-shrink:0">×${qty}</span>
+          <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+            <button onclick="GuiasView.camPrevQtyMinus('${cbE}')" style="${btnStyle}">−</button>
+            <span style="min-width:36px;text-align:center;font-size:.85em;
+                         color:#94a3b8;font-weight:700">×${qty}</span>
+            <button onclick="GuiasView.camPrevQtyPlus('${cbE}')" style="${btnStyle}">+</button>
+          </div>
         </div>`;
       }).join('');
     }
@@ -3122,8 +3131,8 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    // Usar el código escaneado como clave — si es equivalencia, _scannedCb es el código del operador
-    const cb   = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
+    // Siempre clave por codigoBarra canónico del master — GAS solo acepta PRODUCTOS_MASTER
+    const cb   = String(prod.codigoBarra || prod._scannedCb || prod.idProducto || '');
     const desc = prod.descripcion || prod.nombre || cb;
 
     // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
@@ -3314,6 +3323,37 @@ const GuiasView = (() => {
     vibrate(10);
   }
 
+  // ── +/− sobre ítems "Ya en guía" (previos confirmados) ──────────
+  function camPrevQtyPlus(cb) {
+    const item = (_guiaActual?.detalle || []).find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (!item) return;
+    item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
+    if (item.idDetalle && !item._local) {
+      API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+    }
+    _mostrarDetalleSheet(_guiaActual, false);
+    _renderCamList();
+    SoundFX.beepDouble(); vibrate(8);
+  }
+
+  function camPrevQtyMinus(cb) {
+    const item = (_guiaActual?.detalle || []).find(d =>
+      d.codigoProducto === cb && d.observacion !== 'ANULADO'
+    );
+    if (!item) return;
+    const cur = parseFloat(item.cantidadRecibida) || 0;
+    if (cur <= 1) return;
+    item.cantidadRecibida = cur - 1;
+    if (item.idDetalle && !item._local) {
+      API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+    }
+    _mostrarDetalleSheet(_guiaActual, false);
+    _renderCamList();
+    vibrate(8);
+  }
+
   function _rescanear() {
     abrirCamaraItem();
   }
@@ -3490,6 +3530,8 @@ const GuiasView = (() => {
       modal.dataset.pnGuia = guiaId || '';
       modal.classList.add('open');
     }
+    // Pausar scanner continuo para que no dispare sonidos mientras el modal está abierto
+    if (document.getElementById('scannerModal')?.classList.contains('open')) Scanner.stop();
   }
 
   function _pnCodigoChanged() {
@@ -3532,6 +3574,14 @@ const GuiasView = (() => {
   function cerrarModalPN() {
     const modal = document.getElementById('modalProductoNuevo');
     if (modal) modal.classList.remove('open');
+    // Reanudar scanner si la cámara sigue abierta
+    if (document.getElementById('scannerModal')?.classList.contains('open')) {
+      Scanner.start('scanVideo', _onCamResult,
+        err => toast('Error cámara: ' + err, 'danger'),
+        { continuous: true, cooldown: 1500 }
+      );
+      _setScanStatus('ready');
+    }
   }
 
   function _pnFotoSeleccionada(input) {
@@ -4034,6 +4084,7 @@ const GuiasView = (() => {
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
     cerrarCamara, cerrarCamPicker, seleccionarItemCamara, toggleTorch,
     camQtyPlus, camQtyMinus, camQtyEdit, camUndoLast, camLimpiarTodo, camSetZoom,
+    camPrevQtyPlus, camPrevQtyMinus,
     cerrarScannerItem, _enfocarHid,
     seleccionarItemHid,
     // compat stubs
