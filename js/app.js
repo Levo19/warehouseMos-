@@ -2158,7 +2158,7 @@ const GuiasView = (() => {
               <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
               ${venc}
             </div>
-            <span class="text-base font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : fmt(d.cantidadRecibida)}</span>
+            <span class="text-base font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
