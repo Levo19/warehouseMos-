@@ -84,9 +84,9 @@ function agregarDetalleGuia(params) {
     return String(p.codigoBarra || '').trim().toUpperCase() === codigoBuscado;
   });
 
-  // Si no está en PRODUCTOS_MASTER, buscar en EQUIVALENCIAS → resolver al master
+  // Si no está en PRODUCTOS_MASTER, buscar en EQUIVALENCIAS (MOS master SS, igual que el caché del frontend)
   if (!prod) {
-    var equivSheet = getSheet('EQUIVALENCIAS');
+    var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
     if (equivSheet) {
       var equivs = _sheetToObjects(equivSheet);
       var equiv  = equivs.find(function(e) {
