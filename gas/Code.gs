@@ -197,6 +197,9 @@ function _route(method, e) {
 // Campos que deben forzarse a string (evita pérdida de ceros a la izquierda en Sheets)
 var _STRING_FIELDS = { codigoBarra: true, barcode: true, ean: true, pin: true, adminPin: true };
 
+// Sheets booleans llegan como true/false (no '1'/'0') — normalizar
+function _esActivo(v) { return v === true || v === 1 || String(v) === '1'; }
+
 function _sheetToObjects(sheet) {
   var data = sheet.getDataRange().getValues();
   if (data.length < 2) return [];
@@ -314,7 +317,7 @@ function getPrinterNodeId(tipo, idZona) {
   var rows = _sheetToObjects(sheet);
   var imp  = rows.find(function(r) {
     return r.tipo === tipo &&
-           String(r.activo) === '1' &&
+           _esActivo(r.activo) &&
            String(r.printNodeId || '') !== '' &&
            (!idZona || r.idZona === idZona);
   });
@@ -346,7 +349,7 @@ function descargarMaestros() {
   try {
     var sh = mosSS.getSheetByName('EQUIVALENCIAS');
     result.equivalencias = sh ? _sheetToObjects(sh).filter(function(e) {
-      return String(e.activo) === '1';
+      return _esActivo(e.activo);
     }) : [];
   } catch(e) { errores.push('equivalencias: ' + e.message); }
 
@@ -369,7 +372,7 @@ function descargarMaestros() {
     var sh = mosSS.getSheetByName('IMPRESORAS');
     result.impresoras = sh ? _sheetToObjects(sh).filter(function(r) {
       return String(r.appOrigen || '').toLowerCase() === 'warehousemos' &&
-             String(r.activo) === '1';
+             _esActivo(r.activo);
     }) : [];
   } catch(e) { errores.push('impresoras: ' + e.message); }
 

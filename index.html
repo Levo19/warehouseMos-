@@ -190,6 +190,11 @@
     /* Slide-in para nuevos ítems */
     @keyframes slideInItem { from{opacity:0;transform:translateY(-8px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
     .item-slide-in { animation:slideInItem .22s ease-out both; }
+    /* Pulso de auto-suma en sesión cámara */
+    @keyframes camRowPulse { 0%{background:#1e3a5f;transform:scale(1.02)} 60%{background:#1b2d4a} 100%{background:#1e293b;transform:scale(1)} }
+    @keyframes camQtyPulse { 0%{transform:scale(1.4);color:#93c5fd} 100%{transform:scale(1);color:#fff} }
+    .cam-row-pulse  { animation:camRowPulse .38s ease-out both; }
+    .cam-qty-pulse  { animation:camQtyPulse .38s ease-out both; }
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
                   border-radius:6px;padding:3px 8px;letter-spacing:.5px;cursor:pointer; }

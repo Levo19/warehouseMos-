@@ -2546,19 +2546,38 @@ const GuiasView = (() => {
   function abrirAgregarItem() { abrirCamaraItem(); }
 
   // ── Estado sesión cámara (items escaneados en esta apertura) ─
-  let _camSession     = {}; // { codigoBarra: { prod, qty } }
+  let _camSession      = {}; // { codigoBarra: { prod, qty } }
   let _lastScanHistory = []; // [codigoBarra, ...] — orden cronológico para undo
-  let _torchOn        = false;
+  let _camUnknownList  = []; // [{ code }] — códigos no encontrados en sesión actual
+  let _torchOn         = false;
 
-  function _clearCamSession() { _camSession = {}; _lastScanHistory = []; }
+  function _clearCamSession() { _camSession = {}; _lastScanHistory = []; _camUnknownList = []; }
 
   function _addToCamList(prod) {
-    const cb = String(prod.codigoBarra || prod._scannedCb || '');
+    const cb       = String(prod.codigoBarra || prod._scannedCb || '');
     if (!cb) return;
+    const autoSum  = !!_camSession[cb];
     if (_camSession[cb]) { _camSession[cb].qty++; }
     else                 { _camSession[cb] = { prod, qty: 1 }; }
     _lastScanHistory.push(cb);
     _renderCamList();
+    if (autoSum) {
+      // Pulsar la fila y el número del producto ya existente
+      requestAnimationFrame(() => {
+        const row = document.querySelector(`[data-cam-cb="${CSS.escape(cb)}"]`);
+        if (!row) return;
+        row.classList.remove('cam-row-pulse');
+        const qtyBtn = row.querySelector('.cam-qty-btn');
+        if (qtyBtn) qtyBtn.classList.remove('cam-qty-pulse');
+        void row.offsetWidth; // force reflow
+        row.classList.add('cam-row-pulse');
+        if (qtyBtn) qtyBtn.classList.add('cam-qty-pulse');
+        setTimeout(() => {
+          row.classList.remove('cam-row-pulse');
+          if (qtyBtn) qtyBtn.classList.remove('cam-qty-pulse');
+        }, 400);
+      });
+    }
   }
 
   function _renderCamList() {
@@ -2581,15 +2600,16 @@ const GuiasView = (() => {
       display:flex;align-items:center;justify-content:center;flex-shrink:0;
       -webkit-tap-highlight-color:transparent`;
 
-    // saving = ítem pendiente de confirmación GAS (aún _local)
+    const guiaId = _guiaActual?.idGuia || '';
+    // saving = ítem aún pendiente de GAS — solo cambia borde, no bloquea UX
     let html = items.map(({ prod, qty }) => {
       const cb     = String(prod.codigoBarra || prod._scannedCb || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
-      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+      return `<div data-cam-cb="${cbE}" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;
                 border:1px solid ${saving ? '#475569' : '#334155'};
-                margin-bottom:7px;transition:border-color .4s">
+                margin-bottom:7px">
         <div style="flex:1;min-width:0">
           <p style="font-size:.83em;font-weight:700;color:#f1f5f9;
                     white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(prod.descripcion || cb)}</p>
@@ -2597,16 +2617,14 @@ const GuiasView = (() => {
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
           <button onclick="GuiasView.camQtyMinus('${cbE}')"
-                  ${saving ? 'disabled' : ''}
-                  style="${btnStyle};${saving ? 'opacity:.3;cursor:default' : ''}">−</button>
-          <button onclick="GuiasView.camQtyEdit('${cbE}')"
+                  style="${btnStyle}">−</button>
+          <button class="cam-qty-btn" onclick="GuiasView.camQtyEdit('${cbE}')"
                   title="Toca para editar cantidad"
                   style="min-width:46px;height:32px;border-radius:8px;padding:0 10px;
-                         background:${saving ? '#1e293b' : '#7c3aed'};
-                         border:${saving ? '1px solid #475569' : '1px solid transparent'};
-                         color:${saving ? '#64748b' : '#fff'};font-size:.85em;font-weight:800;
-                         cursor:pointer;transition:background .4s;-webkit-tap-highlight-color:transparent">
-            ${saving ? '⏳' : '×' + qty}
+                         background:#7c3aed;border:1px solid transparent;
+                         color:#fff;font-size:.85em;font-weight:800;
+                         cursor:pointer;-webkit-tap-highlight-color:transparent">
+            ×${qty}
           </button>
           <button onclick="GuiasView.camQtyPlus('${cbE}')"
                   style="${btnStyle}">+</button>
@@ -2638,6 +2656,32 @@ const GuiasView = (() => {
             <p style="font-size:.67em;color:#475569;font-family:monospace">${cb}</p>
           </div>
           <span style="font-size:.8em;color:#475569;font-weight:700;flex-shrink:0">×${qty}</span>
+        </div>`;
+      }).join('');
+    }
+
+    // Sección "No encontrados" — códigos escaneados sin match en catálogo
+    if (_camUnknownList.length) {
+      if (items.length || previos.length) {
+        html += `<div style="height:1px;background:#1e293b;margin:8px 0"></div>`;
+      }
+      html += `<p style="font-size:.62em;color:#f87171;text-transform:uppercase;
+                 letter-spacing:.07em;margin:10px 2px 6px;font-weight:700">No encontrados</p>`;
+      html += _camUnknownList.map(u => {
+        const cE = escAttr(u.code);
+        return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+                  border-radius:11px;background:#2d0a0a;border:1px solid #7f1d1d;
+                  margin-bottom:7px">
+          <div style="flex:1;min-width:0">
+            <p style="font-size:.83em;font-weight:700;color:#f87171">⚠ No registrado</p>
+            <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(u.code)}</p>
+          </div>
+          <button onclick="GuiasView.abrirModalPN('${cE}','${escAttr(guiaId)}')"
+                  style="flex-shrink:0;background:#fff3f3;color:#dc2626;
+                         border:1px solid #fca5a5;border-radius:7px;
+                         padding:4px 12px;font-size:.75em;font-weight:700;cursor:pointer">
+            + Nuevo
+          </button>
         </div>`;
       }).join('');
     }
@@ -2784,7 +2828,12 @@ const GuiasView = (() => {
     const candidatos = _buscarCandidatos(codStr);
 
     if (!candidatos.length) {
-      _setScanStatus('no_existe', codStr + ' · no registrado', codStr);
+      // Acumular en lista persistente (deduplicar por código)
+      if (!_camUnknownList.find(u => u.code === codStr)) {
+        _camUnknownList.push({ code: codStr });
+        _renderCamList();
+      }
+      _setScanStatus('no_existe', codStr + ' · no registrado');
       SoundFX.warn();
       vibrate([60, 30, 60]);
       return;
