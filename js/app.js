@@ -4056,14 +4056,16 @@ const GuiasView = (() => {
 })();
 
 // ════════════════════════════════════════════════
-// Historial de envasados agrupado por día (últimos 7 días, desc)
+// Historial de envasados agrupado por día (últimos 7 días, desc), solo del usuario actual
 function _renderEnvasadosPorDia(list, container) {
-  if (!list.length) {
+  const usuario = window.WH_CONFIG?.usuario || '';
+  const visible = usuario ? list.filter(e => e.usuario === usuario) : list;
+  if (!visible.length) {
     container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin envasados en los últimos 7 días</p>';
     return;
   }
   const grupos = {};
-  list.forEach(e => {
+  visible.forEach(e => {
     const key = String(e.fecha || '').substring(0, 10);
     if (!grupos[key]) grupos[key] = [];
     grupos[key].push(e);
@@ -4103,10 +4105,24 @@ const EnvasadosView = (() => {
   let productosMaestro = [];
 
   async function cargar() {
-    loading('listEnvasados', true);
-    const res = await API.getEnvasados({ fechaDesde: _fechaDesde7Dias() }).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-    _renderEnvasadosPorDia(list, document.getElementById('listEnvasados'));
+    const fd        = _fechaDesde7Dias();
+    const container = document.getElementById('listEnvasados');
+
+    // Optimistic: mostrar caché de inmediato
+    const cached = OfflineManager.getEnvasadosCache()
+      .filter(e => String(e.fecha || '').substring(0, 10) >= fd);
+    if (cached.length) {
+      _renderEnvasadosPorDia(cached, container);
+    } else {
+      loading('listEnvasados', true);
+    }
+
+    // Fondo: actualizar desde servidor
+    const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
+    if (res.ok) {
+      OfflineManager.guardarEnvasadosCache(res.data);
+      _renderEnvasadosPorDia(res.data, container);
+    }
   }
 
   function nuevo(preIdBase, preIdDerivado) {
@@ -4237,7 +4253,20 @@ const EnvasadosView = (() => {
     btn.disabled = true;
     btn.textContent = 'Registrando...';
 
-    // Optimistic: cerrar modal y avisar de inmediato
+    // Optimistic: inyectar en caché y cerrar modal de inmediato
+    OfflineManager.inyectarEnvasadoCache({
+      idEnvasado:             'ENV_OPT_' + Date.now(),
+      codigoProductoBase:     prodBase?.codigoBarra || prod.codigoProductoBase || '',
+      cantidadBase:           cantBase,
+      unidadBase:             prodBase?.unidad || '',
+      codigoProductoEnvasado: prod.codigoBarra,
+      unidadesProducidas:     producidas,
+      mermaReal:              0,
+      eficienciaPct:          100,
+      fecha:                  new Date().toISOString().split('T')[0],
+      usuario:                window.WH_CONFIG.usuario,
+      estado:                 'COMPLETADO'
+    });
     toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
     cerrarSheet('sheetEnvasado');
     cargar();
@@ -4452,11 +4481,24 @@ const EnvasadorView = (() => {
   async function verHistorial() {
     document.getElementById('envCatalogPanel').classList.add('hidden');
     document.getElementById('envHistorialPanel').classList.remove('hidden');
+    const fd        = _fechaDesde7Dias();
     const container = document.getElementById('listEnvasadorHistorial');
-    container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
-    const res = await API.getEnvasados({ fechaDesde: _fechaDesde7Dias() }).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
-    _renderEnvasadosPorDia(list, container);
+
+    // Optimistic: mostrar caché de inmediato
+    const cached = OfflineManager.getEnvasadosCache()
+      .filter(e => String(e.fecha || '').substring(0, 10) >= fd);
+    if (cached.length) {
+      _renderEnvasadosPorDia(cached, container);
+    } else {
+      container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+    }
+
+    // Fondo: actualizar desde servidor
+    const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
+    if (res.ok) {
+      OfflineManager.guardarEnvasadosCache(res.data);
+      _renderEnvasadosPorDia(res.data, container);
+    }
   }
 
   function verCatalogo() {

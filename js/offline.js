@@ -22,7 +22,8 @@ const OfflineManager = (() => {
     AUDITORIAS_C: 'wh_auditorias_c',
     ADMIN_PIN:    'wh_admin_pin',
     LAST_MASTER:  'wh_last_master',
-    PN:           'wh_pn'
+    PN:           'wh_pn',
+    ENVASADOS:    'wh_envasados'
   };
 
   // ── Estado ────────────────────────────────────────────────
@@ -262,6 +263,16 @@ const OfflineManager = (() => {
   const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);
+  const getEnvasadosCache     = () => cargar(KEYS.ENVASADOS)     || [];
+  const guardarEnvasadosCache = (v) => guardar(KEYS.ENVASADOS, v);
+
+  function inyectarEnvasadoCache(item) {
+    const cache = getEnvasadosCache();
+    if (!cache.find(x => x.idEnvasado === item.idEnvasado)) {
+      cache.unshift(item);
+      guardar(KEYS.ENVASADOS, cache);
+    }
+  }
 
   // ── Patch de un preingreso existente en caché ───────────────
   function patchPreingresosCache(id, changes) {
@@ -327,6 +338,7 @@ const OfflineManager = (() => {
     getAdminPin,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
     getPNCache, setPNCache,
+    getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
   };
