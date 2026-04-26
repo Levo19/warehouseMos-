@@ -115,7 +115,8 @@ function agregarDetalleGuia(params) {
   var cantRecibida  = parseFloat(params.cantidadRecibida !== undefined ? params.cantidadRecibida : cantEsperada);
   var precioUnit    = parseFloat(params.precioUnitario)    || 0;
 
-  var cbProd = String(prod.codigoBarra);
+  // Preservar el código escaneado exacto (puede ser equiv o master) — stock es independiente por barcode
+  var cbProd = codigoBuscado;
 
   // Lote: si viene fechaVencimiento, crear lote inmediatamente
   var idLote = params.idLote || '';

@@ -2554,7 +2554,7 @@ const GuiasView = (() => {
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; _camUnknownList = []; }
 
   function _addToCamList(prod) {
-    const cb       = String(prod.codigoBarra || prod._scannedCb || '');
+    const cb       = String(prod._scannedCb || prod.codigoBarra || '');
     if (!cb) return;
     const autoSum  = !!_camSession[cb];
     if (_camSession[cb]) { _camSession[cb].qty++; }
@@ -2604,7 +2604,7 @@ const GuiasView = (() => {
     // saving = ítem aún pendiente de GAS — solo cambia borde, no bloquea UX
     // totalQty = cantidad real en detalle (no el contador de sesión)
     let html = items.map(({ prod, qty }) => {
-      const cb     = String(prod.codigoBarra || prod._scannedCb || '');
+      const cb     = String(prod._scannedCb || prod.codigoBarra || '');
       const cbE    = escAttr(cb);
       const saving = detalleCompleto.some(d => d.codigoProducto === cb && d._local === true);
       const det    = detalleCompleto.find(d => d.codigoProducto === cb && d.observacion !== 'ANULADO');
@@ -3131,8 +3131,8 @@ const GuiasView = (() => {
 
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
-    // Siempre clave por codigoBarra canónico del master — GAS solo acepta PRODUCTOS_MASTER
-    const cb   = String(prod.codigoBarra || prod._scannedCb || prod.idProducto || '');
+    // Clave = código escaneado (equiv o master) — GAS acepta ambos y stock es independiente por barcode
+    const cb   = String(prod._scannedCb || prod.codigoBarra || prod.idProducto || '');
     const desc = prod.descripcion || prod.nombre || cb;
 
     // Auto-suma: si el mismo codigoBarra ya está en detalle → incrementar
