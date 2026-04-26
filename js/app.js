@@ -5026,17 +5026,18 @@ const DespachoView = (() => {
       list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Escribe al menos 2 caracteres</p>';
       return;
     }
-    // Buscar en: descripcion, codigoBarra, skuBase, idProducto + equiv barcodes
-    const equivMap = {}; // idProducto → [codigoBarra equiv]
+    // Buscar en: descripcion, codigoBarra, skuBase, idProducto + equiv barcodes y descripciones
+    const equivMap = {}; // skuBase.toUpperCase() → [cb y desc de equivs]
     equivs.forEach(e => {
-      const key = String(e.skuBase || '').trim();
+      const key = String(e.skuBase || '').trim().toUpperCase();
       if (!key) return;
       if (!equivMap[key]) equivMap[key] = [];
       equivMap[key].push(String(e.codigoBarra || '').toLowerCase());
+      if (e.descripcion) equivMap[key].push(String(e.descripcion).toLowerCase());
     });
     const seen = new Set();
     const results = prods.filter(p => {
-      const key = String(p.skuBase || p.idProducto || '').trim();
+      const key = String(p.skuBase || p.idProducto || '').trim().toUpperCase();
       if (seen.has(key)) return false;
       const haystack = [
         String(p.descripcion   || '').toLowerCase(),
