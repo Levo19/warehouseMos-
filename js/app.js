@@ -2589,6 +2589,7 @@ const GuiasView = (() => {
   let _lastScanHistory = []; // [codigoBarra, ...] — orden cronológico para undo
   let _camUnknownList  = []; // [{ code }] — códigos no encontrados en sesión actual
   let _torchOn         = false;
+  let _camActive       = false; // true solo cuando GuiasView abrió el scannerModal
 
   function _clearCamSession() { _camSession = {}; _lastScanHistory = []; _camUnknownList = []; }
 
@@ -2754,6 +2755,7 @@ const GuiasView = (() => {
   // ── MODO CÁMARA ──────────────────────────────────────────────
   function abrirCamaraItem() {
     if (!_guiaActual) return;
+    _camActive = true;
     _clearCamSession();
     _renderCamList();
     _torchOn = false;
@@ -2800,11 +2802,12 @@ const GuiasView = (() => {
     document.getElementById('scannerModal').classList.remove('open');
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
-    // Mostrar detalle de la guía al volver
-    if (_guiaActual) {
+    // Solo volver al detalle de guía si GuiasView abrió la cámara
+    if (_camActive && _guiaActual) {
       abrirSheet('sheetGuiaDetalle');
       _mostrarDetalleSheet(_guiaActual, false);
     }
+    _camActive = false;
     // Toast + sonido resumen
     const sessionItems = Object.values(_camSession);
     const total = sessionItems.reduce((s, i) => s + i.qty, 0);
@@ -4883,10 +4886,11 @@ const DespachoView = (() => {
     // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
-      const skuB = String(equiv.skuBase || '').trim();
+      const skuB = String(equiv.skuBase || '').trim().toUpperCase();
       const prod = prods.find(p =>
-        String(p.idProducto || '').trim() === skuB ||
-        String(p.skuBase    || '').trim() === skuB
+        String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+        String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+        String(p.codigoBarra || '').trim().toUpperCase() === skuB
       );
       if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
@@ -4898,10 +4902,11 @@ const DespachoView = (() => {
         .map(p => ({ ...p }));
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
       equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
-        const skuB = String(e.skuBase || '').trim();
+        const skuB = String(e.skuBase || '').trim().toUpperCase();
         const base = prods.find(p =>
-          String(p.idProducto || '').trim() === skuB ||
-          String(p.skuBase    || '').trim() === skuB
+          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+          String(p.codigoBarra || '').trim().toUpperCase() === skuB
         );
         if (base && !idsYa.has(base.idProducto)) {
           porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });
@@ -5012,15 +5017,37 @@ const DespachoView = (() => {
   }
 
   function despBuscarInput(q) {
-    const prods = OfflineManager.getProductosCache();
-    const qL    = String(q || '').toLowerCase().trim();
-    const list  = document.getElementById('despSearchList');
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    const qL     = String(q || '').toLowerCase().trim();
+    const list   = document.getElementById('despSearchList');
     if (!list) return;
     if (qL.length < 2) {
       list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Escribe al menos 2 caracteres</p>';
       return;
     }
-    const results = prods.filter(p => (p.descripcion || '').toLowerCase().includes(qL)).slice(0, 15);
+    // Buscar en: descripcion, codigoBarra, skuBase, idProducto + equiv barcodes
+    const equivMap = {}; // idProducto → [codigoBarra equiv]
+    equivs.forEach(e => {
+      const key = String(e.skuBase || '').trim();
+      if (!key) return;
+      if (!equivMap[key]) equivMap[key] = [];
+      equivMap[key].push(String(e.codigoBarra || '').toLowerCase());
+    });
+    const seen = new Set();
+    const results = prods.filter(p => {
+      const key = String(p.skuBase || p.idProducto || '').trim();
+      if (seen.has(key)) return false;
+      const haystack = [
+        String(p.descripcion   || '').toLowerCase(),
+        String(p.codigoBarra   || '').toLowerCase(),
+        String(p.skuBase       || '').toLowerCase(),
+        String(p.idProducto    || '').toLowerCase(),
+        ...(equivMap[key] || [])
+      ].join(' ');
+      if (haystack.includes(qL)) { seen.add(key); return true; }
+      return false;
+    }).slice(0, 15);
     if (!results.length) {
       list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Sin resultados</p>';
       return;
@@ -5311,14 +5338,11 @@ const DespachoView = (() => {
     abrirSheet('sheetDespFinalizar');
   }
 
-  async function confirmarDespacho() {
+  function confirmarDespacho() {
     const idZona = _tipoSalida === 'SALIDA_ZONA' ? document.getElementById('despZonaSelect').value : '';
     if (_tipoSalida === 'SALIDA_ZONA' && !idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
     if (idZona) _saveZona(idZona);
     const nota = document.getElementById('despNotaFinal')?.value?.trim() || '';
-    const btn  = document.getElementById('btnConfirmarDespacho');
-    btn.disabled    = true;
-    btn.textContent = '⏳ Generando guía...';
     const payload = {
       idZona,
       tipo:    _tipoSalida,
@@ -5326,36 +5350,49 @@ const DespachoView = (() => {
       usuario: window.WH_CONFIG?.usuario || '',
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
     };
-    // Timeout generoso — GAS puede tardar 30-40s con varios ítems
-    const res = await Promise.race([
+
+    // Optimista: vaciar carrito y cerrar sheet inmediatamente
+    const cartSnapshot = [..._cart];
+    const tipoSnapshot = _tipoSalida;
+    const pickupSnapshot = _pickupActivo;
+    _cart = []; _tipoSalida = 'SALIDA_ZONA'; _saveCart();
+    cerrarSheet('sheetDespFinalizar');
+    _renderCart(); _updateFooter(); badgeUpdate();
+    toast('⏳ Generando guía...', 'info', 55000);
+
+    // GAS en segundo plano — timeout generoso 55s
+    Promise.race([
       API.crearDespachoRapido(payload),
       new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
-    ]).catch(e => e?.timeout
-      ? { ok: false, error: 'Tiempo agotado — verifica tu conexión y reintenta' }
-      : { ok: false, error: 'Sin conexión' });
-    btn.disabled    = false;
-    btn.textContent = '📦 Generar guía de salida + Imprimir';
-    if (res.ok) {
-      const d = res.data;
-      const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
-      toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
-      if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
-      SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
-      _saveHist({ idGuia: d.idGuia, ts: Date.now(), n: _cart.length, tipo: _tipoSalida, ok: true });
-      if (_pickupActivo) {
-        API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'COMPLETADO' }).catch(() => {});
-        _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
-        _pickupActivo = null;
+    ]).then(res => {
+      if (res.ok) {
+        const d = res.data;
+        const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
+        toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
+        if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
+        SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
+        _saveHist({ idGuia: d.idGuia, ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: true });
+        if (pickupSnapshot) {
+          API.actualizarPickup({ idPickup: pickupSnapshot.idPickup, estado: 'COMPLETADO' }).catch(() => {});
+          _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== pickupSnapshot.idPickup);
+          _pickupActivo = null;
+        }
+      } else {
+        SoundFX.error(); vibrate([80, 40, 80]);
+        _saveHist({ idGuia: '—', ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: false });
+        toast('Error al generar guía: ' + (res.error || 'Sin respuesta'), 'danger', 8000);
+        // Restaurar carrito para que el usuario pueda reintentar
+        if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
       }
-      _cart = []; _tipoSalida = 'SALIDA_ZONA'; _saveCart();
-      cerrarSheet('sheetDespFinalizar');
-      _renderCart(); _updateFooter(); _renderHist(); badgeUpdate();
-    } else {
-      SoundFX.error(); vibrate([80, 40, 80]);
-      _saveHist({ idGuia: '—', ts: Date.now(), n: _cart.length, tipo: _tipoSalida, ok: false });
       _renderHist();
-      toast('Error: ' + (res.error || 'No se pudo crear la guía'), 'danger', 6000);
-    }
+    }).catch(e => {
+      const msg = e?.timeout ? 'Tiempo agotado — verifica tu conexión' : 'Sin conexión';
+      SoundFX.error(); vibrate([80, 40, 80]);
+      _saveHist({ idGuia: '—', ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: false });
+      toast('Error: ' + msg, 'danger', 8000);
+      if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
+      _renderHist();
+    });
   }
 
   function cancelar() {
