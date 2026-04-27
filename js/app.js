@@ -4719,23 +4719,73 @@ const DespachoView = (() => {
       return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
     return d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit' });
   }
+  function _histDestino(h) {
+    if (h.tipo === 'SALIDA_ZONA')       return { label: 'Zona', detail: h.nombreZona || h.idZona || '—', col: '#38bdf8' };
+    if (h.tipo === 'SALIDA_JEFATURA')   return { label: 'Jefatura', detail: h.nota || 'Sin comentario', col: '#a78bfa' };
+    if (h.tipo === 'SALIDA_DEVOLUCION') return { label: 'Devolución', detail: h.nota || 'Sin comentario', col: '#fbbf24' };
+    return { label: h.tipo || '—', detail: h.nota || '', col: '#94a3b8' };
+  }
+
   function _renderHist() {
     const el = document.getElementById('despHistorial');
     if (!el) return;
     const hist = _loadHist();
     if (!hist.length) { el.style.display = 'none'; return; }
     el.style.display = 'block';
-    const TIPO_SHORT = { SALIDA_ZONA: 'Zona', SALIDA_JEFATURA: 'Jefatura', SALIDA_DEVOLUCION: 'Devolución' };
     el.innerHTML = `
-      <p style="font-size:.68em;font-weight:800;color:#334155;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase">Últimas guías</p>
-      ${hist.map(h => `
-        <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #1e293b">
+      <p style="font-size:.68em;font-weight:800;color:#334155;margin-bottom:5px;letter-spacing:.06em;text-transform:uppercase">Últimos despachos</p>
+      ${hist.map((h, idx) => {
+        const dest = _histDestino(h);
+        return `<div onclick="DespachoView.verHistDetalle(${idx})"
+                     style="display:flex;align-items:center;gap:10px;padding:9px 4px;
+                            border-bottom:1px solid #1e293b;cursor:pointer;
+                            -webkit-tap-highlight-color:transparent"
+                     ontouchstart="this.style.background='#0c1e30'" ontouchend="this.style.background='transparent'">
           <div style="flex:1;min-width:0">
-            <p style="font-size:.78em;font-weight:700;color:#94a3b8">${escHtml(h.idGuia || '—')}</p>
-            <p style="font-size:.65em;color:#475569">${h.n} prod · ${escHtml(TIPO_SHORT[h.tipo] || h.tipo || 'Zona')} · ${_fmtHistTs(h.ts)}</p>
+            <p style="font-size:.74em;font-weight:800;color:${dest.col};letter-spacing:.02em">
+              ${escHtml(dest.label)} · <span style="color:#cbd5e1;font-weight:600">${escHtml(dest.detail)}</span>
+            </p>
+            <p style="font-size:.62em;color:#475569;margin-top:1px">${_fmtHistTs(h.ts)}${h.ok ? '' : ' · <span style="color:#f87171">error</span>'}</p>
           </div>
-          <span style="font-size:.72em;font-weight:800;color:${h.ok ? '#34d399' : '#f87171'}">${h.ok ? '✓' : '✗'}</span>
-        </div>`).join('')}`;
+          <div style="text-align:right;flex-shrink:0">
+            <p style="font-size:.92em;font-weight:900;color:#f1f5f9;line-height:1">${h.n}</p>
+            <p style="font-size:.55em;color:#475569;letter-spacing:.05em;text-transform:uppercase">prod</p>
+          </div>
+          <span style="font-size:.7em;color:${h.ok ? '#34d399' : '#f87171'};flex-shrink:0">${h.ok ? '✓' : '✗'}</span>
+        </div>`;
+      }).join('')}`;
+  }
+
+  function verHistDetalle(idx) {
+    const hist = _loadHist();
+    const h = hist[idx];
+    if (!h) return;
+    const dest = _histDestino(h);
+    const titEl = document.getElementById('histDetalleTitulo');
+    const subEl = document.getElementById('histDetalleSub');
+    const lstEl = document.getElementById('histDetalleLista');
+    const ftEl  = document.getElementById('histDetalleFooter');
+    if (!titEl || !lstEl) return;
+    titEl.innerHTML = `<span style="color:${dest.col}">${escHtml(dest.label)}</span> · <span style="color:#cbd5e1">${escHtml(dest.detail)}</span>`;
+    subEl.textContent = _fmtHistTs(h.ts) + (h.ok ? '' : ' · Error') + (h.idGuia && h.idGuia !== '—' ? '' : '');
+    if (Array.isArray(h.items) && h.items.length) {
+      lstEl.innerHTML = h.items.map(it => {
+        const qtyFmt = fmt(it.cantidad, Number.isInteger(parseFloat(it.cantidad)) ? 0 : 2);
+        return `<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #1e293b">
+          <div style="flex:1;min-width:0">
+            <p style="font-size:.82em;font-weight:700;color:#f1f5f9;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(it.descripcion || it.codigoBarra)}</p>
+            <p style="font-size:.66em;color:#64748b;font-family:monospace">${escHtml(it.codigoBarra)}</p>
+          </div>
+          <span style="font-size:.92em;font-weight:900;color:#38bdf8;flex-shrink:0">${qtyFmt}</span>
+        </div>`;
+      }).join('');
+    } else {
+      lstEl.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding:20px">Sin detalle disponible</p>';
+    }
+    const totalUds = (h.items || []).reduce((s, it) => s + (parseFloat(it.cantidad) || 0), 0);
+    if (ftEl) ftEl.textContent = `${h.n} producto${h.n !== 1 ? 's' : ''} · ${fmt(totalUds, 2)} unidades`;
+    abrirSheet('sheetHistDetalle');
   }
 
   // ── Estado sesión cámara despacho ────────────────────────────
@@ -5459,10 +5509,20 @@ const DespachoView = (() => {
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
     };
 
+    // Resolver nombre de zona para historial
+    const zonas = OfflineManager.getZonasCache();
+    const zonaObj = zonas.find(z => String(z.idZona) === String(idZona));
+    const nombreZona = zonaObj ? (zonaObj.nombre || zonaObj.idZona) : '';
+
     // Optimista: vaciar carrito y cerrar sheet inmediatamente
     const cartSnapshot = [..._cart];
     const tipoSnapshot = _tipoSalida;
     const pickupSnapshot = _pickupActivo;
+    const itemsSnapshot = cartSnapshot.map(c => ({
+      codigoBarra: c.codigoBarra, descripcion: c.descripcion, cantidad: c.cantidad
+    }));
+    const histBase = { ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot,
+                       idZona, nombreZona, nota, items: itemsSnapshot };
     _cart = []; _tipoSalida = 'SALIDA_ZONA'; _saveCart();
     cerrarSheet('sheetDespFinalizar');
     _renderCart(); _updateFooter(); badgeUpdate();
@@ -5479,7 +5539,7 @@ const DespachoView = (() => {
         toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
-        _saveHist({ idGuia: d.idGuia, ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: true });
+        _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
         if (pickupSnapshot) {
           API.actualizarPickup({ idPickup: pickupSnapshot.idPickup, estado: 'COMPLETADO' }).catch(() => {});
           _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== pickupSnapshot.idPickup);
@@ -5487,7 +5547,7 @@ const DespachoView = (() => {
         }
       } else {
         SoundFX.error(); vibrate([80, 40, 80]);
-        _saveHist({ idGuia: '—', ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: false });
+        _saveHist({ ...histBase, idGuia: '—', ok: false });
         toast('Error al generar guía: ' + (res.error || 'Sin respuesta'), 'danger', 8000);
         // Restaurar carrito para que el usuario pueda reintentar
         if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
@@ -5496,7 +5556,7 @@ const DespachoView = (() => {
     }).catch(e => {
       const msg = e?.timeout ? 'Tiempo agotado — verifica tu conexión' : 'Sin conexión';
       SoundFX.error(); vibrate([80, 40, 80]);
-      _saveHist({ idGuia: '—', ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot, ok: false });
+      _saveHist({ ...histBase, idGuia: '—', ok: false });
       toast('Error: ' + msg, 'danger', 8000);
       if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
       _renderHist();
@@ -5730,6 +5790,7 @@ const DespachoView = (() => {
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
            toggleDespScanInline, submitDespScanInline,
+           verHistDetalle,
            abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
            selTipo,
            incQty, decQty, blurQty, quitarItem,

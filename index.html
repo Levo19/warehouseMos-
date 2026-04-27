@@ -2958,6 +2958,19 @@
 
 <!-- ════════════════════════════════════════════════
 <!-- ════════════════════════════════════════════════
+     SHEET: DESPACHO — DETALLE DE HISTORIAL
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayHistDetalle" onclick="cerrarSheet('sheetHistDetalle')"></div>
+<div class="bottom-sheet" id="sheetHistDetalle" style="max-height:80vh;display:flex;flex-direction:column">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+  <p id="histDetalleTitulo" style="font-size:.95em;font-weight:800;margin-bottom:2px"></p>
+  <p id="histDetalleSub" style="font-size:.72em;color:#64748b;margin-bottom:10px"></p>
+  <div id="histDetalleLista" style="flex:1;overflow-y:auto;min-height:0"></div>
+  <p id="histDetalleFooter" style="font-size:.74em;color:#94a3b8;text-align:center;
+     padding:10px 0 0;border-top:1px solid #1e293b;margin-top:8px;font-weight:700"></p>
+</div>
+
+<!-- ════════════════════════════════════════════════
      SHEET: DESPACHO — FINALIZAR (zona + confirmar)
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayDespFinalizar" onclick="cerrarSheet('sheetDespFinalizar')"></div>
