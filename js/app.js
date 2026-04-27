@@ -5090,51 +5090,92 @@ const DespachoView = (() => {
       list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Escribe al menos 2 caracteres</p>';
       return;
     }
-    // Buscar en: descripcion, codigoBarra, skuBase, idProducto + equiv barcodes y descripciones
-    const equivMap = {}; // skuBase.toUpperCase() → [cb y desc de equivs]
+
+    // Agrupar equivs por skuBase para búsqueda y expansión
+    const equivsByKey = {};
     equivs.forEach(e => {
       const key = String(e.skuBase || '').trim().toUpperCase();
-      if (!key) return;
-      if (!equivMap[key]) equivMap[key] = [];
-      equivMap[key].push(String(e.codigoBarra || '').toLowerCase());
-      if (e.descripcion) equivMap[key].push(String(e.descripcion).toLowerCase());
+      if (!key || !e.codigoBarra) return;
+      if (!equivsByKey[key]) equivsByKey[key] = [];
+      equivsByKey[key].push(e);
     });
-    const seen = new Set();
-    const results = prods.filter(p => {
+
+    // Un entry por barcode visible (maestro + cada equiv)
+    const entries = [];
+    const seenCb  = new Set();
+
+    prods.forEach(p => {
       const key = String(p.skuBase || p.idProducto || '').trim().toUpperCase();
-      if (seen.has(key)) return false;
+      const eqs  = equivsByKey[key] || [];
       const haystack = [
-        String(p.descripcion   || '').toLowerCase(),
-        String(p.codigoBarra   || '').toLowerCase(),
-        String(p.skuBase       || '').toLowerCase(),
-        String(p.idProducto    || '').toLowerCase(),
-        ...(equivMap[key] || [])
+        String(p.descripcion || '').toLowerCase(),
+        String(p.codigoBarra || '').toLowerCase(),
+        String(p.skuBase     || '').toLowerCase(),
+        String(p.idProducto  || '').toLowerCase(),
+        ...eqs.map(e => String(e.codigoBarra || '').toLowerCase() + ' ' + String(e.descripcion || '').toLowerCase())
       ].join(' ');
-      if (haystack.includes(qL)) { seen.add(key); return true; }
-      return false;
-    }).slice(0, 15);
-    if (!results.length) {
+      if (!haystack.includes(qL)) return;
+
+      // Barcode maestro
+      const masterCb = String(p.codigoBarra || '');
+      if (masterCb && !seenCb.has(masterCb)) {
+        seenCb.add(masterCb);
+        entries.push({ prod: p, cb: masterCb, label: p.descripcion || masterCb, tag: '' });
+      }
+      // Barcodes equiv
+      eqs.forEach(e => {
+        const equivCb = String(e.codigoBarra);
+        if (!seenCb.has(equivCb)) {
+          seenCb.add(equivCb);
+          entries.push({ prod: p, cb: equivCb, label: e.descripcion || p.descripcion || equivCb, tag: 'EQ', _scannedCb: equivCb });
+        }
+      });
+    });
+
+    if (!entries.length) {
       list.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding-top:20px">Sin resultados</p>';
       return;
     }
-    list.innerHTML = results.map(p => {
-      const cb = String(p.codigoBarra || '');
-      return `<button onclick="DespachoView.seleccionarDespBusqueda('${escAttr(cb)}')"
+    list.innerHTML = entries.slice(0, 20).map(entry => {
+      const cb    = escAttr(entry.cb);
+      const tagHtml = entry.tag
+        ? `<span style="font-size:.6em;font-weight:800;padding:1px 5px;border-radius:4px;
+                         background:rgba(251,191,36,.15);color:#fbbf24;margin-left:5px;flex-shrink:0">${entry.tag}</span>`
+        : '';
+      return `<button onclick="DespachoView.seleccionarDespBusqueda('${cb}')"
               style="width:100%;text-align:left;padding:10px 12px;border-radius:10px;
                      border:1px solid #1e293b;margin-bottom:6px;background:#1e293b;
                      display:flex;align-items:center;gap:10px;cursor:pointer;
                      -webkit-tap-highlight-color:transparent"
               ontouchstart="this.style.background='#0c1e30'" ontouchend="this.style.background='#1e293b'">
         <div style="flex:1;min-width:0">
-          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(p.descripcion || cb)}</p>
-          <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+          <div style="display:flex;align-items:center">
+            <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(entry.label)}</p>
+            ${tagHtml}
+          </div>
+          <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(entry.cb)}</p>
         </div>
       </button>`;
     }).join('');
   }
 
   function seleccionarDespBusqueda(codigoBarra) {
-    const prod = OfflineManager.getProductosCache().find(p => String(p.codigoBarra || '') === codigoBarra);
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+    // Buscar en maestro primero, luego en equivs
+    let prod = prods.find(p => String(p.codigoBarra || '') === codigoBarra);
+    if (!prod) {
+      const equiv = equivs.find(e => String(e.codigoBarra || '') === codigoBarra);
+      if (equiv) {
+        const skuB = String(equiv.skuBase || '').trim().toUpperCase();
+        const master = prods.find(p =>
+          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+          String(p.codigoBarra || '').trim().toUpperCase() === skuB
+        );
+        if (master) prod = { ...master, _scannedCb: codigoBarra };
+      }
+    }
     if (!prod) return;
     cerrarDespBusqueda();
     _agregarDespDirecto(prod);
