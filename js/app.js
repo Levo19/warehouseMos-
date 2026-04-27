@@ -1832,13 +1832,22 @@ const GuiasView = (() => {
     const guias    = OfflineManager.getGuiasCache();
     const detalles = OfflineManager.getGuiaDetalleCache();
     const prods    = OfflineManager.getProductosCache();
+    const equivs   = OfflineManager.getEquivalenciasCache();
     const prodMap  = {};
+    // Index del nombre por idProducto/skuBase/codigoBarra del maestro
     prods.forEach(p => {
       const name = p.descripcion || p.nombre || '';
-      if (name) {
-        prodMap[p.idProducto] = name;
-        if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
-      }
+      if (!name) return;
+      prodMap[p.idProducto] = name;
+      if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
+      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = name;
+    });
+    // Index del nombre por codigoBarra de cada equivalente → resuelve al producto base via skuBase
+    equivs.forEach(e => {
+      if (!e.codigoBarra || !e.skuBase) return;
+      const skuKey = String(e.skuBase).trim().toUpperCase();
+      const name   = prodMap[skuKey];
+      if (name) prodMap[String(e.codigoBarra)] = name;
     });
 
     let guia = guias.find(g => g.idGuia === idGuia);

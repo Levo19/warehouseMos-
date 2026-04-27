@@ -27,15 +27,32 @@ function getGuia(idGuia) {
 
   guia.detalle = detalles.filter(function(d){ return d.idGuia === idGuia; });
 
-  // Enriquecer con nombres de productos (indexar por codigoBarra y por idProducto)
+  // Enriquecer con nombres de productos (indexar por codigoBarra, idProducto, skuBase y equivalentes)
   var productos = _sheetToObjects(getProductosSheet());
   var prodMap = {};
   productos.forEach(function(p){
-    if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p.descripcion;
-    prodMap[p.idProducto] = p.descripcion;
+    var name = p.descripcion || p.nombre || '';
+    if (!name) return;
+    if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
+    if (p.idProducto)  prodMap[String(p.idProducto)] = name;
+    if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = name;
   });
+  // Equivalentes → resuelven al producto base via skuBase
+  try {
+    var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+    if (equivSheet) {
+      _sheetToObjects(equivSheet).forEach(function(e){
+        if (!e.codigoBarra || !e.skuBase) return;
+        var skuKey = String(e.skuBase).trim().toUpperCase();
+        var name   = prodMap[skuKey];
+        if (name) prodMap[String(e.codigoBarra)] = name;
+      });
+    }
+  } catch(e) {}
   guia.detalle.forEach(function(d){
-    d.descripcionProducto = prodMap[d.codigoProducto] || d.codigoProducto;
+    d.descripcionProducto = d.descripcionProducto
+      || prodMap[d.codigoProducto]
+      || d.codigoProducto;
   });
 
   return { ok: true, data: guia };
