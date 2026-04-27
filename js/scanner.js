@@ -31,11 +31,13 @@ const Scanner = (() => {
   }
 
   // Constraints optimizadas para lectura de códigos de barra
+  // 1080p ideal: detecta barras finas y códigos pequeños mejor que 720p.
+  // ideal (no exact) — dispositivos viejos siguen entregando lo que pueden.
   const _CONSTRAINTS = {
     video: {
       facingMode: { ideal: 'environment' },
-      width:      { ideal: 1280 },
-      height:     { ideal: 720 },
+      width:      { ideal: 1920 },
+      height:     { ideal: 1080 },
       frameRate:  { ideal: 15, max: 30 },
       advanced:   [{ focusMode: 'continuous' }]
     },
@@ -199,6 +201,11 @@ const Scanner = (() => {
     if (!_videoEl) { if (onError) onError('Video no encontrado'); return; }
     _active = true;
 
+    // Tap-to-focus: registrar listener (el video puede ser distinto en cada modal)
+    _videoEl.addEventListener('click',     _onVideoTap);
+    _videoEl.addEventListener('touchstart', _onVideoTap, { passive: true });
+    _videoEl.style.cursor = 'crosshair';
+
     if (_hasBarcodeDetector()) {
       _detector = await _buildDetector();
       if (_detector) { await _startNative(onResult, onError); return; }
@@ -211,8 +218,58 @@ const Scanner = (() => {
     if (_raf)      { cancelAnimationFrame(_raf); _raf = null; }
     if (_zxReader) { try { _zxReader.reset(); } catch (e) {} _zxReader = null; }
     if (_stream)   { _stream.getTracks().forEach(t => t.stop()); _stream = null; }
+    if (_videoEl) {
+      _videoEl.removeEventListener('click', _onVideoTap);
+      _videoEl.removeEventListener('touchstart', _onVideoTap);
+      _videoEl.style.cursor = '';
+    }
     if (_videoEl)  { _videoEl.srcObject = null; _videoEl = null; }
     _pendingCode = null; _pendingTs = 0;
+  }
+
+  // ── Tap-to-focus: el usuario toca el video → forzar re-enfoque
+  // Útil en sensores tipo Samsung A56 cuyo autofocus continuous no enfoca cerca
+  let _tapBusy = false;
+  async function _doTapFocus(x, y) {
+    if (!_stream || _tapBusy) return false;
+    const track = _stream.getVideoTracks()[0];
+    if (!track) return false;
+    const caps = track.getCapabilities?.() || {};
+    _tapBusy = true;
+    try {
+      // Si soporta pointsOfInterest + focusMode, usar tap-to-focus real
+      const adv = {};
+      if (caps.pointsOfInterest && x != null && y != null) {
+        adv.pointsOfInterest = [{ x, y }];
+      }
+      if (Array.isArray(caps.focusMode) && caps.focusMode.includes('single-shot')) {
+        adv.focusMode = 'single-shot';
+      }
+      if (Object.keys(adv).length) {
+        await track.applyConstraints({ advanced: [adv] });
+        // Volver a continuous tras enfocar
+        setTimeout(() => {
+          _tapBusy = false;
+          if (Array.isArray(caps.focusMode) && caps.focusMode.includes('continuous')) {
+            track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+          }
+        }, 800);
+        return true;
+      }
+    } catch (e) { /* dispositivo no soporta — ignorar */ }
+    _tapBusy = false;
+    return false;
+  }
+
+  function _onVideoTap(e) {
+    if (!_videoEl) return;
+    const rect = _videoEl.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    if (cx == null || cy == null) { _doTapFocus(0.5, 0.5); return; }
+    const x = (cx - rect.left) / rect.width;
+    const y = (cy - rect.top)  / rect.height;
+    _doTapFocus(Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y)));
   }
 
   async function toggleTorch(on) {
