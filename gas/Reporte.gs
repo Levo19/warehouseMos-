@@ -138,55 +138,77 @@ function imprimirTicketGuia(params) {
   // Init
   b1(0x1b); b1(0x40);
 
-  // Header centrado
+  // ── HEADER: WAREHOUSE / MOS ─────────────────────────────────
+  // Centrado + doble alto + doble ancho + bold
   b1(0x1b); b1(0x61); b1(0x01);
-  b1(0x1b); b1(0x21); b1(0x08);  // bold
-  bLn('ALMACEN CENTRAL - MOS');
+  b1(0x1b); b1(0x21); b1(0x38);
+  bLn('WAREHOUSE');
+  bLn('MOS');
   b1(0x1b); b1(0x21); b1(0x00);
-  b1(0x1b); b1(0x61); b1(0x00);  // left
+  b1(0x1b); b1(0x61); b1(0x00);
 
   bLn(SEP);
 
-  bLn(lineaKV('GUIA    : ', idGuia));
-  bLn(lineaKV('TIPO    : ', tipoLabel));
-  bLn(lineaKV('FECHA   : ', fecha + '  ' + hora));
-  bLn(lineaKV('ESTADO  : ', g.estado || '—'));
+  // ── CUADRO 1: info compacta de la guía ──────────────────────
+  // Línea 1: TIPO · FECHA · ESTADO   (bold)
+  b1(0x1b); b1(0x45); b1(0x01);  // bold ON
+  bLn(tipoLabel.toUpperCase() + '  -  ' + fecha.toUpperCase() + '  -  ' + (g.estado || '—').toUpperCase());
+  b1(0x1b); b1(0x45); b1(0x00);  // bold OFF
 
-  bLn(SEP2);
+  // Línea 2: hora + usuario + idGuia (compacto)
+  bLn('Hora: ' + hora + '   Usuario: ' + (g.usuario || '—'));
+  bLn('Guia: ' + idGuia + (provName ? '   Prov: ' + provName.substring(0, 20) : ''));
 
-  if (provName) bLn(lineaKV('PROVEEDOR: ', provName));
-  bLn(lineaKV('USUARIO  : ', g.usuario || '—'));
+  // Nota: si hay comentario
   if (g.comentario) {
-    bLn(SEP2);
-    bLn(lineaKV('NOTA     : ', String(g.comentario).substring(0, 37)));
+    var nota = String(g.comentario);
+    // Wrap a 48 chars con prefijo "Nota: " en la primera
+    var firstLine = nota.substring(0, 42);
+    bLn('Nota: ' + firstLine);
+    if (nota.length > 42) {
+      var rest = nota.substring(42, 42 + 48);
+      bLn('      ' + rest);
+    }
   }
 
   bLn(SEP);
 
-  // Header detalle
-  b1(0x1b); b1(0x21); b1(0x08);  // bold
-  bLn(lineaDet(' ', 'PRODUCTO', 'CANT'));
-  b1(0x1b); b1(0x21); b1(0x00);
+  // ── CUADRO 2: productos ─────────────────────────────────────
+  // Header sección
+  b1(0x1b); b1(0x61); b1(0x01);  // center
+  b1(0x1b); b1(0x45); b1(0x01);  // bold
+  bLn('PRODUCTOS');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);  // left
   bLn(SEP2);
 
-  // Items
+  // Items con cantidad bold grande
   dets.forEach(function(d) {
     var tag    = d.esProductoNuevo ? 'n' : d.esIncompleto ? 'i' : ' ';
     var nombre = String(d.descripcion || '').toUpperCase();
     var cant   = d.cantidad % 1 === 0 ? String(Math.round(d.cantidad)) : String(d.cantidad);
-    if (nombre.length <= 38) {
-      bLn(lineaDet(tag, nombre, cant));
-    } else {
-      bLn(lineaDet(tag, nombre.substring(0, 38), cant));
-      bLn('   ' + nombre.substring(38, 78));
+
+    // Línea 1: [cant×] NOMBRE — cantidad bold doble-ancho, nombre normal
+    b1(0x1b); b1(0x45); b1(0x01);  // bold ON
+    bStr(cant + 'x');
+    b1(0x1b); b1(0x45); b1(0x00);  // bold OFF
+    bStr(' ');
+    var prefix = cant + 'x ';
+    var ancho  = 48 - prefix.length;
+    var marca  = (tag === 'n' ? '[N] ' : tag === 'i' ? '[!] ' : '');
+    var nomDisp = (marca + nombre).substring(0, ancho);
+    bLn(nomDisp);
+    // Si nombre se cortó, segunda línea con sangría
+    if ((marca + nombre).length > ancho) {
+      bLn('    ' + (marca + nombre).substring(ancho, ancho + 44));
     }
-    // Código: solo para productos nuevos (NLEV u otro código PN)
-    if (d.esProductoNuevo && d.codigoProducto) {
-      bLn('  ' + String(d.codigoProducto));
+    // Código de barra debajo (sangría)
+    if (d.codigoProducto) {
+      bLn('    ' + String(d.codigoProducto));
     }
     // Fecha de vencimiento (si tiene)
     if (d.fechaVencimiento) {
-      bLn('  Venc: ' + fmtVenc(d.fechaVencimiento));
+      bLn('    Venc: ' + fmtVenc(d.fechaVencimiento));
     }
   });
 
@@ -194,9 +216,14 @@ function imprimirTicketGuia(params) {
 
   bLn(SEP);
 
-  // QR Code
+  // ── CUADRO 3: QR Code para reporte en tiempo real ───────────
   if (reporteUrl) {
     b1(0x1b); b1(0x61); b1(0x01);  // centrar
+
+    // Subtitulo bold antes del QR
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('REPORTE EN TIEMPO REAL');
+    b1(0x1b); b1(0x45); b1(0x00);
 
     var qrData = reporteUrl;
     var qrLen  = qrData.length + 3;
@@ -205,8 +232,8 @@ function imprimirTicketGuia(params) {
 
     // Modelo 2
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x04); b1(0x00); b1(0x31); b1(0x41); b1(0x32); b1(0x00);
-    // Tamaño módulo 4
-    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x04);
+    // Tamaño módulo 5 (un poco más grande para fácil lectura)
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x05);
     // Corrección de errores M
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x45); b1(0x31);
     // Almacenar datos
@@ -216,7 +243,8 @@ function imprimirTicketGuia(params) {
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x51); b1(0x30);
 
     b1(0x1b); b1(0x21); b1(0x00);
-    bLn('Escanea para ver el reporte');
+    bLn('Escanea con la camara');
+    bLn('para ver el detalle al instante');
     b1(0x1b); b1(0x61); b1(0x00);
     bLn(SEP);
   }
