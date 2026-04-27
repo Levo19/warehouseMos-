@@ -42,9 +42,23 @@ function imprimirTicketGuia(params) {
     var prodMap = {};
     prods.forEach(function(p) {
       var desc = p.descripcion || p.idProducto;
+      if (!desc) return;
       prodMap[p.idProducto] = desc;
       if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
     });
+    // Equivalentes → resuelven al producto base via skuBase
+    try {
+      var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+      if (equivSheet) {
+        _sheetToObjects(equivSheet).forEach(function(e) {
+          if (!e.codigoBarra || !e.skuBase) return;
+          var skuKey = String(e.skuBase).trim().toUpperCase();
+          var desc   = prodMap[skuKey];
+          if (desc) prodMap[String(e.codigoBarra).trim()] = desc;
+        });
+      }
+    } catch(e) {}
 
     var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
     var pnMap = {};
@@ -322,9 +336,23 @@ function _reporteGuia(id) {
     var prodMap = {};
     prods.forEach(function(p) {
       var desc = p.descripcion || p.idProducto;
+      if (!desc) return;
       prodMap[p.idProducto] = desc;
       if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
     });
+    // Equivalentes → resuelven al producto base via skuBase
+    try {
+      var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+      if (equivSheet) {
+        _sheetToObjects(equivSheet).forEach(function(e) {
+          if (!e.codigoBarra || !e.skuBase) return;
+          var skuKey = String(e.skuBase).trim().toUpperCase();
+          var desc   = prodMap[skuKey];
+          if (desc) prodMap[String(e.codigoBarra).trim()] = desc;
+        });
+      }
+    } catch(e) {}
 
     var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
     var pnMap = {};
