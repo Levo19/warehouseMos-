@@ -5108,12 +5108,69 @@ const DespachoView = (() => {
     }
   }
 
+  function _cerrarInlinePicker() {
+    const pk = document.getElementById('despScanInlinePicker');
+    if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; }
+  }
+
+  function _mostrarInlinePicker(candidatos, codStr) {
+    const pk = document.getElementById('despScanInlinePicker');
+    if (!pk) return;
+    pk.innerHTML = candidatos.map((p, idx) => {
+      const cb      = String(p._scannedCb || p.codigoBarra || '');
+      const display = String(p.codigoBarra || cb);
+      const cbHtml  = display.startsWith(codStr)
+        ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(display.slice(codStr.length))}`
+        : escHtml(display);
+      return `<button onclick="DespachoView.seleccionarItemDespInline('${escAttr(cb)}')"
+              style="width:100%;text-align:left;padding:9px 11px;border-radius:8px;
+                     border:1px solid #334155;margin-bottom:5px;background:#0f172a;
+                     display:flex;align-items:center;gap:9px;cursor:pointer;
+                     -webkit-tap-highlight-color:transparent"
+              ontouchstart="this.style.background='#0c1e30'"
+              ontouchend="this.style.background='#0f172a'">
+        <div style="flex-shrink:0;width:26px;height:26px;border-radius:6px;background:rgba(251,191,36,.15);
+                    display:flex;align-items:center;justify-content:center">
+          <span style="font-size:.65em;color:#fbbf24;font-weight:800">${idx+1}</span>
+        </div>
+        <div style="flex:1;min-width:0">
+          <p style="font-size:.78em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.65em;color:#64748b;font-family:monospace;margin-top:1px">${cbHtml}</p>
+        </div>
+      </button>`;
+    }).join('');
+    pk.style.display = 'block';
+  }
+
+  function seleccionarItemDespInline(scannedCb) {
+    _cerrarInlinePicker();
+    const candidatos = _buscarDespCandidatos(scannedCb);
+    const prod = candidatos[0];
+    if (!prod) return;
+    _agregarDespDirecto(prod);
+    const cb       = String(prod._scannedCb || prod.codigoBarra || scannedCb);
+    const item     = _cart.find(c => c.codigoBarra === cb);
+    const stockD   = item?.stockDisp || 0;
+    const statusEl = document.getElementById('despScanInlineStatus');
+    if (stockD > 0 && item && item.cantidad > stockD) {
+      if (statusEl) { statusEl.textContent = `⚠ ${prod.descripcion || cb} · sobrestock`; statusEl.style.color = '#fb923c'; }
+    } else {
+      if (statusEl) { statusEl.textContent = `✓ ${prod.descripcion || cb}`; statusEl.style.color = '#34d399'; }
+      SoundFX.beep(); vibrate(15);
+    }
+    const inp = document.getElementById('despScanInlineInput');
+    if (inp) { inp.value = ''; inp.focus(); }
+    _renderCart(); _updateFooter(); badgeUpdate();
+    setTimeout(() => { if (statusEl) { statusEl.textContent = ''; statusEl.style.color = '#475569'; } }, 2000);
+  }
+
   function submitDespScanInline() {
     const inp = document.getElementById('despScanInlineInput');
     const statusEl = document.getElementById('despScanInlineStatus');
     if (!inp) return;
     const val = inp.value.trim();
     if (!val) return;
+    _cerrarInlinePicker();
     const candidatos = _buscarDespCandidatos(val);
     if (!candidatos.length) {
       if (statusEl) { statusEl.textContent = '⚠ ' + val + ' · no existe en catálogo'; statusEl.style.color = '#f87171'; }
@@ -5121,13 +5178,14 @@ const DespachoView = (() => {
       inp.select();
       return;
     }
-    // Solo aceptar si es match EXACTO. Con prefijo, pedir código completo (no hay picker visual aquí).
+    // Match exacto → agregar directo. Con prefijo (varios) → mostrar picker para elegir
     if (!candidatos[0]._exacto) {
       if (statusEl) {
-        statusEl.textContent = `⚠ ${candidatos.length} coincidencias · escribe el código completo o usa la cámara`;
+        statusEl.textContent = `↕ Prefijo · ${candidatos.length} coincidencias — elige una`;
         statusEl.style.color = '#fbbf24';
       }
-      SoundFX.warn(); vibrate([40, 20, 40]);
+      SoundFX.warn(); vibrate([30]);
+      _mostrarInlinePicker(candidatos, val);
       inp.select();
       return;
     }
@@ -5832,7 +5890,7 @@ const DespachoView = (() => {
            cerrarDespPicker, seleccionarItemDesp,
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
-           toggleDespScanInline, submitDespScanInline,
+           toggleDespScanInline, submitDespScanInline, seleccionarItemDespInline,
            verHistDetalle,
            abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
            selTipo,
