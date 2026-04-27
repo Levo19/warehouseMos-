@@ -78,11 +78,8 @@ const Scanner = (() => {
       if (!_active) return;
       if (codes.length > 0) {
         const code = codes[0].rawValue;
-        if (!_confirm(code)) {
-          // Primera lectura — esperar confirmación rápida
-          setTimeout(() => { if (_active) _raf = requestAnimationFrame(() => _rafLoop(onResult)); }, 80);
-          return;
-        }
+        // BarcodeDetector nativo ya valida internamente — saltar doble-confirm
+        // (en algunos sensores Samsung el doble-confirm causaba lecturas que nunca se confirman)
         if (_continuous) {
           const now = Date.now();
           if (code !== _lastCode || now - _lastCodeTs > _cooldown) {
@@ -200,6 +197,11 @@ const Scanner = (() => {
     if (!_stream) return false;
     const track = _stream.getVideoTracks()[0];
     if (!track) return false;
+    // Verificar capability primero — algunos Samsung rechazan el constraint si no se chequea
+    try {
+      const caps = track.getCapabilities?.();
+      if (caps && 'torch' in caps && caps.torch === false) return false;
+    } catch (e) { /* ignorar — algunos navegadores no exponen getCapabilities */ }
     try {
       await track.applyConstraints({ advanced: [{ torch: !!on }] });
       return true;

@@ -42,7 +42,7 @@ const OfflineManager = (() => {
   function _notificar() {
     if (_onStatusChange) _onStatusChange({
       online:   navigator.onLine,
-      pending:  getQueue().length,
+      pending:  getQueue().filter(i => i.status === 'pending').length,
       syncing:  _syncing,
       lastSync: localStorage.getItem(KEYS.LAST_SYNC)
     });

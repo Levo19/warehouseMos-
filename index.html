@@ -1215,25 +1215,43 @@
   <script>
   (function() {
     let _prompt = null;
-    function _toggleCard(visible) {
+    function _setMode(mode) {
+      // mode: 'auto' (botón install), 'manual' (instrucciones), 'hidden'
       const c = document.getElementById('cardInstalar');
-      if (c) c.style.display = visible ? '' : 'none';
+      const btn = document.getElementById('btnInstalarAuto');
+      const tip = document.getElementById('tipInstalarManual');
+      if (!c) return;
+      if (mode === 'hidden') { c.style.display = 'none'; return; }
+      c.style.display = '';
+      if (btn) btn.style.display = mode === 'auto' ? '' : 'none';
+      if (tip) tip.style.display = mode === 'manual' ? '' : 'none';
+    }
+    // Detectar si ya está instalada (modo standalone)
+    function _isStandalone() {
+      return window.matchMedia('(display-mode: standalone)').matches
+          || window.navigator.standalone === true;
     }
     window.addEventListener('beforeinstallprompt', e => {
       e.preventDefault();
       _prompt = e;
-      _toggleCard(true);
+      _setMode('auto');
     });
     window.addEventListener('appinstalled', () => {
       _prompt = null;
-      _toggleCard(false);
+      _setMode('hidden');
     });
     window._installPWA = async function() {
       if (!_prompt) return;
       _prompt.prompt();
       const { outcome } = await _prompt.userChoice;
-      if (outcome === 'accepted') { _prompt = null; _toggleCard(false); }
+      if (outcome === 'accepted') { _prompt = null; _setMode('hidden'); }
     };
+    // Fallback: si tras 2s no llegó beforeinstallprompt y no estamos en standalone,
+    // mostrar instrucciones manuales (Samsung One UI / Chrome que ya rechazó / etc.)
+    setTimeout(() => {
+      if (_isStandalone()) { _setMode('hidden'); return; }
+      if (!_prompt) _setMode('manual');
+    }, 2000);
   })();
   </script>
 
@@ -2078,9 +2096,9 @@
     <!-- ── Config ─────────────────────────────── -->
     <div class="pre-date-hdr">Config</div>
 
-    <!-- Instalar PWA (solo si disponible) -->
+    <!-- Instalar PWA (auto si beforeinstallprompt dispara, manual si no) -->
     <div id="cardInstalar" class="card mb-3" style="display:none">
-      <button onclick="window._installPWA()"
+      <button id="btnInstalarAuto" onclick="window._installPWA()"
               class="btn btn-primary w-full flex items-center justify-center gap-2">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
@@ -2088,6 +2106,11 @@
         </svg>
         Instalar en este dispositivo
       </button>
+      <div id="tipInstalarManual" style="display:none;font-size:.78em;color:#94a3b8;line-height:1.5">
+        <p style="font-weight:700;color:#e2e8f0;margin-bottom:6px">📱 Instalar app manualmente</p>
+        <p style="margin-bottom:4px"><b>Chrome:</b> menú ⋮ → "Instalar app" o "Agregar a pantalla de inicio"</p>
+        <p><b>Samsung Internet:</b> menú ☰ → "Agregar página a" → "Pantalla principal"</p>
+      </div>
     </div>
 
     <!-- Sync + actualización -->
