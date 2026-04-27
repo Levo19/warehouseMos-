@@ -150,25 +150,31 @@ function imprimirTicketGuia(params) {
   bLn(SEP);
 
   // ── CUADRO 1: info compacta de la guía ──────────────────────
-  // Línea 1: TIPO · FECHA · ESTADO   (bold)
-  b1(0x1b); b1(0x45); b1(0x01);  // bold ON
-  bLn(tipoLabel.toUpperCase() + '  -  ' + fecha.toUpperCase() + '  -  ' + (g.estado || '—').toUpperCase());
-  b1(0x1b); b1(0x45); b1(0x00);  // bold OFF
+  // Quitar prefijo "SALIDA" / "INGRESO" del tipo, dejar solo el destino
+  var tipoCorto = tipoLabel.toUpperCase().replace(/^SALIDA\s+/, '').replace(/^INGRESO\s+/, '');
 
-  // Línea 2: hora + usuario + idGuia (compacto)
-  bLn('Hora: ' + hora + '   Usuario: ' + (g.usuario || '—'));
-  bLn('Guia: ' + idGuia + (provName ? '   Prov: ' + provName.substring(0, 20) : ''));
+  // Línea 1: tipo (centrado + bold + doble-alto)
+  b1(0x1b); b1(0x61); b1(0x01);  // center
+  b1(0x1b); b1(0x21); b1(0x10);  // double-height
+  b1(0x1b); b1(0x45); b1(0x01);  // bold
+  bLn(tipoCorto);
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x21); b1(0x00);
 
-  // Nota: si hay comentario
+  // Línea 2: fecha + hora juntos (centrado, bold)
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn(fecha.toUpperCase() + '  ' + hora);
+  b1(0x1b); b1(0x45); b1(0x00);
+
+  // Línea 3: estado (centrado)
+  bLn((g.estado || '—').toUpperCase());
+
+  b1(0x1b); b1(0x61); b1(0x00);  // left
+
+  // Nota: si hay comentario, word-wrap inteligente
   if (g.comentario) {
-    var nota = String(g.comentario);
-    // Wrap a 48 chars con prefijo "Nota: " en la primera
-    var firstLine = nota.substring(0, 42);
-    bLn('Nota: ' + firstLine);
-    if (nota.length > 42) {
-      var rest = nota.substring(42, 42 + 48);
-      bLn('      ' + rest);
-    }
+    var notaLines = _wrapPalabras('Nota: ' + String(g.comentario), 48);
+    notaLines.forEach(function(ln) { bLn(ln); });
   }
 
   bLn(SEP);
@@ -182,25 +188,26 @@ function imprimirTicketGuia(params) {
   b1(0x1b); b1(0x61); b1(0x00);  // left
   bLn(SEP2);
 
-  // Items con cantidad bold grande
+  // Items con cantidad bold grande, word-wrap inteligente del nombre
   dets.forEach(function(d) {
     var tag    = d.esProductoNuevo ? 'n' : d.esIncompleto ? 'i' : ' ';
     var nombre = String(d.descripcion || '').toUpperCase();
     var cant   = d.cantidad % 1 === 0 ? String(Math.round(d.cantidad)) : String(d.cantidad);
-
-    // Línea 1: [cant×] NOMBRE — cantidad bold doble-ancho, nombre normal
-    b1(0x1b); b1(0x45); b1(0x01);  // bold ON
-    bStr(cant + 'x');
-    b1(0x1b); b1(0x45); b1(0x00);  // bold OFF
-    bStr(' ');
-    var prefix = cant + 'x ';
-    var ancho  = 48 - prefix.length;
     var marca  = (tag === 'n' ? '[N] ' : tag === 'i' ? '[!] ' : '');
-    var nomDisp = (marca + nombre).substring(0, ancho);
-    bLn(nomDisp);
-    // Si nombre se cortó, segunda línea con sangría
-    if ((marca + nombre).length > ancho) {
-      bLn('    ' + (marca + nombre).substring(ancho, ancho + 44));
+    var prefix = cant + 'x ';
+    var anchoP = 48 - prefix.length;     // ancho disponible primera línea
+    var anchoR = 48 - 4;                  // ancho con sangría continuaciones
+
+    var lineas = _wrapPalabras(marca + nombre, anchoP, anchoR);
+
+    // Línea 1: cantidad bold + primera porción del nombre
+    b1(0x1b); b1(0x45); b1(0x01);
+    bStr(prefix);
+    b1(0x1b); b1(0x45); b1(0x00);
+    bLn(lineas[0] || '');
+    // Continuaciones con sangría
+    for (var li = 1; li < lineas.length; li++) {
+      bLn('    ' + lineas[li]);
     }
     // Código de barra debajo (sangría)
     if (d.codigoProducto) {
@@ -282,6 +289,40 @@ function imprimirTicketGuia(params) {
   } catch(e) {
     return { ok: false, error: e.message };
   }
+}
+
+// Word-wrap inteligente: parte por palabras sin cortar.
+// Si una palabra excede el ancho, la corta como último recurso.
+// anchoPrimero = ancho de la 1ª línea; anchoResto = ancho de continuaciones (default = anchoPrimero).
+function _wrapPalabras(texto, anchoPrimero, anchoResto) {
+  texto = String(texto || '').trim();
+  if (!texto) return [''];
+  if (anchoResto == null) anchoResto = anchoPrimero;
+
+  var palabras = texto.split(/\s+/);
+  var lineas   = [];
+  var cur      = '';
+  var ancho    = anchoPrimero;
+
+  for (var i = 0; i < palabras.length; i++) {
+    var p = palabras[i];
+    // Palabra más larga que el ancho — partir la palabra como último recurso
+    while (p.length > ancho) {
+      if (cur) { lineas.push(cur); cur = ''; ancho = anchoResto; }
+      lineas.push(p.substring(0, ancho));
+      p = p.substring(ancho);
+    }
+    var sep = cur ? ' ' : '';
+    if ((cur + sep + p).length <= ancho) {
+      cur = cur + sep + p;
+    } else {
+      lineas.push(cur);
+      cur = p;
+      ancho = anchoResto;
+    }
+  }
+  if (cur) lineas.push(cur);
+  return lineas;
 }
 
 function getReporte(params) {
