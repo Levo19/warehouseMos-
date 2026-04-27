@@ -15,7 +15,20 @@ const Scanner = (() => {
   // Double-confirm: el mismo código debe leerse 2 veces en _CONFIRM_WINDOW ms
   let _pendingCode = null;
   let _pendingTs   = 0;
-  const _CONFIRM_WINDOW = 1000;
+  const _CONFIRM_WINDOW = 1500;
+
+  // Longitudes esperadas por formato — descarta lecturas parciales
+  const _FORMAT_LEN = {
+    ean_13: 13, ean_8: 8, upc_a: 12, upc_e: 8,
+    itf: null, code_128: null, code_39: null, codabar: null,
+    qr_code: null, data_matrix: null, aztec: null
+  };
+  function _formatoValido(code, format) {
+    if (!format) return code.length >= 6; // sin formato → mínimo 6 chars
+    const expected = _FORMAT_LEN[format];
+    if (expected == null) return code.length >= 4; // formatos variables: solo descarta súper cortos
+    return code.length === expected;
+  }
 
   // Constraints optimizadas para lectura de códigos de barra
   const _CONSTRAINTS = {
@@ -77,9 +90,18 @@ const Scanner = (() => {
     _detector.detect(_videoEl).then(codes => {
       if (!_active) return;
       if (codes.length > 0) {
-        const code = codes[0].rawValue;
-        // BarcodeDetector nativo ya valida internamente — saltar doble-confirm
-        // (en algunos sensores Samsung el doble-confirm causaba lecturas que nunca se confirman)
+        const code   = codes[0].rawValue;
+        const format = codes[0].format;
+        // Filtrar lecturas inválidas/parciales por longitud según formato
+        if (!_formatoValido(code, format)) {
+          _raf = requestAnimationFrame(() => _rafLoop(onResult));
+          return;
+        }
+        // Doble-confirm: el mismo código debe leerse 2 veces seguidas para evitar lecturas parciales
+        if (!_confirm(code)) {
+          setTimeout(() => { if (_active) _raf = requestAnimationFrame(() => _rafLoop(onResult)); }, 60);
+          return;
+        }
         if (_continuous) {
           const now = Date.now();
           if (code !== _lastCode || now - _lastCodeTs > _cooldown) {
