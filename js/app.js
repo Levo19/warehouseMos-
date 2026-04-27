@@ -5121,6 +5121,16 @@ const DespachoView = (() => {
       inp.select();
       return;
     }
+    // Solo aceptar si es match EXACTO. Con prefijo, pedir código completo (no hay picker visual aquí).
+    if (!candidatos[0]._exacto) {
+      if (statusEl) {
+        statusEl.textContent = `⚠ ${candidatos.length} coincidencias · escribe el código completo o usa la cámara`;
+        statusEl.style.color = '#fbbf24';
+      }
+      SoundFX.warn(); vibrate([40, 20, 40]);
+      inp.select();
+      return;
+    }
     const prod = candidatos[0];
     _agregarDespDirecto(prod);
     const cb     = String(prod._scannedCb || prod.codigoBarra || val);
@@ -5533,7 +5543,8 @@ const DespachoView = (() => {
       tipo:    _tipoSalida,
       nota,
       usuario: window.WH_CONFIG?.usuario || '',
-      items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad }))
+      items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad })),
+      imprimir: false  // GAS no imprime — frontend dispara impresión separada para no bloquear
     };
 
     // Resolver nombre de zona para historial
@@ -5562,11 +5573,16 @@ const DespachoView = (() => {
     ]).then(res => {
       if (res.ok) {
         const d = res.data;
-        const impMsg = d.impresion?.ok ? ' · Imprimiendo...' : ' · Sin impresora';
-        toast(`✅ Guía ${d.idGuia} generada${impMsg}`, 'ok', 6000);
+        toast(`✅ Guía ${d.idGuia} generada · Imprimiendo...`, 'ok', 6000);
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
         _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
+        // Disparar impresión en background con QR de reporte (no bloquea al usuario)
+        try {
+          const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+          const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
+          API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl }).catch(() => {});
+        } catch (e) { /* non-fatal */ }
         if (pickupSnapshot) {
           API.actualizarPickup({ idPickup: pickupSnapshot.idPickup, estado: 'COMPLETADO' }).catch(() => {});
           _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== pickupSnapshot.idPickup);
