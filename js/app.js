@@ -4940,6 +4940,18 @@ const DespachoView = (() => {
     _despLastHistory.push(cb);
     _saveCart();
     _renderDespList();
+    // Pulse visual en la fila recién escaneada
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`[data-desp-cb="${CSS.escape(cb)}"]`);
+      if (!row) return;
+      row.classList.remove('cam-row-pulse');
+      const qtyBtn = row.querySelector('.desp-qty-pulse-btn');
+      if (qtyBtn) qtyBtn.classList.remove('cam-qty-pulse');
+      void row.offsetWidth;
+      row.classList.add('cam-row-pulse');
+      if (qtyBtn) qtyBtn.classList.add('cam-qty-pulse');
+      setTimeout(() => { row.classList.remove('cam-row-pulse'); if (qtyBtn) qtyBtn.classList.remove('cam-qty-pulse'); }, 400);
+    });
     // Mostrar stock en barra de estado
     const item = _cart.find(c => c.codigoBarra === cb);
     const qty  = item ? parseFloat(item.cantidad) : 1;
@@ -5001,6 +5013,55 @@ const DespachoView = (() => {
       _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
       SoundFX.beep(); vibrate(15);
     }
+  }
+
+  // ── Inline scan (input directo en vista principal) ──────────
+  function toggleDespScanInline() {
+    const wrap = document.getElementById('despScanInlineWrap');
+    const btn  = document.getElementById('despScanToggleBtn');
+    if (!wrap) return;
+    const visible = wrap.style.display !== 'none';
+    if (visible) {
+      wrap.style.display = 'none';
+      if (btn) btn.style.background = 'rgba(251,191,36,.06)';
+    } else {
+      wrap.style.display = 'block';
+      if (btn) btn.style.background = 'rgba(251,191,36,.18)';
+      setTimeout(() => { document.getElementById('despScanInlineInput')?.focus(); }, 80);
+    }
+  }
+
+  function submitDespScanInline() {
+    const inp = document.getElementById('despScanInlineInput');
+    const statusEl = document.getElementById('despScanInlineStatus');
+    if (!inp) return;
+    const val = inp.value.trim();
+    if (!val) return;
+    const candidatos = _buscarDespCandidatos(val);
+    if (!candidatos.length) {
+      if (statusEl) { statusEl.textContent = '⚠ ' + val + ' · no existe en catálogo'; statusEl.style.color = '#f87171'; }
+      SoundFX.warn(); vibrate([50, 25, 50]);
+      inp.select();
+      return;
+    }
+    const prod = candidatos[0];
+    _agregarDespDirecto(prod);
+    const cb     = String(prod._scannedCb || prod.codigoBarra || val);
+    const item   = _cart.find(c => c.codigoBarra === cb);
+    const stockD = item?.stockDisp || 0;
+    if (stockD > 0 && item && item.cantidad > stockD) {
+      if (statusEl) { statusEl.textContent = `⚠ ${prod.descripcion || cb} · sobrestock`; statusEl.style.color = '#fb923c'; }
+    } else {
+      if (statusEl) { statusEl.textContent = `✓ ${prod.descripcion || cb}`; statusEl.style.color = '#34d399'; }
+      SoundFX.beep(); vibrate(15);
+    }
+    inp.value = '';
+    inp.focus();
+    _renderCart();
+    _updateFooter();
+    badgeUpdate();
+    // Limpiar status tras 2s
+    setTimeout(() => { if (statusEl) { statusEl.textContent = ''; statusEl.style.color = '#475569'; } }, 2000);
   }
 
   // ── Búsqueda manual por nombre ───────────────────────────────
@@ -5137,8 +5198,10 @@ const DespachoView = (() => {
     list.innerHTML = _cart.map(item => {
       const cb    = escAttr(item.codigoBarra);
       const over  = item.stockDisp > 0 && item.cantidad > item.stockDisp;
-      const overW = over ? `<span style="font-size:.63em;color:#f87171;margin-left:4px">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
-      return `<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+      const overW = over ? `<span style="font-size:.63em;color:#f87171;margin-left:4px">⚠ stock:${fmt(item.stockDisp,1)}</span>` : '';
+      const qtyFmt = fmt(item.cantidad, Number.isInteger(parseFloat(item.cantidad)) ? 0 : 2);
+      const qtyCol = over ? '#f87171' : '#38bdf8';
+      return `<div data-desp-cb="${cb}" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;border:1px solid ${over?'#7f1d1d':'#334155'};
                 margin-bottom:7px">
         <div style="flex:1;min-width:0">
@@ -5148,12 +5211,12 @@ const DespachoView = (() => {
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
           <button onclick="DespachoView.despDecQty('${cb}')" style="${btnStyle}">−</button>
-          <button onclick="DespachoView.despEditQty('${cb}')"
+          <button class="desp-qty-pulse-btn" onclick="DespachoView.despEditQty('${cb}')"
                   style="min-width:46px;height:32px;border-radius:8px;padding:0 10px;
-                         background:#0ea5e9;border:1px solid transparent;
-                         color:#fff;font-size:.85em;font-weight:800;cursor:pointer;
+                         background:rgba(14,165,233,.15);border:1px solid rgba(14,165,233,.3);
+                         color:${qtyCol};font-size:.92em;font-weight:900;cursor:pointer;
                          -webkit-tap-highlight-color:transparent">
-            ×${fmt(item.cantidad, 2)}
+            ${qtyFmt}
           </button>
           <button onclick="DespachoView.despIncQty('${cb}')" style="${btnStyle}">+</button>
         </div>
@@ -5236,7 +5299,7 @@ const DespachoView = (() => {
            id="despRow-${safeId}" style="animation-delay:${i*.03}s">
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-sm truncate">${escHtml(item.descripcion)}</p>
-          <p class="text-xs text-slate-400">${escHtml(item.unidad)} ${overWarn}</p>
+          <p class="text-xs text-slate-400 font-mono">${escHtml(item.codigoBarra)} ${overWarn}</p>
         </div>
         <div class="desp-qty-wrap">
           <button class="desp-qty-btn" onclick="DespachoView.decQty('${safeId}')">−</button>
@@ -5625,6 +5688,7 @@ const DespachoView = (() => {
            cerrarDespPicker, seleccionarItemDesp,
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
+           toggleDespScanInline, submitDespScanInline,
            abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
            selTipo,
            incQty, decQty, blurQty, quitarItem,
