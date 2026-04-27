@@ -8030,14 +8030,23 @@ const ProductosView = (() => {
 const MembreteView = (() => {
   let _cola = []; // [{ prod, allEan }]
 
+  function _esActivoEquiv(v) {
+    if (v === true || v === 1) return true;
+    const s = String(v || '').trim().toUpperCase();
+    return s === '1' || s === 'TRUE' || s === 'YES' || s === 'SI' || s === 'S';
+  }
+
   function _buildEan(prod) {
     const equivs = OfflineManager.getEquivalenciasCache();
+    const skuKey = String(prod.skuBase || prod.idProducto || '').trim().toUpperCase();
     const altCodes = equivs
-      .filter(e => e.skuBase === (prod.skuBase || prod.idProducto) && String(e.activo) === '1' && e.codigoBarra)
-      .map(e => String(e.codigoBarra));
+      .filter(e => String(e.skuBase || '').trim().toUpperCase() === skuKey
+                && _esActivoEquiv(e.activo)
+                && e.codigoBarra)
+      .map(e => String(e.codigoBarra).trim());
     const allEan = [];
-    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
-    altCodes.forEach(c => { if (!allEan.includes(c)) allEan.push(c); });
+    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra).trim());
+    altCodes.forEach(c => { if (c && !allEan.includes(c)) allEan.push(c); });
     return allEan;
   }
 
@@ -8094,34 +8103,85 @@ const MembreteView = (() => {
     if (!sEl) return;
     if (val.length < 2) { sEl.style.display = 'none'; sEl.innerHTML = ''; return; }
 
-    const ql      = val.toLowerCase();
-    const prods   = OfflineManager.getProductosCache();
-    const equivs  = OfflineManager.getEquivalenciasCache();
-    const matches = prods.filter(p =>
-      String(p.descripcion || '').toLowerCase().includes(ql) ||
-      String(p.idProducto  || '').toLowerCase().includes(ql) ||
-      String(p.skuBase     || '').toLowerCase().includes(ql) ||
-      String(p.codigoBarra || '').includes(val) ||
-      equivs.some(e => e.skuBase === (p.skuBase || p.idProducto) && String(e.codigoBarra || '').includes(val))
-    ).slice(0, 8);
+    const ql     = val.toLowerCase();
+    const qU     = val.toUpperCase();
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+
+    // Solo productos base de almacén: factor=1 y activos
+    const baseProds = prods.filter(p => {
+      if (p.estado === '0' || p.estado === 0) return false;
+      return parseFloat(p.factorConversion || 1) === 1;
+    });
+
+    // Agrupar equivs por skuBase (normalizado)
+    const equivsByKey = {};
+    equivs.forEach(e => {
+      if (!_esActivoEquiv(e.activo)) return;
+      const k = String(e.skuBase || '').trim().toUpperCase();
+      if (!k || !e.codigoBarra) return;
+      if (!equivsByKey[k]) equivsByKey[k] = [];
+      equivsByKey[k].push(String(e.codigoBarra).trim());
+    });
+
+    // Dedup por skuBase: 1 entrada por producto base
+    const seenSku = new Set();
+    const matches = [];
+    for (const p of baseProds) {
+      const skuKey = String(p.skuBase || p.idProducto || '').trim().toUpperCase();
+      if (seenSku.has(skuKey)) continue;
+      const eqCbs = equivsByKey[skuKey] || [];
+      const haystack = [
+        String(p.descripcion || '').toLowerCase(),
+        String(p.idProducto  || '').toLowerCase(),
+        String(p.skuBase     || '').toLowerCase(),
+        String(p.codigoBarra || '').toLowerCase(),
+        ...eqCbs.map(c => c.toLowerCase())
+      ].join(' ');
+      if (haystack.includes(ql)) {
+        seenSku.add(skuKey);
+        const allCbs = [];
+        if (p.codigoBarra) allCbs.push(String(p.codigoBarra).trim());
+        eqCbs.forEach(c => { if (c && !allCbs.includes(c)) allCbs.push(c); });
+        matches.push({ prod: p, allCbs });
+      }
+      if (matches.length >= 12) break;
+    }
 
     if (!matches.length) {
       sEl.innerHTML = `<div style="padding:10px 12px;font-size:12px;color:#64748b;">Sin resultados</div>`;
     } else {
-      sEl.innerHTML = matches.map(p => {
+      sEl.innerHTML = matches.map(({ prod: p, allCbs }) => {
         const yaEnCola = _cola.some(i => i.prod.idProducto === p.idProducto);
+        const sku   = String(p.skuBase || p.idProducto || '');
+        const nCb   = allCbs.length;
+        const preview = allCbs.length
+          ? (allCbs.slice(0, 2).join(' · ') + (allCbs.length > 2 ? ` · +${allCbs.length - 2} más` : ''))
+          : 'sin códigos';
         return `<button onclick="MembreteView.seleccionar('${escAttr(p.idProducto)}')"
-                style="display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+                style="display:flex;align-items:flex-start;gap:8px;width:100%;text-align:left;
                        padding:10px 12px;background:none;border:none;cursor:pointer;
                        border-bottom:1px solid #1e293b;transition:background .1s;"
                 onmouseenter="this.style.background='#1e293b'"
                 onmouseleave="this.style.background='none'">
-          <span style="flex:1;font-size:13px;font-weight:600;color:${yaEnCola ? '#475569' : '#e2e8f0'};
-                       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-            ${escHtml(p.descripcion || p.idProducto)}
-          </span>
-          ${yaEnCola ? '<span style="font-size:10px;color:#22c55e;flex-shrink:0;">✓ en cola</span>' : ''}
-          <span style="font-size:11px;color:#475569;font-family:monospace;flex-shrink:0;">${escHtml(p.idProducto)}</span>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+              <span style="flex:1;font-size:13px;font-weight:700;color:${yaEnCola ? '#475569' : '#e2e8f0'};
+                           white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${escHtml(p.descripcion || sku)}
+              </span>
+              <span style="flex-shrink:0;font-size:10px;font-weight:700;padding:1px 6px;
+                           border-radius:99px;background:${nCb > 1 ? 'rgba(59,130,246,.18)' : 'rgba(71,85,105,.2)'};
+                           color:${nCb > 1 ? '#60a5fa' : '#64748b'}">
+                ${nCb} cb${nCb !== 1 ? 's' : ''}
+              </span>
+              ${yaEnCola ? '<span style="font-size:10px;color:#22c55e;flex-shrink:0">✓</span>' : ''}
+            </div>
+            <p style="font-size:10.5px;color:#64748b;font-family:monospace;
+                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+              ${escHtml(sku)} · ${escHtml(preview)}
+            </p>
+          </div>
         </button>`;
       }).join('');
     }
@@ -8178,10 +8238,35 @@ const MembreteView = (() => {
       buscar(code);
       const prods  = OfflineManager.getProductosCache();
       const equivs = OfflineManager.getEquivalenciasCache();
-      const exact  = prods.find(p =>
-        p.idProducto === code || p.codigoBarra === code ||
-        equivs.some(e => e.idProducto === p.idProducto && String(e.codigoBarra) === code)
+      const cN     = String(code).trim().toUpperCase();
+
+      // Solo productos base
+      const baseProds = prods.filter(p => {
+        if (p.estado === '0' || p.estado === 0) return false;
+        return parseFloat(p.factorConversion || 1) === 1;
+      });
+
+      // 1. Match en maestro
+      let exact = baseProds.find(p =>
+        String(p.idProducto  || '').trim().toUpperCase() === cN ||
+        String(p.codigoBarra || '').trim().toUpperCase() === cN ||
+        String(p.skuBase     || '').trim().toUpperCase() === cN
       );
+
+      // 2. Match en EQUIVALENCIAS → resolver al producto base
+      if (!exact) {
+        const equiv = equivs.find(e =>
+          String(e.codigoBarra || '').trim().toUpperCase() === cN && _esActivoEquiv(e.activo)
+        );
+        if (equiv) {
+          const skuB = String(equiv.skuBase || '').trim().toUpperCase();
+          exact = baseProds.find(p =>
+            String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+            String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+            String(p.codigoBarra || '').trim().toUpperCase() === skuB
+          );
+        }
+      }
       if (exact) seleccionar(exact.idProducto);
     });
   }

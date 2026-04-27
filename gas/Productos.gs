@@ -1133,24 +1133,27 @@ function imprimirMembrete(params) {
     } catch(e) {}
   }
   if (!allEan.length) {
-    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra));
+    if (prod.codigoBarra) allEan.push(String(prod.codigoBarra).trim());
     try {
       var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
       if (equivSheet) {
+        var skuU = String(sku).trim().toUpperCase();
         _sheetToObjects(equivSheet)
           .filter(function(e) {
-            return String(e.idProducto) === sku && String(e.activo) === '1' && e.codigoBarra;
+            return String(e.skuBase || '').trim().toUpperCase() === skuU
+                && _esActivo(e.activo)
+                && e.codigoBarra;
           })
           .forEach(function(e) {
-            var c = String(e.codigoBarra);
-            if (allEan.indexOf(c) < 0) allEan.push(c);
+            var c = String(e.codigoBarra).trim();
+            if (c && allEan.indexOf(c) < 0) allEan.push(c);
           });
       }
     } catch(e) {}
   }
   if (!allEan.length) allEan.push(sku);
 
-  var numEan      = Math.min(allEan.length, 3);
+  var numEan      = allEan.length;
   var hasMultiple = numEan > 1;
 
   // ── Nombre: word-wrap, máx 2 líneas, ~20 chars/línea ───────
@@ -1177,7 +1180,12 @@ function imprimirMembrete(params) {
   for (var ni = 0; ni < nameLines.length; ni++) { bLn(nameLines[ni]); }
   b1(0x1b); b1(0x21); b1(0x00);   // normal
 
-  // Separador "===..." debajo del nombre
+  // SKU como texto (siempre, debajo del nombre): bold tamaño normal, centrado
+  b1(0x1b); b1(0x21); b1(0x08);   // bold
+  bLn('SKU: ' + sku);
+  b1(0x1b); b1(0x21); b1(0x00);   // normal
+
+  // Separador "===..." debajo del SKU
   b1(0x1b); b1(0x61); b1(0x00);   // left
   bLn(SEPEQ);
 
