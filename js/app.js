@@ -4781,7 +4781,13 @@ const DespachoView = (() => {
         </div>`;
       }).join('');
     } else {
-      lstEl.innerHTML = '<p style="color:#475569;font-size:.78em;text-align:center;padding:20px">Sin detalle disponible</p>';
+      lstEl.innerHTML = `
+        <div style="text-align:center;padding:30px 20px;color:#475569">
+          <p style="font-size:.85em;margin-bottom:6px">📦 ${h.n} producto${h.n !== 1 ? 's' : ''} despachado${h.n !== 1 ? 's' : ''}</p>
+          <p style="font-size:.72em;line-height:1.5">El detalle de productos no está disponible<br>
+            <span style="color:#334155">(despacho registrado antes de v1.5.35)</span>
+          </p>
+        </div>`;
     }
     const totalUds = (h.items || []).reduce((s, it) => s + (parseFloat(it.cantidad) || 0), 0);
     if (ftEl) ftEl.textContent = `${h.n} producto${h.n !== 1 ? 's' : ''} · ${fmt(totalUds, 2)} unidades`;
