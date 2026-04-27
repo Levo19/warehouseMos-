@@ -1926,8 +1926,8 @@
                autocomplete="off" spellcheck="false"/>
         <div class="smart-srch-actions">
           <button id="clearBuscarProd" class="smart-srch-clear" onclick="ProductosView.buscarClear()">✕</button>
-          <button class="smart-srch-btn" title="Escanear barcode"
-                  onclick="abrirScanner(c=>{document.getElementById('inputBuscarProd').value=c;ProductosView.buscar(c);})">
+          <button id="prodCamBtn" class="smart-srch-btn" title="Escanear barcode"
+                  onclick="ProductosView.toggleProdCamara()">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1a.5.5 0 0 0-.5.5v3a.5.5 0 0 1-1 0v-3A1.5 1.5 0 0 1 1.5 0h3a.5.5 0 0 1 0 1h-3zM1 7.5a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zm0 2a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13a.5.5 0 0 1-.5-.5zM14 1h-3a.5.5 0 0 1 0-1h3A1.5 1.5 0 0 1 15.5 1.5v3a.5.5 0 0 1-1 0v-3a.5.5 0 0 0-.5-.5zM1 11.5v3a.5.5 0 0 0 .5.5h3a.5.5 0 0 1 0 1h-3A1.5 1.5 0 0 1 0 14.5v-3a.5.5 0 0 1 1 0zm13 3v-3a.5.5 0 0 1 1 0v3a1.5 1.5 0 0 1-1.5 1.5h-3a.5.5 0 0 1 0-1h3a.5.5 0 0 0 .5-.5z"/></svg>
           </button>
         </div>
@@ -1950,6 +1950,25 @@
         </button>
       </div>
 
+    </div>
+
+    <!-- Cámara inline para búsqueda de productos -->
+    <div id="prodCamStrip" style="display:none;border-radius:12px;overflow:hidden;
+         background:#0f172a;margin-bottom:10px;position:relative;">
+      <video id="prodCamVideo" autoplay playsinline muted
+             style="width:100%;height:200px;object-fit:cover;display:block;"></video>
+      <button onclick="ProductosView.cerrarProdCamara()"
+              style="position:absolute;top:8px;right:8px;width:30px;height:30px;
+                     border-radius:50%;background:rgba(0,0,0,.65);color:#fff;
+                     border:1px solid rgba(255,255,255,.2);font-size:.85em;
+                     cursor:pointer;display:flex;align-items:center;justify-content:center;
+                     -webkit-tap-highlight-color:transparent">✕</button>
+      <div id="prodCamStatus"
+           style="padding:6px 14px;font-size:.74em;font-weight:600;
+                  text-align:center;color:#475569;background:#0f172a;
+                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        — apunta al código de barras —
+      </div>
     </div>
 
     <div id="listProductos" class="space-y-3 pb-4"></div>

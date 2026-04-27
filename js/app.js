@@ -1114,9 +1114,12 @@ const App = (() => {
       viewName = 'envasador';
     }
 
-    // Pausar cámara de despacho al salir de esa vista
+    // Pausar cámaras al salir de su vista
     if (currentView === 'despacho' && viewName !== 'despacho') {
       DespachoView.pauseCamera();
+    }
+    if (currentView === 'productos' && viewName !== 'productos') {
+      ProductosView.cerrarProdCamara();
     }
 
     closeUserMenu();
@@ -7751,10 +7754,101 @@ const ProductosView = (() => {
     _aplicarQuery();
   }
 
+  // ── Cámara inline de búsqueda ────────────────────────────────
+  let _prodCamTimer = null;
+
+  function _setProdCamStatus(type, text) {
+    const el = document.getElementById('prodCamStatus');
+    if (!el) return;
+    clearTimeout(_prodCamTimer);
+    if (type === 'ready') {
+      el.textContent  = '— apunta al código de barras —';
+      el.style.color  = '#475569';
+      el.style.background = '#0f172a';
+      return;
+    }
+    const cfgs = {
+      ok:        { col: '#34d399', bg: '#022c22', dur: 1200 },
+      no_existe: { col: '#f87171', bg: '#2d0a0a', dur: 3500 }
+    };
+    const c = cfgs[type] || cfgs.ok;
+    el.style.color  = c.col;
+    el.style.background = c.bg;
+    el.textContent  = (type === 'ok' ? '✓ ' : '⚠ ') + text;
+    if (c.dur) _prodCamTimer = setTimeout(() => _setProdCamStatus('ready'), c.dur);
+  }
+
+  function _onProdCamResult(cod) {
+    const cNorm  = normCb(cod);
+    if (!cNorm) return;
+    const prods  = OfflineManager.getProductosCache();
+    const equivs = OfflineManager.getEquivalenciasCache();
+
+    // 1. Exacto en PRODUCTOS_MASTER
+    let found = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
+
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro
+    if (!found) {
+      const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
+      if (equiv) {
+        const skuB = String(equiv.skuBase || '').trim().toUpperCase();
+        found = prods.find(p =>
+          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+          String(p.codigoBarra || '').trim().toUpperCase() === skuB
+        );
+      }
+    }
+
+    if (!found) {
+      _setProdCamStatus('no_existe', cNorm + ' · no existe en catálogo');
+      SoundFX.warn(); vibrate([50, 25, 50]);
+      return;
+    }
+
+    // Encontrado: llenar búsqueda, filtrar lista, cerrar cámara tras breve feedback
+    SoundFX.beep(); vibrate(15);
+    _setProdCamStatus('ok', found.descripcion || cNorm);
+    const inp = document.getElementById('inputBuscarProd');
+    const searchCode = found.codigoBarra || cNorm;
+    if (inp) { inp.value = searchCode; }
+    buscar(searchCode);
+    setTimeout(() => cerrarProdCamara(), 900);
+  }
+
+  function abrirProdCamara() {
+    const strip = document.getElementById('prodCamStrip');
+    if (!strip) return;
+    strip.style.display = 'block';
+    _setProdCamStatus('ready');
+    const btn = document.getElementById('prodCamBtn');
+    if (btn) btn.style.background = 'rgba(14,165,233,.25)';
+    Scanner.start('prodCamVideo', _onProdCamResult, err => {
+      toast('Error cámara: ' + err, 'danger');
+      cerrarProdCamara();
+    }, { continuous: true, cooldown: 1200 });
+  }
+
+  function cerrarProdCamara() {
+    clearTimeout(_prodCamTimer);
+    Scanner.stop();
+    const strip = document.getElementById('prodCamStrip');
+    if (strip) strip.style.display = 'none';
+    const btn = document.getElementById('prodCamBtn');
+    if (btn) btn.style.background = '';
+  }
+
+  function toggleProdCamara() {
+    const strip = document.getElementById('prodCamStrip');
+    if (strip && strip.style.display !== 'none') cerrarProdCamara();
+    else abrirProdCamara();
+  }
+
   return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
-           verHistorial, imprimirHistorial };
+           verHistorial, imprimirHistorial,
+           abrirProdCamara, cerrarProdCamara, toggleProdCamara };
 })();
 
 
