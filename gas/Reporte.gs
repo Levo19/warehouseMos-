@@ -224,36 +224,149 @@ function imprimirTicketGuia(params) {
   bLn(SEP);
 
   // ── CUADRO 3: QR Code para reporte en tiempo real ───────────
-  if (reporteUrl) {
+  function _imprimirQR(url, titulo, sub1, sub2) {
     b1(0x1b); b1(0x61); b1(0x01);  // centrar
-
-    // Subtitulo bold antes del QR
     b1(0x1b); b1(0x45); b1(0x01);
-    bLn('REPORTE EN TIEMPO REAL');
+    bLn(titulo);
     b1(0x1b); b1(0x45); b1(0x00);
 
-    var qrData = reporteUrl;
-    var qrLen  = qrData.length + 3;
-    var qrpL   = qrLen & 0xff;
-    var qrpH   = (qrLen >> 8) & 0xff;
+    var qrLen = url.length + 3;
+    var qrpL  = qrLen & 0xff;
+    var qrpH  = (qrLen >> 8) & 0xff;
 
-    // Modelo 2
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x04); b1(0x00); b1(0x31); b1(0x41); b1(0x32); b1(0x00);
-    // Tamaño módulo 5 (un poco más grande para fácil lectura)
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x05);
-    // Corrección de errores M
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x45); b1(0x31);
-    // Almacenar datos
     b1(0x1d); b1(0x28); b1(0x6b); b1(qrpL); b1(qrpH); b1(0x31); b1(0x50); b1(0x30);
-    bStr(qrData);
-    // Imprimir
+    bStr(url);
     b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x51); b1(0x30);
 
     b1(0x1b); b1(0x21); b1(0x00);
-    bLn('Escanea con la camara');
-    bLn('para ver el detalle al instante');
+    if (sub1) bLn(sub1);
+    if (sub2) bLn(sub2);
     b1(0x1b); b1(0x61); b1(0x00);
     bLn(SEP);
+  }
+
+  if (reporteUrl) {
+    _imprimirQR(reporteUrl, 'REPORTE EN TIEMPO REAL',
+                'Escanea con la camara',
+                'para ver el detalle al instante');
+  }
+
+  // ── BLOQUE 2: PREINGRESO (solo si la guía proviene de uno) ─────────
+  if (g.idPreingreso) {
+    try {
+      var preRows = _sheetToObjects(getSheet('PREINGRESOS'));
+      var pi      = preRows.find(function(x) { return x.idPreingreso === g.idPreingreso; });
+      if (pi) {
+        // Espacio entre bloques (~2cm para corte manual)
+        b1(0x1b); b1(0x4a); b1(80);   // ~1cm
+
+        // Header: PREINGRESO
+        b1(0x1b); b1(0x61); b1(0x01);
+        b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);  // double-height + bold
+        bLn('PREINGRESO');
+        b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+        b1(0x1b); b1(0x61); b1(0x00);
+        bLn(SEP);
+
+        // Empresa (nombre del proveedor) — centrado, bold doble alto
+        var preProvName = '';
+        try {
+          var preProv = provs ? provs.find(function(p) { return p.idProveedor === pi.idProveedor; }) : null;
+          if (!preProv) {
+            var ps = _sheetToObjects(getProveedoresSheet());
+            preProv = ps.find(function(p) { return p.idProveedor === pi.idProveedor; });
+          }
+          if (preProv) preProvName = String(preProv.nombre || '');
+        } catch(e) {}
+
+        if (preProvName) {
+          b1(0x1b); b1(0x61); b1(0x01);
+          b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);
+          var nameLines = _wrapPalabras(preProvName.toUpperCase(), 24);
+          for (var nl = 0; nl < nameLines.length && nl < 2; nl++) bLn(nameLines[nl]);
+          b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+
+          // Fecha: "14 abril 2pm"
+          var fechaPI = '';
+          try {
+            var d = new Date(pi.fecha || pi.fechaCreacion || new Date());
+            var meses = ['enero','febrero','marzo','abril','mayo','junio',
+                         'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+            var dia    = d.getDate();
+            var mes    = meses[d.getMonth()] || '';
+            var hh     = d.getHours();
+            var mm     = d.getMinutes();
+            var ampm   = hh >= 12 ? 'pm' : 'am';
+            var hh12   = hh % 12; if (hh12 === 0) hh12 = 12;
+            var horaTxt = mm === 0 ? (hh12 + ampm) : (hh12 + ':' + (mm < 10 ? '0' : '') + mm + ampm);
+            fechaPI = dia + ' ' + mes + ' ' + horaTxt;
+          } catch(e) {}
+          if (fechaPI) bLn(fechaPI);
+          b1(0x1b); b1(0x61); b1(0x00);
+        }
+
+        bLn(SEP);
+
+        // Estado y monto
+        if (pi.estado) bLn('Estado:  ' + String(pi.estado).toUpperCase());
+        if (pi.monto)  bLn('Monto:   S/. ' + pi.monto);
+
+        // Cargadores: uno por línea
+        var cargs = [];
+        try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
+        if (cargs.length) {
+          bLn('');
+          bLn('Cargadores:');
+          cargs.forEach(function(c) {
+            var nombre = (typeof c === 'object') ? (c.nombre || c.idPersonal || '') : String(c);
+            if (nombre) bLn('  - ' + nombre);
+          });
+        }
+
+        // Comentario — RESALTADO en doble alto bold
+        if (pi.comentario) {
+          bLn(SEP2);
+          b1(0x1b); b1(0x45); b1(0x01);
+          bLn('Comentario:');
+          b1(0x1b); b1(0x45); b1(0x00);
+          b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);  // double-height + bold
+          var comLines = _wrapPalabras(String(pi.comentario), 24);
+          for (var ci = 0; ci < comLines.length && ci < 4; ci++) bLn(comLines[ci]);
+          b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+        }
+
+        bLn(SEP);
+
+        // Adjuntos (solo cuántos)
+        var nFotos = pi.fotos ? String(pi.fotos).split(',').filter(Boolean).length : 0;
+        b1(0x1b); b1(0x61); b1(0x01);
+        b1(0x1b); b1(0x45); b1(0x01);
+        bLn('ADJUNTOS');
+        b1(0x1b); b1(0x45); b1(0x00);
+        bLn(nFotos + ' imagen' + (nFotos !== 1 ? 'es' : '') + ' adjunta' + (nFotos !== 1 ? 's' : ''));
+        bLn('ver en el reporte digital');
+        b1(0x1b); b1(0x61); b1(0x00);
+        bLn(SEP);
+
+        // QR del preingreso
+        var preReporteUrl = '';
+        try {
+          if (reporteUrl) {
+            // Reemplazar tipo=guia&id=XXX por tipo=preingreso&id=YYY conservando dominio
+            preReporteUrl = reporteUrl.replace(/tipo=guia/, 'tipo=preingreso')
+                                       .replace(/id=[^&]*/, 'id=' + encodeURIComponent(pi.idPreingreso));
+          }
+        } catch(e) {}
+        if (preReporteUrl) {
+          _imprimirQR(preReporteUrl, 'PREINGRESO COMPLETO',
+                      'Escanea para ver',
+                      'fotos y detalles');
+        }
+      }
+    } catch(e) {}
   }
 
   // Feed + corte
