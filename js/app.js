@@ -4433,6 +4433,10 @@ const EnvasadosView = (() => {
       (p.skuBase && p.skuBase === prod.codigoProductoBase) ||
       p.idProducto === prod.codigoProductoBase
     );
+    // Calcular consumo de base ANTES de inyectar al caché (la inyección lo necesita)
+    const factorBase = parseFloat(prod.factorConversionBase) || 0;
+    const cantBase   = producidas * factorBase;
+
     const btn = document.getElementById('btnRegistrarEnvasado');
     btn.disabled = true;
     btn.textContent = 'Registrando...';
@@ -4456,8 +4460,6 @@ const EnvasadosView = (() => {
     cargar();
 
     // Patch stock cache local para actualizar UI de inmediato
-    const factorBase = parseFloat(prod.factorConversionBase) || 0;
-    const cantBase   = producidas * factorBase;
     if (prodBase?.codigoBarra) OfflineManager.patchStockCache(String(prodBase.codigoBarra), -cantBase);
     OfflineManager.patchStockCache(String(prod.codigoBarra), producidas);
     window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
