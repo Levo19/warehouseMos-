@@ -12,6 +12,10 @@ const Scanner = (() => {
   let _cooldown    = 1200;
   let _lastCode    = null;
   let _lastCodeTs  = 0;
+  // Anti-doble-conteo: el código tiene que "desaparecer" del frame para volver a contarse.
+  // _emptyFrames cuenta frames sin detección consecutivos; al superar el umbral, _lastCode se libera.
+  let _emptyFrames = 0;
+  const _EMPTY_FRAMES_RESET = 5;
   // Double-confirm: el mismo código debe leerse 2 veces en _CONFIRM_WINDOW ms
   let _pendingCode = null;
   let _pendingTs   = 0;
@@ -92,6 +96,7 @@ const Scanner = (() => {
     _detector.detect(_videoEl).then(codes => {
       if (!_active) return;
       if (codes.length > 0) {
+        _emptyFrames = 0; // reset porque hay detección
         const code   = codes[0].rawValue;
         const format = codes[0].format;
         // Filtrar lecturas inválidas/parciales por longitud según formato
@@ -105,9 +110,10 @@ const Scanner = (() => {
           return;
         }
         if (_continuous) {
-          const now = Date.now();
-          if (code !== _lastCode || now - _lastCodeTs > _cooldown) {
-            _lastCode = code; _lastCodeTs = now;
+          // Solo aceptar si es código distinto al último confirmado.
+          // Para repetir el mismo código, debe primero desaparecer del frame (_emptyFrames).
+          if (code !== _lastCode) {
+            _lastCode = code; _lastCodeTs = Date.now();
             onResult(code);
           }
           setTimeout(() => { if (_active) _raf = requestAnimationFrame(() => _rafLoop(onResult)); }, 300);
@@ -115,6 +121,11 @@ const Scanner = (() => {
           stop(); onResult(code);
         }
       } else {
+        // Sin detección este frame: contar; si llega al umbral, liberar _lastCode
+        _emptyFrames++;
+        if (_emptyFrames >= _EMPTY_FRAMES_RESET) {
+          _lastCode = null;
+        }
         _raf = requestAnimationFrame(() => _rafLoop(onResult));
       }
     }).catch(() => {
@@ -150,15 +161,20 @@ const Scanner = (() => {
 
     const _zxCb = (result, err) => {
       if (result && _active) {
+        _emptyFrames = 0;
         const text = result.getText();
         if (!_confirm(text)) return;
         if (_continuous) {
-          const now = Date.now();
-          if (text !== _lastCode || now - _lastCodeTs > _cooldown) {
-            _lastCode = text; _lastCodeTs = now;
+          // Mismo anti-doble-conteo: solo si es código distinto
+          if (text !== _lastCode) {
+            _lastCode = text; _lastCodeTs = Date.now();
             onResult(text);
           }
         } else { stop(); onResult(text); }
+      } else if (_active && _continuous) {
+        // ZXing reporta NotFoundException cuando no detecta — usar para liberar _lastCode
+        _emptyFrames++;
+        if (_emptyFrames >= _EMPTY_FRAMES_RESET) _lastCode = null;
       }
       if (err && err.name && !err.name.includes('NotFoundException')) {
         console.warn('[Scanner/ZXing]', err.name);
@@ -196,6 +212,7 @@ const Scanner = (() => {
     _cooldown    = options?.cooldown   || 1200;
     _lastCode    = null; _lastCodeTs  = 0;
     _pendingCode = null; _pendingTs   = 0;
+    _emptyFrames = 0;
 
     _videoEl = document.getElementById(videoElementId);
     if (!_videoEl) { if (onError) onError('Video no encontrado'); return; }
