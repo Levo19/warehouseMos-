@@ -1834,13 +1834,17 @@ const GuiasView = (() => {
     const prods    = OfflineManager.getProductosCache();
     const equivs   = OfflineManager.getEquivalenciasCache();
     const prodMap  = {};
-    // Index del nombre por idProducto/skuBase/codigoBarra del maestro
+    // Index del nombre por idProducto/skuBase/codigoBarra del maestro.
+    // skuBase solo se indexa para productos BASE (factor=1, activos): evita que una
+    // presentación (factor>1) con el mismo skuBase sobreescriba el nombre del base.
     prods.forEach(p => {
       const name = p.descripcion || p.nombre || '';
       if (!name) return;
       prodMap[p.idProducto] = name;
       if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
-      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = name;
+      const isBase = parseFloat(p.factorConversion || 1) === 1
+                  && p.estado !== '0' && p.estado !== 0;
+      if (isBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = name;
     });
     // Index del nombre por codigoBarra de cada equivalente → resuelve al producto base via skuBase
     equivs.forEach(e => {
@@ -3140,14 +3144,16 @@ const GuiasView = (() => {
     const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (exacto) return [{ ...exacto, _exacto: true }];
 
-    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto base (factor=1); guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim().toUpperCase();
       const prod = prods.find(p =>
-        String(p.idProducto  || '').trim().toUpperCase() === skuB ||
-        String(p.skuBase     || '').trim().toUpperCase() === skuB ||
-        String(p.codigoBarra || '').trim().toUpperCase() === skuB
+        parseFloat(p.factorConversion || 1) === 1 &&
+        p.estado !== '0' && p.estado !== 0 &&
+        (String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+         String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+         String(p.codigoBarra || '').trim().toUpperCase() === skuB)
       );
       if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
@@ -3158,14 +3164,16 @@ const GuiasView = (() => {
         .filter(p => String(p.codigoBarra || '').trim().toUpperCase().startsWith(cNorm))
         .map(p => ({ ...p })); // copias
 
-      // Prefijo en EQUIVALENCIAS → resolver al producto maestro (sin duplicar por idProducto)
+      // Prefijo en EQUIVALENCIAS → resolver al producto base (factor=1, sin duplicar por idProducto)
       const idsYa = new Set(porMaestro.map(p => p.idProducto));
       equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
         const skuB = String(e.skuBase || '').trim().toUpperCase();
         const base  = prods.find(p =>
-          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
-          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
-          String(p.codigoBarra || '').trim().toUpperCase() === skuB
+          parseFloat(p.factorConversion || 1) === 1 &&
+          p.estado !== '0' && p.estado !== 0 &&
+          (String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+           String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+           String(p.codigoBarra || '').trim().toUpperCase() === skuB)
         );
         if (base && !idsYa.has(base.idProducto)) {
           porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });
@@ -4951,14 +4959,16 @@ const DespachoView = (() => {
     const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (exacto) return [{ ...exacto, _exacto: true }];
 
-    // 2. Exacto en EQUIVALENCIAS → resolver al producto maestro; guardar código escaneado
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto base (factor=1); guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim().toUpperCase();
       const prod = prods.find(p =>
-        String(p.idProducto  || '').trim().toUpperCase() === skuB ||
-        String(p.skuBase     || '').trim().toUpperCase() === skuB ||
-        String(p.codigoBarra || '').trim().toUpperCase() === skuB
+        parseFloat(p.factorConversion || 1) === 1 &&
+        p.estado !== '0' && p.estado !== 0 &&
+        (String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+         String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+         String(p.codigoBarra || '').trim().toUpperCase() === skuB)
       );
       if (prod) return [{ ...prod, _exacto: true, _scannedCb: cNorm }];
     }
@@ -4972,9 +4982,11 @@ const DespachoView = (() => {
       equivs.filter(e => String(e.codigoBarra || '').trim().toUpperCase().startsWith(cNorm)).forEach(e => {
         const skuB = String(e.skuBase || '').trim().toUpperCase();
         const base = prods.find(p =>
-          String(p.idProducto  || '').trim().toUpperCase() === skuB ||
-          String(p.skuBase     || '').trim().toUpperCase() === skuB ||
-          String(p.codigoBarra || '').trim().toUpperCase() === skuB
+          parseFloat(p.factorConversion || 1) === 1 &&
+          p.estado !== '0' && p.estado !== 0 &&
+          (String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+           String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+           String(p.codigoBarra || '').trim().toUpperCase() === skuB)
         );
         if (base && !idsYa.has(base.idProducto)) {
           porMaestro.push({ ...base, _scannedCb: String(e.codigoBarra).trim() });

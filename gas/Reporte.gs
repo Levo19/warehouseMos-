@@ -45,7 +45,9 @@ function imprimirTicketGuia(params) {
       if (!desc) return;
       prodMap[p.idProducto] = desc;
       if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
-      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
+      // skuBase solo para producto BASE (factor=1) — evita que presentaciones sobreescriban
+      var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
+      if (esBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
     });
     // Equivalentes → resuelven al producto base via skuBase
     try {
@@ -339,7 +341,9 @@ function _reporteGuia(id) {
       if (!desc) return;
       prodMap[p.idProducto] = desc;
       if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
-      if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
+      // skuBase solo para producto BASE (factor=1) — evita que presentaciones sobreescriban
+      var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
+      if (esBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
     });
     // Equivalentes → resuelven al producto base via skuBase
     try {

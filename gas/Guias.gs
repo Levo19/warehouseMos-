@@ -35,7 +35,9 @@ function getGuia(idGuia) {
     if (!name) return;
     if (p.codigoBarra) prodMap[String(p.codigoBarra)] = name;
     if (p.idProducto)  prodMap[String(p.idProducto)] = name;
-    if (p.skuBase)     prodMap[String(p.skuBase).trim().toUpperCase()] = name;
+    // skuBase solo para producto BASE (factor=1) — evita que presentaciones sobreescriban
+    var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
+    if (esBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = name;
   });
   // Equivalentes → resuelven al producto base via skuBase
   try {
@@ -111,10 +113,16 @@ function agregarDetalleGuia(params) {
       });
       if (equiv) {
         var skuB = String(equiv.skuBase || '').trim().toUpperCase();
+        // Resolver al producto BASE (factor=1, activo). Evita matchear presentaciones
+        // (factor>1) que comparten skuBase con su producto base.
         prod = productos.find(function(p) {
-          return String(p.idProducto  || '').trim().toUpperCase() === skuB ||
-                 String(p.skuBase     || '').trim().toUpperCase() === skuB ||
-                 String(p.codigoBarra || '').trim().toUpperCase() === skuB;
+          var esBase = parseFloat(p.factorConversion || 1) === 1
+                    && String(p.estado || '') !== '0';
+          return esBase && (
+            String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+            String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+            String(p.codigoBarra || '').trim().toUpperCase() === skuB
+          );
         });
       }
     }
