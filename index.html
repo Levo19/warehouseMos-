@@ -1025,6 +1025,69 @@
   .hist-desc  { font-size:13px; font-weight:700; color:#e2e8f0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .hist-time  { font-size:11px; color:#475569; margin-top:3px; }
 
+  /* ── Productos nuevos aprobados (3 días) ─────────────── */
+  .pn-aprob-count {
+    background: linear-gradient(135deg,#c9a227,#ffd700);
+    color: #020817; font-size: 10px; font-weight: 800;
+    padding: 2px 8px; border-radius: 999px;
+    box-shadow: 0 0 10px rgba(255,215,0,.4);
+    animation: pnCountPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pnCountPulse {
+    0%,100% { transform: scale(1); }
+    50%     { transform: scale(1.08); box-shadow: 0 0 14px rgba(255,215,0,.6); }
+  }
+  .pn-aprob-scroll {
+    display: flex; gap: 10px; overflow-x: auto;
+    padding: 4px 2px 8px;
+    scrollbar-width: none;
+  }
+  .pn-aprob-scroll::-webkit-scrollbar { display: none; }
+  .pn-aprob-card {
+    flex-shrink: 0; width: 168px;
+    background: linear-gradient(135deg, #1a1503, #0f172a);
+    border: 1px solid rgba(255,215,0,.3);
+    border-radius: 12px; padding: 10px;
+    cursor: default;
+    box-shadow: 0 0 0 0 rgba(255,215,0,.4);
+    animation: pnCardGlow 2.4s ease-in-out infinite;
+    -webkit-tap-highlight-color: transparent;
+  }
+  @keyframes pnCardGlow {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,215,0,.3),  0 4px 12px rgba(0,0,0,.4); }
+    50%     { box-shadow: 0 0 0 4px rgba(255,215,0,0), 0 4px 18px rgba(255,215,0,.25); }
+  }
+  .pn-aprob-card.recent { animation: pnCardGlow 1.4s ease-in-out infinite, pnCardShake 2.4s ease-in-out infinite; }
+  @keyframes pnCardShake {
+    0%,90%,100% { transform: translateX(0); }
+    93% { transform: translateX(-1.5px) rotate(-.6deg); }
+    96% { transform: translateX(1.5px)  rotate(.6deg); }
+  }
+  .pn-aprob-foto {
+    width: 100%; height: 80px; border-radius: 8px;
+    background: #060d1f; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 8px;
+  }
+  .pn-aprob-foto img { width: 100%; height: 100%; object-fit: cover; }
+  .pn-aprob-tipo {
+    display: inline-block; padding: 2px 7px;
+    border-radius: 999px; font-size: 9px; font-weight: 800;
+    letter-spacing: .05em; margin-bottom: 4px;
+  }
+  .pn-aprob-tipo.nuevo  { background: rgba(34,197,94,.15);  color: #4ade80; border: 1px solid rgba(34,197,94,.3); }
+  .pn-aprob-tipo.equiv  { background: rgba(96,165,250,.15); color: #60a5fa; border: 1px solid rgba(96,165,250,.3); }
+  .pn-aprob-desc {
+    font-size: 12px; font-weight: 700; color: #fef3c7;
+    line-height: 1.3; margin-bottom: 4px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .pn-aprob-meta { font-size: 10px; color: #94a3b8; font-family: monospace; }
+  .pn-aprob-when { font-size: 10px; color: #c9a227; margin-top: 3px; font-weight: 600; }
+  .pn-aprob-by   { font-size: 10px; color: #64748b; margin-top: 1px; }
+  .pn-aprob-by.tu { color: #ffd700; font-weight: 700; }
+
   /* ── Global search overlay ── */
   #globalSearchOverlay {
     position:fixed; inset:0; z-index:55;
@@ -1502,6 +1565,16 @@
         <div class="hist-item skel" style="min-width:150px;height:68px;border:none;"></div>
         <div class="hist-item skel" style="min-width:150px;height:68px;border:none;"></div>
       </div>
+    </div>
+
+    <!-- Productos nuevos aprobados (últimos 3 días) -->
+    <div id="dashPNAprob" class="mb-3 hidden">
+      <div class="pre-date-hdr" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span style="font-size:1rem">📦</span>
+        <span>Productos nuevos · últimos 3 días</span>
+        <span id="pnAprobCount" class="pn-aprob-count">0</span>
+      </div>
+      <div class="pn-aprob-scroll" id="pnAprobList"></div>
     </div>
 
     <!-- Panel expandible: VENCIMIENTOS -->

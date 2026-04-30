@@ -148,9 +148,10 @@ function _route(method, e) {
       case 'crearAjuste':        return crearAjuste(params);
 
       // ── Producto Nuevo ─────────────────────────────────────
-      case 'getProductosNuevos': return getProductosNuevos(params);
-      case 'registrarProductoNuevo': return registrarProductoNuevo(params);
-      case 'aprobarProductoNuevo':   return aprobarProductoNuevo(params);
+      case 'getProductosNuevos':         return getProductosNuevos(params);
+      case 'getProductosNuevosRecientes': return getProductosNuevosRecientes(params);
+      case 'registrarProductoNuevo':     return registrarProductoNuevo(params);
+      case 'aprobarProductoNuevo':       return aprobarProductoNuevo(params);
 
       // ── Lotes ──────────────────────────────────────────────
       case 'getLotesVencimiento': return getLotesVencimiento(params);

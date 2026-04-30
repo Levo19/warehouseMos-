@@ -360,6 +360,64 @@ function escHtml(s)  { return String(s || '').replace(/&/g,'&amp;').replace(/</g
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
 function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim().toUpperCase(); }
 
+// ── Productos nuevos aprobados — últimos 3 días ─────────────
+async function _cargarPNAprobados() {
+  const cont = document.getElementById('dashPNAprob');
+  const list = document.getElementById('pnAprobList');
+  const cnt  = document.getElementById('pnAprobCount');
+  if (!cont || !list) return;
+
+  let pns = [];
+  try {
+    const resp = await API.get('getProductosNuevosRecientes', { dias: 3 });
+    pns = Array.isArray(resp) ? resp : (resp && resp.data) || [];
+  } catch(e) { pns = []; }
+
+  if (!pns.length) { cont.classList.add('hidden'); return; }
+
+  // Toast: ¿hay aprobados desde la última visita?
+  const lastSeenKey = 'wh_pnAprob_lastSeen';
+  const lastSeen = parseInt(localStorage.getItem(lastSeenKey) || '0');
+  const ahora = Date.now();
+  const nuevosDesdeUltimaVez = pns.filter(p => {
+    const t = new Date(p.fechaAprobacion).getTime();
+    return t > lastSeen;
+  });
+  if (nuevosDesdeUltimaVez.length > 0 && lastSeen > 0 && typeof toast === 'function') {
+    toast(`✅ ${nuevosDesdeUltimaVez.length} producto${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''} nuevo${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''} aprobado${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''}`, 'ok');
+  }
+  localStorage.setItem(lastSeenKey, String(ahora));
+
+  cont.classList.remove('hidden');
+  cnt.textContent = pns.length;
+
+  const usuarioActual = (window.AppSession && AppSession.getNombre && AppSession.getNombre()) || '';
+  const nombreLow = String(usuarioActual).toLowerCase().trim();
+
+  list.innerHTML = pns.map(p => {
+    const tipo = String(p.tipoAprobacion || 'NUEVO').toUpperCase();
+    const tipoCls = tipo === 'EQUIVALENTE' ? 'equiv' : 'nuevo';
+    const tipoLabel = tipo === 'EQUIVALENTE' ? 'EQUIV' : 'NUEVO';
+    const isMine = String(p.usuario || '').toLowerCase().trim().indexOf(nombreLow) >= 0 && nombreLow;
+    const fechaApr = p.fechaAprobacion ? new Date(p.fechaAprobacion) : null;
+    const dias = fechaApr ? Math.floor((Date.now() - fechaApr.getTime()) / 86400000) : 0;
+    const whenTxt = dias === 0 ? 'Hoy' : dias === 1 ? 'Ayer' : `hace ${dias}d`;
+    const recientCls = dias === 0 ? ' recent' : '';
+    const fotoHtml = p.foto
+      ? `<img src="${escHtml(p.foto)}" alt="">`
+      : '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>';
+    return `
+      <div class="pn-aprob-card${recientCls}">
+        <div class="pn-aprob-foto">${fotoHtml}</div>
+        <span class="pn-aprob-tipo ${tipoCls}">${tipoLabel}</span>
+        <div class="pn-aprob-desc">${escHtml(p.descripcion || '—')}</div>
+        <div class="pn-aprob-meta">▌${escHtml(p.codigoBarra || '—')}</div>
+        <div class="pn-aprob-when">${whenTxt}</div>
+        <div class="pn-aprob-by${isMine ? ' tu' : ''}">${isMine ? '✓ Tú' : escHtml(p.usuario || '—')}</div>
+      </div>`;
+  }).join('');
+}
+
 // Hora desde campo fecha de guía — solo si tiene componente de hora explícito
 function _horaDesdeGuia(g) {
   const f = String(g.fecha || '');
@@ -1322,6 +1380,9 @@ const App = (() => {
         histEl.innerHTML = '<p class="text-slate-500 text-xs py-2 px-2">Sin registros recientes</p>';
       }
     }
+
+    // Productos nuevos aprobados (últimos 3 días) — carga en background
+    _cargarPNAprobados();
 
     // Panel Vencimientos
     document.getElementById('listVencCrit').innerHTML = criticos.map(v => `

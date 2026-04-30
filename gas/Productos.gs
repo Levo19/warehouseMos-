@@ -229,6 +229,40 @@ function getProductosNuevos(params) {
   return { ok: true, data: rows };
 }
 
+// Productos nuevos APROBADOS dentro de los últimos N días (default 3)
+function getProductosNuevosRecientes(params) {
+  var dias = parseInt(params && params.dias) || 3;
+  var corte = new Date();
+  corte.setDate(corte.getDate() - dias);
+  var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO')).filter(function(r){
+    if (String(r.estado).toUpperCase() !== 'APROBADO') return false;
+    if (!r.fechaAprobacion) return false;
+    var f = r.fechaAprobacion instanceof Date ? r.fechaAprobacion : new Date(r.fechaAprobacion);
+    return f >= corte;
+  });
+  // Mapear con tipoAprobacion derivado de la observacion (NUEVO o "EQUIVALENTE de X")
+  var resultado = rows.map(function(r){
+    var obs = String(r.observacion || '').trim();
+    var tipo = obs.indexOf('EQUIVALENTE') === 0 ? 'EQUIVALENTE' : 'NUEVO';
+    return {
+      idProductoNuevo:  r.idProductoNuevo,
+      codigoBarra:      r.codigoBarra,
+      descripcion:      r.descripcion,
+      foto:             r.foto,
+      cantidad:         r.cantidad,
+      fechaCreacion:    r.fechaCreacion,
+      fechaAprobacion:  r.fechaAprobacion,
+      aprobadoPor:      r.aprobadoPor,
+      usuario:          r.usuario,
+      tipoAprobacion:   tipo,
+      observacion:      obs
+    };
+  }).sort(function(a, b){
+    return new Date(b.fechaAprobacion) - new Date(a.fechaAprobacion);
+  });
+  return { ok: true, data: resultado };
+}
+
 function registrarProductoNuevo(params) {
   var sheet = getSheet('PRODUCTO_NUEVO');
   var id    = _generateId('PN');
@@ -289,10 +323,27 @@ function registrarProductoNuevo(params) {
     }
   }
 
+  // Push: notificar a MOS que llegó un producto nuevo para revisar
+  try {
+    var descCorta = (params.descripcion || '').substring(0, 40);
+    var qty = parseFloat(params.cantidad) || 0;
+    _notificarMOS(
+      '🆕 Producto nuevo pendiente',
+      descCorta + ' · ' + qty + ' uds · ' + (params.usuario || 'Operador')
+    );
+  } catch(eP) { Logger.log('Push PN nuevo: ' + eP.message); }
+
   return { ok: true, data: { idProductoNuevo: id, codigoBarra: codigoBarra } };
 }
 
 function aprobarProductoNuevo(params) {
+  var tipo           = String(params.tipo || 'NUEVO').toUpperCase();
+  var idGuia         = params.idGuia;
+  var codigoOriginal = String(params.codigoOriginal || '').trim();
+  var codigoFinal    = String(params.codigoFinal    || '').trim() || codigoOriginal;
+  var cantidadFinal  = parseFloat(params.cantidadFinal) || 0;
+
+  // 1) Localizar PN
   var sheet  = getSheet('PRODUCTO_NUEVO');
   var data   = sheet.getDataRange().getValues();
   var hdrs   = data[0];
@@ -301,44 +352,124 @@ function aprobarProductoNuevo(params) {
   var idxApb = hdrs.indexOf('aprobadoPor');
   var idxFAp = hdrs.indexOf('fechaAprobacion');
 
-  var fila = -1;
-  var row;
+  var fila = -1, row;
   for (var i = 1; i < data.length; i++) {
-    if (data[i][idxId] === params.idProductoNuevo) {
-      fila = i + 1;
-      row  = data[i];
-      break;
-    }
+    if (data[i][idxId] === params.idProductoNuevo) { fila = i + 1; row = data[i]; break; }
   }
   if (fila < 0) return { ok: false, error: 'ProductoNuevo no encontrado' };
 
-  // Crear en PRODUCTOS
-  var prodData = {};
-  hdrs.forEach(function(h, idx){ prodData[h] = row[idx]; });
+  // 2) Si NUEVO: crear en catálogo local de WH (idempotente)
+  var idProductoCreado = '';
+  if (tipo === 'NUEVO') {
+    var prodDataPN = {};
+    hdrs.forEach(function(h, idx){ prodDataPN[h] = row[idx]; });
+    var resultCrear = crearProducto({
+      codigoBarra:        codigoFinal,
+      descripcion:        params.descripcion || prodDataPN.descripcion,
+      marca:              prodDataPN.marca,
+      idCategoria:        params.idCategoria || prodDataPN.idCategoria,
+      unidad:             params.unidad      || prodDataPN.unidad || 'UNIDAD',
+      stockMinimo:        params.stockMinimo || 0,
+      stockMaximo:        params.stockMaximo || 0,
+      precioCompra:       params.precioCompra || 0,
+      esEnvasable:        params.esEnvasable  || '0',
+      codigoProductoBase: params.codigoProductoBase || '',
+      factorConversion:   params.factorConversion   || '',
+      mermaEsperadaPct:   params.mermaEsperadaPct   || ''
+    });
+    if (resultCrear && resultCrear.ok) idProductoCreado = resultCrear.data.idProducto;
+    // Si falla por duplicado, seguimos
+  }
 
-  var resultCrear = crearProducto({
-    codigoBarra:    prodData.codigoBarra,
-    descripcion:    prodData.descripcion,
-    marca:          prodData.marca,
-    idCategoria:    prodData.idCategoria || params.idCategoria,
-    unidad:         prodData.unidad      || params.unidad || 'UNIDAD',
-    stockMinimo:    params.stockMinimo   || 0,
-    stockMaximo:    params.stockMaximo   || 0,
-    precioCompra:   params.precioCompra  || 0,
-    esEnvasable:    params.esEnvasable   || '0',
-    codigoProductoBase: params.codigoProductoBase || '',
-    factorConversion:   params.factorConversion   || '',
-    mermaEsperadaPct:   params.mermaEsperadaPct   || ''
-  });
-
-  if (!resultCrear.ok) return resultCrear;
-
-  // Actualizar estado del ProductoNuevo
+  // 3) Marcar PN como APROBADO
   sheet.getRange(fila, idxEst + 1).setValue('APROBADO');
-  sheet.getRange(fila, idxApb + 1).setValue(params.aprobadoPor || params.usuario);
+  sheet.getRange(fila, idxApb + 1).setValue(params.aprobadoPor || 'MOS');
   sheet.getRange(fila, idxFAp + 1).setValue(new Date());
+  // Guardar tipoAprobacion en la columna observacion (col 14, idx 13) si existe
+  // o en la última columna libre. Usamos formato: "NUEVO" o "EQUIVALENTE de <skuBase>"
+  var tipoLabel = tipo === 'EQUIVALENTE' ? ('EQUIVALENTE de ' + (params.skuBase || '')) : 'NUEVO';
+  try {
+    var idxObs = hdrs.indexOf('observacion');
+    if (idxObs >= 0) sheet.getRange(fila, idxObs + 1).setValue(tipoLabel);
+  } catch(_){}
 
-  return { ok: true, data: { idProducto: resultCrear.data.idProducto } };
+  // 4) Actualizar GUIA_DETALLE: buscar por idGuia + codigoOriginal
+  var stockDeltaOrig = 0;  // restar del original (si guía cerrada)
+  var stockDeltaFin  = 0;  // sumar al final  (si guía cerrada)
+  var cantOriginalEnDetalle = 0;
+  var guiaCerrada = false;
+  var esIngreso   = false;
+
+  if (idGuia) {
+    try {
+      // Estado de la guía
+      var guiasSh   = getSheet('GUIAS');
+      var guiasData = guiasSh.getDataRange().getValues();
+      var gHdrs     = guiasData[0];
+      var iGId      = gHdrs.indexOf('idGuia');
+      var iGEst     = gHdrs.indexOf('estado');
+      var iGTip     = gHdrs.indexOf('tipo');
+      for (var gi = 1; gi < guiasData.length; gi++) {
+        if (String(guiasData[gi][iGId]).trim() === String(idGuia).trim()) {
+          guiaCerrada = String(guiasData[gi][iGEst] || '').toUpperCase() === 'CERRADA';
+          esIngreso   = String(guiasData[gi][iGTip] || '').toUpperCase().indexOf('INGRESO') === 0;
+          break;
+        }
+      }
+
+      var detSheet = getSheet('GUIA_DETALLE');
+      var detData  = detSheet.getDataRange().getValues();
+      var detHdrs  = detData[0];
+      var iDetGuia = detHdrs.indexOf('idGuia');
+      var iDetCod  = detHdrs.indexOf('codigoProducto');
+      var iDetCant = detHdrs.indexOf('cantidadRecibida');
+      var iDetObs  = detHdrs.indexOf('observacion');
+
+      for (var di = 1; di < detData.length; di++) {
+        if (String(detData[di][iDetGuia] || '').trim() !== String(idGuia).trim()) continue;
+        var codDet = String(detData[di][iDetCod] || '').trim();
+        if (codDet !== codigoOriginal) continue;
+
+        cantOriginalEnDetalle = parseFloat(detData[di][iDetCant]) || 0;
+        var cantFinal = cantidadFinal > 0 ? cantidadFinal : cantOriginalEnDetalle;
+
+        // Update código si cambió
+        if (codigoFinal !== codigoOriginal) {
+          detSheet.getRange(di + 1, iDetCod + 1).setNumberFormat('@').setValue(codigoFinal);
+        }
+        // Update cantidad si cambió
+        if (cantFinal !== cantOriginalEnDetalle) {
+          detSheet.getRange(di + 1, iDetCant + 1).setValue(cantFinal);
+        }
+        // Marcar observacion como APROBADO
+        detSheet.getRange(di + 1, iDetObs + 1).setValue('APROBADO');
+
+        // Calcular ajustes de stock si guía cerrada (stock ya se aplicó)
+        if (guiaCerrada && esIngreso) {
+          if (codigoFinal !== codigoOriginal) {
+            stockDeltaOrig = -cantOriginalEnDetalle;  // revertir aplicación al código viejo
+            stockDeltaFin  = +cantFinal;              // aplicar al código nuevo
+          } else if (cantFinal !== cantOriginalEnDetalle) {
+            // Mismo código, solo ajusta delta
+            stockDeltaFin = (cantFinal - cantOriginalEnDetalle);
+          }
+        }
+        break;
+      }
+    } catch(e) {
+      Logger.log('aprobarProductoNuevo: GUIA_DETALLE error: ' + e.message);
+    }
+  }
+
+  // 5) Aplicar deltas
+  try {
+    if (stockDeltaOrig !== 0) _actualizarStock(codigoOriginal, stockDeltaOrig);
+    if (stockDeltaFin  !== 0) _actualizarStock(codigoFinal,    stockDeltaFin);
+  } catch(eS) {
+    Logger.log('aprobarProductoNuevo: stock error: ' + eS.message);
+  }
+
+  return { ok: true, data: { idProducto: idProductoCreado, tipo: tipo, guiaCerrada: guiaCerrada } };
 }
 
 // ── Historial de stock por producto ─────────────────────────
