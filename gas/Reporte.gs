@@ -404,6 +404,243 @@ function imprimirTicketGuia(params) {
   }
 }
 
+// ============================================================
+// imprimirAvisoCajeros — manda ticket de aviso de preingreso a
+// la(s) impresora(s) donde haya un cajero/vendedor con caja ABIERTA
+// en MosExpress. Lee MosExpress.CAJAS WHERE Estado=ABIERTA y para
+// cada caja toma su PrintNode_ID directo (lo que MosExpress guardó
+// al abrirla).
+// ============================================================
+function imprimirAvisoCajeros(params) {
+  var idPreingreso = String(params.idPreingreso || '');
+  if (!idPreingreso) return { ok: false, error: 'idPreingreso requerido' };
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  // 1. Leer preingreso
+  var pi;
+  try {
+    var preRows = _sheetToObjects(getSheet('PREINGRESOS'));
+    pi = preRows.find(function(r) { return r.idPreingreso === idPreingreso; });
+  } catch(e) { return { ok: false, error: 'Error leyendo PREINGRESOS: ' + e.message }; }
+  if (!pi) return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
+
+  // 2. Resolver proveedor
+  var provName = '';
+  try {
+    var provs = _sheetToObjects(getProveedoresSheet());
+    var prov  = provs.find(function(p) { return p.idProveedor === pi.idProveedor; });
+    if (prov) provName = String(prov.nombre || '');
+  } catch(e) {}
+
+  // 3. Leer cajas ABIERTAS en MosExpress
+  var cajasAbiertas = [];
+  try {
+    var sheetCajas = _getMosExpressSS().getSheetByName('CAJAS');
+    if (!sheetCajas) return { ok: false, error: 'Hoja CAJAS no existe en MosExpress' };
+    var rows = _sheetToObjects(sheetCajas);
+    cajasAbiertas = rows.filter(function(c) {
+      return String(c.Estado || '').trim().toUpperCase() === 'ABIERTA' && c.PrintNode_ID;
+    });
+  } catch(e) { return { ok: false, error: 'No se pudo leer CAJAS de MosExpress: ' + e.message }; }
+
+  if (!cajasAbiertas.length) {
+    return { ok: false, error: 'NO_HAY_CAJEROS_ACTIVOS', mensaje: 'No hay cajas abiertas con impresora asignada' };
+  }
+
+  // 4. URL del reporte público para QR
+  var reporteUrl = String(params.reporteUrl || '');
+
+  // 5. Construir ESC/POS UNA VEZ (mismo ticket para todas las cajas)
+  var bytes = _construirAvisoIngresoBytes(pi, provName, reporteUrl);
+  var blob  = Utilities.newBlob(bytes, 'application/octet-stream');
+  var b64   = Utilities.base64Encode(blob.getBytes());
+
+  // 6. Enviar a cada PrintNode
+  var resultados = [];
+  cajasAbiertas.forEach(function(caja) {
+    var printerId = parseInt(caja.PrintNode_ID);
+    if (!printerId) {
+      resultados.push({ vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
+                        printNodeId: caja.PrintNode_ID, ok: false, error: 'PrintNode_ID inválido' });
+      return;
+    }
+    try {
+      var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+        method:  'post',
+        headers: {
+          'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+          'Content-Type':  'application/json'
+        },
+        payload: JSON.stringify({
+          printerId:   printerId,
+          title:       'Aviso ingreso ' + idPreingreso,
+          contentType: 'raw_base64',
+          content:     b64,
+          source:      'warehouseMos'
+        }),
+        muteHttpExceptions: true
+      });
+      var code = resp.getResponseCode();
+      resultados.push({
+        vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
+        printNodeId: caja.PrintNode_ID,
+        ok: code === 201,
+        error: code === 201 ? '' : ('PrintNode ' + code)
+      });
+    } catch(e) {
+      resultados.push({ vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
+                        printNodeId: caja.PrintNode_ID, ok: false, error: e.message });
+    }
+  });
+
+  var algunOk = resultados.some(function(r) { return r.ok; });
+  return { ok: algunOk, data: { idPreingreso: idPreingreso, impresiones: resultados } };
+}
+
+// Construye los bytes ESC/POS del ticket de aviso de ingreso (sin la palabra "PREINGRESO").
+// Header: empresa grande / fecha / hora / monto bien grande / cargadores / comentario destacado / QR
+function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
+  var B = [];
+  function b1(v)   { B.push(v & 0xff); }
+  function bStr(s) { for (var k = 0; k < s.length; k++) B.push(s.charCodeAt(k) & 0xff); }
+  function bLn(s)  { bStr(s); b1(0x0a); }
+
+  var SEP  = '================================================';
+  var SEP2 = '------------------------------------------------';
+
+  // Init
+  b1(0x1b); b1(0x40);
+
+  // ── Header: WAREHOUSE / MOS / AVISO INGRESO ─────────────────
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x21); b1(0x38);
+  bLn('WAREHOUSE');
+  bLn('MOS');
+  b1(0x1b); b1(0x21); b1(0x00);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('AVISO INGRESO');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // ── Empresa: doble alto bold, centrado ──────────────────────
+  if (provName) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);
+    var nameLines = _wrapPalabras(String(provName).toUpperCase(), 24);
+    for (var nl = 0; nl < nameLines.length && nl < 2; nl++) bLn(nameLines[nl]);
+    b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x00);
+  }
+
+  // ── Fecha estilo "1 mayo 3pm" ───────────────────────────────
+  var fechaPI = '';
+  try {
+    var d = new Date(pi.fecha || pi.fechaCreacion || new Date());
+    var meses = ['enero','febrero','marzo','abril','mayo','junio',
+                 'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    var dia    = d.getDate();
+    var mes    = meses[d.getMonth()] || '';
+    var hh     = d.getHours();
+    var mm     = d.getMinutes();
+    var ampm   = hh >= 12 ? 'pm' : 'am';
+    var hh12   = hh % 12; if (hh12 === 0) hh12 = 12;
+    var horaTxt = mm === 0 ? (hh12 + ampm) : (hh12 + ':' + (mm < 10 ? '0' : '') + mm + ampm);
+    fechaPI = dia + ' ' + mes + ' ' + horaTxt;
+  } catch(e) {}
+  if (fechaPI) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn(fechaPI);
+    b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x00);
+  }
+
+  bLn(SEP);
+
+  // ── Monto a preparar (BIEN GRANDE, lo más importante) ──────
+  if (pi.monto) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('PREPARAR PARA PAGAR');
+    b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x21); b1(0x38); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('S/. ' + pi.monto);
+    b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // ── Estado ──────────────────────────────────────────────────
+  if (pi.estado) bLn('Estado:  ' + String(pi.estado).toUpperCase());
+
+  // ── Cargadores: uno por línea ───────────────────────────────
+  var cargs = [];
+  try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
+  if (cargs.length) {
+    bLn('');
+    bLn('Cargadores:');
+    cargs.forEach(function(c) {
+      var nombre = (typeof c === 'object') ? (c.nombre || c.idPersonal || '') : String(c);
+      if (nombre) bLn('  - ' + nombre);
+    });
+  }
+
+  // ── Comentario: doble alto bold (resaltado) ─────────────────
+  if (pi.comentario) {
+    bLn(SEP2);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('Comentario:');
+    b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);
+    var comLines = _wrapPalabras(String(pi.comentario), 24);
+    for (var ci = 0; ci < comLines.length && ci < 5; ci++) bLn(comLines[ci]);
+    b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+  }
+
+  bLn(SEP);
+
+  // ── Adjuntos ────────────────────────────────────────────────
+  var nFotos = pi.fotos ? String(pi.fotos).split(',').filter(Boolean).length : 0;
+  if (nFotos > 0) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    bLn(nFotos + ' imagen' + (nFotos !== 1 ? 'es' : '') + ' adjunta' + (nFotos !== 1 ? 's' : ''));
+    bLn('ver en el reporte digital');
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // ── QR del reporte del preingreso ───────────────────────────
+  if (reporteUrl) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('VER PREINGRESO COMPLETO');
+    b1(0x1b); b1(0x45); b1(0x00);
+
+    var qrLen = reporteUrl.length + 3;
+    var qrpL  = qrLen & 0xff;
+    var qrpH  = (qrLen >> 8) & 0xff;
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x04); b1(0x00); b1(0x31); b1(0x41); b1(0x32); b1(0x00);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x05);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x45); b1(0x31);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(qrpL); b1(qrpH); b1(0x31); b1(0x50); b1(0x30);
+    bStr(reporteUrl);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x51); b1(0x30);
+
+    bLn('Escanea para fotos y detalles');
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // Feed + corte
+  b1(0x1b); b1(0x4a); b1(160);
+  b1(0x1d); b1(0x56); b1(0x00);
+
+  return B;
+}
+
 // Word-wrap inteligente: parte por palabras sin cortar.
 // Si una palabra excede el ancho, la corta como último recurso.
 // anchoPrimero = ancho de la 1ª línea; anchoResto = ancho de continuaciones (default = anchoPrimero).

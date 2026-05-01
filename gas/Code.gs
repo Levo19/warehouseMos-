@@ -168,6 +168,7 @@ function _route(method, e) {
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
+      case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
 
       // ── Personal ───────────────────────────────────────────
       case 'loginPersonal':      return loginPersonal(params);
@@ -286,6 +287,14 @@ function _getMosSS() {
   if (!id) throw new Error('MOS_SS_ID no configurado en Script Properties. Contactar administrador.');
   try { return SpreadsheetApp.openById(id); }
   catch(e) { throw new Error('No se pudo abrir el Spreadsheet de MOS (' + id + '): ' + e.message); }
+}
+
+// Bridge a MosExpress (para leer CAJAS abiertas y saber a qué impresora mandar avisos)
+function _getMosExpressSS() {
+  var id = PropertiesService.getScriptProperties().getProperty('MOSEXPRESS_SS_ID');
+  if (!id) throw new Error('MOSEXPRESS_SS_ID no configurado en Script Properties.');
+  try { return SpreadsheetApp.openById(id); }
+  catch(e) { throw new Error('No se pudo abrir el Spreadsheet de MosExpress (' + id + '): ' + e.message); }
 }
 
 function getProductosSheet() {

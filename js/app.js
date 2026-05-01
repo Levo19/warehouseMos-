@@ -6644,6 +6644,8 @@ const PreingresosView = (() => {
       const fotos = todasFotos.map(f => f.url).join(',');
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => console.warn('[EditPreingreso]', e));
+      // Re-disparar aviso a cajeros con datos actualizados
+      _dispararAvisoCajeros(idPreingreso, { silent: true });
     })();
   }
 
@@ -6930,6 +6932,40 @@ const PreingresosView = (() => {
     const fotosCaptura = [..._fotosSeleccionadas];
     _fotosSeleccionadas = [];
     _subirFotosEnBackground(idPreingresoReal, fotosCaptura);
+
+    // 4. Disparar aviso a cajeros activos en MosExpress (background, no bloquea)
+    _dispararAvisoCajeros(idPreingresoReal);
+  }
+
+  // Aviso a cajas abiertas de MosExpress — no bloquea, muestra toast con resultado.
+  // Reutilizable: se llama al crear, editar y desde botón "Reimprimir aviso".
+  async function _dispararAvisoCajeros(idPreingreso, opts) {
+    opts = opts || {};
+    const base       = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+    const reporteUrl = `${base}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
+    if (!opts.silent) toast('📤 Avisando a cajas...', 'info', 3000);
+    try {
+      const res = await API.imprimirAvisoCajeros({ idPreingreso, reporteUrl });
+      if (res.ok) {
+        const okList = (res.data?.impresiones || []).filter(r => r.ok);
+        if (okList.length) {
+          const detalle = okList.map(r => `${r.vendedor || '—'} (${r.zona || '—'})`).join(', ');
+          toast(`✓ Aviso enviado a: ${detalle}`, 'ok', 5000);
+        }
+        const errList = (res.data?.impresiones || []).filter(r => !r.ok);
+        if (errList.length) {
+          toast(`⚠ ${errList.length} impresora(s) fallaron`, 'warn', 5000);
+        }
+      } else if (res.error === 'NO_HAY_CAJEROS_ACTIVOS') {
+        toast('⚠ No hay cajas abiertas — no se imprimió aviso', 'warn', 5000);
+      } else {
+        toast('Error aviso cajas: ' + (res.error || 'desconocido'), 'danger', 6000);
+      }
+      return res;
+    } catch (e) {
+      toast('Sin conexión — aviso no enviado', 'warn', 5000);
+      return { ok: false, error: 'sin conexión' };
+    }
   }
 
   async function _subirFotosEnBackground(idPreingreso, fotos) {
@@ -7128,12 +7164,17 @@ const PreingresosView = (() => {
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
 
+  function reimprimirAviso() {
+    if (!_editItem) { toast('Abre un preingreso primero', 'warn'); return; }
+    _dispararAvisoCajeros(_editItem.idPreingreso);
+  }
+
   return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
            onFotosSeleccionadas, quitarFoto, verFotos,
            onFotosEditSeleccionadas, quitarFotoEdit,
-           abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido,
+           abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido, reimprimirAviso,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
