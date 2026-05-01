@@ -138,9 +138,10 @@ const API = (() => {
     actualizarProveedor:(p)      => post({ action: 'actualizarProveedor', ...p }),
 
     // Producto Nuevo
-    getProductosNuevos: (p={})   => call({ action: 'getProductosNuevos', ...p }),
-    registrarPN:        (p)      => post({ action: 'registrarProductoNuevo', ...p }),
-    aprobarPN:          (p)      => post({ action: 'aprobarProductoNuevo', ...p }),
+    getProductosNuevos:          (p={}) => call({ action: 'getProductosNuevos', ...p }),
+    getProductosNuevosRecientes: (p={}) => call({ action: 'getProductosNuevosRecientes', ...p }),
+    registrarPN:                 (p)    => post({ action: 'registrarProductoNuevo', ...p }),
+    aprobarPN:                   (p)    => post({ action: 'aprobarProductoNuevo', ...p }),
 
     // Config
     getConfig:          ()                  => call({ action: 'getConfig' }),

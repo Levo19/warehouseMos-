@@ -371,15 +371,17 @@ async function _cargarPNAprobados() {
   let errorMsg = '';
 
   // Estrategia robusta: intentar primero el endpoint nuevo (rápido, ya filtrado)
-  // y caer al endpoint legacy getProductosNuevos si falla
+  // y caer al endpoint legacy getProductosNuevos si falla o no responde ok
   try {
-    const resp = await API.get('getProductosNuevosRecientes', { dias: 3 });
+    const resp = await API.getProductosNuevosRecientes({ dias: 3 });
+    if (resp && resp.ok === false) throw new Error(resp.error || 'endpoint nuevo no ok');
     pns = Array.isArray(resp) ? resp : (resp && resp.data) || [];
     console.log('[PN aprobados] recientes via endpoint nuevo:', pns.length);
   } catch(e1) {
     console.warn('[PN aprobados] endpoint nuevo falló, intentando legacy:', e1 && e1.message);
     try {
-      const resp = await API.get('getProductosNuevos', { estado: 'APROBADO' });
+      const resp = await API.getProductosNuevos({ estado: 'APROBADO' });
+      if (resp && resp.ok === false) throw new Error(resp.error || 'legacy no ok');
       const todos = Array.isArray(resp) ? resp : (resp && resp.data) || [];
       // Filtrar por últimos 3 días en el frontend
       const corte = Date.now() - (3 * 86400000);
