@@ -200,15 +200,48 @@ function actualizarCantidadDetalle(params) {
   var hdrs   = data[0];
   var idxId  = hdrs.indexOf('idDetalle');
   var idxRec = hdrs.indexOf('cantidadRecibida');
+  var idxIdG = hdrs.indexOf('idGuia');
+  var idxCod = hdrs.indexOf('codigoProducto');
   if (idxId < 0 || idxRec < 0) return { ok: false, error: 'Columnas no encontradas' };
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === idDetalle) {
+      var cantidadVieja = parseFloat(data[i][idxRec]) || 0;
+      var idGuia        = String(data[i][idxIdG] || '');
+      var codigo        = String(data[i][idxCod] || '');
+
+      // Si la guía está CERRADA, ajustar stock por la diferencia (la cant nueva ya entró/salió)
+      var guiaInfo = _getGuiaInfo(idGuia);
+      if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA' && codigo) {
+        var diff = cantidad - cantidadVieja;
+        if (diff !== 0) {
+          var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
+          var delta = esIngreso ? diff : -diff;
+          _actualizarStock(codigo, delta);
+        }
+      }
+
       sheet.getRange(i + 1, idxRec + 1).setValue(cantidad);
       return { ok: true };
     }
   }
   return { ok: false, error: 'Detalle no encontrado: ' + idDetalle };
+}
+
+// Helper: lee la guía y retorna {tipo, estado} o null si no existe
+function _getGuiaInfo(idGuia) {
+  var sheet   = getSheet('GUIAS');
+  var data    = sheet.getDataRange().getValues();
+  var hdrs    = data[0];
+  var idxId   = hdrs.indexOf('idGuia');
+  var idxTipo = hdrs.indexOf('tipo');
+  var idxEst  = hdrs.indexOf('estado');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === String(idGuia)) {
+      return { tipo: String(data[i][idxTipo] || ''), estado: String(data[i][idxEst] || '') };
+    }
+  }
+  return null;
 }
 
 // ── Actualizar solo la fecha de vencimiento de un detalle existente ─
@@ -235,6 +268,8 @@ function actualizarFechaVencimiento(params) {
 }
 
 // ── Anular un ítem de detalle ────────────────────────────
+// Si la guía padre está CERRADA, devuelve el stock que ya se había aplicado.
+// Si está ABIERTA, solo marca como anulado (stock aún no descontado).
 function anularDetalle(params) {
   var idDetalle = params.idDetalle;
   if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
@@ -242,15 +277,35 @@ function anularDetalle(params) {
   var sheet = getSheet('GUIA_DETALLE');
   var data  = sheet.getDataRange().getValues();
   var hdrs  = data[0];
-  var idxId = hdrs.indexOf('idDetalle');
+  var idxId  = hdrs.indexOf('idDetalle');
   var idxObs = hdrs.indexOf('observacion');
+  var idxRec = hdrs.indexOf('cantidadRecibida');
+  var idxIdG = hdrs.indexOf('idGuia');
+  var idxCod = hdrs.indexOf('codigoProducto');
 
   for (var i = 1; i < data.length; i++) {
     if (data[i][idxId] === idDetalle) {
-      // Marcar como anulado en observacion
+      // Idempotencia: si ya está ANULADO, no devolver stock de nuevo
+      if (String(data[i][idxObs] || '') === 'ANULADO') {
+        return { ok: true, yaAnulado: true };
+      }
+
+      var cantidadActual = idxRec >= 0 ? (parseFloat(data[i][idxRec]) || 0) : 0;
+      var idGuia         = String(data[i][idxIdG] || '');
+      var codigo         = String(data[i][idxCod] || '');
+
+      // Si la guía está CERRADA y tenía cantidad > 0, devolver stock
+      var guiaInfo = _getGuiaInfo(idGuia);
+      if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA'
+          && cantidadActual > 0 && codigo) {
+        var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
+        // Reverso: si era INGRESO, sumar al stock se devierte (resta); si SALIDA, devuelve (suma)
+        var delta = esIngreso ? -cantidadActual : cantidadActual;
+        _actualizarStock(codigo, delta);
+      }
+
+      // Marcar como anulado y poner cantidad en 0
       sheet.getRange(i + 1, idxObs + 1).setValue('ANULADO');
-      // Poner cantidadRecibida = 0
-      var idxRec = hdrs.indexOf('cantidadRecibida');
       if (idxRec >= 0) sheet.getRange(i + 1, idxRec + 1).setValue(0);
       return { ok: true };
     }
@@ -259,6 +314,8 @@ function anularDetalle(params) {
 }
 
 // ── Reabrir una guía cerrada (requiere adminPin en el cliente) ──
+// REVIERTE el stock que se aplicó al cerrar para que al volver a cerrar
+// no se descuente dos veces. Es la operación inversa de cerrarGuia.
 function reabrirGuia(params) {
   var idGuia = params.idGuia;
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
@@ -266,11 +323,34 @@ function reabrirGuia(params) {
   var sheet = getSheet('GUIAS');
   var data  = sheet.getDataRange().getValues();
   var hdrs  = data[0];
-  var idxId  = hdrs.indexOf('idGuia');
-  var idxEst = hdrs.indexOf('estado');
+  var idxId   = hdrs.indexOf('idGuia');
+  var idxEst  = hdrs.indexOf('estado');
+  var idxTipo = hdrs.indexOf('tipo');
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(idGuia)) {
+      var estadoActual = String(data[i][idxEst] || '').toUpperCase();
+      // Idempotencia: si ya está ABIERTA, no revertir stock
+      if (estadoActual === 'ABIERTA') {
+        return { ok: true, yaAbierta: true };
+      }
+      var tipoGuia = String(data[i][idxTipo] || '');
+      var esIngreso = tipoGuia.toUpperCase().indexOf('INGRESO') === 0;
+
+      // Solo revertir si estaba CERRADA (no AUTOCERRADA, ANULADA, etc.)
+      if (estadoActual === 'CERRADA') {
+        var detalles = _sheetToObjects(getSheet('GUIA_DETALLE')).filter(function(d) {
+          return d.idGuia === idGuia && d.observacion !== 'ANULADO';
+        });
+        detalles.forEach(function(d) {
+          var cant = parseFloat(d.cantidadRecibida) || 0;
+          if (cant === 0 || !d.codigoProducto) return;
+          // Reverso del cierre: si era INGRESO, restar; si SALIDA, sumar
+          var deltaReverso = esIngreso ? -cant : cant;
+          _actualizarStock(String(d.codigoProducto), deltaReverso);
+        });
+      }
+
       sheet.getRange(i + 1, idxEst + 1).setValue('ABIERTA');
       return { ok: true };
     }
@@ -320,14 +400,23 @@ function cerrarGuia(idGuia, usuario, idSesion) {
 
   var filaGuia = -1;
   var tipoGuia = '';
+  var estadoActual = '';
   for (var i = 1; i < guias.length; i++) {
     if (guias[i][idxIdGuia] === idGuia) {
       filaGuia = i + 1;
       tipoGuia = guias[i][idxTipo];
+      estadoActual = String(guias[i][idxEstado] || '').toUpperCase();
       break;
     }
   }
   if (filaGuia < 0) return { ok: false, error: 'Guía no encontrada' };
+
+  // Idempotencia: si la guía ya está CERRADA (o AUTOCERRADA), no reaplicar stock.
+  // Permite que el frontend reintente sin duplicar descuentos.
+  if (estadoActual === 'CERRADA' || estadoActual === 'AUTOCERRADA') {
+    var montoExistente = idxMontoTotal >= 0 ? (parseFloat(guias[filaGuia - 1][idxMontoTotal]) || 0) : 0;
+    return { ok: true, data: { idGuia: idGuia, estado: estadoActual, montoTotal: montoExistente, yaCerrada: true } };
+  }
 
   // Obtener detalles
   var detalles = _sheetToObjects(getSheet('GUIA_DETALLE')).filter(function(d){
