@@ -369,20 +369,42 @@ async function _cargarPNAprobados() {
 
   let pns = [];
   let errorMsg = '';
+
+  // Estrategia robusta: intentar primero el endpoint nuevo (rápido, ya filtrado)
+  // y caer al endpoint legacy getProductosNuevos si falla
   try {
     const resp = await API.get('getProductosNuevosRecientes', { dias: 3 });
     pns = Array.isArray(resp) ? resp : (resp && resp.data) || [];
-    console.log('[PN aprobados]', pns.length, 'recientes');
-  } catch(e) {
-    errorMsg = e && e.message ? e.message : 'Error desconocido';
-    console.warn('[PN aprobados] error:', errorMsg);
+    console.log('[PN aprobados] recientes via endpoint nuevo:', pns.length);
+  } catch(e1) {
+    console.warn('[PN aprobados] endpoint nuevo falló, intentando legacy:', e1 && e1.message);
+    try {
+      const resp = await API.get('getProductosNuevos', { estado: 'APROBADO' });
+      const todos = Array.isArray(resp) ? resp : (resp && resp.data) || [];
+      // Filtrar por últimos 3 días en el frontend
+      const corte = Date.now() - (3 * 86400000);
+      pns = todos.filter(r => {
+        if (!r.fechaAprobacion) return false;
+        const t = new Date(r.fechaAprobacion).getTime();
+        return t >= corte;
+      }).map(r => {
+        // Inferir tipoAprobacion desde observacion
+        const obs = String(r.observacion || '').trim();
+        const tipo = obs.indexOf('EQUIVALENTE') === 0 ? 'EQUIVALENTE' : 'NUEVO';
+        return Object.assign({}, r, { tipoAprobacion: tipo });
+      }).sort((a, b) => new Date(b.fechaAprobacion) - new Date(a.fechaAprobacion));
+      console.log('[PN aprobados] via legacy:', pns.length);
+    } catch(e2) {
+      errorMsg = e2 && e2.message ? e2.message : 'Error desconocido';
+      console.warn('[PN aprobados] legacy también falló:', errorMsg);
+    }
   }
 
-  // Si la API falló (endpoint no desplegado en GAS) → mostrar aviso
+  // Si ambos endpoints fallaron → mostrar aviso
   if (errorMsg) {
     cont.classList.remove('hidden');
     cnt.textContent = '!';
-    list.innerHTML = `<div class="text-xs text-amber-400 italic px-2">⚠ Endpoint getProductosNuevosRecientes no responde. Verifica que el GAS de warehouseMos esté actualizado y desplegado. Detalle: ${errorMsg}</div>`;
+    list.innerHTML = `<div class="text-xs text-amber-400 italic px-2">⚠ No se pudo cargar productos aprobados. Detalle: ${errorMsg}</div>`;
     return;
   }
   if (!pns.length) { cont.classList.add('hidden'); return; }
