@@ -368,11 +368,23 @@ async function _cargarPNAprobados() {
   if (!cont || !list) return;
 
   let pns = [];
+  let errorMsg = '';
   try {
     const resp = await API.get('getProductosNuevosRecientes', { dias: 3 });
     pns = Array.isArray(resp) ? resp : (resp && resp.data) || [];
-  } catch(e) { pns = []; }
+    console.log('[PN aprobados]', pns.length, 'recientes');
+  } catch(e) {
+    errorMsg = e && e.message ? e.message : 'Error desconocido';
+    console.warn('[PN aprobados] error:', errorMsg);
+  }
 
+  // Si la API falló (endpoint no desplegado en GAS) → mostrar aviso
+  if (errorMsg) {
+    cont.classList.remove('hidden');
+    cnt.textContent = '!';
+    list.innerHTML = `<div class="text-xs text-amber-400 italic px-2">⚠ Endpoint getProductosNuevosRecientes no responde. Verifica que el GAS de warehouseMos esté actualizado y desplegado. Detalle: ${errorMsg}</div>`;
+    return;
+  }
   if (!pns.length) { cont.classList.add('hidden'); return; }
 
   // Toast: ¿hay aprobados desde la última visita?
