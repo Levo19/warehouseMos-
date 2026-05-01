@@ -361,7 +361,42 @@ function cerrarGuia(idGuia, usuario, idSesion) {
   guiasSheet.getRange(filaGuia, idxEstado + 1).setValue('CERRADA');
   guiasSheet.getRange(filaGuia, idxMontoTotal + 1).setValue(montoTotal);
 
+  // Si fue INGRESO_PROVEEDOR con idProveedor, sincroniza productos a MOS
+  // (silencioso: si falla, log y sigue)
+  try {
+    if (tipoGuia === 'INGRESO_PROVEEDOR') {
+      var idxProv = headers.indexOf('idProveedor');
+      var idProveedor = idxProv >= 0 ? String(guias[filaGuia - 1][idxProv] || '').trim() : '';
+      if (idProveedor) _syncProductosProvAMos(idProveedor, detalles);
+    }
+  } catch(eS) { Logger.log('sync productos proveedor: ' + eS.message); }
+
   return { ok: true, data: { idGuia: idGuia, estado: 'CERRADA', montoTotal: montoTotal } };
+}
+
+// Llama al GAS de MOS para upsert de cada producto en PROVEEDORES_PRODUCTOS
+function _syncProductosProvAMos(idProveedor, detalles) {
+  var url = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
+  if (!url) return;
+  detalles.forEach(function(d){
+    var cb = String(d.codigoProducto || '').trim();
+    var precio = parseFloat(d.precioUnitario) || 0;
+    if (!cb) return;
+    try {
+      UrlFetchApp.fetch(url, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          action: 'upsertProductoProveedor',
+          idProveedor: idProveedor,
+          codigoBarra: cb,
+          precioUnitario: precio,
+          descripcion: d.descripcion || ''
+        }),
+        muteHttpExceptions: true
+      });
+    } catch(e) { /* silencioso */ }
+  });
 }
 
 function _actualizarLote(idLote, codigoProducto, cantidad, fechaVencimiento, idGuia) {
