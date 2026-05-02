@@ -535,20 +535,27 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
     b1(0x1b); b1(0x61); b1(0x00);
   }
 
-  // ── Fecha estilo "1 mayo 3pm" ───────────────────────────────
+  // ── Fecha estilo "2 mayo 1:11pm" — timezone Lima forzado ────
+  // Usar Utilities.formatDate con tz explícita para evitar desfases
+  // si el script está configurado en otra zona horaria.
   var fechaPI = '';
   try {
-    var d = new Date(pi.fecha || pi.fechaCreacion || new Date());
-    var meses = ['enero','febrero','marzo','abril','mayo','junio',
-                 'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-    var dia    = d.getDate();
-    var mes    = meses[d.getMonth()] || '';
-    var hh     = d.getHours();
-    var mm     = d.getMinutes();
-    var ampm   = hh >= 12 ? 'pm' : 'am';
-    var hh12   = hh % 12; if (hh12 === 0) hh12 = 12;
-    var horaTxt = mm === 0 ? (hh12 + ampm) : (hh12 + ':' + (mm < 10 ? '0' : '') + mm + ampm);
-    fechaPI = dia + ' ' + mes + ' ' + horaTxt;
+    var rawFecha = pi.fecha || pi.fechaCreacion;
+    var d = (rawFecha instanceof Date) ? rawFecha : new Date(rawFecha || new Date());
+    if (!isNaN(d.getTime())) {
+      var tzLima = 'America/Lima';
+      var meses = ['enero','febrero','marzo','abril','mayo','junio',
+                   'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+      var dia    = parseInt(Utilities.formatDate(d, tzLima, 'd'), 10);
+      var mesIdx = parseInt(Utilities.formatDate(d, tzLima, 'M'), 10) - 1;
+      var hh     = parseInt(Utilities.formatDate(d, tzLima, 'H'), 10);
+      var mm     = parseInt(Utilities.formatDate(d, tzLima, 'm'), 10);
+      var mes    = meses[mesIdx] || '';
+      var ampm   = hh >= 12 ? 'pm' : 'am';
+      var hh12   = hh % 12; if (hh12 === 0) hh12 = 12;
+      var horaTxt = mm === 0 ? (hh12 + ampm) : (hh12 + ':' + (mm < 10 ? '0' : '') + mm + ampm);
+      fechaPI = dia + ' ' + mes + ' ' + horaTxt;
+    }
   } catch(e) {}
   if (fechaPI) {
     b1(0x1b); b1(0x61); b1(0x01);
@@ -572,9 +579,6 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
     b1(0x1b); b1(0x61); b1(0x00);
     bLn(SEP);
   }
-
-  // ── Estado ──────────────────────────────────────────────────
-  if (pi.estado) bLn('Estado:  ' + String(pi.estado).toUpperCase());
 
   // ── Cargadores: uno por línea ───────────────────────────────
   var cargs = [];
