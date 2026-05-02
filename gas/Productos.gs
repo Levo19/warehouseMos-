@@ -302,22 +302,46 @@ function registrarProductoNuevo(params) {
 
   // Si tiene guía → escribir directo a GUIA_DETALLE sin validar catálogo
   // (el PN aún no está aprobado → no existe en PRODUCTOS_MASTER)
+  // AUTO-SUMA: si ya existe detalle (mismo idGuia + codigoBarra, no anulado),
+  // sumar cantidad en lugar de duplicar. Previene reintentos y doble-clicks.
   if (params.idGuia) {
     try {
-      var detSheet   = getSheet('GUIA_DETALLE');
-      var idDetalle  = _generateId('DET');
-      var nextDetRow = detSheet.getLastRow() + 1;
-      detSheet.appendRow([
-        idDetalle,
-        params.idGuia,
-        codigoBarra,
-        0,
-        parseFloat(params.cantidad) || 1,
-        0,
-        '',
-        'PN_PENDIENTE'
-      ]);
-      detSheet.getRange(nextDetRow, 3).setNumberFormat('@').setValue(codigoBarra);
+      var detSheet  = getSheet('GUIA_DETALLE');
+      var detData   = detSheet.getDataRange().getValues();
+      var hdrs      = detData[0];
+      var idxIdG    = hdrs.indexOf('idGuia');
+      var idxCb     = hdrs.indexOf('codigoProducto');
+      var idxRec    = hdrs.indexOf('cantidadRecibida');
+      var idxObs    = hdrs.indexOf('observacion');
+      var cantNueva = parseFloat(params.cantidad) || 1;
+      var sumado    = false;
+
+      for (var dr = 1; dr < detData.length; dr++) {
+        if (String(detData[dr][idxIdG]) !== String(params.idGuia)) continue;
+        if (String(detData[dr][idxCb]).toUpperCase() !== String(codigoBarra).toUpperCase()) continue;
+        if (String(detData[dr][idxObs] || '').toUpperCase() === 'ANULADO') continue;
+        // Match: sumar al detalle existente
+        var qtyExist = parseFloat(detData[dr][idxRec]) || 0;
+        detSheet.getRange(dr + 1, idxRec + 1).setValue(qtyExist + cantNueva);
+        sumado = true;
+        break;
+      }
+
+      if (!sumado) {
+        var idDetalle  = _generateId('DET');
+        var nextDetRow = detSheet.getLastRow() + 1;
+        detSheet.appendRow([
+          idDetalle,
+          params.idGuia,
+          codigoBarra,
+          0,
+          cantNueva,
+          0,
+          '',
+          'PN_PENDIENTE'
+        ]);
+        detSheet.getRange(nextDetRow, 3).setNumberFormat('@').setValue(codigoBarra);
+      }
     } catch(e) {
       Logger.log('Error al agregar detalle PN a guia: ' + e.message);
     }

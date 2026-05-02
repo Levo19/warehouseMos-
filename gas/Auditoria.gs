@@ -247,6 +247,61 @@ function marcarAlertaRevisada(params) {
 }
 
 // ============================================================
+// Limpieza one-shot de duplicados en GUIA_DETALLE.
+// Recorre todas las guías y, si hay 2+ detalles con mismo codigoProducto
+// (no anulados), conserva el PRIMERO (suma sus cantidades) y borra el resto.
+// Útil para reparar duplicados históricos. Idempotente: si no hay
+// duplicados, no hace nada. Devuelve resumen.
+// ============================================================
+function limpiarDuplicadosGuiaDetalle() {
+  var sheet = getSheet('GUIA_DETALLE');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId    = hdrs.indexOf('idDetalle');
+  var idxIdG   = hdrs.indexOf('idGuia');
+  var idxCb    = hdrs.indexOf('codigoProducto');
+  var idxRec   = hdrs.indexOf('cantidadRecibida');
+  var idxObs   = hdrs.indexOf('observacion');
+
+  // Mapa: clave (idGuia + cb) → primera fila vista
+  var primeros = {};
+  var aBorrar  = []; // lista de filas (1-based) a borrar de abajo hacia arriba
+  var sumar    = []; // [{filaPrimero, cantidadAdicional}]
+
+  for (var i = 1; i < data.length; i++) {
+    var idG = String(data[i][idxIdG] || '');
+    var cb  = String(data[i][idxCb]  || '').toUpperCase();
+    var obs = String(data[i][idxObs] || '').toUpperCase();
+    if (!idG || !cb || obs === 'ANULADO') continue;
+    var key = idG + '|' + cb;
+    if (primeros[key] === undefined) {
+      primeros[key] = i;  // primera vez: conservar
+    } else {
+      // Duplicado: sumar al primero, borrar este
+      var qtyDup = parseFloat(data[i][idxRec]) || 0;
+      sumar.push({ filaPrimero: primeros[key] + 1, cantidad: qtyDup });
+      aBorrar.push(i + 1);
+    }
+  }
+
+  // Aplicar sumas primero (antes de borrar para preservar índices)
+  sumar.forEach(function(s) {
+    var celda  = sheet.getRange(s.filaPrimero, idxRec + 1);
+    var qtyAct = parseFloat(celda.getValue()) || 0;
+    celda.setValue(qtyAct + s.cantidad);
+  });
+
+  // Borrar de abajo hacia arriba para preservar índices
+  aBorrar.sort(function(a, b) { return b - a; }).forEach(function(f) {
+    sheet.deleteRow(f);
+  });
+
+  Logger.log('limpiarDuplicadosGuiaDetalle: ' + aBorrar.length + ' duplicados eliminados, ' +
+             sumar.length + ' sumas aplicadas');
+  return { ok: true, data: { duplicadosEliminados: aBorrar.length, sumasAplicadas: sumar.length } };
+}
+
+// ============================================================
 // Setup de triggers — ejecutar UNA vez desde el editor de Apps Script
 // ============================================================
 function setupTriggersAuditoria() {

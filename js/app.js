@@ -3862,7 +3862,11 @@ const GuiasView = (() => {
     reader.readAsDataURL(file);
   }
 
+  let _pnSubmitting = false;
   async function confirmarRegistrarPN() {
+    if (_pnSubmitting) return;  // guard contra doble click
+    _pnSubmitting = true;
+
     const modal    = document.getElementById('modalProductoNuevo');
     const idGuia   = modal?.dataset.pnGuia || '';
     const cantidad = parseFloat(document.getElementById('pnCantidad')?.value) || 1;
@@ -3882,6 +3886,12 @@ const GuiasView = (() => {
       params.fotoBase64 = _pnFotoBase64;
       params.mimeType   = _pnFotoMime;
     }
+
+    // Limpiar estado del modal ANTES de la llamada para evitar reuso del codigoBarra
+    const cbAEnviar = _pnCodigo;
+    _pnCodigo = '';
+    _pnFotoBase64 = null;
+    _pnFotoMime   = '';
 
     cerrarModalPN();
     _ocultarPNOffer();
@@ -3931,6 +3941,8 @@ const GuiasView = (() => {
       }
     } catch(e) {
       toast('Error al registrar producto nuevo', 'warn', 3000);
+    } finally {
+      _pnSubmitting = false;
     }
   }
 

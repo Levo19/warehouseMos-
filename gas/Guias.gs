@@ -145,6 +145,50 @@ function agregarDetalleGuia(params) {
   // Preservar el código escaneado exacto (puede ser equiv o master) — stock es independiente por barcode
   var cbProd = codigoBuscado;
 
+  // ── AUTO-SUMA: si ya existe detalle (mismo idGuia + cb, no anulado), sumar cantidad ──
+  // Previene duplicados por reintentos, doble-click o flujos paralelos.
+  // Si la guía está CERRADA, también ajusta el stock por el delta.
+  var detData    = sheet.getDataRange().getValues();
+  var hdrs       = detData[0];
+  var idxIdG     = hdrs.indexOf('idGuia');
+  var idxCb      = hdrs.indexOf('codigoProducto');
+  var idxRec     = hdrs.indexOf('cantidadRecibida');
+  var idxObs     = hdrs.indexOf('observacion');
+  var idxIdDet   = hdrs.indexOf('idDetalle');
+  for (var dr = 1; dr < detData.length; dr++) {
+    if (String(detData[dr][idxIdG]) !== String(params.idGuia)) continue;
+    if (String(detData[dr][idxCb]).toUpperCase() !== cbProd) continue;
+    if (String(detData[dr][idxObs] || '').toUpperCase() === 'ANULADO') continue;
+
+    // Match: sumar cantidades en el detalle existente
+    var existingId  = String(detData[dr][idxIdDet]);
+    var qtyAnterior = parseFloat(detData[dr][idxRec]) || 0;
+    var qtyNueva    = qtyAnterior + cantRecibida;
+    sheet.getRange(dr + 1, idxRec + 1).setValue(qtyNueva);
+
+    // Si la guía ya está CERRADA, ajustar stock por la diferencia agregada
+    var guiaInfo2 = _getGuiaInfo(params.idGuia);
+    if (guiaInfo2 && String(guiaInfo2.estado).toUpperCase() === 'CERRADA' && cantRecibida !== 0) {
+      var esIngreso2 = String(guiaInfo2.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
+      var deltaSum = esIngreso2 ? cantRecibida : -cantRecibida;
+      _actualizarStock(cbProd, deltaSum);
+    }
+
+    return {
+      ok: true,
+      autoSumado: true,
+      data: {
+        idDetalle:          existingId,
+        idGuia:             params.idGuia,
+        codigoProducto:     cbProd,
+        descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
+        cantidadEsperada:   cantEsperada,
+        cantidadRecibida:   qtyNueva,
+        precioUnitario:     precioUnit
+      }
+    };
+  }
+
   // Lote: si viene fechaVencimiento, crear lote inmediatamente
   var idLote = params.idLote || '';
   var fechaVenc = params.fechaVencimiento || '';
