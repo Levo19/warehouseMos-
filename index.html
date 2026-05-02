@@ -1386,10 +1386,99 @@
       _reg.update().catch(() => {});
       setInterval(() => _reg?.update().catch(() => {}), 5 * 60 * 1000);
     }).catch(e => console.warn('[SW]', e));
+
+    // ── FORCED UPDATE: compara version.json con la versión cargada ─────
+    // Algunos navegadores cachean el SW agresivamente y la actualización
+    // normal se atrasa. Este check fuerza la actualización sin opción
+    // del usuario cuando detecta que el bundle local difiere del publicado.
+    let _APP_VERSION_BL = null; // baseline: versión vista al cargar la app
+    let _forceUpdateTriggered = false;
+
+    async function _checkForcedUpdate() {
+      if (_forceUpdateTriggered) return;
+      try {
+        const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!j || !j.version) return;
+        if (_APP_VERSION_BL === null) {
+          _APP_VERSION_BL = j.version; // primera carga — guarda baseline
+          return;
+        }
+        if (j.version !== _APP_VERSION_BL) {
+          _forceUpdateTriggered = true;
+          // Mostrar overlay no-dismissable
+          const el = document.getElementById('whUpdateOverlay');
+          if (el) {
+            el.classList.add('visible');
+            const sub = el.querySelector('.wh-upd-sub');
+            if (sub) sub.textContent = 'Actualizando a v' + j.version + ' · obligatorio';
+          }
+          // Marcar resync de catálogo post-reload (los masters pueden cambiar)
+          try { localStorage.setItem('wh_force_resync', '1'); } catch(e) {}
+          // Intentar update SW + skipWaiting
+          if (window._SWCheck) { try { await window._SWCheck(); } catch(e) {} }
+          // Forzar recarga si el SW no disparó controllerchange en 3s
+          setTimeout(() => { location.reload(true); }, 3000);
+        }
+      } catch(e) {}
+    }
+    // Primer check inmediato (guarda baseline)
+    _checkForcedUpdate();
+    // Cada 3 minutos
+    setInterval(_checkForcedUpdate, 3 * 60 * 1000);
+    // Cada vez que la app vuelve al foreground (cambio de pestaña / unlock)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') _checkForcedUpdate();
+    });
   })();
   </script>
+  <style>
+    /* ── Forced update overlay ──────────────────────── */
+    #whUpdateOverlay {
+      display:none;position:fixed;inset:0;z-index:9999;
+      background:#0a0f1e;
+      flex-direction:column;align-items:center;justify-content:center;
+      font-family:system-ui,-apple-system,sans-serif;
+    }
+    #whUpdateOverlay.visible { display:flex; }
+    .wh-upd-logo {
+      width:68px;height:68px;border-radius:20px;
+      background:linear-gradient(135deg,#0ea5e9,#7c3aed);
+      display:flex;align-items:center;justify-content:center;
+      font-size:1.7rem;font-weight:900;color:#fff;letter-spacing:.05em;
+      margin-bottom:28px;
+      animation:whLogoPulse 2s ease-in-out infinite;
+    }
+    @keyframes whLogoPulse {
+      0%,100%{ box-shadow:0 0 0 0 rgba(14,165,233,.5); }
+      50%    { box-shadow:0 0 0 18px rgba(14,165,233,0); }
+    }
+    .wh-upd-title { font-size:1.2rem;font-weight:700;color:#f1f5f9;margin:0 0 6px;text-align:center; }
+    .wh-upd-sub   { font-size:.82rem;color:#64748b;margin:0 0 26px;text-align:center; }
+    .wh-upd-dots  { display:flex;gap:9px; }
+    .wh-upd-dots span {
+      width:8px;height:8px;border-radius:50%;background:#0ea5e9;
+      animation:whDotP 1.2s ease-in-out infinite;
+    }
+    .wh-upd-dots span:nth-child(2){ animation-delay:.2s; }
+    .wh-upd-dots span:nth-child(3){ animation-delay:.4s; }
+    @keyframes whDotP {
+      0%,80%,100%{ opacity:.2;transform:scale(.8); }
+      40%        { opacity:1;transform:scale(1.2); }
+    }
+  </style>
 </head>
 <body class="pb-20">
+
+<!-- Forced update overlay (full-screen, no dismissable) -->
+<div id="whUpdateOverlay">
+  <div class="wh-upd-logo">WH</div>
+  <h2 class="wh-upd-title">Actualizando warehouseMos</h2>
+  <p class="wh-upd-sub">Nueva versión disponible · Instalando...</p>
+  <div class="wh-upd-dots"><span></span><span></span><span></span></div>
+</div>
+
 <!-- Banner nueva versión disponible -->
 <div id="whUpdateBanner" role="alert" aria-live="polite">
   <div class="wh-upd-banner-inner">
