@@ -29,7 +29,10 @@ function cerrarGuiasAbiertasGlobal() {
   var ok = 0, err = 0;
   abiertas.forEach(function(idGuia) {
     try {
-      var res = cerrarGuia(idGuia, 'sistema-cierre-21h', null);
+      // skipMosSync: evita el UrlFetchApp por cada detalle (lento si hay muchos
+      // productos, causa timeout >6min). El sync interactivo de productos
+      // proveedor sigue funcionando cuando el usuario cierra guías manualmente.
+      var res = cerrarGuia(idGuia, 'sistema-cierre-21h', null, { skipMosSync: true });
       if (res.ok) ok++; else err++;
     } catch(e) { err++; Logger.log('Error cerrando ' + idGuia + ': ' + e.message); }
   });

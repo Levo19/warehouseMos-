@@ -431,8 +431,10 @@ function autoCloseDayGuias() {
   return { ok: true, data: { cerradas: cerradas } };
 }
 
-function cerrarGuia(idGuia, usuario, idSesion) {
+function cerrarGuia(idGuia, usuario, idSesion, opts) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+  opts = opts || {};
+  var skipMosSync = opts.skipMosSync === true;  // omitir sync a MOS (uso en cierres masivos para evitar timeout)
 
   var guiasSheet    = getSheet('GUIAS');
   var guias         = guiasSheet.getDataRange().getValues();
@@ -496,13 +498,17 @@ function cerrarGuia(idGuia, usuario, idSesion) {
 
   // Si fue INGRESO_PROVEEDOR con idProveedor, sincroniza productos a MOS
   // (silencioso: si falla, log y sigue)
-  try {
-    if (tipoGuia === 'INGRESO_PROVEEDOR') {
-      var idxProv = headers.indexOf('idProveedor');
-      var idProveedor = idxProv >= 0 ? String(guias[filaGuia - 1][idxProv] || '').trim() : '';
-      if (idProveedor) _syncProductosProvAMos(idProveedor, detalles);
-    }
-  } catch(eS) { Logger.log('sync productos proveedor: ' + eS.message); }
+  // OMITIR si skipMosSync (cierres masivos para evitar timeout — el sync hace
+  // un UrlFetchApp por cada detalle, lento si la guía tiene muchos productos).
+  if (!skipMosSync) {
+    try {
+      if (tipoGuia === 'INGRESO_PROVEEDOR') {
+        var idxProv = headers.indexOf('idProveedor');
+        var idProveedor = idxProv >= 0 ? String(guias[filaGuia - 1][idxProv] || '').trim() : '';
+        if (idProveedor) _syncProductosProvAMos(idProveedor, detalles);
+      }
+    } catch(eS) { Logger.log('sync productos proveedor: ' + eS.message); }
+  }
 
   return { ok: true, data: { idGuia: idGuia, estado: 'CERRADA', montoTotal: montoTotal } };
 }
