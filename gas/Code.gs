@@ -104,6 +104,7 @@ function _route(method, e) {
       case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
       case 'actualizarFechaVencimiento':  return actualizarFechaVencimiento(params);
       case 'actualizarCantidadDetalle':   return actualizarCantidadDetalle(params);
+      case 'actualizarPreciosDetalle':    return actualizarPreciosDetalle(params);
       case 'cerrarGuia':                return cerrarGuia(params.idGuia, params.usuario, params.idSesion);
       case 'reabrirGuia':               return reabrirGuia(params);
       case 'anularDetalle':             return anularDetalle(params);
@@ -171,6 +172,7 @@ function _route(method, e) {
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
       case 'getAlertasStock':     return getAlertasStock(params);
       case 'marcarAlertaRevisada':return marcarAlertaRevisada(params);
+      case 'aceptarTeoricoAlerta':return aceptarTeoricoAlerta(params);
       case 'auditarStockGlobal':  return auditarStockGlobal();
       case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 

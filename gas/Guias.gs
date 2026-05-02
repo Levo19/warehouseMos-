@@ -272,6 +272,65 @@ function actualizarCantidadDetalle(params) {
   return { ok: false, error: 'Detalle no encontrado: ' + idDetalle };
 }
 
+// Actualizar precios unitarios de varias líneas de una guía en batch.
+// params: { idGuia, items: [{ idDetalle, precioUnitario }] }
+function actualizarPreciosDetalle(params) {
+  if (!params.idGuia || !Array.isArray(params.items) || !params.items.length) {
+    return { ok: false, error: 'idGuia + items[] requeridos' };
+  }
+  var sheet  = getSheet('GUIA_DETALLE');
+  var data   = sheet.getDataRange().getValues();
+  var hdrs   = data[0];
+  var idxId  = hdrs.indexOf('idDetalle');
+  var idxIdG = hdrs.indexOf('idGuia');
+  var idxPU  = hdrs.indexOf('precioUnitario');
+  if (idxId < 0 || idxPU < 0) return { ok: false, error: 'Columnas no encontradas en GUIA_DETALLE' };
+
+  // Mapa idDetalle → precio nuevo
+  var mapPrecio = {};
+  params.items.forEach(function(it) {
+    if (it.idDetalle && it.precioUnitario !== undefined && it.precioUnitario !== '' && !isNaN(parseFloat(it.precioUnitario))) {
+      mapPrecio[String(it.idDetalle)] = parseFloat(it.precioUnitario);
+    }
+  });
+
+  var actualizados = 0;
+  var sumaTotal   = 0;
+  var idxCantR    = hdrs.indexOf('cantidadRecibida');
+  var idxCantE    = hdrs.indexOf('cantidadEsperada');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxIdG]) !== String(params.idGuia)) continue;
+    var idDet = String(data[i][idxId]);
+    if (mapPrecio.hasOwnProperty(idDet)) {
+      sheet.getRange(i + 1, idxPU + 1).setValue(mapPrecio[idDet]);
+      actualizados++;
+    }
+    // Sumar para recalcular monto total de la guía
+    var cant = (idxCantR >= 0 ? parseFloat(data[i][idxCantR]) : 0) || (idxCantE >= 0 ? parseFloat(data[i][idxCantE]) : 0) || 0;
+    var precio = mapPrecio[idDet] !== undefined ? mapPrecio[idDet] : (parseFloat(data[i][idxPU]) || 0);
+    sumaTotal += cant * precio;
+  }
+
+  // Actualizar montoTotal de la guía
+  try {
+    var shGuias = getSheet('GUIAS');
+    var dataG = shGuias.getDataRange().getValues();
+    var hdrsG = dataG[0];
+    var idxGid = hdrsG.indexOf('idGuia');
+    var idxGmt = hdrsG.indexOf('montoTotal');
+    if (idxGid >= 0 && idxGmt >= 0) {
+      for (var j = 1; j < dataG.length; j++) {
+        if (String(dataG[j][idxGid]) === String(params.idGuia)) {
+          shGuias.getRange(j + 1, idxGmt + 1).setValue(Math.round(sumaTotal * 100) / 100);
+          break;
+        }
+      }
+    }
+  } catch(_){}
+
+  return { ok: true, data: { actualizados: actualizados, montoTotalNuevo: Math.round(sumaTotal * 100) / 100 } };
+}
+
 // Helper: lee la guía y retorna {tipo, estado} o null si no existe
 function _getGuiaInfo(idGuia) {
   var sheet   = getSheet('GUIAS');
