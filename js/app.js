@@ -1139,41 +1139,146 @@ const Dashboard = (() => {
     if (btn) btn.style.display = _alertasCache.length > 3 ? '' : 'none';
   }
 
+  // Estado del modal de alertas: filtro y búsqueda
+  let _alertaFiltro = 'todas';   // 'todas' | 'salidas' | 'entradas'
+  let _alertaQuery  = '';
+
   function verTodasAlertas() {
-    const list = document.getElementById('listAlertasStockFull');
-    const sub  = document.getElementById('alertasStockSub');
-    if (!list) return;
-    if (!_alertasCache.length) { list.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Sin alertas pendientes</p>'; }
-    else {
-      const fechaUlt = _alertasCache[0]?.fecha;
-      if (sub) sub.textContent = fechaUlt ? `Última auditoría: ${new Date(fechaUlt).toLocaleString('es-PE')}` : '';
-      list.innerHTML = [..._alertasCache]
-        .sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia))
-        .map(a => {
-          const safeId = escAttr(a.idAlerta);
-          const explica = a.diferencia > 0
-            ? `Stock <b>+${fmt(a.diferencia,1)}</b> mayor a lo esperado — entradas no registradas o salidas anuladas tras cerrar guía`
-            : `Stock <b>${fmt(a.diferencia,1)}</b> menor a lo esperado — salidas no registradas o cierres duplicados`;
-          return `
-          <div class="card-sm" style="border:1px solid rgba(239,68,68,.3);padding:10px 12px">
-            <div class="flex items-start justify-between gap-2 mb-1.5">
-              <div class="flex-1 min-w-0">
-                <p class="font-bold text-sm text-slate-100 truncate">${escHtml(a.descripcion)}</p>
-                <p class="text-[10px] text-slate-500 font-mono">${escHtml(a.codigoProducto)}</p>
-              </div>
-              <span class="font-black text-base ${a.diferencia > 0 ? 'text-amber-400' : 'text-red-400'} flex-shrink-0">${a.diferencia > 0 ? '+' : ''}${fmt(a.diferencia,1)}</span>
-            </div>
-            <div class="grid grid-cols-2 gap-1 text-[11px] mb-1.5">
-              <div><span class="text-slate-500">Stock real:</span> <b class="text-slate-200">${fmt(a.stockReal,1)}</b></div>
-              <div><span class="text-slate-500">Teórico:</span> <b class="text-slate-200">${fmt(a.stockTeorico,1)}</b></div>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-tight mb-2">${explica}</p>
-            <button onclick="Dashboard.marcarAlertaRevisada('${safeId}')"
-                    class="text-[11px] text-emerald-400 underline">✓ Marcar revisado</button>
-          </div>`;
-        }).join('');
-    }
+    _alertaFiltro = 'todas';
+    _alertaQuery  = '';
+    const inp = document.getElementById('alertaSearchInput');
+    if (inp) inp.value = '';
+    const sub = document.getElementById('alertasStockSub');
+    const fechaUlt = _alertasCache[0]?.fecha;
+    if (sub) sub.textContent = fechaUlt ? `Última auditoría: ${new Date(fechaUlt).toLocaleString('es-PE')}` : '';
+    _renderAlertasFiltradas();
     abrirSheet('sheetAlertasStock');
+  }
+
+  function setAlertaFiltro(filtro) {
+    _alertaFiltro = filtro;
+    _renderAlertasFiltradas();
+  }
+
+  function buscarAlerta(q) {
+    _alertaQuery = String(q || '').toLowerCase().trim();
+    _renderAlertasFiltradas();
+  }
+
+  function _renderAlertasFiltradas() {
+    const list = document.getElementById('listAlertasStockFull');
+    if (!list) return;
+
+    // Conteos por categoría (para los chips)
+    const totalSalidas  = _alertasCache.filter(a => a.diferencia < 0).length;
+    const totalEntradas = _alertasCache.filter(a => a.diferencia > 0).length;
+    const total         = _alertasCache.length;
+    const cT  = document.getElementById('chipAlertasTodas');
+    const cS  = document.getElementById('chipAlertasSalidas');
+    const cE  = document.getElementById('chipAlertasEntradas');
+    if (cT) cT.textContent = `Todas (${total})`;
+    if (cS) cS.textContent = `Salidas fantasma (${totalSalidas})`;
+    if (cE) cE.textContent = `Entradas fantasma (${totalEntradas})`;
+    [cT, cS, cE].forEach(c => c && c.classList.remove('chip-active'));
+    const activo = _alertaFiltro === 'salidas' ? cS : (_alertaFiltro === 'entradas' ? cE : cT);
+    if (activo) activo.classList.add('chip-active');
+
+    // Filtrar
+    let lista = [..._alertasCache];
+    if (_alertaFiltro === 'salidas')  lista = lista.filter(a => a.diferencia < 0);
+    if (_alertaFiltro === 'entradas') lista = lista.filter(a => a.diferencia > 0);
+    if (_alertaQuery) {
+      lista = lista.filter(a =>
+        String(a.descripcion).toLowerCase().includes(_alertaQuery) ||
+        String(a.codigoProducto).toLowerCase().includes(_alertaQuery)
+      );
+    }
+    lista.sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia));
+
+    if (!lista.length) {
+      list.innerHTML = '<p class="text-xs text-slate-500 text-center py-6">Sin alertas en esta categoría</p>';
+      return;
+    }
+
+    list.innerHTML = lista.map(a => {
+      const safeId = escAttr(a.idAlerta);
+      const safeCb = escAttr(a.codigoProducto);
+      const safeNm = escAttr(a.descripcion);
+      const teor   = a.stockTeorico;
+      const explica = a.diferencia > 0
+        ? `Stock <b>+${fmt(a.diferencia,1)}</b> mayor a lo esperado — entradas no registradas o salidas anuladas tras cerrar guía`
+        : `Stock <b>${fmt(a.diferencia,1)}</b> menor a lo esperado — salidas no registradas o cierres duplicados`;
+      return `
+      <div class="card-sm" style="border:1px solid rgba(239,68,68,.3);padding:10px 12px">
+        <div class="flex items-start justify-between gap-2 mb-1.5">
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-sm text-slate-100 truncate">${escHtml(a.descripcion)}</p>
+            <p class="text-[10px] text-slate-500 font-mono">${escHtml(a.codigoProducto)}</p>
+          </div>
+          <span class="font-black text-base ${a.diferencia > 0 ? 'text-amber-400' : 'text-red-400'} flex-shrink-0">${a.diferencia > 0 ? '+' : ''}${fmt(a.diferencia,1)}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-1 text-[11px] mb-2">
+          <div><span class="text-slate-500">Stock real:</span> <b class="text-slate-200">${fmt(a.stockReal,1)}</b></div>
+          <div><span class="text-slate-500">Teórico:</span> <b class="text-slate-200">${fmt(a.stockTeorico,1)}</b></div>
+        </div>
+        <p class="text-[11px] text-slate-400 leading-tight mb-2">${explica}</p>
+        <div class="flex gap-1.5 flex-wrap">
+          <button onclick="Dashboard.auditarDesdeAlerta('${safeId}','${safeCb}','${safeNm}',${teor})"
+                  class="text-[11px] px-2.5 py-1 rounded font-bold"
+                  style="background:rgba(14,165,233,.18);color:#38bdf8;border:1px solid rgba(14,165,233,.4)">
+            📋 Auditar
+          </button>
+          <button onclick="Dashboard.aceptarTeorico('${safeId}')"
+                  class="text-[11px] px-2.5 py-1 rounded font-bold"
+                  style="background:rgba(16,185,129,.18);color:#34d399;border:1px solid rgba(16,185,129,.4)">
+            ⚡ Aceptar teórico
+          </button>
+          <button onclick="Dashboard.marcarAlertaRevisada('${safeId}')"
+                  class="text-[11px] px-2.5 py-1 rounded font-bold"
+                  style="background:rgba(100,116,139,.18);color:#94a3b8;border:1px solid rgba(100,116,139,.3)">
+            ✓ Solo revisar
+          </button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function auditarDesdeAlerta(idAlerta, codigoBarra, nombre, stockTeorico) {
+    cerrarSheet('sheetAlertasStock');
+    setTimeout(() => {
+      // Buscar skuBase del producto en cache
+      const prods = OfflineManager.getProductosCache();
+      const p = prods.find(x =>
+        String(x.codigoBarra || '') === codigoBarra ||
+        String(x.idProducto  || '') === codigoBarra ||
+        String(x.skuBase     || '') === codigoBarra
+      );
+      const skuBase = p?.skuBase || p?.idProducto || codigoBarra;
+      ProductosView.abrirAuditBarcode(codigoBarra, nombre, skuBase, {
+        prefillFisico: stockTeorico,
+        idAlerta
+      });
+    }, 300);
+  }
+
+  async function aceptarTeorico(idAlerta) {
+    if (!confirm('¿Aplicar el stock teórico? Se creará un ajuste automático que iguala el stock real al teórico.')) return;
+    try {
+      const res = await API.aceptarTeoricoAlerta({
+        idAlerta,
+        usuario: window.WH_CONFIG?.usuario || ''
+      });
+      if (res.ok) {
+        const aj = res.data?.ajusteAplicado || 0;
+        toast(`✓ Stock corregido${aj !== 0 ? ` (ajuste ${aj > 0 ? '+' : ''}${fmt(aj, 1)})` : ''}`, 'ok', 3000);
+        // Quitar de la lista local y re-render
+        _alertasCache = _alertasCache.filter(a => a.idAlerta !== idAlerta);
+        _renderAlertasStock();
+        _renderAlertasFiltradas();
+      } else {
+        toast('Error: ' + (res.error || 'No se pudo aplicar'), 'danger', 5000);
+      }
+    } catch(e) { toast('Sin conexión', 'warn', 3000); }
   }
 
   async function marcarAlertaRevisada(idAlerta) {
@@ -1190,7 +1295,8 @@ const Dashboard = (() => {
     } catch(e) { toast('Sin conexión', 'warn'); }
   }
 
-  return { toggle, cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada };
+  return { toggle, cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada,
+           setAlertaFiltro, buscarAlerta, auditarDesdeAlerta, aceptarTeorico };
 })();
 
 // ════════════════════════════════════════════════
@@ -8084,15 +8190,20 @@ const ProductosView = (() => {
     _render(_filtrados);
   }
 
-  function abrirAuditBarcode(codigoBarra, nombre, skuBase) {
+  function abrirAuditBarcode(codigoBarra, nombre, skuBase, opts) {
+    opts = opts || {};
     const cod = String(codigoBarra);
     const s   = _s(cod);
-    _auditTarget = { codigoBarra: cod, nombre, skuBase };
+    _auditTarget = { codigoBarra: cod, nombre, skuBase, idAlerta: opts.idAlerta || null };
     document.getElementById('auditNombre').textContent   = nombre;
     document.getElementById('auditCodigo').textContent   = cod;
     document.getElementById('auditStockSis').textContent = fmt(s.cantidadDisponible || 0);
-    document.getElementById('auditConteo').value         = '';
-    document.getElementById('auditObs').value            = '';
+    // Pre-llenar conteo con teórico (si viene de una alerta) — el usuario puede editarlo
+    document.getElementById('auditConteo').value =
+      (opts.prefillFisico !== undefined && opts.prefillFisico !== null)
+        ? String(opts.prefillFisico) : '';
+    document.getElementById('auditObs').value =
+      opts.idAlerta ? 'Auditoría desde alerta de cuadre' : '';
     abrirSheet('sheetAudit');
   }
 
@@ -8141,6 +8252,10 @@ const ProductosView = (() => {
       usuario:     window.WH_CONFIG?.usuario || ''
     }).then(res => {
       if (!res.ok) toast('Error al guardar en servidor: ' + (res.error || ''), 'danger', 5000);
+      // Si la auditoría vino de una alerta de cuadre, marcarla como revisada
+      else if (target.idAlerta && typeof Dashboard !== 'undefined') {
+        Dashboard.marcarAlertaRevisada(target.idAlerta);
+      }
     }).catch(() => {
       toast('Sin conexión — auditoría en cola', 'warn', 4000);
     });

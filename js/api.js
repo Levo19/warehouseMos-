@@ -154,6 +154,7 @@ const API = (() => {
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
     getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),
     marcarAlertaRevisada:(p)     => post({ action: 'marcarAlertaRevisada', ...p }),
+    aceptarTeoricoAlerta:(p)     => post({ action: 'aceptarTeoricoAlerta', ...p }),
     imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
 
     // Guías — acciones extra

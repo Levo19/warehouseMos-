@@ -228,6 +228,57 @@ function getAlertasStock(params) {
   return { ok: true, data: rows };
 }
 
+// ============================================================
+// aceptarTeoricoAlerta — corrección one-click: crea AJUSTE para
+// que stock real = stock teórico, y marca la alerta como revisada.
+// Útil para diferencias chicas donde no hace falta conteo físico.
+// ============================================================
+function aceptarTeoricoAlerta(params) {
+  var idAlerta = String(params.idAlerta || '');
+  if (!idAlerta) return { ok: false, error: 'idAlerta requerido' };
+  var usuario = String(params.usuario || 'sistema');
+
+  var ss = SpreadsheetApp.openById(SS_ID);
+  var sheet = ss.getSheetByName('ALERTAS_STOCK');
+  if (!sheet) return { ok: false, error: 'Hoja ALERTAS_STOCK no existe' };
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0];
+  var idxId    = hdrs.indexOf('idAlerta');
+  var idxCb    = hdrs.indexOf('codigoProducto');
+  var idxReal  = hdrs.indexOf('stockReal');
+  var idxTeor  = hdrs.indexOf('stockTeorico');
+  var idxRev   = hdrs.indexOf('revisado');
+  var idxFecR  = hdrs.indexOf('fechaRevision');
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) !== idAlerta) continue;
+    var cb       = String(data[i][idxCb]);
+    var stockReal = parseFloat(data[i][idxReal]) || 0;
+    var stockTeor = parseFloat(data[i][idxTeor]) || 0;
+    var diff      = stockTeor - stockReal;  // ajuste para que real → teórico
+    if (Math.abs(diff) <= 0.5) {
+      // Ya están iguales; solo marcar revisada
+      sheet.getRange(i + 1, idxRev + 1).setValue('SI');
+      if (idxFecR >= 0) sheet.getRange(i + 1, idxFecR + 1).setValue(new Date());
+      return { ok: true, data: { idAlerta: idAlerta, ajusteAplicado: 0 } };
+    }
+    // Crear AJUSTE INC o DEC para corregir
+    var resAj = crearAjuste({
+      codigoProducto: cb,
+      tipoAjuste:     diff > 0 ? 'INC' : 'DEC',
+      cantidadAjuste: Math.abs(diff),
+      motivo:         'Aceptar teórico (alerta cuadre stock)',
+      usuario:        usuario
+    });
+    if (!resAj.ok) return { ok: false, error: 'Error creando ajuste: ' + resAj.error };
+    // Marcar alerta como revisada
+    sheet.getRange(i + 1, idxRev + 1).setValue('SI');
+    if (idxFecR >= 0) sheet.getRange(i + 1, idxFecR + 1).setValue(new Date());
+    return { ok: true, data: { idAlerta: idAlerta, ajusteAplicado: diff, idAjuste: resAj.data.idAjuste } };
+  }
+  return { ok: false, error: 'Alerta no encontrada' };
+}
+
 function marcarAlertaRevisada(params) {
   var idAlerta = String(params.idAlerta || '');
   if (!idAlerta) return { ok: false, error: 'idAlerta requerido' };

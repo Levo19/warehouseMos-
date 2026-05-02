@@ -1744,12 +1744,43 @@
 
   <!-- ── SHEET: detalle alertas de cuadre ─────────── -->
   <div class="sheet-overlay" id="overlayAlertasStock" onclick="cerrarSheet('sheetAlertasStock')"></div>
-  <div class="bottom-sheet" id="sheetAlertasStock" style="max-height:88vh;overflow-y:auto">
+  <div class="bottom-sheet" id="sheetAlertasStock" style="max-height:90vh;overflow-y:auto">
     <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
     <p class="font-bold text-base mb-1">Alertas de cuadre de stock</p>
     <p id="alertasStockSub" class="text-xs text-slate-400 mb-3"></p>
+
+    <!-- Búsqueda -->
+    <div class="mb-2">
+      <input id="alertaSearchInput" type="text"
+             placeholder="🔍 Buscar producto o código..."
+             oninput="Dashboard.buscarAlerta(this.value)"
+             style="width:100%;background:#1e293b;border:1px solid #334155;
+                    border-radius:8px;padding:8px 10px;color:#f1f5f9;
+                    font-size:.85em;outline:none"/>
+    </div>
+
+    <!-- Filtros chips -->
+    <div class="flex gap-1.5 mb-3 flex-wrap">
+      <button id="chipAlertasTodas" onclick="Dashboard.setAlertaFiltro('todas')"
+              class="alerta-chip chip-active">Todas</button>
+      <button id="chipAlertasSalidas" onclick="Dashboard.setAlertaFiltro('salidas')"
+              class="alerta-chip">Salidas fantasma</button>
+      <button id="chipAlertasEntradas" onclick="Dashboard.setAlertaFiltro('entradas')"
+              class="alerta-chip">Entradas fantasma</button>
+    </div>
+
     <div id="listAlertasStockFull" class="space-y-2"></div>
   </div>
+  <style>
+    .alerta-chip {
+      font-size: .72em; font-weight: 700; padding: 5px 10px; border-radius: 999px;
+      border: 1px solid #334155; background: transparent; color: #64748b;
+      cursor: pointer; transition: all .15s;
+    }
+    .alerta-chip.chip-active {
+      border-color: rgba(239,68,68,.5); background: rgba(127,29,29,.2); color: #f87171;
+    }
+  </style>
 
   <!-- ── MODO ENVASADOR ────────────────────────── -->
   <section id="view-envasador" class="view slide-up">
