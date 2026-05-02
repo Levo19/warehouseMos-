@@ -167,11 +167,19 @@ function agregarDetalleGuia(params) {
     sheet.getRange(dr + 1, idxRec + 1).setValue(qtyNueva);
 
     // Si la guía ya está CERRADA, ajustar stock por la diferencia agregada
+    // Auto-suma sobre guía CERRADA: ajustar stock por la cantidad agregada
+    // (excepto en envasados, que manejan stock directo)
     var guiaInfo2 = _getGuiaInfo(params.idGuia);
-    if (guiaInfo2 && String(guiaInfo2.estado).toUpperCase() === 'CERRADA' && cantRecibida !== 0) {
+    if (guiaInfo2 && String(guiaInfo2.estado).toUpperCase() === 'CERRADA'
+        && cantRecibida !== 0 && !_esGuiaEnvasado(guiaInfo2.tipo)) {
       var esIngreso2 = String(guiaInfo2.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
       var deltaSum = esIngreso2 ? cantRecibida : -cantRecibida;
-      _actualizarStock(cbProd, deltaSum);
+      _actualizarStock(cbProd, deltaSum, {
+        tipoOperacion: 'AUTO_SUMA_DETALLE',
+        origen:        existingId,
+        usuario:       String(params.usuario || ''),
+        observacion:   'idGuia=' + params.idGuia
+      });
     }
 
     return {
@@ -248,21 +256,35 @@ function actualizarCantidadDetalle(params) {
   var idxCod = hdrs.indexOf('codigoProducto');
   if (idxId < 0 || idxRec < 0) return { ok: false, error: 'Columnas no encontradas' };
 
+  var idxObs = hdrs.indexOf('observacion');
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === idDetalle) {
       var cantidadVieja = parseFloat(data[i][idxRec]) || 0;
       var idGuia        = String(data[i][idxIdG] || '');
       var codigo        = String(data[i][idxCod] || '');
+      var obsActual     = idxObs >= 0 ? String(data[i][idxObs] || '').toUpperCase() : '';
 
-      // Si la guía está CERRADA, ajustar stock por la diferencia (la cant nueva ya entró/salió)
+      // Ajustar stock por diff SOLO si guía CERRADA y NO es envasado
+      // (envasados manejan stock directo, no via cerrarGuia)
       var guiaInfo = _getGuiaInfo(idGuia);
-      if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA' && codigo) {
+      if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA' && codigo
+          && !_esGuiaEnvasado(guiaInfo.tipo)) {
         var diff = cantidad - cantidadVieja;
         if (diff !== 0) {
           var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
           var delta = esIngreso ? diff : -diff;
-          _actualizarStock(codigo, delta);
+          _actualizarStock(codigo, delta, {
+            tipoOperacion: 'EDICION_CANTIDAD',
+            origen:        idDetalle,
+            usuario:       String(params.usuario || ''),
+            observacion:   'idGuia=' + idGuia + ' diff=' + diff
+          });
         }
+      }
+
+      // Si estaba ANULADO y ahora se edita a cantidad > 0, des-anularlo
+      if (obsActual === 'ANULADO' && cantidad > 0 && idxObs >= 0) {
+        sheet.getRange(i + 1, idxObs + 1).setValue('');
       }
 
       sheet.getRange(i + 1, idxRec + 1).setValue(cantidad);
@@ -397,14 +419,22 @@ function anularDetalle(params) {
       var idGuia         = String(data[i][idxIdG] || '');
       var codigo         = String(data[i][idxCod] || '');
 
-      // Si la guía está CERRADA y tenía cantidad > 0, devolver stock
+      // Si la guía está CERRADA y tenía cantidad > 0, devolver stock.
+      // EXCEPCIÓN: guías de envasado manejan stock directamente desde Envasados.gs
+      // (no via cerrarGuia), por lo tanto anular detalle NO debe revertir stock.
       var guiaInfo = _getGuiaInfo(idGuia);
       if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA'
-          && cantidadActual > 0 && codigo) {
+          && cantidadActual > 0 && codigo
+          && !_esGuiaEnvasado(guiaInfo.tipo)) {
         var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
-        // Reverso: si era INGRESO, sumar al stock se devierte (resta); si SALIDA, devuelve (suma)
+        // Reverso: si era INGRESO, suma se revierte (resta); si SALIDA, devuelve (suma)
         var delta = esIngreso ? -cantidadActual : cantidadActual;
-        _actualizarStock(codigo, delta);
+        _actualizarStock(codigo, delta, {
+          tipoOperacion: 'ANULACION_DETALLE',
+          origen:        idDetalle,
+          usuario:       String(params.usuario || ''),
+          observacion:   'idGuia=' + idGuia
+        });
       }
 
       // Si era una línea de PN pendiente, marcar el PN correspondiente como ANULADO
@@ -472,8 +502,10 @@ function reabrirGuia(params) {
       var tipoGuia = String(data[i][idxTipo] || '');
       var esIngreso = tipoGuia.toUpperCase().indexOf('INGRESO') === 0;
 
-      // Solo revertir si estaba CERRADA (no AUTOCERRADA, ANULADA, etc.)
-      if (estadoActual === 'CERRADA') {
+      // Solo revertir si estaba CERRADA Y no es de envasado.
+      // Envasados manejan stock directo (no via cerrarGuia), por lo tanto
+      // reabrir NO debe revertir stock — eso descuadraría el inventario.
+      if (estadoActual === 'CERRADA' && !_esGuiaEnvasado(tipoGuia)) {
         var detalles = _sheetToObjects(getSheet('GUIA_DETALLE')).filter(function(d) {
           return d.idGuia === idGuia && d.observacion !== 'ANULADO';
         });
@@ -482,7 +514,12 @@ function reabrirGuia(params) {
           if (cant === 0 || !d.codigoProducto) return;
           // Reverso del cierre: si era INGRESO, restar; si SALIDA, sumar
           var deltaReverso = esIngreso ? -cant : cant;
-          _actualizarStock(String(d.codigoProducto), deltaReverso);
+          _actualizarStock(String(d.codigoProducto), deltaReverso, {
+            tipoOperacion: 'REABRIR_REVERSO',
+            origen:        idGuia,
+            usuario:       String(params.usuario || ''),
+            observacion:   'tipo=' + tipoGuia
+          });
         });
       }
 
@@ -566,20 +603,28 @@ function cerrarGuia(idGuia, usuario, idSesion, opts) {
   }, 0);
 
   var esIngreso = tipoGuia.startsWith('INGRESO');
+  var esEnvasado = _esGuiaEnvasado(tipoGuia);
 
-  // Actualizar stock por cada detalle
-  detalles.forEach(function(d) {
-    var cantidad = parseFloat(d.cantidadRecibida) || 0;
-    if (cantidad === 0) return;
-
-    var delta = esIngreso ? cantidad : -cantidad;
-    _actualizarStock(d.codigoProducto, delta);
-
-    // Si es ingreso → crear/actualizar lote de vencimiento si tiene fecha
-    if (esIngreso && d.idLote && d.idLote !== '') {
-      _actualizarLote(d.idLote, d.codigoProducto, cantidad, d.fechaVencimiento || '', idGuia);
-    }
-  });
+  // Actualizar stock por cada detalle.
+  // SALIDA_ENVASADO / INGRESO_ENVASADO: stock ya fue aplicado por Envasados.gs
+  // directamente con _actualizarStock — saltarse para no duplicar.
+  if (!esEnvasado) {
+    detalles.forEach(function(d) {
+      var cantidad = parseFloat(d.cantidadRecibida) || 0;
+      if (cantidad === 0) return;
+      var delta = esIngreso ? cantidad : -cantidad;
+      _actualizarStock(d.codigoProducto, delta, {
+        tipoOperacion: 'CIERRE_GUIA',
+        origen:        idGuia,
+        usuario:       String(usuario || ''),
+        observacion:   'tipo=' + tipoGuia
+      });
+      // Si es ingreso → crear/actualizar lote de vencimiento si tiene fecha
+      if (esIngreso && d.idLote && d.idLote !== '') {
+        _actualizarLote(d.idLote, d.codigoProducto, cantidad, d.fechaVencimiento || '', idGuia);
+      }
+    });
+  }
 
   if (idSesion) registrarActividad(idSesion, 'GUIA_CERRADA', 1);
 

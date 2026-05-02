@@ -279,6 +279,20 @@ function aceptarTeoricoAlerta(params) {
   return { ok: false, error: 'Alerta no encontrada' };
 }
 
+// Endpoint para consultar STOCK_MOVIMIENTOS de un producto específico.
+// Útil para diagnosticar "¿quién/cuándo movió este stock?".
+function getStockMovimientos(params) {
+  var codigo = String(params.codigoProducto || '').trim();
+  var ss = SpreadsheetApp.openById(SS_ID);
+  var sheet = ss.getSheetByName('STOCK_MOVIMIENTOS');
+  if (!sheet) return { ok: true, data: [] };
+  var rows = _sheetToObjects(sheet);
+  if (codigo) rows = rows.filter(function(r) { return String(r.codigoProducto) === codigo; });
+  rows.sort(function(a, b) { return new Date(b.fecha) - new Date(a.fecha); });
+  if (params.limit) rows = rows.slice(0, parseInt(params.limit));
+  return { ok: true, data: rows };
+}
+
 function marcarAlertaRevisada(params) {
   var idAlerta = String(params.idAlerta || '');
   if (!idAlerta) return { ok: false, error: 'idAlerta requerido' };

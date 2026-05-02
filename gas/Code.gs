@@ -173,6 +173,7 @@ function _route(method, e) {
       case 'getAlertasStock':     return getAlertasStock(params);
       case 'marcarAlertaRevisada':return marcarAlertaRevisada(params);
       case 'aceptarTeoricoAlerta':return aceptarTeoricoAlerta(params);
+      case 'getStockMovimientos': return getStockMovimientos(params);
       case 'auditarStockGlobal':  return auditarStockGlobal();
       case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 
@@ -544,7 +545,18 @@ function imprimirBienvenida(params) {
   }
 }
 
-function _actualizarStock(codigo, delta) {
+// Detecta si es guía cuyo stock NO se aplica via cerrarGuia (envasados maneja
+// el stock manualmente con _actualizarStock directo). Reabrir/anular/editar
+// detalles de estas guías NO debe revertir/ajustar stock.
+function _esGuiaEnvasado(tipo) {
+  var t = String(tipo || '').toUpperCase();
+  return t === 'INGRESO_ENVASADO' || t === 'SALIDA_ENVASADO';
+}
+
+// _actualizarStock con log de trazabilidad.
+// opts opcional: { tipoOperacion, origen, usuario, observacion }
+function _actualizarStock(codigo, delta, opts) {
+  opts = opts || {};
   var sheet = getSheet('STOCK');
   var info = _getStockProducto(codigo);
   var nuevaCantidad = info.cantidad + delta;
@@ -562,7 +574,45 @@ function _actualizarStock(codigo, delta) {
     sheet.getRange(nextRow, 4).setNumberFormat('dd/MM/yyyy HH:mm');
     sheet.getRange(nextRow, 1, 1, stVals.length).setValues([stVals]);
   }
+
+  // Log de trazabilidad — silencioso si falla (no rompe el flujo principal)
+  try {
+    _logStockMovimiento({
+      codigoProducto: codigo,
+      delta:          delta,
+      stockAntes:     info.cantidad,
+      stockDespues:   nuevaCantidad,
+      tipoOperacion:  opts.tipoOperacion || 'INDEFINIDO',
+      origen:         opts.origen || '',
+      usuario:        opts.usuario || '',
+      observacion:    opts.observacion || ''
+    });
+  } catch(eLog) { Logger.log('logStockMov: ' + eLog.message); }
   return nuevaCantidad;
+}
+
+// Helper interno — registra cada movimiento de stock con trazabilidad completa.
+// Hoja STOCK_MOVIMIENTOS se auto-crea la primera vez.
+function _logStockMovimiento(m) {
+  var ss    = SpreadsheetApp.openById(SS_ID);
+  var sheet = ss.getSheetByName('STOCK_MOVIMIENTOS');
+  if (!sheet) {
+    sheet = ss.insertSheet('STOCK_MOVIMIENTOS');
+    sheet.getRange(1, 1, 1, 9).setValues([[
+      'idMov','fecha','codigoProducto','delta','stockAntes','stockDespues',
+      'tipoOperacion','origen','usuario'
+    ]]);
+    sheet.getRange(1, 1, 1, 9).setFontWeight('bold');
+  }
+  var idMov = 'MOV' + new Date().getTime() + Math.floor(Math.random() * 1000);
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.getRange(nextRow, 3).setNumberFormat('@');  // codigoBarra como texto
+  sheet.getRange(nextRow, 1, 1, 9).setValues([[
+    idMov, new Date(), String(m.codigoProducto || ''),
+    m.delta, m.stockAntes, m.stockDespues,
+    m.tipoOperacion, m.origen, m.usuario
+  ]]);
+  sheet.getRange(nextRow, 2).setNumberFormat('dd/MM/yyyy HH:mm:ss');
 }
 
 // Marca una guía CERRADA sin tocar stock (para envasados que gestionan stock directamente)

@@ -487,8 +487,22 @@ function aprobarProductoNuevo(params) {
 
   // 5) Aplicar deltas
   try {
-    if (stockDeltaOrig !== 0) _actualizarStock(codigoOriginal, stockDeltaOrig);
-    if (stockDeltaFin  !== 0) _actualizarStock(codigoFinal,    stockDeltaFin);
+    if (stockDeltaOrig !== 0) {
+      _actualizarStock(codigoOriginal, stockDeltaOrig, {
+        tipoOperacion: 'APROBACION_PN',
+        origen:        idProductoNuevo,
+        usuario:       String(params.usuario || ''),
+        observacion:   'reverso codigo original'
+      });
+    }
+    if (stockDeltaFin !== 0) {
+      _actualizarStock(codigoFinal, stockDeltaFin, {
+        tipoOperacion: 'APROBACION_PN',
+        origen:        idProductoNuevo,
+        usuario:       String(params.usuario || ''),
+        observacion:   'aplicar codigo final'
+      });
+    }
   } catch(eS) {
     Logger.log('aprobarProductoNuevo: stock error: ' + eS.message);
   }
@@ -800,7 +814,12 @@ function auditarProducto(params) {
   } else if (Math.abs(diff) > 0.5) {
     // Diferencia real → AJUSTE INC/DEC + actualizar STOCK
     _writeAjuste(diff > 0 ? 'INC' : 'DEC', Math.abs(diff), 'Auditoria diaria');
-    _actualizarStock(codigoBarra, diff);
+    _actualizarStock(codigoBarra, diff, {
+      tipoOperacion: 'AUDITORIA',
+      origen:        audId,
+      usuario:       String(params.usuario || ''),
+      observacion:   'físico=' + stockFisico + ' sistema=' + stockSistema
+    });
   }
   // Si diff ≤ 0.5: stock cuadra, solo queda en AUDITORIAS, sin tocar AJUSTES
 
@@ -840,7 +859,12 @@ function crearAjuste(params) {
   sheet.getRange(nextRow, 8).setNumberFormat('dd/MM/yyyy HH:mm');
   sheet.getRange(nextRow, 1, 1, ajVals.length).setValues([ajVals]);
 
-  _actualizarStock(codigoBarra, delta);
+  _actualizarStock(codigoBarra, delta, {
+    tipoOperacion: 'AJUSTE_MANUAL',
+    origen:        id,
+    usuario:       String(params.usuario || ''),
+    observacion:   String(params.motivo || '')
+  });
 
   return { ok: true, data: { idAjuste: id, stockNuevo: _getStockProducto(codigoBarra).cantidad } };
 }
