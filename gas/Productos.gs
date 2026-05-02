@@ -645,10 +645,10 @@ function registrarMerma(params) {
   ]);
 
   // Descontar del stock si el origen ya está en almacén
+  // El descuento lo hace cerrarGuia(SALIDA_MERMA) — UNA sola vez para evitar
+  // duplicación. ANTES había `_actualizarStock(-cant)` aquí + cerrarGuia que
+  // también descontaba → -2*cant. Bug histórico corregido.
   if (params.descontarStock === true || params.descontarStock === 'true') {
-    _actualizarStock(params.codigoProducto, -cant);
-
-    // Crear guía de salida por merma
     var resultG = crearGuia({
       tipo:       'SALIDA_MERMA',
       usuario:    params.usuario,

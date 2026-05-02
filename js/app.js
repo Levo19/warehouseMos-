@@ -1103,7 +1103,94 @@ const Dashboard = (() => {
     setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   }
 
-  return { toggle };
+  // ── Alertas de cuadre stock (auditoría diaria 22:00) ──────
+  let _alertasCache = [];
+
+  async function cargarAlertasStock() {
+    try {
+      const res = await API.getAlertasStock({ soloPendientes: true });
+      if (!res.ok) return;
+      _alertasCache = res.data || [];
+      _renderAlertasStock();
+    } catch(e) { /* silencioso, sin red */ }
+  }
+
+  function _renderAlertasStock() {
+    const card = document.getElementById('cardAlertasStock');
+    const list = document.getElementById('listAlertasStock');
+    const cnt  = document.getElementById('alertasStockCount');
+    const btn  = document.getElementById('btnVerTodasAlertas');
+    if (!card || !list) return;
+    if (!_alertasCache.length) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    if (cnt) cnt.textContent = `${_alertasCache.length} producto${_alertasCache.length !== 1 ? 's' : ''}`;
+    // Top 3 con mayor diferencia absoluta
+    const top = [..._alertasCache].sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia)).slice(0, 3);
+    list.innerHTML = top.map(a => `
+      <div class="flex items-center justify-between text-xs py-1 border-b border-red-900/30">
+        <div class="flex-1 min-w-0">
+          <p class="text-slate-200 font-semibold truncate">${escHtml(a.descripcion)}</p>
+          <p class="text-slate-500 font-mono text-[10px]">${escHtml(a.codigoProducto)}</p>
+        </div>
+        <div class="text-right flex-shrink-0 ml-2">
+          <span class="font-bold ${a.diferencia > 0 ? 'text-amber-400' : 'text-red-400'}">${a.diferencia > 0 ? '+' : ''}${fmt(a.diferencia, 1)}</span>
+        </div>
+      </div>`).join('');
+    if (btn) btn.style.display = _alertasCache.length > 3 ? '' : 'none';
+  }
+
+  function verTodasAlertas() {
+    const list = document.getElementById('listAlertasStockFull');
+    const sub  = document.getElementById('alertasStockSub');
+    if (!list) return;
+    if (!_alertasCache.length) { list.innerHTML = '<p class="text-xs text-slate-500 text-center py-4">Sin alertas pendientes</p>'; }
+    else {
+      const fechaUlt = _alertasCache[0]?.fecha;
+      if (sub) sub.textContent = fechaUlt ? `Última auditoría: ${new Date(fechaUlt).toLocaleString('es-PE')}` : '';
+      list.innerHTML = [..._alertasCache]
+        .sort((a, b) => Math.abs(b.diferencia) - Math.abs(a.diferencia))
+        .map(a => {
+          const safeId = escAttr(a.idAlerta);
+          const explica = a.diferencia > 0
+            ? `Stock <b>+${fmt(a.diferencia,1)}</b> mayor a lo esperado — entradas no registradas o salidas anuladas tras cerrar guía`
+            : `Stock <b>${fmt(a.diferencia,1)}</b> menor a lo esperado — salidas no registradas o cierres duplicados`;
+          return `
+          <div class="card-sm" style="border:1px solid rgba(239,68,68,.3);padding:10px 12px">
+            <div class="flex items-start justify-between gap-2 mb-1.5">
+              <div class="flex-1 min-w-0">
+                <p class="font-bold text-sm text-slate-100 truncate">${escHtml(a.descripcion)}</p>
+                <p class="text-[10px] text-slate-500 font-mono">${escHtml(a.codigoProducto)}</p>
+              </div>
+              <span class="font-black text-base ${a.diferencia > 0 ? 'text-amber-400' : 'text-red-400'} flex-shrink-0">${a.diferencia > 0 ? '+' : ''}${fmt(a.diferencia,1)}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-1 text-[11px] mb-1.5">
+              <div><span class="text-slate-500">Stock real:</span> <b class="text-slate-200">${fmt(a.stockReal,1)}</b></div>
+              <div><span class="text-slate-500">Teórico:</span> <b class="text-slate-200">${fmt(a.stockTeorico,1)}</b></div>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-tight mb-2">${explica}</p>
+            <button onclick="Dashboard.marcarAlertaRevisada('${safeId}')"
+                    class="text-[11px] text-emerald-400 underline">✓ Marcar revisado</button>
+          </div>`;
+        }).join('');
+    }
+    abrirSheet('sheetAlertasStock');
+  }
+
+  async function marcarAlertaRevisada(idAlerta) {
+    try {
+      const res = await API.marcarAlertaRevisada({ idAlerta });
+      if (res.ok) {
+        _alertasCache = _alertasCache.filter(a => a.idAlerta !== idAlerta);
+        _renderAlertasStock();
+        verTodasAlertas();
+        toast('Alerta marcada como revisada', 'ok', 2000);
+      } else {
+        toast('Error: ' + (res.error || 'sin respuesta'), 'danger');
+      }
+    } catch(e) { toast('Sin conexión', 'warn'); }
+  }
+
+  return { toggle, cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada };
 })();
 
 // ════════════════════════════════════════════════
@@ -1383,6 +1470,9 @@ const App = (() => {
     // KPIs secundarios
     document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
     document.getElementById('kpiSalidas').textContent    = kpis.salidasUltimos30dias ?? '—';
+
+    // Alertas de cuadre stock (en background, no bloquea render)
+    Dashboard.cargarAlertasStock();
 
     // Logo alert dot (topbar + sidebar)
     const totalAlertas = contadores.alertasTotal ?? 0;

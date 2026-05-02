@@ -152,6 +152,8 @@ const API = (() => {
     imprimirMembrete:   (p)      => post({ action: 'imprimirMembrete', ...p }),
     imprimirTicketGuia: (p)      => post({ action: 'imprimirTicketGuia', ...p }),
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
+    getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),
+    marcarAlertaRevisada:(p)     => post({ action: 'marcarAlertaRevisada', ...p }),
     imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
 
     // Guías — acciones extra

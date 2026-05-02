@@ -1639,7 +1639,28 @@
       </div>
     </div>
 
+    <!-- Alertas de cuadre stock (auditoría diaria 22:00) -->
+    <div id="cardAlertasStock" class="card mb-3" style="display:none;border:1.5px solid rgba(239,68,68,.4);background:rgba(127,29,29,.08)">
+      <div class="flex items-center justify-between mb-2">
+        <span class="font-bold text-red-400">⚠ Alertas de cuadre de stock</span>
+        <span id="alertasStockCount" class="text-xs text-red-300 font-mono"></span>
+      </div>
+      <p class="text-xs text-slate-400 mb-2">Productos donde el stock NO coincide con el historial — auditoría diaria 22:00</p>
+      <div id="listAlertasStock" class="space-y-1.5 mb-2"></div>
+      <button onclick="Dashboard.verTodasAlertas()" id="btnVerTodasAlertas"
+              class="text-xs text-red-300 underline w-full text-center" style="display:none">Ver todas →</button>
+    </div>
+
   </section>
+
+  <!-- ── SHEET: detalle alertas de cuadre ─────────── -->
+  <div class="sheet-overlay" id="overlayAlertasStock" onclick="cerrarSheet('sheetAlertasStock')"></div>
+  <div class="bottom-sheet" id="sheetAlertasStock" style="max-height:88vh;overflow-y:auto">
+    <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+    <p class="font-bold text-base mb-1">Alertas de cuadre de stock</p>
+    <p id="alertasStockSub" class="text-xs text-slate-400 mb-3"></p>
+    <div id="listAlertasStockFull" class="space-y-2"></div>
+  </div>
 
   <!-- ── MODO ENVASADOR ────────────────────────── -->
   <section id="view-envasador" class="view slide-up">

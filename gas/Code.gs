@@ -169,6 +169,10 @@ function _route(method, e) {
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
+      case 'getAlertasStock':     return getAlertasStock(params);
+      case 'marcarAlertaRevisada':return marcarAlertaRevisada(params);
+      case 'auditarStockGlobal':  return auditarStockGlobal();
+      case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 
       // ── Personal ───────────────────────────────────────────
       case 'loginPersonal':      return loginPersonal(params);
