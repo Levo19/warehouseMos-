@@ -407,6 +407,15 @@ function anularDetalle(params) {
         _actualizarStock(codigo, delta);
       }
 
+      // Si era una línea de PN pendiente, marcar el PN correspondiente como ANULADO
+      // (de lo contrario MOS lo sigue mostrando para aprobación)
+      var obsActual = String(data[i][idxObs] || '').toUpperCase();
+      if (obsActual === 'PN_PENDIENTE' && idGuia && codigo) {
+        try { _anularPNPorGuiaYCodigo(idGuia, codigo); } catch(e) {
+          Logger.log('No se pudo anular PN huérfano: ' + e.message);
+        }
+      }
+
       // Marcar como anulado y poner cantidad en 0
       sheet.getRange(i + 1, idxObs + 1).setValue('ANULADO');
       if (idxRec >= 0) sheet.getRange(i + 1, idxRec + 1).setValue(0);
@@ -414,6 +423,29 @@ function anularDetalle(params) {
     }
   }
   return { ok: false, error: 'Detalle no encontrado' };
+}
+
+// Marca como ANULADO los PNs PENDIENTE asociados a (idGuia, codigoBarra).
+// Idempotente: si no hay PN PENDIENTE coincidente, no hace nada.
+function _anularPNPorGuiaYCodigo(idGuia, codigoBarra) {
+  var sh = getSheet('PRODUCTO_NUEVO');
+  if (!sh) return;
+  var data = sh.getDataRange().getValues();
+  if (data.length < 2) return;
+  var hdrs = data[0];
+  var idxIdG = hdrs.indexOf('idGuia');
+  var idxCb  = hdrs.indexOf('codigoBarra');
+  var idxEst = hdrs.indexOf('estado');
+  if (idxIdG < 0 || idxCb < 0 || idxEst < 0) return;
+
+  var cb = String(codigoBarra || '').toUpperCase();
+  var ig = String(idGuia || '');
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][idxIdG]) !== ig) continue;
+    if (String(data[r][idxCb] || '').toUpperCase() !== cb) continue;
+    if (String(data[r][idxEst] || '').toUpperCase() !== 'PENDIENTE') continue;
+    sh.getRange(r + 1, idxEst + 1).setValue('ANULADO');
+  }
 }
 
 // ── Reabrir una guía cerrada (requiere adminPin en el cliente) ──
