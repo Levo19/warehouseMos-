@@ -137,6 +137,9 @@ function _route(method, e) {
       // ── Mermas ─────────────────────────────────────────────
       case 'getMermas':          return getMermas(params);
       case 'registrarMerma':     return registrarMerma(params);
+      case 'resolverMerma':      return resolverMerma(params);
+      case 'getMermasEnProceso': return getMermasEnProceso(params);
+      case 'getMermasVencidas':  return getMermasVencidas();
 
       // ── Auditorias ─────────────────────────────────────────
       case 'getAuditorias':      return getAuditorias(params);

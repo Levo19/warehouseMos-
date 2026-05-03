@@ -2170,12 +2170,31 @@
 
   <!-- ── MERMAS ────────────────────────────────── -->
   <section id="view-mermas" class="view slide-up">
-    <div id="listMermas" class="space-y-2"></div>
+    <!-- Tabs filtro -->
+    <div class="flex gap-1.5 mb-3 flex-wrap">
+      <button id="tabMermasProceso" onclick="MermasView.setFiltro('EN_PROCESO')"
+              class="merma-tab tab-active">En proceso (<span id="tabMermasNProceso">0</span>)</button>
+      <button id="tabMermasResueltas" onclick="MermasView.setFiltro('RESUELTA')"
+              class="merma-tab">Resueltas</button>
+      <button id="tabMermasDesechadas" onclick="MermasView.setFiltro('DESECHADA')"
+              class="merma-tab">Desechadas</button>
+    </div>
+    <div id="listMermas" class="space-y-2 pb-20"></div>
     <button onclick="MermasView.nueva()"
             class="fixed bottom-24 right-4 w-14 h-14 bg-red-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
       +
     </button>
   </section>
+  <style>
+    .merma-tab {
+      font-size: .75em; font-weight: 700; padding: 6px 11px; border-radius: 999px;
+      border: 1px solid #334155; background: transparent; color: #64748b;
+      cursor: pointer; transition: all .15s;
+    }
+    .merma-tab.tab-active {
+      border-color: rgba(239,68,68,.5); background: rgba(127,29,29,.2); color: #f87171;
+    }
+  </style>
 
 
   <!-- ── PRODUCTOS ─────────────────────────────── -->
@@ -3627,7 +3646,7 @@
      SHEET: NUEVA MERMA
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayMerma" onclick="cerrarSheet('sheetMerma')"></div>
-<div class="bottom-sheet" id="sheetMerma">
+<div class="bottom-sheet" id="sheetMerma" style="max-height:92vh;overflow-y:auto">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
   <p class="font-bold text-base mb-4">Registrar Merma</p>
   <div class="space-y-3">
@@ -3641,13 +3660,11 @@
       </div>
     </div>
     <div>
-      <label class="text-xs text-slate-400">Origen</label>
-      <select id="mermaOrigen" class="input mt-1">
-        <option value="RECEPCION">Recepción</option>
-        <option value="ALMACEN">Almacén</option>
-        <option value="VENCIMIENTO">Vencimiento</option>
-        <option value="ENVASADO">Envasado</option>
-        <option value="TRANSPORTE">Transporte</option>
+      <label class="text-xs text-slate-400">Responsable</label>
+      <select id="mermaResponsable" class="input mt-1">
+        <option value="ALMACEN">ALMACÉN (interno)</option>
+        <option value="RECEPCION">RECEPCIÓN (proveedor)</option>
+        <!-- zonas inyectadas dinámicamente desde MOS -->
       </select>
     </div>
     <div>
@@ -3656,13 +3673,48 @@
     </div>
     <div>
       <label class="text-xs text-slate-400">Motivo</label>
-      <input id="mermaMotivo" class="input mt-1" type="text"/>
+      <input id="mermaMotivo" class="input mt-1" type="text" placeholder="golpe, vencido, abierto…"/>
     </div>
-    <div class="flex items-center gap-2">
-      <input id="mermaDescontar" type="checkbox" checked class="w-4 h-4"/>
-      <label class="text-sm text-slate-300">Descontar del stock ahora</label>
+    <div>
+      <label class="text-xs text-slate-400">Foto (obligatoria)</label>
+      <div class="flex gap-2 mt-1">
+        <label class="btn btn-outline cursor-pointer flex-1 text-center">
+          <span id="mermaFotoLbl">📷 Tomar foto</span>
+          <input id="mermaFotoInput" type="file" accept="image/*" capture="environment" class="hidden"
+                 onchange="MermasView.onFotoSeleccionada(event)"/>
+        </label>
+      </div>
+      <div id="mermaFotoPrev" class="mt-2"></div>
     </div>
-    <button onclick="MermasView.crear()" class="btn btn-danger btn-lg w-full">Registrar merma</button>
+    <button onclick="MermasView.crear()" id="btnRegistrarMerma" class="btn btn-danger btn-lg w-full">Registrar merma</button>
+  </div>
+</div>
+
+<!-- Sheet RESOLVER MERMA -->
+<div class="sheet-overlay" id="overlayResolverMerma" onclick="cerrarSheet('sheetResolverMerma')"></div>
+<div class="bottom-sheet" id="sheetResolverMerma" style="max-height:92vh">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+  <p class="font-bold text-base mb-1">Resolver merma</p>
+  <p id="resolverMermaInfo" class="text-xs text-slate-400 mb-3"></p>
+  <div class="space-y-3">
+    <div class="grid grid-cols-2 gap-2">
+      <div>
+        <label class="text-xs text-emerald-400">✓ Reparar</label>
+        <input id="resolverMermaReparar" class="input mt-1" type="number" step="0.01" min="0" value="0"
+               oninput="MermasView.balancearResolucion('rep')"/>
+      </div>
+      <div>
+        <label class="text-xs text-red-400">🗑 Desechar</label>
+        <input id="resolverMermaDesechar" class="input mt-1" type="number" step="0.01" min="0" value="0"
+               oninput="MermasView.balancearResolucion('des')"/>
+      </div>
+    </div>
+    <p id="resolverMermaWarn" class="text-xs text-amber-400"></p>
+    <div>
+      <label class="text-xs text-slate-400">Comentario de resolución</label>
+      <textarea id="resolverMermaObs" class="input mt-1" rows="2" placeholder="Ej: tapa rota reemplazada / envase totalmente roto"></textarea>
+    </div>
+    <button onclick="MermasView.confirmarResolver()" id="btnConfirmarResolver" class="btn btn-primary btn-lg w-full">Aplicar resolución</button>
   </div>
 </div>
 

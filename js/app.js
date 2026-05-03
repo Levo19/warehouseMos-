@@ -1923,10 +1923,11 @@ const GuiasView = (() => {
 
   function _renderGuiaCard(g) {
     const isEnvasado  = g.tipo === 'SALIDA_ENVASADO' || g.tipo === 'INGRESO_ENVASADO';
+    const isMerma     = g.tipo === 'SALIDA_MERMA';
     const isIngreso   = g.tipo?.startsWith('INGRESO');
     const isAbierta   = g.estado === 'ABIERTA';
-    const borderColor = isEnvasado ? '#475569' : isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
-    const tipoLabel   = TIPO_LABELS[g.tipo] || g.tipo || '—';
+    const borderColor = isMerma ? '#dc2626' : isEnvasado ? '#475569' : isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
+    const tipoLabel   = (isMerma ? '🗑 ' : '') + (TIPO_LABELS[g.tipo] || g.tipo || '—');
     const provNombre  = _getProvNombre(g.idProveedor) || g.usuario || '—';
     const hora        = _horaDesdeGuia(g);
     const fechaCorta  = _fmtCorta(g.fecha);
@@ -7395,51 +7396,261 @@ const PreingresosView = (() => {
 // MERMAS VIEW
 // ════════════════════════════════════════════════
 const MermasView = (() => {
+  let _filtro = 'EN_PROCESO';
+  let _all    = [];
+  let _selMerma = null;
+  let _fotoBase64 = null;
+  let _fotoMime   = '';
+
   async function cargar() {
     loading('listMermas', true);
-    const res = await API.getMermas({ limit: 30 }).catch(() => ({ ok: false }));
-    const list = res.ok ? res.data : [];
+    const res = await API.getMermas({ limit: 200 }).catch(() => ({ ok: false }));
+    _all = res.ok ? res.data : [];
+    // Calcular días en proceso para flag vencidas (>3 días)
+    const ahora = Date.now();
+    _all.forEach(m => {
+      if (!m.fechaIngreso) { m.diasEnProceso = 0; m.vencida = false; return; }
+      const ms = ahora - new Date(m.fechaIngreso).getTime();
+      m.diasEnProceso = Math.floor(ms / (24 * 60 * 60 * 1000));
+      m.vencida = String(m.estado || '').toUpperCase() === 'EN_PROCESO' && ms > (3 * 24 * 60 * 60 * 1000);
+    });
+    _renderTabs();
+    _render();
+  }
+
+  function setFiltro(f) {
+    _filtro = f;
+    document.querySelectorAll('.merma-tab').forEach(b => b.classList.remove('tab-active'));
+    const map = { 'EN_PROCESO': 'tabMermasProceso', 'RESUELTA': 'tabMermasResueltas', 'DESECHADA': 'tabMermasDesechadas' };
+    const btn = document.getElementById(map[f]);
+    if (btn) btn.classList.add('tab-active');
+    _render();
+  }
+
+  function _renderTabs() {
+    const enProceso = _all.filter(m => String(m.estado || '').toUpperCase() === 'EN_PROCESO').length;
+    const el = document.getElementById('tabMermasNProceso');
+    if (el) el.textContent = enProceso;
+  }
+
+  function _render() {
     const container = document.getElementById('listMermas');
+    if (!container) return;
+    const filtradas = _all.filter(m => String(m.estado || '').toUpperCase() === _filtro);
+    if (!filtradas.length) {
+      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin mermas en esta categoría</p>';
+      return;
+    }
+    // Resolver descripciones desde caché
+    const prods = OfflineManager.getProductosCache();
+    const descMap = {};
+    prods.forEach(p => {
+      if (p.codigoBarra) descMap[String(p.codigoBarra)] = p.descripcion;
+      if (p.idProducto)  descMap[String(p.idProducto)]  = p.descripcion;
+    });
 
-    if (!list.length) { container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin mermas registradas</p>'; return; }
-
-    container.innerHTML = list.map(m => `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="font-semibold text-sm">${m.codigoProducto}</span>
-          <span class="tag-${m.estado === 'PENDIENTE' ? 'warn' : 'ok'}">${m.estado}</span>
+    container.innerHTML = filtradas.map(m => {
+      const desc = descMap[String(m.codigoProducto || '').trim()] || m.codigoProducto;
+      const respLabel = String(m.responsable || m.origen || '—');
+      const fechaStr = m.fechaIngreso ? new Date(m.fechaIngreso).toLocaleDateString('es-PE') : '';
+      const safeId = escAttr(m.idMerma);
+      let actions = '';
+      if (_filtro === 'EN_PROCESO') {
+        actions = `
+          <div class="flex gap-1.5 mt-2">
+            <button onclick="MermasView.abrirResolver('${safeId}')"
+                    class="btn btn-sm btn-primary text-xs px-3 py-1.5 flex-1">Resolver</button>
+            ${m.foto ? `<button onclick="MermasView.verFoto('${escAttr(m.foto)}')"
+                       class="btn btn-sm btn-outline text-xs px-3 py-1.5">📷</button>` : ''}
+          </div>`;
+      }
+      let footer = '';
+      if (_filtro === 'RESUELTA' || _filtro === 'DESECHADA') {
+        footer = `
+          <p class="text-[10.5px] text-slate-500 mt-1">
+            ${m.cantidadReparada > 0 ? `<span class="text-emerald-400">✓ ${fmt(m.cantidadReparada, 1)} reparadas</span>` : ''}
+            ${m.cantidadReparada > 0 && m.cantidadDesechada > 0 ? ' · ' : ''}
+            ${m.cantidadDesechada > 0 ? `<span class="text-red-400">🗑 ${fmt(m.cantidadDesechada, 1)} desechadas</span>` : ''}
+            ${m.idGuiaSalida ? ` · guía ${escHtml(m.idGuiaSalida)}` : ''}
+          </p>
+          ${m.observacionResolucion ? `<p class="text-[10.5px] text-slate-500 mt-0.5 italic">"${escHtml(m.observacionResolucion)}"</p>` : ''}`;
+      }
+      return `
+      <div class="card-sm" style="${m.vencida ? 'border:1px solid rgba(245,158,11,.5);background:rgba(120,53,15,.08)' : ''}">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-sm text-slate-100 truncate">${escHtml(desc)}</p>
+            <p class="text-[10.5px] text-slate-500 font-mono">${escHtml(m.codigoProducto)}</p>
+          </div>
+          <span class="font-black text-base text-red-400 flex-shrink-0">${fmt(m.cantidadOriginal, 1)}</span>
         </div>
-        <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen}</p>
-        <p class="text-sm font-bold text-red-400">${fmt(m.cantidadOriginal, 2)} uds</p>
-        ${m.motivo ? `<p class="text-xs text-slate-500 mt-1">${m.motivo}</p>` : ''}
-      </div>`).join('');
+        <div class="flex items-center gap-2 text-[11px] text-slate-400">
+          <span class="px-2 py-0.5 rounded-full" style="background:rgba(100,116,139,.18)">${escHtml(respLabel)}</span>
+          <span>${escHtml(fechaStr)}</span>
+          ${m.vencida ? `<span class="text-amber-400 font-bold">⚠ ${m.diasEnProceso}d sin resolver</span>` : ''}
+        </div>
+        ${m.motivo ? `<p class="text-[11px] text-slate-500 mt-1">${escHtml(m.motivo)}</p>` : ''}
+        ${footer}
+        ${actions}
+      </div>`;
+    }).join('');
+  }
+
+  function nueva() {
+    _fotoBase64 = null; _fotoMime = '';
+    document.getElementById('mermaCodigoProd').value = '';
+    document.getElementById('mermaCantidad').value   = '';
+    document.getElementById('mermaMotivo').value     = '';
+    document.getElementById('mermaFotoLbl').textContent = '📷 Tomar foto';
+    document.getElementById('mermaFotoPrev').innerHTML = '';
+    // Inyectar zonas en el dropdown desde caché
+    const zonas = OfflineManager.getZonasCache();
+    const sel = document.getElementById('mermaResponsable');
+    sel.innerHTML = `
+      <option value="ALMACEN">ALMACÉN (interno)</option>
+      <option value="RECEPCION">RECEPCIÓN (proveedor)</option>
+      ${zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('')}`;
+    abrirSheet('sheetMerma');
+  }
+
+  async function onFotoSeleccionada(ev) {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    try {
+      const { b64, mime } = await _prepFotoMerma(file);
+      _fotoBase64 = b64;
+      _fotoMime   = mime;
+      const url = URL.createObjectURL(file);
+      document.getElementById('mermaFotoLbl').textContent = '✓ Foto agregada — cambiar';
+      document.getElementById('mermaFotoPrev').innerHTML =
+        `<img src="${url}" style="max-height:120px;border-radius:8px;border:1px solid #334155">`;
+    } catch(e) { toast('Error al procesar foto', 'warn'); }
+  }
+
+  // Comprime y convierte a base64 (~700px max)
+  function _prepFotoMerma(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 700;
+        let { width: w, height: h } = img;
+        if (w > max || h > max) { const r = w > h ? max/w : max/h; w = w*r|0; h = h*r|0; }
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = c.toDataURL('image/jpeg', 0.78);
+        URL.revokeObjectURL(img.src);
+        resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+      };
+      img.onerror = reject;
+      img.src = URL.createObjectURL(file);
+    });
   }
 
   async function crear() {
-    const params = {
-      codigoProducto:  document.getElementById('mermaCodigoProd').value,
-      origen:          document.getElementById('mermaOrigen').value,
-      cantidadOriginal:document.getElementById('mermaCantidad').value,
-      motivo:          document.getElementById('mermaMotivo').value,
-      descontarStock:  document.getElementById('mermaDescontar').checked,
-      usuario:         window.WH_CONFIG.usuario
-    };
-    if (!params.codigoProducto || !params.cantidadOriginal) {
-      toast('Completa producto y cantidad', 'warn');
-      return;
+    const codigoProducto = document.getElementById('mermaCodigoProd').value.trim();
+    const responsable    = document.getElementById('mermaResponsable').value;
+    const cantidad       = parseFloat(document.getElementById('mermaCantidad').value);
+    const motivo         = document.getElementById('mermaMotivo').value.trim();
+    if (!codigoProducto || !cantidad || cantidad <= 0) {
+      toast('Completa producto y cantidad', 'warn'); return;
     }
-    const res = await API.registrarMerma(params);
-    if (res.ok) {
-      toast('Merma registrada', 'ok');
-      cerrarSheet('sheetMerma');
-      cargar();
-    } else {
-      toast('Error: ' + res.error, 'danger');
+    if (!_fotoBase64) {
+      toast('Foto obligatoria al registrar merma', 'warn'); return;
     }
+    const btn = document.getElementById('btnRegistrarMerma');
+    btn.disabled = true; btn.textContent = 'Registrando...';
+    try {
+      const res = await API.registrarMerma({
+        codigoProducto, responsable, motivo,
+        cantidadOriginal: cantidad,
+        fotoBase64: _fotoBase64, mimeType: _fotoMime,
+        usuario: window.WH_CONFIG?.usuario || ''
+      });
+      if (res.ok) {
+        toast('✓ Merma registrada en proceso', 'ok');
+        cerrarSheet('sheetMerma');
+        cargar();
+      } else {
+        toast('Error: ' + (res.error || 'desconocido'), 'danger', 5000);
+      }
+    } catch(e) { toast('Sin conexión', 'warn'); }
+    finally { btn.disabled = false; btn.textContent = 'Registrar merma'; }
   }
 
-  function nueva() { abrirSheet('sheetMerma'); }
-  return { cargar, crear, nueva };
+  function abrirResolver(idMerma) {
+    const m = _all.find(x => x.idMerma === idMerma);
+    if (!m) return;
+    _selMerma = m;
+    const prods = OfflineManager.getProductosCache();
+    const desc = prods.find(p => p.codigoBarra === m.codigoProducto || p.idProducto === m.codigoProducto)?.descripcion || m.codigoProducto;
+    document.getElementById('resolverMermaInfo').textContent =
+      `${desc} · ${fmt(m.cantidadOriginal, 1)} unidades · ${m.responsable || m.origen || ''}`;
+    document.getElementById('resolverMermaReparar').value  = m.cantidadOriginal;
+    document.getElementById('resolverMermaDesechar').value = 0;
+    document.getElementById('resolverMermaObs').value      = '';
+    document.getElementById('resolverMermaWarn').textContent = '';
+    abrirSheet('sheetResolverMerma');
+  }
+
+  function balancearResolucion(modificado) {
+    if (!_selMerma) return;
+    const total = parseFloat(_selMerma.cantidadOriginal) || 0;
+    const repInp = document.getElementById('resolverMermaReparar');
+    const desInp = document.getElementById('resolverMermaDesechar');
+    const warn   = document.getElementById('resolverMermaWarn');
+    let rep = parseFloat(repInp.value) || 0;
+    let des = parseFloat(desInp.value) || 0;
+    // Auto-balance: al editar uno, ajustar el otro al complemento
+    if (modificado === 'rep') des = Math.max(0, total - rep);
+    if (modificado === 'des') rep = Math.max(0, total - des);
+    repInp.value = rep;
+    desInp.value = des;
+    if (Math.abs((rep + des) - total) > 0.001) {
+      warn.textContent = `⚠ Reparar + desechar debe sumar ${fmt(total, 1)} (actual: ${fmt(rep + des, 1)})`;
+    } else { warn.textContent = ''; }
+  }
+
+  async function confirmarResolver() {
+    if (!_selMerma) return;
+    const rep = parseFloat(document.getElementById('resolverMermaReparar').value)  || 0;
+    const des = parseFloat(document.getElementById('resolverMermaDesechar').value) || 0;
+    const obs = document.getElementById('resolverMermaObs').value.trim();
+    const total = parseFloat(_selMerma.cantidadOriginal) || 0;
+    if (Math.abs((rep + des) - total) > 0.001) {
+      toast(`Reparar + desechar debe sumar ${fmt(total, 1)}`, 'warn'); return;
+    }
+    if (rep === 0 && des === 0) { toast('Indica al menos una cantidad', 'warn'); return; }
+
+    const btn = document.getElementById('btnConfirmarResolver');
+    btn.disabled = true; btn.textContent = 'Aplicando...';
+    try {
+      const res = await API.resolverMerma({
+        idMerma: _selMerma.idMerma,
+        cantidadReparada:  rep,
+        cantidadDesechada: des,
+        observacionResolucion: obs,
+        usuario: window.WH_CONFIG?.usuario || ''
+      });
+      if (res.ok) {
+        const msgDesecho = des > 0 ? ` · ${fmt(des, 1)} a guía semanal` : '';
+        toast(`✓ Resuelto${msgDesecho}`, 'ok', 4000);
+        cerrarSheet('sheetResolverMerma');
+        _selMerma = null;
+        cargar();
+      } else {
+        toast('Error: ' + (res.error || 'desconocido'), 'danger', 5000);
+      }
+    } catch(e) { toast('Sin conexión', 'warn'); }
+    finally { btn.disabled = false; btn.textContent = 'Aplicar resolución'; }
+  }
+
+  function verFoto(url) {
+    if (!url) return;
+    window.open(url, '_blank');
+  }
+
+  return { cargar, crear, nueva, setFiltro, onFotoSeleccionada,
+           abrirResolver, balancearResolucion, confirmarResolver, verFoto };
 })();
 
 

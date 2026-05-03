@@ -632,6 +632,13 @@ function cerrarGuia(idGuia, usuario, idSesion, opts) {
   guiasSheet.getRange(filaGuia, idxEstado + 1).setValue('CERRADA');
   guiasSheet.getRange(filaGuia, idxMontoTotal + 1).setValue(montoTotal);
 
+  // Si fue SALIDA_MERMA (cierre semanal manual), marcar mermas asociadas como DESECHADA
+  // y notificar a MASTER/ADMINISTRADOR vía push
+  if (tipoGuia === 'SALIDA_MERMA') {
+    try { _cerrarMermasDeGuia(idGuia, detalles); }
+    catch(eM) { Logger.log('cerrar mermas: ' + eM.message); }
+  }
+
   // Si fue INGRESO_PROVEEDOR con idProveedor, sincroniza productos a MOS
   // (silencioso: si falla, log y sigue)
   // OMITIR si skipMosSync (cierres masivos para evitar timeout — el sync hace

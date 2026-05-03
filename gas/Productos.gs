@@ -665,45 +665,262 @@ function registrarMerma(params) {
   var sheet = getSheet('MERMAS');
   var id    = _generateId('M');
   var cant  = parseFloat(params.cantidadOriginal) || 0;
+  if (cant <= 0) return { ok: false, error: 'cantidad inválida' };
+  if (!params.codigoProducto) return { ok: false, error: 'codigoProducto requerido' };
+
+  // Foto obligatoria — subirla a Drive si viene base64
+  var fotoUrl    = String(params.foto || '');
+  var fotoBase64 = String(params.fotoBase64 || '').trim();
+  if (fotoBase64) {
+    try { fotoUrl = _subirFotoMerma(id, fotoBase64, params.mimeType || 'image/jpeg'); }
+    catch(e) { Logger.log('Error subiendo foto merma: ' + e.message); }
+  }
+  if (!fotoUrl) return { ok: false, error: 'Foto obligatoria al registrar merma' };
 
   if (params.idSesion) registrarActividad(params.idSesion, 'MERMA_REGISTRADA', 1);
 
-  sheet.appendRow([
-    id,
-    new Date(),
-    params.origen          || 'ALMACEN',
-    params.codigoProducto,
-    params.idLote          || '',
-    cant,
-    cant,                    // pendiente = original al inicio
-    params.motivo          || '',
-    params.usuario         || '',
-    params.idGuia          || '',
-    'PENDIENTE'
-  ]);
+  // Escribir por nombre de columna (la hoja puede tener schema viejo o nuevo)
+  // Al primer registro con campos nuevos, agregamos las columnas faltantes.
+  _ensureColumnasMerma(sheet);
 
-  // Descontar del stock si el origen ya está en almacén
-  // El descuento lo hace cerrarGuia(SALIDA_MERMA) — UNA sola vez para evitar
-  // duplicación. ANTES había `_actualizarStock(-cant)` aquí + cerrarGuia que
-  // también descontaba → -2*cant. Bug histórico corregido.
-  if (params.descontarStock === true || params.descontarStock === 'true') {
-    var resultG = crearGuia({
-      tipo:       'SALIDA_MERMA',
-      usuario:    params.usuario,
-      comentario: 'Merma: ' + (params.motivo || '')
-    });
-    if (resultG.ok) {
-      agregarDetalleGuia({
-        idGuia:           resultG.data.idGuia,
-        codigoProducto:   params.codigoProducto,
-        cantidadEsperada: cant,
-        cantidadRecibida: cant
+  var hdrs = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var row  = new Array(hdrs.length).fill('');
+  function _set(col, val) { var i = hdrs.indexOf(col); if (i >= 0) row[i] = val; }
+  _set('idMerma',           id);
+  _set('fechaIngreso',      new Date());
+  _set('origen',            params.responsable || params.origen || 'ALMACEN');  // RECEPCION/ALMACEN/idZona
+  _set('responsable',       params.responsable || '');
+  _set('codigoProducto',    params.codigoProducto);
+  _set('idLote',            params.idLote || '');
+  _set('cantidadOriginal',  cant);
+  _set('cantidadPendiente', cant);
+  _set('cantidadReparada',  0);
+  _set('cantidadDesechada', 0);
+  _set('motivo',            params.motivo || '');
+  _set('usuario',           params.usuario || '');
+  _set('foto',              fotoUrl);
+  _set('estado',            'EN_PROCESO');
+  sheet.appendRow(row);
+
+  // Push a MOS — notificar a admins/master de nueva merma EN_PROCESO
+  try {
+    var titulo = '⚠ Merma registrada';
+    var sub    = (params.codigoProducto || '?') + ' · ' + cant + ' uds · ' +
+                 (params.responsable || params.origen || 'ALMACEN') +
+                 ' · por ' + (params.usuario || 'operador');
+    _notificarMOS(titulo, sub);
+  } catch(eP) { Logger.log('Push merma: ' + eP.message); }
+
+  return { ok: true, data: { idMerma: id, fotoUrl: fotoUrl } };
+}
+
+// Asegura que la hoja MERMAS tenga las columnas nuevas. Idempotente.
+function _ensureColumnasMerma(sheet) {
+  var lastCol  = sheet.getLastColumn();
+  var existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim(); });
+  var faltantes = [];
+  ['responsable','cantidadReparada','cantidadDesechada','foto',
+   'fechaResolucion','observacionResolucion','idGuiaSalida'
+  ].forEach(function(c) {
+    if (existing.indexOf(c) < 0) faltantes.push(c);
+  });
+  if (!faltantes.length) return;
+  sheet.getRange(1, lastCol + 1, 1, faltantes.length).setValues([faltantes]);
+}
+
+// Sube foto de merma a Drive con permiso público (similar al de preingresos)
+function _subirFotoMerma(idMerma, base64Data, mimeType) {
+  var folderId = PropertiesService.getScriptProperties().getProperty('MERMAS_FOLDER_ID');
+  var folder;
+  if (folderId) {
+    try { folder = DriveApp.getFolderById(folderId); } catch(e) { folder = null; }
+  }
+  if (!folder) {
+    // Crear carpeta junto al spreadsheet
+    var ssId   = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    var ssFile = DriveApp.getFileById(ssId);
+    var parent = ssFile.getParents().next();
+    var imgIter = parent.getFoldersByName('imagenes');
+    var imgFolder = imgIter.hasNext() ? imgIter.next() : parent.createFolder('imagenes');
+    var mIter = imgFolder.getFoldersByName('mermas');
+    folder = mIter.hasNext() ? mIter.next() : imgFolder.createFolder('mermas');
+    PropertiesService.getScriptProperties().setProperty('MERMAS_FOLDER_ID', folder.getId());
+  }
+  var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, idMerma + '.jpg');
+  var file = folder.createFile(blob);
+  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+}
+
+// ============================================================
+// resolverMerma — el operador decide cuántas reparar y cuántas desechar.
+// La parte desechada se envía a la guía SALIDA_MERMA semanal (lun-dom).
+// La parte reparada NO toca stock (siempre estuvo).
+// ============================================================
+function resolverMerma(params) {
+  var idMerma         = String(params.idMerma || '');
+  var cantReparada    = parseFloat(params.cantidadReparada)  || 0;
+  var cantDesechada   = parseFloat(params.cantidadDesechada) || 0;
+  var observacion     = String(params.observacionResolucion || '');
+  var usuario         = String(params.usuario || '');
+  if (!idMerma) return { ok: false, error: 'idMerma requerido' };
+
+  var sheet = getSheet('MERMAS');
+  _ensureColumnasMerma(sheet);
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId       = hdrs.indexOf('idMerma');
+  var idxEstado   = hdrs.indexOf('estado');
+  var idxOrig     = hdrs.indexOf('cantidadOriginal');
+  var idxPend     = hdrs.indexOf('cantidadPendiente');
+  var idxRep      = hdrs.indexOf('cantidadReparada');
+  var idxDes      = hdrs.indexOf('cantidadDesechada');
+  var idxFechaR   = hdrs.indexOf('fechaResolucion');
+  var idxObsR     = hdrs.indexOf('observacionResolucion');
+  var idxIdGuia   = hdrs.indexOf('idGuiaSalida');
+  var idxCb       = hdrs.indexOf('codigoProducto');
+  var idxMotivo   = hdrs.indexOf('motivo');
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) !== idMerma) continue;
+    var estadoActual = String(data[i][idxEstado] || '').toUpperCase();
+    if (estadoActual === 'RESUELTA' || estadoActual === 'DESECHADA') {
+      return { ok: false, error: 'Merma ya resuelta' };
+    }
+    var cantOrig = parseFloat(data[i][idxOrig]) || 0;
+    if (Math.abs((cantReparada + cantDesechada) - cantOrig) > 0.001) {
+      return { ok: false, error: 'reparada + desechada debe igualar ' + cantOrig };
+    }
+
+    var idGuiaSalida = '';
+    var codigoProd   = String(data[i][idxCb] || '');
+    var motivoOrig   = String(data[i][idxMotivo] || '');
+
+    // Si hay parte para desechar, agregar a la guía SALIDA_MERMA semanal
+    if (cantDesechada > 0 && codigoProd) {
+      var resGuia = _getOCrearGuiaMermaSemana(usuario);
+      if (!resGuia.ok) return { ok: false, error: 'Error guía merma: ' + resGuia.error };
+      idGuiaSalida = resGuia.data.idGuia;
+      var resDet = agregarDetalleGuia({
+        idGuia:           idGuiaSalida,
+        codigoProducto:   codigoProd,
+        cantidadEsperada: cantDesechada,
+        cantidadRecibida: cantDesechada,
+        observacion:      'Merma ' + idMerma + (motivoOrig ? ' · ' + motivoOrig : '')
       });
-      cerrarGuia(resultG.data.idGuia, params.usuario);
+      if (!resDet.ok) return { ok: false, error: 'Detalle guía: ' + resDet.error };
+    }
+
+    // Actualizar la fila de merma
+    sheet.getRange(i + 1, idxRep    + 1).setValue(cantReparada);
+    sheet.getRange(i + 1, idxDes    + 1).setValue(cantDesechada);
+    sheet.getRange(i + 1, idxPend   + 1).setValue(0);
+    sheet.getRange(i + 1, idxEstado + 1).setValue('RESUELTA');
+    if (idxFechaR >= 0)  sheet.getRange(i + 1, idxFechaR + 1).setValue(new Date());
+    if (idxObsR >= 0)    sheet.getRange(i + 1, idxObsR   + 1).setValue(observacion);
+    if (idxIdGuia >= 0 && idGuiaSalida) sheet.getRange(i + 1, idxIdGuia + 1).setValue(idGuiaSalida);
+
+    return { ok: true, data: { idMerma: idMerma, idGuiaSalida: idGuiaSalida,
+                                cantidadReparada: cantReparada, cantidadDesechada: cantDesechada } };
+  }
+  return { ok: false, error: 'Merma no encontrada' };
+}
+
+// Busca o crea la guía SALIDA_MERMA ABIERTA de la semana actual (lun-dom).
+// Todas las mermas desechadas durante la semana van a la misma guía.
+// El operador la cierra manualmente cuando los productos físicamente se retiran.
+function _getOCrearGuiaMermaSemana(usuario) {
+  var tz = Session.getScriptTimeZone();
+  // Calcular lunes de la semana actual
+  var ahora = new Date();
+  var diaSem = ahora.getDay(); // 0=domingo, 1=lunes, ..., 6=sábado
+  var diasAtrasLunes = diaSem === 0 ? 6 : (diaSem - 1);
+  var lunes = new Date(ahora);
+  lunes.setDate(ahora.getDate() - diasAtrasLunes);
+  lunes.setHours(0, 0, 0, 0);
+  var domingo = new Date(lunes);
+  domingo.setDate(lunes.getDate() + 7);
+
+  // Buscar guía SALIDA_MERMA ABIERTA cuya fecha caiga en esta semana
+  var guias = _sheetToObjects(getSheet('GUIAS'));
+  for (var i = 0; i < guias.length; i++) {
+    var g = guias[i];
+    if (g.tipo !== 'SALIDA_MERMA') continue;
+    if (String(g.estado || '').toUpperCase() !== 'ABIERTA') continue;
+    var fGuia = g.fecha ? new Date(g.fecha) : null;
+    if (!fGuia) continue;
+    if (fGuia >= lunes && fGuia < domingo) {
+      return { ok: true, data: { idGuia: g.idGuia, esNueva: false } };
+    }
+  }
+  // No existe → crear nueva
+  var fmt    = Utilities.formatDate(lunes, tz, 'dd MMM');
+  var fmtFin = Utilities.formatDate(new Date(domingo.getTime() - 1), tz, 'dd MMM');
+  var res = crearGuia({
+    tipo:       'SALIDA_MERMA',
+    usuario:    usuario || 'sistema',
+    comentario: 'Mermas semana ' + fmt + ' al ' + fmtFin
+  });
+  if (!res.ok) return res;
+  return { ok: true, data: { idGuia: res.data.idGuia, esNueva: true } };
+}
+
+// Endpoint: lista mermas EN_PROCESO con flag de vencidas (>3 días)
+function getMermasEnProceso(params) {
+  var rows = _sheetToObjects(getSheet('MERMAS'));
+  rows = rows.filter(function(r) { return String(r.estado || '').toUpperCase() === 'EN_PROCESO'; });
+  var ahora = new Date().getTime();
+  var TRES_DIAS = 3 * 24 * 60 * 60 * 1000;
+  rows.forEach(function(r) {
+    var f = r.fechaIngreso ? new Date(r.fechaIngreso).getTime() : ahora;
+    r.diasEnProceso = Math.floor((ahora - f) / (24 * 60 * 60 * 1000));
+    r.vencida       = (ahora - f) > TRES_DIAS;
+  });
+  rows.sort(function(a, b) { return new Date(b.fechaIngreso) - new Date(a.fechaIngreso); });
+  return { ok: true, data: rows };
+}
+
+// Cuenta mermas vencidas (>3 días sin resolver) — para badge en dashboard
+function getMermasVencidas() {
+  var rows = _sheetToObjects(getSheet('MERMAS'));
+  var ahora = new Date().getTime();
+  var TRES_DIAS = 3 * 24 * 60 * 60 * 1000;
+  var vencidas = rows.filter(function(r) {
+    if (String(r.estado || '').toUpperCase() !== 'EN_PROCESO') return false;
+    var f = r.fechaIngreso ? new Date(r.fechaIngreso).getTime() : ahora;
+    return (ahora - f) > TRES_DIAS;
+  });
+  return { ok: true, data: { count: vencidas.length, mermas: vencidas } };
+}
+
+// Marca mermas asociadas a una guía SALIDA_MERMA cerrada como DESECHADA
+// y emite push de resumen a MASTER/ADMINISTRADOR.
+function _cerrarMermasDeGuia(idGuia, detalles) {
+  var sheet = getSheet('MERMAS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId      = hdrs.indexOf('idMerma');
+  var idxEstado  = hdrs.indexOf('estado');
+  var idxIdGuia  = hdrs.indexOf('idGuiaSalida');
+  if (idxId < 0 || idxEstado < 0 || idxIdGuia < 0) return;
+
+  var marcadas = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxIdGuia]) === String(idGuia)) {
+      sheet.getRange(i + 1, idxEstado + 1).setValue('DESECHADA');
+      marcadas++;
     }
   }
 
-  return { ok: true, data: { idMerma: id } };
+  // Push resumen a admins
+  try {
+    var totalUds = (detalles || []).reduce(function(s, d) {
+      return s + (parseFloat(d.cantidadRecibida) || 0);
+    }, 0);
+    var nProds = (detalles || []).length;
+    _notificarMOS('🗑 Desecho de mermas',
+      marcadas + ' merma(s) · ' + nProds + ' producto(s) · ' + totalUds + ' unid · guía ' + idGuia);
+  } catch(eP) { Logger.log('Push desecho: ' + eP.message); }
 }
 
 // ── Auditorias ──────────────────────────────────────────────

@@ -122,6 +122,9 @@ const API = (() => {
     // Mermas
     getMermas:          (p={})   => call({ action: 'getMermas', ...p }),
     registrarMerma:     (p)      => post({ action: 'registrarMerma', ...p }),
+    resolverMerma:      (p)      => post({ action: 'resolverMerma', ...p }),
+    getMermasEnProceso: (p={})   => call({ action: 'getMermasEnProceso', ...p }),
+    getMermasVencidas:  ()       => call({ action: 'getMermasVencidas' }),
 
     // Auditorias
     getAuditorias:      (p={})   => call({ action: 'getAuditorias', ...p }),
