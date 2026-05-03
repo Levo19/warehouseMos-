@@ -752,13 +752,8 @@ const Session = (() => {
   }
 
   function _imprimirTicketBienvenida() {
-    if (!navigator.onLine) return;
-    API.imprimirBienvenida({
-      nombre:     sesionActual.nombre,
-      apellido:   sesionActual.apellido,
-      rol:        sesionActual.rol,
-      horaInicio: sesionActual.horaInicio
-    }).catch(() => {});
+    // Deshabilitado por solicitud del usuario — ahorrar papel.
+    // El cuerpo se mantiene como no-op para no romper otros llamados existentes.
   }
 
   function _mostrarAvisoSesionAnterior(fecha) {
@@ -789,6 +784,11 @@ const Session = (() => {
     if (sideNm) sideNm.textContent = sesionActual.nombre;
     const sideMnNm = document.getElementById('sideUserMenuName');
     if (sideMnNm) sideMnNm.textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
+
+    // Mostrar acceso a Logs solo para roles privilegiados
+    const rolUp = String(sesionActual.rol || '').toUpperCase();
+    const sideLogs = document.getElementById('sideRowLogs');
+    if (sideLogs) sideLogs.style.display = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') ? '' : 'none';
 
     _mostrarApp();
     _iniciarTimerBloqueo();
@@ -1447,6 +1447,7 @@ const App = (() => {
       case 'mermas':      MermasView.cargar(); break;
       case 'productos':   ProductosView.cargar(); break;
       case 'tools':       _loadTools(); break;
+      case 'logs':        LogsView.cargar(); break;
     }
   }
 
@@ -8786,6 +8787,120 @@ const ConfigView = (() => {
   }
 
   return { guardar, guardarImpresion };
+})();
+
+// ════════════════════════════════════════════════
+// LOGS VIEW — historial de movimientos de stock
+// Solo accesible para MASTER / ADMINISTRADOR
+// ════════════════════════════════════════════════
+const LogsView = (() => {
+  let _movimientos = [];
+  let _cargando    = false;
+
+  const TIPO_LABEL = {
+    'CIERRE_GUIA':       { txt: 'Cierre guía',       color: '#3b82f6', bg: 'rgba(59,130,246,.15)' },
+    'ANULACION_DETALLE': { txt: 'Anulación',         color: '#f87171', bg: 'rgba(248,113,113,.15)' },
+    'EDICION_CANTIDAD':  { txt: 'Edición cantidad',  color: '#fbbf24', bg: 'rgba(251,191,36,.15)' },
+    'AUTO_SUMA_DETALLE': { txt: 'Auto-suma',         color: '#a78bfa', bg: 'rgba(167,139,250,.15)' },
+    'REABRIR_REVERSO':   { txt: 'Reabrir guía',      color: '#fb923c', bg: 'rgba(251,146,60,.15)' },
+    'AJUSTE_MANUAL':     { txt: 'Ajuste manual',     color: '#34d399', bg: 'rgba(52,211,153,.15)' },
+    'AUDITORIA':         { txt: 'Auditoría',         color: '#60a5fa', bg: 'rgba(96,165,250,.15)' },
+    'ENVASADO_BASE':     { txt: 'Envasado base',     color: '#c084fc', bg: 'rgba(192,132,252,.15)' },
+    'ENVASADO_DERIVADO': { txt: 'Envasado derivado', color: '#c084fc', bg: 'rgba(192,132,252,.15)' },
+    'APROBACION_PN':     { txt: 'Aprobación PN',     color: '#34d399', bg: 'rgba(52,211,153,.15)' },
+    'INDEFINIDO':        { txt: 'Indefinido',        color: '#94a3b8', bg: 'rgba(148,163,184,.15)' }
+  };
+
+  async function cargar() {
+    if (_cargando) return;
+    _cargando = true;
+    const list = document.getElementById('logsList');
+    if (list) list.innerHTML = '<p class="text-xs text-slate-500 text-center py-6">Cargando movimientos...</p>';
+    try {
+      const res = await API.getStockMovimientos({ limit: 500 });
+      _movimientos = res.ok ? (res.data || []) : [];
+      filtrar();
+    } catch(e) {
+      if (list) list.innerHTML = '<p class="text-xs text-red-400 text-center py-6">Sin conexión</p>';
+    } finally {
+      _cargando = false;
+    }
+  }
+
+  function filtrar() {
+    const q     = (document.getElementById('logsFiltroProducto')?.value || '').toLowerCase().trim();
+    const tipo  = document.getElementById('logsFiltroTipo')?.value || '';
+    let lista = [..._movimientos];
+    if (q) {
+      // Buscar por código + descripción (resolvemos descripción desde caché)
+      const prods = OfflineManager.getProductosCache();
+      const descMap = {};
+      prods.forEach(p => {
+        if (p.codigoBarra) descMap[String(p.codigoBarra).trim()] = String(p.descripcion || '').toLowerCase();
+        if (p.idProducto)  descMap[String(p.idProducto)] = String(p.descripcion || '').toLowerCase();
+      });
+      lista = lista.filter(m => {
+        const cb = String(m.codigoProducto || '').toLowerCase();
+        const desc = descMap[String(m.codigoProducto || '').trim()] || '';
+        return cb.includes(q) || desc.includes(q);
+      });
+    }
+    if (tipo) lista = lista.filter(m => m.tipoOperacion === tipo);
+    _render(lista);
+  }
+
+  function _render(lista) {
+    const list = document.getElementById('logsList');
+    const tot  = document.getElementById('logsTotal');
+    if (!list) return;
+    if (tot) tot.textContent = lista.length + ' / ' + _movimientos.length + ' movimientos';
+    if (!lista.length) {
+      list.innerHTML = '<p class="text-xs text-slate-500 text-center py-6">Sin movimientos</p>';
+      return;
+    }
+    // Resolver descripciones
+    const prods = OfflineManager.getProductosCache();
+    const descMap = {};
+    prods.forEach(p => {
+      const name = p.descripcion || '';
+      if (!name) return;
+      if (p.codigoBarra) descMap[String(p.codigoBarra).trim()] = name;
+      if (p.idProducto)  descMap[String(p.idProducto)] = name;
+    });
+
+    list.innerHTML = lista.map(m => {
+      const cfg = TIPO_LABEL[m.tipoOperacion] || TIPO_LABEL.INDEFINIDO;
+      const desc = descMap[String(m.codigoProducto || '').trim()] || m.codigoProducto;
+      const delta = parseFloat(m.delta) || 0;
+      const fechaStr = m.fecha ? new Date(m.fecha).toLocaleString('es-PE') : '';
+      return `
+      <div class="card-sm" style="padding:9px 11px">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div class="flex-1 min-w-0">
+            <p class="font-semibold text-sm text-slate-100 truncate">${escHtml(desc)}</p>
+            <p class="text-[10px] text-slate-500 font-mono">${escHtml(m.codigoProducto)}</p>
+          </div>
+          <span class="font-black text-sm flex-shrink-0"
+                style="color:${delta > 0 ? '#34d399' : '#f87171'}">${delta > 0 ? '+' : ''}${fmt(delta, 2)}</span>
+        </div>
+        <div class="flex items-center justify-between gap-2 text-[11px]">
+          <span style="display:inline-block;padding:1px 8px;border-radius:99px;
+                       background:${cfg.bg};color:${cfg.color};font-weight:700;font-size:10px">
+            ${cfg.txt}
+          </span>
+          <span class="text-slate-500">${escHtml(fechaStr)}</span>
+        </div>
+        <div class="text-[10px] text-slate-500 mt-1 flex gap-3">
+          <span>antes: <b class="text-slate-300">${fmt(m.stockAntes, 1)}</b></span>
+          <span>después: <b class="text-slate-300">${fmt(m.stockDespues, 1)}</b></span>
+          ${m.usuario ? `<span class="ml-auto">${escHtml(m.usuario)}</span>` : ''}
+        </div>
+        ${m.origen ? `<p class="text-[10px] text-slate-600 font-mono mt-0.5">origen: ${escHtml(m.origen)}</p>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  return { cargar, filtrar };
 })();
 
 // ════════════════════════════════════════════════
