@@ -776,6 +776,9 @@ const Session = (() => {
     window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
     window.WH_CONFIG.idSesion  = sesionActual.idSesion;
 
+    // Activar wake lock — pantalla activa mientras hay sesión
+    _activarWakeLock();
+
     // Iniciar monitor de horario laboral (avisa 5min antes y cierra al límite)
     if (typeof Welcome !== 'undefined') Welcome.iniciarMonitorHorario(sesionActual.rol);
 
@@ -898,6 +901,9 @@ const Session = (() => {
 
     localStorage.setItem('wh_lock_inicio', Date.now());
 
+    // Init reloj, frase rotante y partículas en el lock screen
+    _initLockEnhancements();
+
     document.getElementById('lockScreen').style.display = 'flex';
 
     clearInterval(lockInterval);
@@ -906,8 +912,98 @@ const Session = (() => {
       const m = Math.floor(seg / 60), s = seg % 60;
       document.getElementById('lockTiempo').textContent =
         `Bloqueado hace ${m > 0 ? m + 'm ' : ''}${s}s`;
+
+      // Reloj central HH:MM:SS
+      const n = new Date();
+      const hm = String(n.getHours()).padStart(2, '0') + ':' + String(n.getMinutes()).padStart(2, '0');
+      const ss = String(n.getSeconds()).padStart(2, '0');
+      const elHM = document.getElementById('lockClockHM');
+      const elSec = document.getElementById('lockClockSec');
+      if (elHM) elHM.textContent = hm;
+      if (elSec) elSec.textContent = ':' + ss;
     }, 1000);
   }
+
+  // ───────────────────────────────────────────────
+  //  Salvapantalla / Lock screen enhancements
+  // ───────────────────────────────────────────────
+  const _frasesAlmacen = [
+    'El orden de hoy es la productividad de mañana.',
+    'Cada caja bien etiquetada ahorra horas al equipo.',
+    'Un almacén limpio refleja un equipo orgulloso.',
+    'La precisión en el inventario es respeto al cliente.',
+    'Trabajar bien hoy es no tener problemas mañana.',
+    'Tu atención al detalle se nota en todo el negocio.',
+    'Cada guía bien revisada protege al equipo entero.',
+    'Lo que se cuenta bien, no se pierde nunca.',
+    'El silencio de un almacén ordenado vale oro.',
+    'Pequeñas decisiones precisas, grandes resultados.',
+    'La constancia ordenada vence al esfuerzo desordenado.',
+    'Eres parte del corazón de Inversiones MOS.',
+    'Cuando todo está en su lugar, el equipo respira.',
+    'La calidad empieza en el almacén, no en la venta.',
+    'Tu trabajo es invisible cuando todo sale bien — eso es lo valioso.',
+    'Mediste, contaste, etiquetaste: hiciste posible la venta.',
+    'El cliente nunca te ve, pero vive de tu precisión.',
+    'Una hora ordenada vale tres horas corriendo.',
+    'Cada producto bien guardado es un cliente sin reclamos.',
+    'Hoy no se trata de hacer más, sino de hacer mejor.'
+  ];
+  let _lockQuoteInterval = null;
+  let _wakeLockSentinel = null;
+
+  function _initLockEnhancements() {
+    // Frase inicial aleatoria
+    const elQ = document.getElementById('lockQuote');
+    if (elQ) {
+      elQ.textContent = '"' + _frasesAlmacen[Math.floor(Math.random() * _frasesAlmacen.length)] + '"';
+    }
+    // Rotar frase cada 8s con fade
+    if (_lockQuoteInterval) clearInterval(_lockQuoteInterval);
+    _lockQuoteInterval = setInterval(() => {
+      if (!elQ) return;
+      elQ.classList.add('fading');
+      setTimeout(() => {
+        elQ.textContent = '"' + _frasesAlmacen[Math.floor(Math.random() * _frasesAlmacen.length)] + '"';
+        elQ.classList.remove('fading');
+      }, 500);
+    }, 8000);
+    // Posicionar partículas con coords aleatorias
+    for (let i = 0; i < 6; i++) {
+      const p = document.getElementById('lockPart' + i);
+      if (!p) continue;
+      p.style.left           = (Math.random() * 100) + '%';
+      p.style.setProperty('--p-dx', ((Math.random() - 0.5) * 100) + 'px');
+      p.style.animationDelay = (Math.random() * 18) + 's';
+      p.style.animationDuration = (14 + Math.random() * 8) + 's';
+    }
+    // Indicador wake lock
+    const ind = document.getElementById('lockWakeLockInd');
+    if (ind) ind.style.display = _wakeLockSentinel ? 'block' : 'none';
+  }
+
+  // ───────────────────────────────────────────────
+  //  Wake Lock — pantalla activa con sesión
+  // ───────────────────────────────────────────────
+  async function _activarWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    if (_wakeLockSentinel) return;
+    if (localStorage.getItem('wh_wakelock') === '0') return;
+    try {
+      _wakeLockSentinel = await navigator.wakeLock.request('screen');
+      _wakeLockSentinel.addEventListener('release', () => { _wakeLockSentinel = null; });
+    } catch(e) { /* dispositivo no soporta */ }
+  }
+  async function _liberarWakeLock() {
+    if (_wakeLockSentinel) {
+      try { await _wakeLockSentinel.release(); } catch(e) {}
+      _wakeLockSentinel = null;
+    }
+  }
+  // Re-activar al volver al foreground
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && sesionActual) _activarWakeLock();
+  });
 
   function lockTecla(d) {
     if (lockPinBuffer.length >= 4) return;
@@ -936,8 +1032,10 @@ const Session = (() => {
 
     if (ok) {
       clearInterval(lockInterval);
+      if (_lockQuoteInterval) { clearInterval(_lockQuoteInterval); _lockQuoteInterval = null; }
       document.getElementById('lockScreen').style.display = 'none';
       _resetTimerBloqueo();
+      _activarWakeLock(); // re-activar por si el SO lo libero al bloquear
     } else {
       document.getElementById('lockError').textContent = '❌ PIN incorrecto';
       setTimeout(() => { document.getElementById('lockError').textContent = ''; }, 2000);
@@ -1050,6 +1148,8 @@ const Session = (() => {
     if (!confirm('¿Cerrar sesión? Se perderá el reporte de turno.')) return;
     clearTimeout(lockTimer);
     clearInterval(lockInterval);
+    if (_lockQuoteInterval) { clearInterval(_lockQuoteInterval); _lockQuoteInterval = null; }
+    _liberarWakeLock();
     _limpiarSesion();
     sesionActual = null;
     document.getElementById('lockScreen').style.display = 'none';
