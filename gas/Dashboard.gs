@@ -158,38 +158,47 @@ function getDashboard() {
 
 function _calcularPendientesEnvasado(productos, stockMap) {
   var pendientes = [];
-  productos.forEach(function(p) {
-    if (p.esEnvasable !== '1' || p.estado !== '1') return;
-    // Para cada derivado que use este producto como base
-    // No — buscamos productos derivados con stock bajo
-  });
 
-  // Productos WH envasados: codigoBarra empieza con WH + tienen codigoProductoBase
+  // Regla "por envasar":
+  //   1. Producto derivado activo (estado=1) con codigoProductoBase definido
+  //   2. Prefijo WH (envasable en almacén)
+  //   3. Sin tope/min: stock <= 0
+  //   4. Con stockMinimo: stock < stockMinimo
+  //   5. Con stockMaximo: incluir siempre que stock < stockMaximo
+  //   La base puede no tener stock — el derivado igual aparece como pendiente
+  //   (la falta de base es info adicional, no excluye el alert).
   productos.forEach(function(p) {
     if (!p.codigoProductoBase || p.codigoProductoBase === '') return;
     if (p.estado !== '1') return;
-    // Solo productos envasados en almacén (prefijo WH en barcode o idProducto)
     var esWH = String(p.codigoBarra || p.idProducto || '').toUpperCase().indexOf('WH') === 0;
     if (!esWH) return;
 
-    var stockDerivado = stockMap[p.idProducto] || 0;
+    // Stock derivado: indexar por codigoBarra primero, luego idProducto (compat)
+    var stockDerivado = stockMap[p.codigoBarra] !== undefined
+      ? stockMap[p.codigoBarra]
+      : (stockMap[p.idProducto] || 0);
     var minDerivado   = parseFloat(p.stockMinimo) || 0;
     var maxDerivado   = parseFloat(p.stockMaximo) || 0;
-    // Incluir siempre que esté bajo el máximo (objetivo es llegar al max, mínimo es alerta)
-    if (maxDerivado > 0 && stockDerivado >= maxDerivado) return;
+
+    // Decidir si está pendiente
+    var estaPendiente;
+    if (maxDerivado > 0) {
+      estaPendiente = stockDerivado < maxDerivado;
+    } else if (minDerivado > 0) {
+      estaPendiente = stockDerivado < minDerivado;
+    } else {
+      estaPendiente = stockDerivado <= 0;
+    }
+    if (!estaPendiente) return;
 
     var stockBase = stockMap[p.codigoProductoBase] || 0;
-    // factorConversionBase: unidades WH por 1 unidad de granel
-    // factorConversion: fallback si aún no se migró el campo
-    var factor = parseFloat(p.factorConversionBase) || parseFloat(p.factorConversion) || 1;
-    var merma  = parseFloat(p.mermaEsperadaPct) || 0;
+    var factor    = parseFloat(p.factorConversionBase) || parseFloat(p.factorConversion) || 1;
+    var merma     = parseFloat(p.mermaEsperadaPct) || 0;
     var maxProducibles = Math.floor(stockBase * factor * (1 - merma / 100));
-
-    if (stockBase <= 0) return; // Sin base, no se puede envasar
 
     var necesita = maxDerivado > 0
       ? Math.max(0, maxDerivado - stockDerivado)
-      : Math.max(0, minDerivado - stockDerivado);
+      : (minDerivado > 0 ? Math.max(0, minDerivado - stockDerivado) : Math.max(1, -stockDerivado));
 
     pendientes.push({
       codigoDerivado:       p.idProducto,
