@@ -1479,6 +1479,97 @@
   <div class="wh-upd-dots"><span></span><span></span><span></span></div>
 </div>
 
+<!-- ── WELCOME OVERLAY (post-login) ───────────────── -->
+<div id="welcomeOverlay" style="display:none;position:fixed;inset:0;z-index:9000;
+     background:linear-gradient(135deg,#0a1424 0%,#1e293b 50%,#0a1424 100%);
+     background-size:200% 200%;animation:welBg 18s ease infinite;
+     color:#f1f5f9;flex-direction:column;align-items:center;justify-content:center;
+     padding:24px;text-align:center;overflow-y:auto">
+  <div id="welAvatar" style="width:96px;height:96px;border-radius:24px;
+       background:#1e293b;border:3px solid #fbbf24;
+       display:flex;align-items:center;justify-content:center;
+       font-size:2.2rem;font-weight:900;color:#fff;letter-spacing:.05em;
+       box-shadow:0 0 0 0 rgba(251,191,36,.6);
+       animation:welAvatarPulse 2.4s ease-in-out infinite;margin-bottom:18px">JG</div>
+  <h1 id="welSaludo" style="font-size:1.65rem;font-weight:800;letter-spacing:.02em;margin:0 0 4px">¡Buenos días, Jorgenis! ⚡</h1>
+  <p id="welBrand" style="color:#94a3b8;font-size:.85rem;margin:0 0 18px;letter-spacing:.04em">InversionMos · ALMACENERO</p>
+  <p id="welQuote" style="color:#fbbf24;font-size:.95rem;font-style:italic;
+     min-height:48px;max-width:420px;line-height:1.45;margin-bottom:22px;font-weight:600"></p>
+
+  <div style="display:flex;gap:10px;margin-bottom:22px;flex-wrap:wrap;justify-content:center">
+    <div style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.3);
+                padding:9px 14px;border-radius:12px;min-width:90px">
+      <p id="welRacha" style="font-size:1.4rem;font-weight:900;color:#fbbf24;margin:0">🔥 0</p>
+      <p style="font-size:.65rem;color:#94a3b8;margin:0;letter-spacing:.05em">DÍAS RACHA</p>
+    </div>
+    <div style="background:rgba(14,165,233,.1);border:1px solid rgba(14,165,233,.3);
+                padding:9px 14px;border-radius:12px;min-width:90px">
+      <p id="welSesiones" style="font-size:1.4rem;font-weight:900;color:#38bdf8;margin:0">📅 0</p>
+      <p style="font-size:.65rem;color:#94a3b8;margin:0;letter-spacing:.05em">SESIONES</p>
+    </div>
+    <div style="background:rgba(52,211,153,.1);border:1px solid rgba(52,211,153,.3);
+                padding:9px 14px;border-radius:12px;min-width:90px">
+      <p id="welHoraInicio" style="font-size:1.4rem;font-weight:900;color:#34d399;margin:0">⏰ —</p>
+      <p style="font-size:.65rem;color:#94a3b8;margin:0;letter-spacing:.05em">HORA INICIO</p>
+    </div>
+  </div>
+
+  <div id="welPendientes" style="background:rgba(127,29,29,.15);border:1px solid rgba(248,113,113,.3);
+       border-radius:12px;padding:12px 18px;margin-bottom:14px;max-width:420px;width:100%;display:none">
+    <p style="font-size:.7rem;font-weight:800;color:#f87171;letter-spacing:.08em;margin:0 0 8px">PENDIENTES DE HOY</p>
+    <div id="welPendList" style="font-size:.85rem;color:#fca5a5;line-height:1.7;text-align:left"></div>
+  </div>
+
+  <div id="welAyer" style="background:rgba(30,41,59,.6);border:1px solid #334155;
+       border-radius:12px;padding:12px 18px;margin-bottom:18px;max-width:420px;width:100%;display:none">
+    <p style="font-size:.7rem;font-weight:800;color:#94a3b8;letter-spacing:.08em;margin:0 0 6px">RESUMEN AYER</p>
+    <p id="welAyerTexto" style="font-size:.82rem;color:#cbd5e1;line-height:1.5;margin:0"></p>
+  </div>
+
+  <!-- Barra de progreso de pre-carga -->
+  <div style="width:280px;max-width:90%;margin-bottom:14px">
+    <div style="height:5px;background:#1e293b;border-radius:99px;overflow:hidden">
+      <div id="welProgBar" style="height:100%;background:linear-gradient(90deg,#fbbf24,#f59e0b);
+           width:0%;transition:width .4s ease"></div>
+    </div>
+    <p id="welProgLabel" style="font-size:.7rem;color:#64748b;margin:6px 0 0">Cargando datos...</p>
+  </div>
+
+  <button onclick="Welcome.cerrar()" id="welBtnEntrar"
+          style="background:linear-gradient(135deg,#fbbf24,#f59e0b);color:#0a1424;
+                 font-weight:900;font-size:1rem;padding:12px 32px;border:none;
+                 border-radius:12px;cursor:pointer;letter-spacing:.06em;
+                 box-shadow:0 4px 12px rgba(251,191,36,.3);
+                 transition:all .15s">
+    ENTRAR AL ALMACÉN →
+  </button>
+</div>
+
+<!-- ── PANTALLA "ALMACÉN CERRADO" ───────────────── -->
+<div id="almacenCerradoOverlay" style="display:none;position:fixed;inset:0;z-index:9100;
+     background:#0a0f1e;color:#f1f5f9;flex-direction:column;align-items:center;
+     justify-content:center;padding:24px;text-align:center">
+  <div style="font-size:5rem;margin-bottom:18px">🌙</div>
+  <h2 style="font-size:1.4rem;font-weight:800;margin:0 0 8px">ALMACÉN CERRADO</h2>
+  <p id="acHorario" style="color:#94a3b8;font-size:.9rem;margin:0 0 4px;line-height:1.6"></p>
+  <p id="acFaltan" style="color:#fbbf24;font-size:1rem;font-weight:700;margin:14px 0 24px"></p>
+  <p style="color:#475569;font-size:.78rem;margin:0 0 8px">¿Eres administrador?</p>
+  <button onclick="Welcome.intentarAccesoAdmin()"
+          style="background:transparent;border:1.5px solid #475569;color:#94a3b8;
+                 padding:9px 22px;border-radius:10px;font-size:.85rem;font-weight:700;
+                 cursor:pointer">
+    Acceso admin con PIN
+  </button>
+</div>
+
+<style>
+  @keyframes welBg { 0%,100%{ background-position:0% 0% } 50%{ background-position:100% 100% } }
+  @keyframes welAvatarPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(251,191,36,.6); }
+    50%     { box-shadow: 0 0 0 18px rgba(251,191,36,0); }
+  }
+</style>
+
 <!-- Banner nueva versión disponible -->
 <div id="whUpdateBanner" role="alert" aria-live="polite">
   <div class="wh-upd-banner-inner">

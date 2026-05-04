@@ -14,6 +14,23 @@ function loginPersonal(params) {
   });
   if (!operador) return { ok: false, error: 'PIN incorrecto' };
 
+  // Bloqueo por horario laboral — solo afecta a roles no-admin
+  var horario = _horarioPermitido(operador.rol);
+  if (!horario.permitido) {
+    return {
+      ok: false,
+      error: 'FUERA_DE_HORARIO',
+      data: {
+        rol:       operador.rol,
+        nombre:    operador.nombre,
+        apertura:  horario.apertura,
+        cierre:    horario.cierre,
+        dia:       horario.dia,
+        motivo:    horario.motivo
+      }
+    };
+  }
+
   var tz       = Session.getScriptTimeZone();
   var ahora    = new Date();
   var fechaStr = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
@@ -405,4 +422,80 @@ function _notificarMOS(titulo, cuerpo) {
     });
     Logger.log('[Push→MOS] HTTP ' + resp.getResponseCode() + ' | ' + resp.getContentText().substring(0, 120));
   } catch(e) { Logger.log('[Push→MOS] excepcion: ' + e.message); }
+}
+
+// ============================================================
+// HORARIO LABORAL + CIERRE NOCTURNO
+// LUN-SÁB: 07:00 - 19:00
+// DOMINGO: 07:00 - 16:00
+// MASTER y ADMINISTRADOR: 24/7 sin restricción
+// ============================================================
+function _horarioPermitido(rol) {
+  var rolUp = String(rol || '').toUpperCase();
+  if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') return { permitido: true, motivo: 'rol_admin' };
+
+  var tz   = Session.getScriptTimeZone();
+  var ahora = new Date();
+  var dia  = parseInt(Utilities.formatDate(ahora, tz, 'u'), 10); // 1=lun, 7=dom
+  var hora = parseInt(Utilities.formatDate(ahora, tz, 'H'), 10);
+  var min  = parseInt(Utilities.formatDate(ahora, tz, 'm'), 10);
+  var horaDecimal = hora + (min / 60);
+
+  var apertura = 7;
+  var cierre   = (dia === 7) ? 16 : 19;  // domingo cierra 16h, resto 19h
+
+  if (horaDecimal >= apertura && horaDecimal < cierre) {
+    return { permitido: true, apertura: apertura, cierre: cierre, dia: dia };
+  }
+  return {
+    permitido: false,
+    apertura:  apertura,
+    cierre:    cierre,
+    dia:       dia,
+    motivo:    horaDecimal < apertura ? 'antes_apertura' : 'despues_cierre'
+  };
+}
+
+// Endpoint público: el frontend lo llama antes de mostrar la pantalla de login
+// y antes de desbloquear sesión, para saber si el operador puede entrar.
+function verificarHorario(params) {
+  var rol = String(params.rol || '');
+  var info = _horarioPermitido(rol);
+  return { ok: true, data: info };
+}
+
+// Cierra todas las SESIONES ACTIVAS de operadores/envasadores. MASTER/ADMINISTRADOR
+// se mantienen activos. Llamado por trigger nocturno.
+function forzarCierreSesionesNocturno() {
+  var sheet  = getSheet('SESIONES');
+  var data   = sheet.getDataRange().getValues();
+  var hdrs   = data[0];
+  var idxId    = hdrs.indexOf('idSesion');
+  var idxIdP   = hdrs.indexOf('idPersonal');
+  var idxFFin  = hdrs.indexOf('fechaFin');
+  var idxHFin  = hdrs.indexOf('horaFin');
+  var idxEst   = hdrs.indexOf('estado');
+
+  var personal = _sheetToObjects(getPersonalSheet());
+  var rolMap = {};
+  personal.forEach(function(p) { rolMap[String(p.idPersonal)] = String(p.rol || '').toUpperCase(); });
+
+  var tz       = Session.getScriptTimeZone();
+  var ahora    = new Date();
+  var fechaStr = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
+  var horaStr  = Utilities.formatDate(ahora, tz, 'HH:mm:ss');
+
+  var cerradas = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxEst] || '').toUpperCase() !== 'ACTIVA') continue;
+    var rol = rolMap[String(data[i][idxIdP])];
+    if (rol === 'MASTER' || rol === 'ADMINISTRADOR') continue;  // no tocar admins
+
+    sheet.getRange(i + 1, idxFFin + 1).setValue(fechaStr);
+    sheet.getRange(i + 1, idxHFin + 1).setValue(horaStr);
+    sheet.getRange(i + 1, idxEst  + 1).setValue('CERRADA_AUTO');
+    cerradas++;
+  }
+  Logger.log('forzarCierreSesionesNocturno: ' + cerradas + ' sesiones cerradas');
+  return { ok: true, data: { cerradas: cerradas } };
 }

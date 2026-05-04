@@ -177,6 +177,9 @@ function _route(method, e) {
       case 'marcarAlertaRevisada':return marcarAlertaRevisada(params);
       case 'aceptarTeoricoAlerta':return aceptarTeoricoAlerta(params);
       case 'getStockMovimientos': return getStockMovimientos(params);
+      case 'getWelcomeData':      return getWelcomeData(params);
+      case 'verificarHorario':    return verificarHorario(params);
+      case 'forzarCierreSesionesNocturno': return forzarCierreSesionesNocturno();
       case 'auditarStockGlobal':  return auditarStockGlobal();
       case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 

@@ -689,8 +689,15 @@ const Session = (() => {
     // Sin caché → esperar GAS (nuevo dispositivo o sin datos locales)
     if (!localOp && navigator.onLine) {
       const res = await API.loginPersonal(pinIntento);
+      if (!res.ok && res.error === 'FUERA_DE_HORARIO') {
+        // Operador/Envasador intentando entrar fuera del horario laboral
+        try { SoundFX.buzzer(); } catch(e) {}
+        Welcome.mostrarAlmacenCerrado(res.data || {});
+        return;
+      }
       if (!res.ok || res.offline) {
         document.getElementById('loginError').textContent = '❌ PIN incorrecto';
+        try { SoundFX.buzzer(); } catch(e) {}
         setTimeout(() => { document.getElementById('loginError').textContent = ''; }, 2000);
         return;
       }
@@ -746,9 +753,13 @@ const Session = (() => {
 
   // bienvenidaImpresa: true = ya se imprimió el ticket hoy → no imprimir
   function _postLogin(sesionAnterior, bienvenidaImpresa) {
-    toast(`¡Hola ${sesionActual.nombre}! 👋`, 'ok', 2500);
     if (sesionAnterior) _mostrarAvisoSesionAnterior(sesionAnterior);
-    if (!bienvenidaImpresa) _imprimirTicketBienvenida();
+    // Welcome screen estilo MosExpress (con stats + pre-carga)
+    if (typeof Welcome !== 'undefined' && sesionActual) {
+      Welcome.mostrar(sesionActual);
+    } else {
+      toast(`¡Hola ${sesionActual?.nombre || ''}! 👋`, 'ok', 2500);
+    }
   }
 
   function _imprimirTicketBienvenida() {
@@ -764,6 +775,9 @@ const Session = (() => {
   function _aplicarSesion() {
     window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
     window.WH_CONFIG.idSesion  = sesionActual.idSesion;
+
+    // Iniciar monitor de horario laboral (avisa 5min antes y cierra al límite)
+    if (typeof Welcome !== 'undefined') Welcome.iniciarMonitorHorario(sesionActual.rol);
 
     // Avatar header (top bar)
     const av = document.getElementById('topAvatar');
@@ -1317,6 +1331,15 @@ const App = (() => {
       window.WH_CONFIG.gasUrl = gasUrl;
     }
     console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
+
+    // Multi-dispositivo: al volver a foreground (cambio de pestaña / unlock),
+    // refrescar datos operacionales para ver cambios de otros dispositivos
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      if (typeof OfflineManager === 'undefined') return;
+      // El throttle interno de 15s previene spam
+      OfflineManager.precargarOperacional(false).catch(() => {});
+    });
 
     // Ocultar app hasta login
     document.getElementById('topBar').style.display = 'none';
@@ -9114,6 +9137,238 @@ const FotoPicker = (() => {
   }
 
   return { abrir, elegir, confirmarSinFoto };
+})();
+
+// ════════════════════════════════════════════════
+// WELCOME — pantalla post-login con stats + pre-carga inteligente
+// ════════════════════════════════════════════════
+const Welcome = (() => {
+  const FRASES = [
+    'Un almacén ordenado es trabajo bien hecho',
+    'Cada producto bien acomodado es un cliente feliz',
+    'El detalle de hoy es la calidad de mañana',
+    'Pequeñas tareas hechas bien construyen grandes resultados',
+    'Trabaja con calma, los errores cuestan más que el tiempo',
+    'Quien controla el stock, controla el negocio',
+    'El almacén es la columna del negocio',
+    'Hoy es un día para hacer el inventario sin dudas',
+    'Un envase bien hecho es un cliente que vuelve',
+    'La precisión hoy ahorra problemas mañana',
+    'Cada guía cerrada bien es una operación segura',
+    'Tu trabajo silencioso sostiene toda la empresa',
+    'Sin el almacén, no hay venta',
+    'Contar bien es más rápido que contar dos veces',
+    'El orden es la base del control',
+    'Un buen almacenero ve lo que otros no ven',
+    'Hoy decides cómo termina el día',
+    'La constancia vence al talento',
+    'Cada día es una nueva oportunidad de hacerlo perfecto',
+    'El almacén bien cuidado vende solo'
+  ];
+
+  let _saludoOpened = false;
+  let _typewriterTimer = null;
+
+  function _saludo() {
+    const h = new Date().getHours();
+    if (h >= 5  && h < 12) return 'Buenos días';
+    if (h >= 12 && h < 19) return 'Buenas tardes';
+    return 'Buenas noches';
+  }
+
+  async function mostrar(sesion) {
+    if (_saludoOpened) return;
+    _saludoOpened = true;
+
+    const overlay = document.getElementById('welcomeOverlay');
+    if (!overlay) return;
+
+    // Llenar datos básicos disponibles
+    const nombre = sesion.nombre || '';
+    const apellido = sesion.apellido || '';
+    const iniciales = ((nombre[0] || '?') + (apellido[0] || '')).toUpperCase();
+    const av = document.getElementById('welAvatar');
+    if (av) {
+      av.textContent = iniciales;
+      if (sesion.color) av.style.background = sesion.color;
+    }
+    document.getElementById('welSaludo').textContent = `¡${_saludo()}, ${nombre}! ⚡`;
+    document.getElementById('welBrand').textContent  = `InversionMos · ${(sesion.rol || '').toUpperCase()}`;
+    document.getElementById('welHoraInicio').textContent = '⏰ ' + (sesion.horaInicio || '—').substring(0, 5);
+
+    // Frase aleatoria con typewriter
+    const frase = FRASES[Math.floor(Math.random() * FRASES.length)];
+    _typewriter(frase);
+
+    // Mostrar overlay + sonido
+    overlay.style.display = 'flex';
+    try { SoundFX.welcome(); } catch(e) {}
+
+    // Pre-carga + datos welcome en paralelo
+    _ejecutarPrecarga(sesion);
+  }
+
+  function _typewriter(texto) {
+    const el = document.getElementById('welQuote');
+    if (!el) return;
+    if (_typewriterTimer) clearInterval(_typewriterTimer);
+    el.textContent = '';
+    let i = 0;
+    _typewriterTimer = setInterval(() => {
+      el.textContent = texto.substring(0, ++i);
+      if (i >= texto.length) { clearInterval(_typewriterTimer); _typewriterTimer = null; }
+    }, 32);
+  }
+
+  function _setProgreso(pct, label) {
+    const bar = document.getElementById('welProgBar');
+    const lbl = document.getElementById('welProgLabel');
+    if (bar) bar.style.width = Math.min(100, pct) + '%';
+    if (lbl) lbl.textContent = label || '';
+  }
+
+  async function _ejecutarPrecarga(sesion) {
+    const jobs = [
+      { name: 'maestros',    fn: () => OfflineManager.precargar(true) },
+      { name: 'operacional', fn: () => OfflineManager.precargarOperacional(true) },
+      { name: 'welcome',     fn: () => API.getWelcomeData({ idPersonal: sesion.idPersonal }) }
+    ];
+    let done = 0;
+    let welcomeData = null;
+
+    _setProgreso(5, 'Cargando datos...');
+
+    for (const job of jobs) {
+      try {
+        const res = await job.fn();
+        if (job.name === 'welcome' && res?.ok) welcomeData = res.data;
+      } catch(e) { /* silencioso */ }
+      done++;
+      _setProgreso((done / jobs.length) * 100, `${done}/${jobs.length} · ${job.name}`);
+    }
+
+    _setProgreso(100, 'Listo');
+
+    if (welcomeData) _renderEstadisticas(welcomeData);
+
+    // Auto-cerrar tras 5s si el usuario no entra
+    setTimeout(() => { if (_saludoOpened) cerrar(); }, 5000);
+  }
+
+  function _renderEstadisticas(d) {
+    document.getElementById('welRacha').textContent    = '🔥 ' + (d.racha || 0);
+    document.getElementById('welSesiones').textContent = '📅 ' + (d.totalSesiones || 0);
+
+    // Pendientes
+    const pend = [];
+    if (d.pendientes) {
+      if (d.pendientes.mermasVencidas > 0)  pend.push(`⚠ ${d.pendientes.mermasVencidas} merma(s) vencida(s) (>3 días)`);
+      if (d.pendientes.envasesUrgentes > 0) pend.push(`📦 ${d.pendientes.envasesUrgentes} envase(s) urgente(s)`);
+      if (d.pendientes.auditoriasHoy > 0)   pend.push(`📅 ${d.pendientes.auditoriasHoy} auditoría(s) para hoy`);
+    }
+    if (d.sinResolverAyer > 0) pend.push(`🔻 ${d.sinResolverAyer} merma(s) sin resolver`);
+    if (pend.length) {
+      document.getElementById('welPendList').innerHTML = pend.map(p => `<div>${escHtml(p)}</div>`).join('');
+      document.getElementById('welPendientes').style.display = '';
+      try { SoundFX.ping(); } catch(e) {}
+    }
+
+    // Ayer
+    if (d.ayer) {
+      const partes = [];
+      if (d.ayer.guiasCerradas > 0)    partes.push(`${d.ayer.guiasCerradas} guías cerradas`);
+      if (d.ayer.unidadesEnvasadas > 0) partes.push(`${fmt(d.ayer.unidadesEnvasadas, 0)} unid. envasadas`);
+      if (d.ayer.mermasResueltas > 0)  partes.push(`${d.ayer.mermasResueltas} mermas resueltas`);
+      if (partes.length) {
+        document.getElementById('welAyerTexto').textContent = 'Ayer: ' + partes.join(' · ');
+        document.getElementById('welAyer').style.display = '';
+      }
+    }
+  }
+
+  function cerrar() {
+    if (!_saludoOpened) return;
+    _saludoOpened = false;
+    if (_typewriterTimer) clearInterval(_typewriterTimer);
+    const overlay = document.getElementById('welcomeOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  // ── Almacén cerrado por horario ─────────────────────
+  function mostrarAlmacenCerrado(info) {
+    const overlay = document.getElementById('almacenCerradoOverlay');
+    if (!overlay) return;
+    const dia = info.dia || 1;
+    const horario = (dia === 7)
+      ? 'Domingo: 07:00 - 16:00'
+      : 'Lun-Sáb: 07:00 - 19:00';
+    document.getElementById('acHorario').textContent = horario;
+    // Calcular falta hasta apertura
+    const ahora = new Date();
+    const apertura = new Date(ahora);
+    if (info.motivo === 'despues_cierre') apertura.setDate(apertura.getDate() + 1);
+    apertura.setHours(info.apertura || 7, 0, 0, 0);
+    const diff = apertura - ahora;
+    const horas = Math.floor(diff / 3600000);
+    const mins  = Math.floor((diff % 3600000) / 60000);
+    document.getElementById('acFaltan').textContent =
+      `Faltan ${horas}h ${mins}m para abrir`;
+    overlay.style.display = 'flex';
+    try { SoundFX.buzzer(); } catch(e) {}
+  }
+
+  function cerrarAlmacenCerrado() {
+    const overlay = document.getElementById('almacenCerradoOverlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function intentarAccesoAdmin() {
+    cerrarAlmacenCerrado();
+    // Volver a mostrar pantalla de login para que admin/master ingrese su PIN
+    const loginScr = document.getElementById('loginScreen');
+    if (loginScr) loginScr.style.display = 'flex';
+  }
+
+  // ── Aviso 5 min antes del cierre + verificación periódica ──
+  let _avisoMostrado = false;
+  let _cierreInterval = null;
+
+  function iniciarMonitorHorario(rol) {
+    const rolUp = String(rol || '').toUpperCase();
+    if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') return;  // sin restricción
+    if (_cierreInterval) clearInterval(_cierreInterval);
+    _cierreInterval = setInterval(() => _checkCierreInminente(), 60 * 1000); // cada minuto
+    _checkCierreInminente();
+  }
+
+  function _checkCierreInminente() {
+    const ahora = new Date();
+    const dia   = ahora.getDay() === 0 ? 7 : ahora.getDay(); // 1=lun, 7=dom
+    const cierreH = (dia === 7) ? 16 : 19;
+    const aperturaH = 7;
+    const horaActual = ahora.getHours() + ahora.getMinutes() / 60;
+
+    // Fuera de horario → forzar logout y pantalla de cierre
+    if (horaActual >= cierreH || horaActual < aperturaH) {
+      Welcome.mostrarAlmacenCerrado({ apertura: aperturaH, cierre: cierreH, dia,
+                                        motivo: horaActual >= cierreH ? 'despues_cierre' : 'antes_apertura' });
+      try { SoundFX.closeAlarm(); } catch(e) {}
+      // Cerrar sesión local
+      try { localStorage.removeItem('wh_sesion'); } catch(e) {}
+      if (_cierreInterval) { clearInterval(_cierreInterval); _cierreInterval = null; }
+      return;
+    }
+
+    // 5 min antes del cierre → aviso una sola vez
+    const minutosAlCierre = (cierreH - horaActual) * 60;
+    if (minutosAlCierre > 0 && minutosAlCierre <= 5 && !_avisoMostrado) {
+      _avisoMostrado = true;
+      try { SoundFX.bell(); } catch(e) {}
+      toast(`🔔 El almacén cierra en ${Math.ceil(minutosAlCierre)} minutos · guarda tu trabajo`, 'warn', 8000);
+    }
+  }
+
+  return { mostrar, cerrar, mostrarAlmacenCerrado, cerrarAlmacenCerrado, intentarAccesoAdmin, iniciarMonitorHorario };
 })();
 
 const LogsView = (() => {

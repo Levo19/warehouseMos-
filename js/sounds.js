@@ -56,5 +56,36 @@ const SoundFX = (() => {
 
     // Listo / cerrar cámara con ítems — chime ascendente 2 notas
     done:       () => { _tone(880, 0.18, 'sine', 0.85, 0); _tone(1320, 0.25, 'sine', 0.9, 0.20); },
+
+    // Login OK — woosh metálico + chime industrial (3 tonos descendente-ascendente)
+    welcome: () => {
+      _tone(220, 0.08, 'sawtooth', 0.5, 0);     // woosh corto grave
+      _tone(440, 0.10, 'triangle', 0.7, 0.06);
+      _tone(660, 0.12, 'triangle', 0.8, 0.13);
+      _tone(880, 0.18, 'sine',     0.9, 0.22);  // chime metálico final
+    },
+
+    // Buzzer corto — acceso denegado / error UX
+    buzzer: () => {
+      _tone(140, 0.12, 'square', 0.95, 0);
+      _tone(120, 0.18, 'square', 0.9, 0.13);
+    },
+
+    // Factory bell — aviso 5 min antes del cierre (3 toques)
+    bell: () => {
+      _tone(1200, 0.13, 'triangle', 0.85, 0);
+      _tone(1200, 0.13, 'triangle', 0.85, 0.25);
+      _tone(1200, 0.18, 'triangle', 0.9,  0.50);
+    },
+
+    // Cierre forzado — sirena descendente larga
+    closeAlarm: () => {
+      _tone(900, 0.30, 'sawtooth', 0.85, 0);
+      _tone(700, 0.30, 'sawtooth', 0.85, 0.30);
+      _tone(500, 0.40, 'sawtooth', 0.9,  0.60);
+    },
+
+    // Ping notificación — para nuevos pendientes
+    ping: () => _tone(2200, 0.10, 'sine', 0.7),
   };
 })();

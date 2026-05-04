@@ -159,6 +159,8 @@ const API = (() => {
     marcarAlertaRevisada:(p)     => post({ action: 'marcarAlertaRevisada', ...p }),
     aceptarTeoricoAlerta:(p)     => post({ action: 'aceptarTeoricoAlerta', ...p }),
     getStockMovimientos: (p={})  => call({ action: 'getStockMovimientos', ...p }),
+    getWelcomeData:     (p={})   => call({ action: 'getWelcomeData', ...p }),
+    verificarHorario:   (p={})   => call({ action: 'verificarHorario', ...p }),
     imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
 
     // Guías — acciones extra
