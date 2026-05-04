@@ -3690,6 +3690,16 @@
   </div>
 </div>
 
+<!-- Sheet SELECTOR FOTO PREINGRESO (reusable) -->
+<div class="sheet-overlay" id="overlaySelectorFotoPI" onclick="cerrarSheet('sheetSelectorFotoPI')"></div>
+<div class="bottom-sheet" id="sheetSelectorFotoPI" style="max-height:88vh;overflow-y:auto">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+  <p class="font-bold text-base mb-1">Foto para la guía</p>
+  <p id="selectorFotoPISub" class="text-xs text-slate-400 mb-3">El preingreso tiene varias fotos — elige cuál usar (o ninguna)</p>
+  <div id="selectorFotoPIGrid" class="grid grid-cols-2 gap-2 mb-3"></div>
+  <button onclick="FotoPicker.confirmarSinFoto()" class="btn btn-outline w-full">Sin foto / continuar</button>
+</div>
+
 <!-- Sheet RESOLVER MERMA -->
 <div class="sheet-overlay" id="overlayResolverMerma" onclick="cerrarSheet('sheetResolverMerma')"></div>
 <div class="bottom-sheet" id="sheetResolverMerma" style="max-height:92vh">

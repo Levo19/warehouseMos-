@@ -4201,18 +4201,31 @@ const GuiasView = (() => {
 
   async function copiarFotoDePreingreso() {
     if (!_guiaActual?.idPreingreso) { toast('Sin preingreso vinculado', 'warn'); return; }
-    const fotoEl = document.getElementById('guiaDetFotoSection');
-    if (fotoEl) fotoEl.innerHTML = '<div class="flex justify-center py-3"><div class="spinner"></div></div>';
-    const res = await API.copiarFotoDePreingreso({ idGuia: _guiaActual.idGuia, idPreingreso: _guiaActual.idPreingreso })
-      .catch(() => ({ ok: false, error: 'Sin conexión' }));
-    if (res.ok && res.data?.url) {
-      _guiaActual.foto = res.data.url;
-      _mostrarDetalleSheet(_guiaActual, false);
-      toast('Foto copiada', 'ok', 1500);
-    } else {
-      toast('Error: ' + (res.error || 'no se pudo copiar'), 'danger');
-      _mostrarDetalleSheet(_guiaActual, false);
-    }
+    // Buscar fotos del preingreso en caché
+    const piCache = OfflineManager.getPreingresosCache();
+    const pi = piCache.find(x => x.idPreingreso === _guiaActual.idPreingreso);
+    const fotos = pi?.fotos ? String(pi.fotos).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+    if (!fotos.length) { toast('El preingreso no tiene fotos', 'warn'); return; }
+
+    FotoPicker.abrir(_guiaActual.idPreingreso, fotos, async (fileId) => {
+      if (!fileId) return;  // canceló o eligió "sin foto"
+      const fotoEl = document.getElementById('guiaDetFotoSection');
+      if (fotoEl) fotoEl.innerHTML = '<div class="flex justify-center py-3"><div class="spinner"></div></div>';
+      const res = await API.copiarFotoDePreingreso({
+        idGuia:       _guiaActual.idGuia,
+        idPreingreso: _guiaActual.idPreingreso,
+        fileId
+      }).catch(() => ({ ok: false, error: 'Sin conexión' }));
+      if (res.ok && res.data?.url) {
+        _guiaActual.foto = res.data.url;
+        _mostrarDetalleSheet(_guiaActual, false);
+        toast('Foto copiada', 'ok', 1500);
+      } else {
+        toast('Error: ' + (res.error || 'no se pudo copiar'), 'danger');
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+    });
   }
 
   function _prepararFotoGuia(file) {
@@ -6878,6 +6891,24 @@ const PreingresosView = (() => {
   }
 
   async function _lanzarCrearGuia(idPreingreso, idProveedor) {
+    // Antes de crear, si el preingreso tiene fotos, dejar que el operador elija una
+    const cached = OfflineManager.getPreingresosCache();
+    const pi     = cached.find(x => x.idPreingreso === idPreingreso);
+    const fotosPI = pi?.fotos
+      ? String(pi.fotos).split(',').map(s => s.trim()).filter(Boolean)
+      : [];
+
+    if (fotosPI.length > 0) {
+      // Selector: el callback recibe fileId o null
+      FotoPicker.abrir(idPreingreso, fotosPI, (fileId) => {
+        _ejecutarCrearGuia(idPreingreso, idProveedor, fileId);
+      });
+    } else {
+      _ejecutarCrearGuia(idPreingreso, idProveedor, null);
+    }
+  }
+
+  async function _ejecutarCrearGuia(idPreingreso, idProveedor, fileIdFoto) {
     const tempId     = 'G_tmp_' + Date.now();
     const provNombre = _getProveedorNombre(idProveedor);
     GuiasView.injectOptimisticGuia({ tempId, idProveedor, provNombre });
@@ -6889,6 +6920,15 @@ const PreingresosView = (() => {
     if (res.ok) {
       toast(`Guía ${res.data.idGuia} creada`, 'ok');
       GuiasView.finalizeOptimisticGuia(tempId, res.data.idGuia, 'INGRESO_PROVEEDOR', provNombre);
+
+      // Si el operador eligió una foto, copiarla a la guía en background
+      if (fileIdFoto) {
+        API.copiarFotoDePreingreso({
+          idGuia: res.data.idGuia,
+          idPreingreso,
+          fileId: fileIdFoto
+        }).catch(() => {});
+      }
     } else {
       toast('Error al crear guía: ' + res.error, 'danger');
       GuiasView.removeOptimisticGuia(tempId);
@@ -9004,6 +9044,82 @@ const ConfigView = (() => {
 // LOGS VIEW — historial de movimientos de stock
 // Solo accesible para MASTER / ADMINISTRADOR
 // ════════════════════════════════════════════════
+// ════════════════════════════════════════════════
+// FOTO PICKER — selector reutilizable de foto desde preingreso.
+// Uso: FotoPicker.abrir(idPreingreso, fotos, onSelect)
+//   fotos: array de URLs (col 'fotos' del preingreso)
+//   onSelect: (fileId | null) => void   (null = sin foto)
+// ════════════════════════════════════════════════
+const FotoPicker = (() => {
+  let _onSelect = null;
+
+  function _extractFileId(url) {
+    const m = String(url || '').match(/[?&]id=([^&]+)/);
+    return m ? m[1] : '';
+  }
+
+  function abrir(idPreingreso, fotos, onSelect) {
+    _onSelect = onSelect || (() => {});
+    const arr = Array.isArray(fotos) ? fotos.filter(Boolean)
+      : String(fotos || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!arr.length) {
+      // Sin fotos → callback null directo
+      _onSelect(null);
+      _onSelect = null;
+      return;
+    }
+    if (arr.length === 1) {
+      // Una sola foto: confirmar rápido sin abrir modal
+      const fid = _extractFileId(arr[0]);
+      if (confirm('El preingreso tiene 1 foto adjunta. ¿Usarla en la guía?')) {
+        _onSelect(fid || null);
+      } else {
+        _onSelect(null);
+      }
+      _onSelect = null;
+      return;
+    }
+    // Múltiples fotos: abrir selector
+    const sub = document.getElementById('selectorFotoPISub');
+    if (sub) sub.textContent = `${arr.length} fotos disponibles — toca una para usarla en la guía`;
+    const grid = document.getElementById('selectorFotoPIGrid');
+    if (grid) {
+      grid.innerHTML = arr.map((url, i) => {
+        const fid = _extractFileId(url);
+        return `
+        <button onclick="FotoPicker.elegir('${escAttr(fid)}')"
+                style="aspect-ratio:1;border:2px solid #334155;border-radius:10px;
+                       background:#0f172a;cursor:pointer;overflow:hidden;
+                       padding:0;position:relative"
+                ontouchstart="this.style.borderColor='#0ea5e9'"
+                ontouchend="this.style.borderColor='#334155'">
+          <img src="${escAttr(url)}" alt="Foto ${i+1}"
+               style="width:100%;height:100%;object-fit:cover"
+               onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+          <div style="display:none;width:100%;height:100%;align-items:center;justify-content:center;color:#475569;font-size:.7em">${i+1}</div>
+          <span style="position:absolute;bottom:6px;right:6px;background:rgba(0,0,0,.7);
+                       color:#fff;font-size:.65em;padding:2px 7px;border-radius:99px">${i+1}</span>
+        </button>`;
+      }).join('');
+    }
+    abrirSheet('sheetSelectorFotoPI');
+  }
+
+  function elegir(fileId) {
+    cerrarSheet('sheetSelectorFotoPI');
+    if (_onSelect) _onSelect(fileId || null);
+    _onSelect = null;
+  }
+
+  function confirmarSinFoto() {
+    cerrarSheet('sheetSelectorFotoPI');
+    if (_onSelect) _onSelect(null);
+    _onSelect = null;
+  }
+
+  return { abrir, elegir, confirmarSinFoto };
+})();
+
 const LogsView = (() => {
   let _movimientos = [];
   let _cargando    = false;

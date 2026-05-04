@@ -1428,18 +1428,30 @@ function subirFotoGuia(params) {
 function copiarFotoDePreingreso(params) {
   var idGuia       = String(params.idGuia       || '');
   var idPreingreso = String(params.idPreingreso || '');
-  if (!idGuia || !idPreingreso) return { ok: false, error: 'idGuia e idPreingreso requeridos' };
+  var fileId       = String(params.fileId       || '').trim();  // foto específica elegida
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
   try {
-    var preFolderId  = PropertiesService.getScriptProperties().getProperty('FOTOS_PRE_FOLDER_ID');
     var guiaFolderId = PropertiesService.getScriptProperties().getProperty('FOTOS_GUIA_FOLDER_ID');
-    if (!preFolderId || !guiaFolderId) return { ok: false, error: 'Carpetas no configuradas. Ejecuta setupPreingresosFolders() y setupGuiasFolders()' };
-    var piFolder = DriveApp.getFolderById(preFolderId).getFoldersByName(idPreingreso);
-    if (!piFolder.hasNext()) return { ok: false, error: 'Carpeta del preingreso no encontrada' };
-    var files = piFolder.next().getFiles();
-    if (!files.hasNext()) return { ok: false, error: 'Sin fotos en el preingreso' };
-    var srcFile    = files.next();
+    if (!guiaFolderId) return { ok: false, error: 'Carpeta guías no configurada. Ejecuta setupGuiasFolders()' };
     var guiaFolder = DriveApp.getFolderById(guiaFolderId);
     var copyName   = idGuia + '.jpg';
+
+    // Resolver srcFile: si viene fileId, usar ese; sino tomar la primera del folder del preingreso (legado)
+    var srcFile = null;
+    if (fileId) {
+      try { srcFile = DriveApp.getFileById(fileId); }
+      catch(e) { return { ok: false, error: 'Foto no encontrada (fileId inválido)' }; }
+    } else {
+      if (!idPreingreso) return { ok: false, error: 'idPreingreso o fileId requerido' };
+      var preFolderId = PropertiesService.getScriptProperties().getProperty('FOTOS_PRE_FOLDER_ID');
+      if (!preFolderId) return { ok: false, error: 'Carpeta preingresos no configurada' };
+      var piFolder = DriveApp.getFolderById(preFolderId).getFoldersByName(idPreingreso);
+      if (!piFolder.hasNext()) return { ok: false, error: 'Carpeta del preingreso no encontrada' };
+      var files = piFolder.next().getFiles();
+      if (!files.hasNext()) return { ok: false, error: 'Sin fotos en el preingreso' };
+      srcFile = files.next();
+    }
+
     // Borrar copia anterior si existe
     var existentes = guiaFolder.getFilesByName(copyName);
     while (existentes.hasNext()) { existentes.next().setTrashed(true); }
