@@ -1574,10 +1574,6 @@ const App = (() => {
     document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
     document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
 
-    // KPIs secundarios
-    document.getElementById('kpiEficiencia').textContent = (kpis.eficienciaEnvasadoPct ?? '—') + '%';
-    document.getElementById('kpiSalidas').textContent    = kpis.salidasUltimos30dias ?? '—';
-
     // Alertas de cuadre stock (en background, no bloquea render)
     Dashboard.cargarAlertasStock();
 
