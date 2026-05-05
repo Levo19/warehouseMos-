@@ -178,6 +178,9 @@ function _route(method, e) {
       case 'aceptarTeoricoAlerta':return aceptarTeoricoAlerta(params);
       case 'getStockMovimientos': return getStockMovimientos(params);
       case 'getWelcomeData':      return getWelcomeData(params);
+      case 'iniciarTestDiagnostico':   return iniciarTestDiagnostico(params);
+      case 'finalizarTestDiagnostico': return finalizarTestDiagnostico(params);
+      case 'getResultadosDiagnostico': return getResultadosDiagnostico();
       case 'verificarHorario':    return verificarHorario(params);
       case 'forzarCierreSesionesNocturno': return forzarCierreSesionesNocturno();
       case 'auditarStockGlobal':  return auditarStockGlobal();

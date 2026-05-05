@@ -161,6 +161,9 @@ const API = (() => {
     getStockMovimientos: (p={})  => call({ action: 'getStockMovimientos', ...p }),
     getWelcomeData:     (p={})   => call({ action: 'getWelcomeData', ...p }),
     verificarHorario:   (p={})   => call({ action: 'verificarHorario', ...p }),
+    iniciarTestDiagnostico:   (p)      => post({ action: 'iniciarTestDiagnostico', ...p }),
+    finalizarTestDiagnostico: (p)      => post({ action: 'finalizarTestDiagnostico', ...p }),
+    getResultadosDiagnostico: ()       => call({ action: 'getResultadosDiagnostico' }),
     imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
 
     // Guías — acciones extra

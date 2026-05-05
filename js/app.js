@@ -802,10 +802,13 @@ const Session = (() => {
     const sideMnNm = document.getElementById('sideUserMenuName');
     if (sideMnNm) sideMnNm.textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
 
-    // Mostrar acceso a Logs solo para roles privilegiados
+    // Mostrar acceso a Logs y Diagnóstico solo para roles privilegiados
     const rolUp = String(sesionActual.rol || '').toUpperCase();
+    const esAdmin = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR');
     const sideLogs = document.getElementById('sideRowLogs');
-    if (sideLogs) sideLogs.style.display = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') ? '' : 'none';
+    if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';
+    const sideDiag = document.getElementById('sideRowDiag');
+    if (sideDiag) sideDiag.style.display = esAdmin ? '' : 'none';
 
     _mostrarApp();
     _iniciarTimerBloqueo();
@@ -1571,6 +1574,7 @@ const App = (() => {
       case 'productos':   ProductosView.cargar(); break;
       case 'tools':       _loadTools(); break;
       case 'logs':        LogsView.cargar(); break;
+      case 'diagnostico': DiagnosticoView.cargar(); break;
     }
   }
 
@@ -9579,6 +9583,304 @@ const LogsView = (() => {
   }
 
   return { cargar, filtrar };
+})();
+
+// ════════════════════════════════════════════════
+// DIAGNOSTICO VIEW — auto-tests guiados de bugs de cuadre
+// ════════════════════════════════════════════════
+const DiagnosticoView = (() => {
+  const TESTS = [
+    {
+      id: 'TEST_1',
+      titulo: 'Scan rápido mismo producto (10 escaneos)',
+      objetivo: 'Detecta race condition al escanear el mismo producto muy rápido',
+      requiereProducto: true,
+      pasos: [
+        'Abre la sección Guías y crea una nueva guía SALIDA_ZONA',
+        'Abre la cámara y escanea el producto seleccionado 10 VECES SEGUIDAS, lo más rápido que puedas (uno cada ~0.3s)',
+        'Espera 5 segundos para que GAS termine',
+        'Cierra la cámara (NO cierres la guía aún)'
+      ],
+      esperado: '1 fila en el detalle con qty=10'
+    },
+    {
+      id: 'TEST_2',
+      titulo: 'Scan + edición concurrente (out-of-order)',
+      objetivo: 'Detecta si actualizarCantidad llega fuera de orden',
+      requiereProducto: true,
+      pasos: [
+        'Crea una guía SALIDA_ZONA nueva',
+        'Escanea el producto seleccionado UNA vez (qty=1)',
+        'Toca el ítem, edita la cantidad a 15 (escribe rápido en el input)',
+        'Antes de cerrar la edición, ESCANEA otra vez el mismo producto',
+        'Confirma la edición y espera 5 segundos'
+      ],
+      esperado: 'qty final >=15 (idealmente 16)'
+    },
+    {
+      id: 'TEST_3',
+      titulo: 'Cerrar guía inmediatamente tras escaneos',
+      objetivo: 'Detecta si el cierre llega antes que las escrituras pendientes',
+      requiereProducto: true,
+      pasos: [
+        'Crea una guía SALIDA_ZONA nueva',
+        'Escanea el producto seleccionado 5 veces rápido',
+        'INMEDIATAMENTE cierra la cámara',
+        'INMEDIATAMENTE pulsa CERRAR GUÍA',
+        'Espera 30 segundos'
+      ],
+      esperado: 'Guía CERRADA, qty=5, stock bajó exactamente 5 unidades'
+    },
+    {
+      id: 'TEST_4',
+      titulo: 'Despacho rápido doble-click',
+      objetivo: 'Detecta si el doble-click crea guías duplicadas',
+      requiereProducto: false,
+      pasos: [
+        'Ve al módulo Despacho rápido',
+        'Escanea 3 productos diferentes',
+        'Pulsa "Generar guía" Y INMEDIATAMENTE pulsa otra vez (doble click rápido)',
+        'Espera 15 segundos'
+      ],
+      esperado: 'Solo 1 guía creada (NO 2 duplicadas)'
+    },
+    {
+      id: 'TEST_5',
+      titulo: 'Botones +/- rápidos en cámara',
+      objetivo: 'Detecta inconsistencia entre cliente y GAS al manipular qty',
+      requiereProducto: true,
+      pasos: [
+        'Crea una guía SALIDA_ZONA nueva',
+        'Escanea el producto UNA vez (qty=1)',
+        'Espera 8 segundos para que GAS confirme',
+        'Pulsa el botón + 5 VECES SEGUIDAS rápido',
+        'Pulsa el botón − 2 VECES rápido',
+        'Cierra la cámara'
+      ],
+      esperado: 'qty final = 4 (1 + 5 − 2)'
+    },
+    {
+      id: 'TEST_6',
+      titulo: 'Reabrir y editar cantidad',
+      objetivo: 'Detecta si reabrir/recerrar duplica descuento de stock',
+      requiereProducto: true,
+      pasos: [
+        'Crea una guía SALIDA_ZONA con el producto, qty=5',
+        'CIERRA la guía (stock baja 5)',
+        'REABRE la guía (admin PIN)',
+        'Edita la cantidad del ítem a 3 (en lugar de 5)',
+        'Cierra la guía nuevamente',
+        'Espera 10 segundos'
+      ],
+      esperado: 'Stock final = stock original − 3 (no − 5)'
+    }
+  ];
+
+  let _resultados = {};  // idTest → { estado, fecha, mensaje, idEjecucion }
+  let _ejecucionActiva = null;
+  let _testActivo = null;
+
+  async function cargar() {
+    try {
+      const res = await API.getResultadosDiagnostico();
+      if (res.ok) {
+        // Indexar por idTest, tomar el más reciente
+        _resultados = {};
+        (res.data || []).forEach(r => {
+          if (!_resultados[r.idTest] || new Date(r.fechaInicio) > new Date(_resultados[r.idTest].fechaInicio)) {
+            _resultados[r.idTest] = r;
+          }
+        });
+      }
+    } catch(e) {}
+    _render();
+  }
+
+  function _render() {
+    const list = document.getElementById('diagListTests');
+    if (!list) return;
+    list.innerHTML = TESTS.map((t, i) => {
+      const ult = _resultados[t.id];
+      let badge = '<span class="text-xs text-slate-500">⏸ Pendiente</span>';
+      if (ult) {
+        if (ult.estado === 'PASS') badge = '<span class="text-xs text-emerald-400 font-bold">✓ PASS</span>';
+        else if (ult.estado === 'FAIL') badge = '<span class="text-xs text-red-400 font-bold">✗ FAIL</span>';
+        else if (ult.estado === 'RUNNING') badge = '<span class="text-xs text-amber-400 font-bold">⚙ Ejecutando</span>';
+      }
+      return `
+      <div class="card-sm" style="padding:11px 13px;cursor:pointer"
+           onclick="DiagnosticoView.iniciarTest('${t.id}')">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-sm text-slate-100">TEST ${i + 1} — ${escHtml(t.titulo)}</p>
+            <p class="text-[11px] text-slate-400 mt-0.5">${escHtml(t.objetivo)}</p>
+            ${ult && ult.mensaje ? `<p class="text-[11px] mt-1 ${ult.estado === 'PASS' ? 'text-emerald-300' : 'text-red-300'}">${escHtml(ult.mensaje)}</p>` : ''}
+          </div>
+          <div class="text-right flex-shrink-0">
+            ${badge}
+            ${ult && ult.fechaInicio ? `<p class="text-[10px] text-slate-500 mt-1">${new Date(ult.fechaInicio).toLocaleString('es-PE')}</p>` : ''}
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  async function iniciarTest(idTest) {
+    const t = TESTS.find(x => x.id === idTest);
+    if (!t) return;
+    _testActivo = t;
+    _ejecucionActiva = null;
+
+    const tit = document.getElementById('testDiagTitulo');
+    const sub = document.getElementById('testDiagSub');
+    const cnt = document.getElementById('testDiagContent');
+    if (tit) tit.textContent = t.titulo;
+    if (sub) sub.textContent = t.objetivo;
+
+    // Pantalla de SETUP
+    let setupHTML = '';
+    if (t.requiereProducto) {
+      const prods = OfflineManager.getProductosCache();
+      const opts = prods
+        .filter(p => p.codigoBarra && p.estado === '1')
+        .slice(0, 200)
+        .map(p => `<option value="${escAttr(p.codigoBarra)}">${escHtml(p.descripcion)} — ${escHtml(p.codigoBarra)}</option>`)
+        .join('');
+      setupHTML = `
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-slate-400">Selecciona un producto físico que tengas disponible:</label>
+            <select id="diagProdSel" class="input mt-1">
+              <option value="">— Elegir producto —</option>${opts}
+            </select>
+            <p class="text-[11px] text-slate-500 mt-1">⚠ Los tests modifican datos reales (stock, guías). Úsalos solo en datos de prueba.</p>
+          </div>
+          <div class="card-sm" style="border:1px solid rgba(14,165,233,.3);background:rgba(14,165,233,.05);padding:10px">
+            <p class="text-xs font-bold text-blue-300 mb-2">📋 Pasos a seguir (lee bien antes):</p>
+            <ol class="text-xs text-slate-300 space-y-1.5" style="padding-left:1.2em;list-style-type:decimal">
+              ${t.pasos.map(p => `<li>${escHtml(p)}</li>`).join('')}
+            </ol>
+            <p class="text-[11px] text-emerald-400 mt-3"><b>Esperado:</b> ${escHtml(t.esperado)}</p>
+          </div>
+          <button onclick="DiagnosticoView.confirmarSetup()" id="btnTestSetup"
+                  class="btn btn-primary w-full">▶ Iniciar test</button>
+        </div>`;
+    } else {
+      setupHTML = `
+        <div class="space-y-3">
+          <div class="card-sm" style="border:1px solid rgba(14,165,233,.3);background:rgba(14,165,233,.05);padding:10px">
+            <p class="text-xs font-bold text-blue-300 mb-2">📋 Pasos a seguir (lee bien antes):</p>
+            <ol class="text-xs text-slate-300 space-y-1.5" style="padding-left:1.2em;list-style-type:decimal">
+              ${t.pasos.map(p => `<li>${escHtml(p)}</li>`).join('')}
+            </ol>
+            <p class="text-[11px] text-emerald-400 mt-3"><b>Esperado:</b> ${escHtml(t.esperado)}</p>
+          </div>
+          <button onclick="DiagnosticoView.confirmarSetup()" id="btnTestSetup"
+                  class="btn btn-primary w-full">▶ Iniciar test</button>
+        </div>`;
+    }
+    if (cnt) cnt.innerHTML = setupHTML;
+    abrirSheet('sheetTestDiag');
+  }
+
+  async function confirmarSetup() {
+    if (!_testActivo) return;
+    let codigoProducto = '';
+    if (_testActivo.requiereProducto) {
+      codigoProducto = document.getElementById('diagProdSel')?.value || '';
+      if (!codigoProducto) { toast('Selecciona un producto', 'warn'); return; }
+    }
+    const btn = document.getElementById('btnTestSetup');
+    if (btn) { btn.disabled = true; btn.textContent = 'Iniciando...'; }
+    try {
+      const res = await API.iniciarTestDiagnostico({
+        idTest: _testActivo.id,
+        codigoProducto,
+        usuario: window.WH_CONFIG?.usuario || ''
+      });
+      if (!res.ok) { toast('Error: ' + res.error, 'danger'); return; }
+      _ejecucionActiva = res.data.idEjecucion;
+
+      // Pantalla de ejecución (recordatorio + botón finalizar)
+      const cnt = document.getElementById('testDiagContent');
+      if (cnt) cnt.innerHTML = `
+        <div class="space-y-3">
+          <div class="card-sm" style="border:1.5px solid rgba(245,158,11,.5);background:rgba(120,53,15,.15);padding:12px">
+            <p class="text-sm font-bold text-amber-300 mb-2">⚙ Test en ejecución</p>
+            <p class="text-xs text-slate-300 mb-2">Realiza los pasos físicos del test:</p>
+            <ol class="text-xs text-slate-300 space-y-1.5" style="padding-left:1.2em;list-style-type:decimal">
+              ${_testActivo.pasos.map(p => `<li>${escHtml(p)}</li>`).join('')}
+            </ol>
+            ${codigoProducto ? `<p class="text-[11px] text-amber-200 mt-2 font-mono">Producto: ${escHtml(codigoProducto)}</p>` : ''}
+          </div>
+          <p class="text-xs text-slate-400 text-center">Cuando hayas completado TODOS los pasos:</p>
+          <button onclick="DiagnosticoView.finalizar()" id="btnTestFin"
+                  class="btn btn-primary w-full">✓ Ya completé todos los pasos · Validar</button>
+          <button onclick="DiagnosticoView.cancelar()" class="btn btn-outline w-full text-xs">Cancelar test</button>
+        </div>`;
+    } catch(e) { toast('Sin conexión', 'warn'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '▶ Iniciar test'; } }
+  }
+
+  async function finalizar() {
+    if (!_ejecucionActiva) return;
+    const btn = document.getElementById('btnTestFin');
+    if (btn) { btn.disabled = true; btn.textContent = 'Validando...'; }
+    try {
+      const res = await API.finalizarTestDiagnostico({ idEjecucion: _ejecucionActiva });
+      if (!res.ok) { toast('Error validando: ' + res.error, 'danger'); return; }
+      _renderResultado(res.data);
+    } catch(e) { toast('Sin conexión', 'warn'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '✓ Ya completé · Validar'; } }
+  }
+
+  function _renderResultado(r) {
+    const cnt = document.getElementById('testDiagContent');
+    if (!cnt) return;
+    const passed = r.pass === true;
+    cnt.innerHTML = `
+      <div class="space-y-3">
+        <div class="card-sm" style="border:2px solid ${passed ? 'rgba(52,211,153,.6)' : 'rgba(248,113,113,.6)'};
+             background:${passed ? 'rgba(6,78,59,.2)' : 'rgba(127,29,29,.2)'};padding:14px;text-align:center">
+          <p class="text-3xl mb-1">${passed ? '✓' : '✗'}</p>
+          <p class="text-base font-bold ${passed ? 'text-emerald-300' : 'text-red-300'}">${passed ? 'TEST PASS' : 'TEST FAIL'}</p>
+          <p class="text-xs ${passed ? 'text-emerald-200' : 'text-red-200'} mt-2">${escHtml(r.mensaje || '')}</p>
+        </div>
+        ${r.esperado || r.obtenido ? `
+        <div class="card-sm" style="padding:10px;background:#0f172a">
+          ${r.esperado ? `<p class="text-[11px] text-slate-400">Esperado: <b class="text-slate-200">${escHtml(String(r.esperado))}</b></p>` : ''}
+          ${r.obtenido ? `<p class="text-[11px] text-slate-400 mt-1">Obtenido: <b class="text-slate-200">${escHtml(String(r.obtenido))}</b></p>` : ''}
+          ${r.idGuia ? `<p class="text-[10px] text-slate-500 mt-1 font-mono">Guía: ${escHtml(r.idGuia)}</p>` : ''}
+        </div>` : ''}
+        ${passed ? `<button onclick="DiagnosticoView.cerrarYsiguiente()" class="btn btn-primary w-full">Continuar al siguiente</button>`
+                 : `<button onclick="DiagnosticoView.cerrar()" class="btn btn-outline w-full">Cerrar — revisar bug</button>`}
+      </div>`;
+    try { passed ? SoundFX.done() : SoundFX.error(); } catch(e) {}
+    cargar();  // refresca lista
+  }
+
+  function cancelar() {
+    _ejecucionActiva = null;
+    _testActivo = null;
+    cerrarSheet('sheetTestDiag');
+  }
+
+  function cerrar() {
+    _ejecucionActiva = null;
+    _testActivo = null;
+    cerrarSheet('sheetTestDiag');
+    cargar();
+  }
+
+  function cerrarYsiguiente() {
+    const idx = TESTS.findIndex(t => t.id === _testActivo?.id);
+    cerrar();
+    if (idx >= 0 && idx < TESTS.length - 1) {
+      setTimeout(() => iniciarTest(TESTS[idx + 1].id), 400);
+    }
+  }
+
+  return { cargar, iniciarTest, confirmarSetup, finalizar, cancelar, cerrar, cerrarYsiguiente };
 })();
 
 // ════════════════════════════════════════════════
