@@ -215,6 +215,7 @@ const API = (() => {
     iniciarTestDiagnostico:   (p)      => post({ action: 'iniciarTestDiagnostico', ...p }),
     finalizarTestDiagnostico: (p)      => post({ action: 'finalizarTestDiagnostico', ...p }),
     getResultadosDiagnostico: ()       => call({ action: 'getResultadosDiagnostico' }),
+    runInternalTests:         (p)      => post({ action: 'runInternalTests', ...p }),
     imprimirBienvenida: (p)      => post({ action: 'imprimirBienvenida', ...p }),
 
     // Guías — acciones extra

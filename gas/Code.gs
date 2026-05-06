@@ -181,6 +181,7 @@ function _route(method, e) {
       case 'iniciarTestDiagnostico':   return iniciarTestDiagnostico(params);
       case 'finalizarTestDiagnostico': return finalizarTestDiagnostico(params);
       case 'getResultadosDiagnostico': return getResultadosDiagnostico();
+      case 'runInternalTests':         return runInternalTests(params);
       case 'verificarHorario':    return verificarHorario(params);
       case 'forzarCierreSesionesNocturno': return forzarCierreSesionesNocturno();
       case 'auditarStockGlobal':  return auditarStockGlobal();

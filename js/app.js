@@ -10233,7 +10233,82 @@ const DiagnosticoView = (() => {
     }
   }
 
-  return { cargar, iniciarTest, confirmarSetup, finalizar, cancelar, cerrar, cerrarYsiguiente };
+  // ── Test interno automático (sin acción manual) ──────────
+  function _llenarSelectorProductos() {
+    const sel = document.getElementById('testInternoProd');
+    if (!sel) return;
+    const prods = OfflineManager.getProductosCache();
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => {
+      stockMap[String(s.codigoProducto || '').trim()] = parseFloat(s.cantidadDisponible) || 0;
+    });
+    // Solo productos activos con codigoBarra y stock >= 50 (para no causar negativos)
+    const opts = prods
+      .filter(p => p.codigoBarra && p.estado === '1')
+      .filter(p => (stockMap[String(p.codigoBarra).trim()] || 0) >= 50)
+      .slice(0, 100)
+      .map(p => `<option value="${escAttr(p.codigoBarra)}">${escHtml(p.descripcion)} — stock ${stockMap[String(p.codigoBarra).trim()]}</option>`)
+      .join('');
+    sel.innerHTML = '<option value="">— Producto con stock ≥ 50 —</option>' + opts;
+  }
+
+  async function ejecutarTestInterno() {
+    const sel = document.getElementById('testInternoProd');
+    const cb = sel?.value;
+    if (!cb) { toast('Selecciona un producto con stock ≥ 50', 'warn'); return; }
+    const btn = document.getElementById('btnTestInterno');
+    const resEl = document.getElementById('testInternoResultado');
+    if (btn) { btn.disabled = true; btn.textContent = '⚙ Ejecutando 9 tests...'; }
+    if (resEl) resEl.innerHTML = '<p class="text-xs text-slate-400 text-center py-3">Procesando...</p>';
+    try {
+      const res = await API.runInternalTests({ codigoBarra: cb });
+      if (!res.ok) {
+        if (resEl) resEl.innerHTML = `<p class="text-xs text-red-400">Error: ${escHtml(res.error || '')}</p>`;
+        return;
+      }
+      const d = res.data;
+      const passColor = c => c ? 'text-emerald-400' : 'text-red-400';
+      const passIcon  = c => c ? '✓' : '✗';
+      let html = `
+        <div class="card-sm" style="padding:10px;background:#0f172a;border:1px solid #334155">
+          <p class="text-sm font-bold mb-2">
+            <span class="text-emerald-400">${d.pass} pass</span> ·
+            <span class="text-red-400">${d.fail} fail</span> ·
+            ${d.total} total
+          </p>
+          <p class="text-[10px] text-slate-500 mb-2">
+            Stock original: ${d.stockOriginal} → final: ${d.stockFinal}
+            ${Math.abs(d.stockFinal - d.stockOriginal) <= 0.01 ? ' ✓' : ' ⚠ DIFF'}
+            ${d.idGuiaBorrada ? ' · guía test borrada: ' + escHtml(d.idGuiaBorrada) : ''}
+          </p>
+          <div class="space-y-1">
+            ${d.resultados.map(r => `
+              <div class="text-[11px] border-l-2 pl-2 ${r.pass ? 'border-emerald-500' : 'border-red-500'}">
+                <span class="${passColor(r.pass)} font-bold">${passIcon(r.pass)}</span>
+                <span class="text-slate-200">${escHtml(r.test)}</span>
+                <span class="text-slate-500 block">${escHtml(r.detalle || '')}</span>
+                ${!r.pass && r.esperado !== undefined ? `<span class="text-slate-500 block">esperado: <b>${escHtml(String(r.esperado))}</b> · obtenido: <b>${escHtml(String(r.obtenido))}</b></span>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+      if (resEl) resEl.innerHTML = html;
+      try { (d.fail === 0 ? SoundFX.done : SoundFX.error)(); } catch(e) {}
+    } catch(e) {
+      if (resEl) resEl.innerHTML = `<p class="text-xs text-red-400">Sin conexión</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '▶ Ejecutar tests internos'; }
+    }
+  }
+
+  // Llenar selector cuando se carga la vista
+  const _origCargar = cargar;
+  async function cargarConSelector() {
+    await _origCargar();
+    _llenarSelectorProductos();
+  }
+
+  return { cargar: cargarConSelector, iniciarTest, confirmarSetup, finalizar, cancelar, cerrar, cerrarYsiguiente, ejecutarTestInterno };
 })();
 
 // ════════════════════════════════════════════════
