@@ -96,27 +96,21 @@ function agregarDetalleGuia(params) {
   });
 }
 
-// Helper para envolver una operación con LockService, con timeout largo
-// y reintentos automáticos en caso de timeout. Reduce dramáticamente los
-// errores "servidor ocupado" en operaciones concurrentes legítimas.
+// Helper para envolver una operación con LockService.
+// Timeout 60s — Apps Script Web Apps tiene quota generosa de tiempo total,
+// y el LockService es la única forma confiable de evitar race conditions
+// entre POSTs paralelos. Operaciones individuales son rápidas (<1s típico),
+// así que este timeout solo afecta picos de concurrencia extrema.
 function _conLock(nombre, fn) {
   var lock = LockService.getScriptLock();
-  // Intento 1: 30s
   try {
-    lock.waitLock(30000);
-    try { return fn(); }
-    finally { try { lock.releaseLock(); } catch(e) {} }
+    lock.waitLock(60000);
   } catch(eL) {
-    // Intento 2: 15s extra (60s+ acumulado)
-    try {
-      lock.waitLock(15000);
-      try { return fn(); }
-      finally { try { lock.releaseLock(); } catch(e) {} }
-    } catch(eL2) {
-      Logger.log('[' + nombre + '] timeout lock tras 45s: ' + eL2.message);
-      return { ok: false, error: 'Sistema saturado, espera unos segundos y reintenta' };
-    }
+    Logger.log('[' + nombre + '] timeout lock tras 60s: ' + eL.message);
+    return { ok: false, error: 'Sistema saturado, espera unos segundos y reintenta' };
   }
+  try { return fn(); }
+  finally { try { lock.releaseLock(); } catch(e) {} }
 }
 
 function _agregarDetalleGuiaImpl(params) {
@@ -241,15 +235,14 @@ function _agregarDetalleGuiaImpl(params) {
       loteSheet.getRange(lotNextRow, 2).setNumberFormat('@').setValue(cbProd);
     }
   }
-  // FIX REFORZADO: en lugar de appendRow + setNumberFormat (que no garantiza
-  // texto porque Sheets infiere tipo del valor), usar setValues directamente
-  // en un rango con formato '@' pre-aplicado a las cols clave.
+  // FIX REFORZADO: setValues sobre rango pre-formateado (en vez de appendRow)
+  // garantiza que codigoBarra preserve ceros a la izquierda. El LockService
+  // ya serializa, así que no hay race entre llamadas paralelas.
   var nextRow  = sheet.getLastRow() + 1;
-  // 1. Pre-formatear toda la nueva fila — col 3 (codigoBarra) e col 7 (idLote) como texto
+  // Pre-formatear col codigoBarra (3) e idLote (7) como texto
   sheet.getRange(nextRow, 3).setNumberFormat('@');
   if (idLote) sheet.getRange(nextRow, 7).setNumberFormat('@');
-  SpreadsheetApp.flush(); // forzar que el formato se aplique antes de escribir
-  // 2. Escribir valores con setValues (respeta el formato de la celda)
+  // Escribir todos los valores en una sola operación
   sheet.getRange(nextRow, 1, 1, 8).setValues([[
     idDetalle,
     params.idGuia,
@@ -260,8 +253,6 @@ function _agregarDetalleGuiaImpl(params) {
     String(idLote || ''),
     params.observacion || ''
   ]]);
-  // 3. Re-asegurar formato y valor exacto en col codigoBarra (defensa final)
-  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(String(cbProd));
 
   return {
     ok: true,

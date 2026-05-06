@@ -45,35 +45,22 @@ const API = (() => {
     return { ok: false, error: 'Sin conexión y sin caché disponible' };
   }
 
-  // ── COLA DE OPERACIONES ──────────────────────────────────────
-  // Acciones que TOCAN la misma guía/detalle deben procesarse en orden estricto
-  // para evitar race conditions en GAS y errores "Sistema saturado".
-  // El cliente serializa estas acciones; las demás van en paralelo.
-  const _SERIALIZED_ACTIONS = new Set([
-    'agregarDetalle',
-    'actualizarCantidadDetalle',
-    'actualizarFechaVencimiento',
-    'anularDetalle',
-    'cerrarGuia',
-    'reabrirGuia',
-    'crearDespachoRapido',
-    'registrarEnvasado',
-    'registrarMerma',
-    'resolverMerma'
-  ]);
-
-  let _opQueueChain = Promise.resolve();
-  let _opQueueLen   = 0;
-  function _emitQueueState() {
+  // ── Contador de operaciones en vuelo ─────────────────────────
+  // El cliente envía POSTs en paralelo (rápido). GAS LockService serializa
+  // internamente para evitar race conditions. El cliente solo cuenta cuántas
+  // están esperando respuesta para mostrar feedback visual.
+  let _opsEnVuelo = 0;
+  function _emitOpsState() {
     try {
-      window.dispatchEvent(new CustomEvent('wh:opqueue', { detail: { count: _opQueueLen } }));
+      window.dispatchEvent(new CustomEvent('wh:opqueue', { detail: { count: _opsEnVuelo } }));
     } catch(e) {}
   }
 
   async function _doFetchWithRetry(GAS_URL, params) {
-    // Hasta 5 intentos con backoff (1s, 2s, 4s, 6s, 10s) — total ~23s antes de rendirse
-    const delays = [1000, 2000, 4000, 6000, 10000];
-    for (let intento = 0; intento < 5; intento++) {
+    // 3 intentos: rápido si todo OK, recuperación si red flaquea o lock saturado.
+    // Backoff: 600ms, 1500ms (total ~2.1s antes de rendirse).
+    const delays = [600, 1500];
+    for (let intento = 0; intento < 3; intento++) {
       try {
         const res  = await fetch(GAS_URL, {
           method:  'POST',
@@ -82,22 +69,21 @@ const API = (() => {
         });
         const json = await res.json();
         if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
-          if (intento < 4) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
+          if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
         }
         return json;
       } catch {
-        if (intento < 4) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
-        // Red falló tras 5 intentos → encolar offline
+        if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
+        // Red falló tras 3 intentos → encolar offline
         const localId = OfflineManager.encolar(params.action, params);
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
     }
   }
 
-  // POST: si offline → encolar y devolver respuesta optimista
+  // POST: si offline → encolar offline. GAS LockService maneja la serialización.
   async function post(params) {
     const GAS_URL = _gasUrl();
-    // Inyectar idSesion automáticamente
     const idSesion = window.WH_CONFIG?.idSesion;
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
 
@@ -106,20 +92,14 @@ const API = (() => {
       return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
 
-    // Si NO es operación serializada → mandar de inmediato (paralelo)
-    if (!_SERIALIZED_ACTIONS.has(params.action)) {
-      return _doFetchWithRetry(GAS_URL, params);
+    _opsEnVuelo++;
+    _emitOpsState();
+    try {
+      return await _doFetchWithRetry(GAS_URL, params);
+    } finally {
+      _opsEnVuelo--;
+      _emitOpsState();
     }
-
-    // Operación serializada: encolar en chain global
-    _opQueueLen++;
-    _emitQueueState();
-    const exec = _opQueueChain.then(() => _doFetchWithRetry(GAS_URL, params));
-    _opQueueChain = exec.catch(() => null).finally(() => {
-      _opQueueLen--;
-      _emitQueueState();
-    });
-    return exec;
   }
 
   return {
