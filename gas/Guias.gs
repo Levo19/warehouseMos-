@@ -91,17 +91,31 @@ function crearGuia(params) {
 }
 
 function agregarDetalleGuia(params) {
-  // ── LockService: serializa llamadas concurrentes para evitar race conditions
-  // que causan duplicados (cuando dos POSTs casi simultáneos no detectan al
-  // otro y ambos crean filas en lugar de auto-sumar a la existente).
-  var lock = LockService.getScriptLock();
-  try { lock.waitLock(15000); } catch(eL) {
-    return { ok: false, error: 'Servidor ocupado, reintenta' };
-  }
-  try {
+  return _conLock('agregarDetalleGuia', function() {
     return _agregarDetalleGuiaImpl(params);
-  } finally {
-    try { lock.releaseLock(); } catch(e) {}
+  });
+}
+
+// Helper para envolver una operación con LockService, con timeout largo
+// y reintentos automáticos en caso de timeout. Reduce dramáticamente los
+// errores "servidor ocupado" en operaciones concurrentes legítimas.
+function _conLock(nombre, fn) {
+  var lock = LockService.getScriptLock();
+  // Intento 1: 30s
+  try {
+    lock.waitLock(30000);
+    try { return fn(); }
+    finally { try { lock.releaseLock(); } catch(e) {} }
+  } catch(eL) {
+    // Intento 2: 15s extra (60s+ acumulado)
+    try {
+      lock.waitLock(15000);
+      try { return fn(); }
+      finally { try { lock.releaseLock(); } catch(e) {} }
+    } catch(eL2) {
+      Logger.log('[' + nombre + '] timeout lock tras 45s: ' + eL2.message);
+      return { ok: false, error: 'Sistema saturado, espera unos segundos y reintenta' };
+    }
   }
 }
 
@@ -227,22 +241,27 @@ function _agregarDetalleGuiaImpl(params) {
       loteSheet.getRange(lotNextRow, 2).setNumberFormat('@').setValue(cbProd);
     }
   }
+  // FIX REFORZADO: en lugar de appendRow + setNumberFormat (que no garantiza
+  // texto porque Sheets infiere tipo del valor), usar setValues directamente
+  // en un rango con formato '@' pre-aplicado a las cols clave.
   var nextRow  = sheet.getLastRow() + 1;
-  // FIX: setNumberFormat('@') ANTES del appendRow para garantizar que el
-  // codigoBarra preserve ceros a la izquierda (ej. "00027" no se convierta a 27)
+  // 1. Pre-formatear toda la nueva fila — col 3 (codigoBarra) e col 7 (idLote) como texto
   sheet.getRange(nextRow, 3).setNumberFormat('@');
-  sheet.appendRow([
+  if (idLote) sheet.getRange(nextRow, 7).setNumberFormat('@');
+  SpreadsheetApp.flush(); // forzar que el formato se aplique antes de escribir
+  // 2. Escribir valores con setValues (respeta el formato de la celda)
+  sheet.getRange(nextRow, 1, 1, 8).setValues([[
     idDetalle,
     params.idGuia,
     String(cbProd),
     cantEsperada,
     cantRecibida,
     precioUnit,
-    idLote,
+    String(idLote || ''),
     params.observacion || ''
-  ]);
-  // Re-aplicar setValue con string explícito (defensa redundante)
-  sheet.getRange(nextRow, 3).setValue(String(cbProd));
+  ]]);
+  // 3. Re-asegurar formato y valor exacto en col codigoBarra (defensa final)
+  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(String(cbProd));
 
   return {
     ok: true,
@@ -262,15 +281,9 @@ function _agregarDetalleGuiaImpl(params) {
 
 // ── Actualizar cantidad recibida de un detalle existente ────────────
 function actualizarCantidadDetalle(params) {
-  var lock = LockService.getScriptLock();
-  try { lock.waitLock(15000); } catch(eL) {
-    return { ok: false, error: 'Servidor ocupado, reintenta' };
-  }
-  try {
+  return _conLock('actualizarCantidadDetalle', function() {
     return _actualizarCantidadDetalleImpl(params);
-  } finally {
-    try { lock.releaseLock(); } catch(e) {}
-  }
+  });
 }
 
 function _actualizarCantidadDetalleImpl(params) {
@@ -427,15 +440,9 @@ function actualizarFechaVencimiento(params) {
 // Si la guía padre está CERRADA, devuelve el stock que ya se había aplicado.
 // Si está ABIERTA, solo marca como anulado (stock aún no descontado).
 function anularDetalle(params) {
-  var lock = LockService.getScriptLock();
-  try { lock.waitLock(15000); } catch(eL) {
-    return { ok: false, error: 'Servidor ocupado, reintenta' };
-  }
-  try {
+  return _conLock('anularDetalle', function() {
     return _anularDetalleImpl(params);
-  } finally {
-    try { lock.releaseLock(); } catch(e) {}
-  }
+  });
 }
 
 function _anularDetalleImpl(params) {
@@ -604,16 +611,9 @@ function autoCloseDayGuias() {
 
 function cerrarGuia(idGuia, usuario, idSesion, opts) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
-  // LockService: evita doble cierre concurrente (timeout + reintento del frontend)
-  var lock = LockService.getScriptLock();
-  try { lock.waitLock(20000); } catch(eL) {
-    return { ok: false, error: 'Servidor ocupado, reintenta' };
-  }
-  try {
+  return _conLock('cerrarGuia', function() {
     return _cerrarGuiaImpl(idGuia, usuario, idSesion, opts);
-  } finally {
-    try { lock.releaseLock(); } catch(e) {}
-  }
+  });
 }
 
 function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {

@@ -57,17 +57,32 @@ const API = (() => {
       return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
 
-    try {
-      const res  = await fetch(GAS_URL, {
-        method:  'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body:    JSON.stringify(params)
-      });
-      return await res.json();
-    } catch {
-      // Red falló → encolar
-      const localId = OfflineManager.encolar(params.action, params);
-      return { ok: true, offline: true, localId, data: { idLocal: localId } };
+    // Reintentar hasta 3 veces si GAS responde "Sistema saturado" (LockService timeout)
+    for (let intento = 0; intento < 3; intento++) {
+      try {
+        const res  = await fetch(GAS_URL, {
+          method:  'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body:    JSON.stringify(params)
+        });
+        const json = await res.json();
+        // Si GAS dice saturado, esperar y reintentar (backoff exponencial: 1s, 2s, 4s)
+        if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
+          if (intento < 2) {
+            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, intento)));
+            continue;
+          }
+        }
+        return json;
+      } catch {
+        if (intento < 2) {
+          await new Promise(r => setTimeout(r, 800));
+          continue;
+        }
+        // Red falló tras 3 intentos → encolar
+        const localId = OfflineManager.encolar(params.action, params);
+        return { ok: true, offline: true, localId, data: { idLocal: localId } };
+      }
     }
   }
 
