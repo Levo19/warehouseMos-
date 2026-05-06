@@ -56,9 +56,31 @@ const API = (() => {
     } catch(e) {}
   }
 
+  // ── Idempotencia: localId único por operación ────────────────
+  // GAS guarda en SYNC_LOG el localId de cada POST procesado. Si llega un POST
+  // con el mismo localId (reintento por timeout, doble click, etc.), GAS retorna
+  // la respuesta cacheada sin re-ejecutar. Garantiza 0 duplicados.
+  const _IDEMPOTENT_ACTIONS = new Set([
+    'agregarDetalleGuia', 'actualizarCantidadDetalle', 'actualizarFechaVencimiento',
+    'anularDetalle', 'cerrarGuia', 'reabrirGuia', 'crearGuia', 'crearDespachoRapido',
+    'registrarEnvasado', 'registrarMerma', 'resolverMerma',
+    'registrarProductoNuevo', 'aprobarProductoNuevo',
+    'crearPreingreso', 'aprobarPreingreso', 'actualizarPreingreso',
+    'crearProducto', 'actualizarProducto',
+    'crearProveedor', 'actualizarProveedor',
+    'crearAjuste', 'auditarProducto',
+    'asignarAuditoria', 'ejecutarAuditoria',
+    'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
+    'actualizarGuia', 'actualizarPickup', 'cerrarTurno'
+  ]);
+  function _genLocalId() {
+    return 'L' + Date.now() + Math.random().toString(36).substr(2, 7);
+  }
+
   async function _doFetchWithRetry(GAS_URL, params) {
     // 3 intentos: rápido si todo OK, recuperación si red flaquea o lock saturado.
     // Backoff: 600ms, 1500ms (total ~2.1s antes de rendirse).
+    // params.localId se mantiene constante en los reintentos → GAS deduplica.
     const delays = [600, 1500];
     for (let intento = 0; intento < 3; intento++) {
       try {
@@ -74,7 +96,7 @@ const API = (() => {
         return json;
       } catch {
         if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
-        // Red falló tras 3 intentos → encolar offline
+        // Red falló tras 3 intentos → encolar offline (reusa localId si ya existe)
         const localId = OfflineManager.encolar(params.action, params);
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
@@ -86,6 +108,11 @@ const API = (() => {
     const GAS_URL = _gasUrl();
     const idSesion = window.WH_CONFIG?.idSesion;
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
+
+    // Inyectar localId para acciones idempotentes (si no viene ya)
+    if (_IDEMPOTENT_ACTIONS.has(params.action) && !params.localId) {
+      params = { ...params, localId: _genLocalId() };
+    }
 
     if (!GAS_URL || !navigator.onLine) {
       const localId = OfflineManager.encolar(params.action, params);

@@ -143,7 +143,10 @@ const OfflineManager = (() => {
   }
 
   function encolar(action, params) {
-    const localId = 'L' + Date.now() + Math.random().toString(36).substr(2, 5);
+    // Reutilizar localId si ya viene (idempotencia: api.js inyecta uno antes
+    // del primer POST, y si la red falla y caemos en cola offline, debemos
+    // preservarlo para que GAS deduplique al sincronizar).
+    const localId = params?.localId || ('L' + Date.now() + Math.random().toString(36).substr(2, 5));
     const item = { localId, action, params: { ...params, localId }, ts: Date.now(), status: 'pending' };
     const queue = getQueue();
     queue.push(item);

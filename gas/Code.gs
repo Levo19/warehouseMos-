@@ -28,6 +28,21 @@ function doPost(e) {
 }
 
 // ── Deduplicación por localId ──────────────────────────────
+// Toda operación idempotente lleva un localId 'L<timestamp><rand>'. GAS guarda
+// el resultado en SYNC_LOG; si llega el mismo localId otra vez (reintento por
+// timeout, doble click, app cerrada mid-POST), retorna la respuesta cacheada
+// sin re-ejecutar. Garantiza 0 duplicados.
+function _getOrCreateSyncLog() {
+  var sheet = getSheet('SYNC_LOG');
+  if (sheet) return sheet;
+  try {
+    var ss = getSpreadsheet();
+    sheet = ss.insertSheet('SYNC_LOG');
+    sheet.appendRow(['localId','action','resultado','fecha']);
+    return sheet;
+  } catch(e) { return null; }
+}
+
 function _checkDuplicado(localId) {
   if (!localId || !String(localId).startsWith('L')) return null;
   try {
@@ -46,7 +61,7 @@ function _checkDuplicado(localId) {
 function _logSync(localId, action, resultado) {
   if (!localId || !String(localId).startsWith('L')) return;
   try {
-    var sheet = getSheet('SYNC_LOG');
+    var sheet = _getOrCreateSyncLog();
     if (sheet) sheet.appendRow([localId, action, JSON.stringify(resultado), new Date()]);
   } catch(e) {}
 }
