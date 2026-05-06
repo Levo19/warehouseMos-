@@ -95,7 +95,9 @@ function loginPersonal(params) {
   try {
     _notificarMOS(
       '👤 ' + operador.nombre + ' ingresó a Almacén',
-      (operador.rol || 'Operador') + ' · ' + horaStr
+      (operador.rol || 'Operador') + ' · ' + horaStr,
+      // Solo admins/master reciben + no auto-notificarse si entró un admin
+      (operador.nombre + ' ' + (operador.apellido || '')).trim()
     );
   } catch(eP) { Logger.log('Push login WH: ' + eP.message); }
 
@@ -410,14 +412,21 @@ function _cerrarSesionesHuerfanas(idPersonal) {
 
 
 // ── Notificar a ProyectoMOS vía push (requiere MOS_WEB_APP_URL en Script Properties) ──
-function _notificarMOS(titulo, cuerpo) {
+// Solo manda a MASTER/ADMIN y excluye al sender si fue un admin (auto-exclusión).
+function _notificarMOS(titulo, cuerpo, excluirUsuario) {
   var url = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
   if (!url) { Logger.log('[Push] MOS_WEB_APP_URL no configurada'); return; }
   try {
     var resp = UrlFetchApp.fetch(url, {
       method: 'post',
       contentType: 'application/json',
-      payload: JSON.stringify({ action: 'enviarPushNotif', titulo: titulo, cuerpo: cuerpo }),
+      payload: JSON.stringify({
+        action: 'enviarPushNotif',
+        titulo: titulo,
+        cuerpo: cuerpo,
+        soloRolesAdmin: true,
+        excluirUsuario: excluirUsuario || null
+      }),
       muteHttpExceptions: true
     });
     Logger.log('[Push→MOS] HTTP ' + resp.getResponseCode() + ' | ' + resp.getContentText().substring(0, 120));
