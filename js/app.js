@@ -802,13 +802,14 @@ const Session = (() => {
     const sideMnNm = document.getElementById('sideUserMenuName');
     if (sideMnNm) sideMnNm.textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
 
-    // Mostrar acceso a Logs y Diagnóstico solo para roles privilegiados
+    // Mostrar acceso a Logs y Diagnóstico según rol
     const rolUp = String(sesionActual.rol || '').toUpperCase();
-    const esAdmin = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR');
+    const esAdmin  = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR');
+    const esMaster = (rolUp === 'MASTER');
     const sideLogs = document.getElementById('sideRowLogs');
-    if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';
+    if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';   // logs: admin + master
     const sideDiag = document.getElementById('sideRowDiag');
-    if (sideDiag) sideDiag.style.display = esAdmin ? '' : 'none';
+    if (sideDiag) sideDiag.style.display = esMaster ? '' : 'none';  // diagnóstico: solo MASTER
 
     _mostrarApp();
     _iniciarTimerBloqueo();
@@ -10294,6 +10295,8 @@ const DiagnosticoView = (() => {
         </div>`;
       if (resEl) resEl.innerHTML = html;
       try { (d.fail === 0 ? SoundFX.done : SoundFX.error)(); } catch(e) {}
+      // Refrescar histórico
+      _cargarHistorialInterno();
     } catch(e) {
       if (resEl) resEl.innerHTML = `<p class="text-xs text-red-400">Sin conexión</p>`;
     } finally {
@@ -10301,11 +10304,45 @@ const DiagnosticoView = (() => {
     }
   }
 
+  function _renderHistorialInterno() {
+    const cont = document.getElementById('testInternoHistorial');
+    const list = document.getElementById('testInternoHistList');
+    if (!cont || !list) return;
+    const histInternos = Object.values(_resultados)
+      .filter(r => r.idTest === 'INTERNO_AUTO');
+    // _resultados está indexado por idTest, así que solo hay 1 INTERNO_AUTO (el más reciente)
+    // Usamos getResultadosDiagnostico para traer los últimos 10 internos completos
+    if (!histInternos.length) { cont.style.display = 'none'; return; }
+  }
+
+  async function _cargarHistorialInterno() {
+    try {
+      const res = await API.getResultadosDiagnostico();
+      if (!res.ok) return;
+      const internos = (res.data || []).filter(r => r.idTest === 'INTERNO_AUTO').slice(0, 8);
+      const cont = document.getElementById('testInternoHistorial');
+      const list = document.getElementById('testInternoHistList');
+      if (!cont || !list) return;
+      if (!internos.length) { cont.style.display = 'none'; return; }
+      cont.style.display = '';
+      list.innerHTML = internos.map(h => {
+        const ok = h.estado === 'PASS';
+        return `
+        <div class="flex items-center justify-between text-[11px] py-1 border-b border-slate-700/50">
+          <span class="${ok ? 'text-emerald-400' : 'text-red-400'} font-bold">${ok ? '✓' : '✗'}</span>
+          <span class="flex-1 text-slate-300 ml-2 truncate">${escHtml(h.mensaje || '')}</span>
+          <span class="text-slate-500 text-[10px] ml-2">${h.fechaInicio ? new Date(h.fechaInicio).toLocaleString('es-PE') : ''}</span>
+        </div>`;
+      }).join('');
+    } catch(e) {}
+  }
+
   // Llenar selector cuando se carga la vista
   const _origCargar = cargar;
   async function cargarConSelector() {
     await _origCargar();
     _llenarSelectorProductos();
+    _cargarHistorialInterno();
   }
 
   return { cargar: cargarConSelector, iniciarTest, confirmarSetup, finalizar, cancelar, cerrar, cerrarYsiguiente, ejecutarTestInterno };

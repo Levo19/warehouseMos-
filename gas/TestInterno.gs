@@ -198,15 +198,35 @@ function runInternalTests(params) {
 
   var totalPass = resultados.filter(function(r){return r.pass;}).length;
   var totalFail = resultados.filter(function(r){return !r.pass;}).length;
-  return { ok: true, data: {
+  var resumen = {
     resultados:   resultados,
     pass:         totalPass,
     fail:         totalFail,
     total:        resultados.length,
     stockOriginal: stockOriginal,
     stockFinal:    stockFinal,
+    codigoBarra:   codigoBarra,
     idGuiaBorrada: idGuiaTest
-  }};
+  };
+
+  // Persistir en hoja DIAGNOSTICO_TESTS para histórico
+  try {
+    var sheetD = _getSheetDiagnostico();
+    var idEjec = 'INT_' + new Date().getTime();
+    sheetD.appendRow([
+      idEjec,
+      'INTERNO_AUTO',
+      String((params && params.usuario) || 'sistema-test'),
+      new Date(),
+      new Date(),
+      JSON.stringify({ codigoBarra: codigoBarra, stockOriginal: stockOriginal }),
+      JSON.stringify(resumen).substring(0, 4900),
+      totalFail === 0 ? 'PASS' : 'FAIL',
+      totalPass + ' pass · ' + totalFail + ' fail · cb=' + codigoBarra
+    ]);
+  } catch(eP) { Logger.log('persist test: ' + eP.message); }
+
+  return { ok: true, data: resumen };
 }
 
 // ============================================================
