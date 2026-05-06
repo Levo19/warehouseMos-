@@ -839,6 +839,9 @@ const Session = (() => {
     if (typeof OfflineManager !== 'undefined' && OfflineManager.sincronizarAdminCache) {
       OfflineManager.sincronizarAdminCache();
     }
+
+    // Push notifications — registrar token con nombre del operador
+    setTimeout(_pushInitWH, 3000);
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -1199,6 +1202,73 @@ const Session = (() => {
   }
 
   function getSesion() { return sesionActual; }
+
+  // ── PUSH NOTIFICATIONS (FCM) ────────────────────────────
+  // Registra token FCM asociado al operador logueado para que MOS
+  // pueda enviarle notificaciones dirigidas (admin → operador).
+  const _PUSH_VAPID = 'BB_Nhb8wPlFpObGxR93tzRfWw7VncQsJoyJYe6wv8r5yqcrhA53LEM9wPkvhtG19LmMEl30VaBFCPIClBBPKQgo';
+  const _PUSH_CONFIG = {
+    apiKey:            'AIzaSyA_gfynRxAmlbGgHWoioaj5aeaxnnywP88',
+    projectId:         'proyectomos-push',
+    messagingSenderId: '328735199478',
+    appId:             '1:328735199478:web:947f338ae9716a7c049cd7'
+  };
+  let _pushHandlerSet = false;
+
+  async function _pushInitWH() {
+    try {
+      if (!sesionActual) return;
+      if (!window.firebase || !('Notification' in window) || !('serviceWorker' in navigator)) return;
+      const mosUrl = window.WH_CONFIG?.mosGasUrl;
+      if (!mosUrl) return;
+      if (!firebase.apps.length) firebase.initializeApp(_PUSH_CONFIG);
+      const messaging = firebase.messaging();
+
+      // Handler de primer plano (la app está abierta) → notif visible
+      if (!_pushHandlerSet) {
+        _pushHandlerSet = true;
+        messaging.onMessage(async payload => {
+          const t = payload.notification?.title || '';
+          const b = payload.notification?.body  || '';
+          if (typeof toast === 'function') toast('🔔 ' + t + (b ? ': ' + b : ''), 'info', 8000);
+          try {
+            const reg = await navigator.serviceWorker.ready;
+            reg.showNotification(t, {
+              body: b,
+              icon:  'https://levo19.github.io/MOS/icon-192.png',
+              badge: 'https://levo19.github.io/MOS/icon-192.png',
+              vibrate: [200, 100, 200],
+              tag: 'wh-push-fg'
+            });
+          } catch(_) {}
+        });
+      }
+
+      const permission = Notification.permission === 'default'
+        ? await Notification.requestPermission()
+        : Notification.permission;
+      if (permission !== 'granted') return;
+
+      const swReg = await navigator.serviceWorker.ready;
+      const token = await messaging.getToken({ vapidKey: _PUSH_VAPID, serviceWorkerRegistration: swReg });
+      if (!token) return;
+
+      // Registrar token en MOS GAS asociado al operador
+      const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
+      fetch(mosUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'registrarPushToken',
+          token, usuario,
+          appOrigen: 'warehouseMos',
+          dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
+        })
+      }).catch(() => {});
+    } catch(e) {
+      console.warn('[Push WH] init error:', e?.message);
+    }
+  }
+  window._pushInitWH = _pushInitWH;
 
   // Verificar cierre forzado cada minuto
   setInterval(_verificarCierreForzado, 60000);
