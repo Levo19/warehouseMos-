@@ -831,6 +831,9 @@ const Session = (() => {
 
     // Si hay cola pendiente y hay red, sincronizar
     if (navigator.onLine) OfflineManager.sincronizar();
+
+    // Polling de bloqueo remoto desde MOS
+    if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.iniciar();
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -1173,7 +1176,10 @@ const Session = (() => {
     catch { return null; }
   }
 
-  function _limpiarSesion() { localStorage.removeItem('wh_sesion'); }
+  function _limpiarSesion() {
+    localStorage.removeItem('wh_sesion');
+    if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.detener();
+  }
 
   function _mostrarApp() {
     document.getElementById('topBar').style.display = '';
@@ -1198,6 +1204,196 @@ const Session = (() => {
            cerrarSesionDesdeLock,
            getSesion };
 })();
+
+// ════════════════════════════════════════════════
+// BLOQUEO REMOTO — el admin desactiva al operador en MOS
+// Polling 30s a getEstadoBloqueoUsuario; muestra overlay de
+// candado y pide clave de admin para acceso temporal de 15 min.
+// ════════════════════════════════════════════════
+const BloqueoRemoto = (() => {
+  let _pollTimer = null;
+  let _countdownTimer = null;
+  let _state = { bloqueado: false, unlockVigente: false, unlockHasta: 0, msRestantes: 0 };
+  let _warningShown = false;
+  let _activo = false;
+
+  function _mosUrl() { return window.WH_CONFIG?.mosGasUrl || ''; }
+
+  async function _check() {
+    const ses = Session.getSesion();
+    if (!ses || !ses.idPersonal) return;
+    if (!_mosUrl() || !navigator.onLine) return;
+    try {
+      const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
+                + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
+                + '&appOrigen=warehouseMos';
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!j || !j.ok || !j.data) return;
+      const prev = _state;
+      _state = {
+        bloqueado: !!j.data.bloqueado,
+        unlockVigente: !!j.data.unlockVigente,
+        unlockHasta: parseInt(j.data.unlockHasta, 10) || 0,
+        msRestantes: parseInt(j.data.msRestantes, 10) || 0,
+        motivo: j.data.motivo || ''
+      };
+      // Transición: pasó a bloqueado → mostrar overlay
+      if (!prev.bloqueado && _state.bloqueado) {
+        _mostrarOverlay(ses);
+      }
+      // Transición: estaba bloqueado y ahora unlock vigente → ocultar
+      if (prev.bloqueado && _state.unlockVigente) {
+        _ocultarOverlay();
+        _arrancarCountdown();
+      }
+      // Transición: reactivado en MOS (estado=1)
+      if (prev.bloqueado && !_state.bloqueado && !_state.unlockVigente) {
+        _ocultarOverlay();
+        _ocultarBanner();
+        _warningShown = false;
+        toast('Cuenta reactivada por administrador', 'ok', 4000);
+      }
+    } catch(e) { /* tolerar */ }
+  }
+
+  function _mostrarOverlay(ses) {
+    const el = document.getElementById('lockRemotoScreen');
+    if (!el) return;
+    const nombre = ses ? (ses.nombre + ' ' + (ses.apellido || '')).trim() : '';
+    const elNm = document.getElementById('lockRemNombre');
+    if (elNm) elNm.textContent = nombre;
+    const elIn = document.getElementById('lockRemPin');
+    if (elIn) elIn.value = '';
+    const elErr = document.getElementById('lockRemError');
+    if (elErr) elErr.textContent = '';
+    el.style.display = 'flex';
+    setTimeout(() => { if (elIn) elIn.focus(); }, 100);
+  }
+
+  function _ocultarOverlay() {
+    const el = document.getElementById('lockRemotoScreen');
+    if (el) el.style.display = 'none';
+  }
+
+  function _mostrarBanner(segs) {
+    const el = document.getElementById('lockRemBanner');
+    const txt = document.getElementById('lockRemBannerTxt');
+    if (!el || !txt) return;
+    const m = Math.floor(segs / 60);
+    const s = segs % 60;
+    const fmtTm = m + ':' + (s < 10 ? '0' : '') + s;
+    txt.textContent = 'Acceso temporal · ' + fmtTm;
+    el.style.display = 'block';
+    if (segs <= 60) {
+      el.style.background = 'rgba(239,68,68,0.95)';
+      el.style.color = '#fff';
+    } else {
+      el.style.background = 'rgba(245,158,11,0.95)';
+      el.style.color = '#0f172a';
+    }
+  }
+
+  function _ocultarBanner() {
+    const el = document.getElementById('lockRemBanner');
+    if (el) el.style.display = 'none';
+  }
+
+  function _arrancarCountdown() {
+    if (_countdownTimer) clearInterval(_countdownTimer);
+    _warningShown = false;
+    const tick = () => {
+      const ms = (_state.unlockHasta || 0) - Date.now();
+      if (ms <= 0) {
+        if (_state.unlockVigente) {
+          _state.unlockVigente = false;
+          _state.bloqueado = true;
+          _state.msRestantes = 0;
+          _mostrarOverlay(Session.getSesion());
+        }
+        _ocultarBanner();
+        clearInterval(_countdownTimer);
+        _countdownTimer = null;
+        return;
+      }
+      const segs = Math.floor(ms / 1000);
+      _mostrarBanner(segs);
+      if (ms <= 60000 && !_warningShown) {
+        _warningShown = true;
+        toast('⚠ Acceso temporal por vencer · queda menos de 1 min', 'warn', 5000);
+      }
+    };
+    tick();
+    _countdownTimer = setInterval(tick, 1000);
+  }
+
+  async function intentarDesbloqueo() {
+    const elIn = document.getElementById('lockRemPin');
+    const elErr = document.getElementById('lockRemError');
+    const elBtn = document.getElementById('lockRemBtn');
+    const clave = String(elIn?.value || '').trim();
+    if (!clave) { if (elErr) elErr.textContent = 'Ingresa la clave de admin'; return; }
+    const ses = Session.getSesion();
+    if (!ses) return;
+    if (elBtn) { elBtn.disabled = true; elBtn.textContent = 'VALIDANDO...'; }
+    try {
+      const r = await fetch(_mosUrl(), {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'desbloquearUsuarioTemporal',
+          idPersonal: ses.idPersonal,
+          nombre: ses.nombre,
+          appOrigen: 'warehouseMos',
+          claveAdmin: clave
+        })
+      });
+      const j = await r.json();
+      if (!j || !j.ok) {
+        if (elErr) elErr.textContent = (j && j.error) || 'Error de conexión';
+        return;
+      }
+      if (!j.data?.autorizado) {
+        if (elErr) elErr.textContent = j.data?.error || 'Clave incorrecta';
+        if (elIn) elIn.value = '';
+        return;
+      }
+      _state = {
+        bloqueado: false,
+        unlockVigente: true,
+        unlockHasta: parseInt(j.data.unlockHasta, 10),
+        msRestantes: parseInt(j.data.msRestantes, 10) || (15 * 60 * 1000),
+        motivo: ''
+      };
+      _ocultarOverlay();
+      _arrancarCountdown();
+      toast('Acceso otorgado · 15 minutos · validado por ' + (j.data.validadoPor || 'admin'), 'ok', 4000);
+    } catch(e) {
+      if (elErr) elErr.textContent = 'Sin conexión con MOS';
+    } finally {
+      if (elBtn) { elBtn.disabled = false; elBtn.textContent = 'DESBLOQUEAR 15 MIN'; }
+    }
+  }
+
+  function iniciar() {
+    if (_activo) return;
+    _activo = true;
+    setTimeout(_check, 4000);
+    _pollTimer = setInterval(_check, 30 * 1000);
+  }
+
+  function detener() {
+    _activo = false;
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+    if (_countdownTimer) { clearInterval(_countdownTimer); _countdownTimer = null; }
+    _ocultarOverlay();
+    _ocultarBanner();
+    _state = { bloqueado: false, unlockVigente: false, unlockHasta: 0, msRestantes: 0 };
+    _warningShown = false;
+  }
+
+  return { iniciar, detener, intentarDesbloqueo };
+})();
+window.BloqueoRemoto = BloqueoRemoto;
 
 // ════════════════════════════════════════════════
 // DASHBOARD — paneles expandibles
