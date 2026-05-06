@@ -834,6 +834,11 @@ const Session = (() => {
 
     // Polling de bloqueo remoto desde MOS
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.iniciar();
+
+    // Caché admin (clave global + PINs admins) para validar offline
+    if (typeof OfflineManager !== 'undefined' && OfflineManager.sincronizarAdminCache) {
+      OfflineManager.sincronizarAdminCache();
+    }
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -3146,17 +3151,22 @@ const GuiasView = (() => {
     }
   }
 
-  // Local dot-indicator updater for admin PIN (3 dots only)
+  // Local dot-indicator updater for admin PIN (8 dots: 4 globales + 4 admin)
   function _updAdminDots(n) {
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 8; i++) {
       const el = document.getElementById('apn' + i);
-      if (el) el.className = i < n
-        ? 'w-4 h-4 rounded-full bg-amber-400'
-        : 'w-4 h-4 rounded-full border-2 border-slate-600';
+      if (!el) continue;
+      const filled = i < n;
+      // Globales (0-3): ámbar. Admin (4-7): emerald.
+      const colorVal = i < 4 ? 'bg-amber-400' : 'bg-emerald-400';
+      const colorBor = i < 4 ? 'border-slate-600' : 'border-emerald-700';
+      el.className = filled
+        ? 'w-3.5 h-3.5 rounded-full ' + colorVal
+        : 'w-3.5 h-3.5 rounded-full border-2 ' + colorBor;
     }
   }
 
-  // Admin PIN dialog para reabrir guía
+  // Admin PIN dialog para reabrir guía — clave 8 dígitos (global+admin)
   let _pinGuiaTarget = null;
   let _adminPinBuf   = '';
 
@@ -3166,13 +3176,17 @@ const GuiasView = (() => {
     _updAdminDots(0);
     document.getElementById('adminPinError').textContent = '';
     document.getElementById('adminPinModal').style.display = 'flex';
+    // Refrescar caché en background para próxima vez
+    if (typeof OfflineManager !== 'undefined' && OfflineManager.sincronizarAdminCache) {
+      OfflineManager.sincronizarAdminCache();
+    }
   }
 
   function adminPinTecla(d) {
-    if (_adminPinBuf.length >= 3) return;
+    if (_adminPinBuf.length >= 8) return;
     _adminPinBuf += d;
     _updAdminDots(_adminPinBuf.length);
-    if (_adminPinBuf.length === 3) setTimeout(_verificarAdminPin, 150);
+    if (_adminPinBuf.length === 8) setTimeout(_verificarAdminPin, 150);
   }
 
   function adminPinAtras() {
@@ -3180,28 +3194,70 @@ const GuiasView = (() => {
     _updAdminDots(_adminPinBuf.length);
   }
 
+  function _validarLocalmenteAdmin(clave) {
+    const cache = OfflineManager.getAdminCache();
+    if (!cache || !cache.globalPin) return null;
+    if (clave.length !== 8 || !/^\d{8}$/.test(clave)) return { ok: false, error: 'Clave debe ser de 8 dígitos' };
+    const globalPart = clave.substring(0, 4);
+    const userPart = clave.substring(4, 8);
+    if (globalPart !== cache.globalPin) return { ok: false, error: 'Clave incorrecta' };
+    const admin = (cache.adminPins || []).find(a => String(a.pin) === userPart);
+    if (!admin) return { ok: false, error: 'Clave incorrecta' };
+    return { ok: true, validadoPor: 'admin:' + admin.nombre + ' (offline)', idPersonal: admin.idPersonal };
+  }
+
   async function _verificarAdminPin() {
-    const cached = OfflineManager.getAdminPin();
-    if (!cached) {
-      // Sin caché: enviar a GAS de todos modos (GAS verifica desde MOS)
-    } else if (String(_adminPinBuf) !== String(cached)) {
-      document.getElementById('adminPinError').textContent = 'PIN incorrecto';
+    const clave = _adminPinBuf;
+    let resultado = null;
+
+    // Online primero — valida contra MOS y registra en auditoría
+    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+    if (navigator.onLine && mosUrl) {
+      try {
+        const r = await fetch(mosUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'verificarClaveAdmin',
+            clave: clave,
+            accion: 'REABRIR_GUIA',
+            refDocumento: _pinGuiaTarget || '',
+            appOrigen: 'warehouseMos',
+            dispositivo: window.WH_CONFIG?.usuario || ''
+          })
+        });
+        const j = await r.json();
+        if (j?.ok && j.data) resultado = j.data;
+      } catch(e) { /* fallback offline */ }
+    }
+    // Fallback offline
+    if (!resultado) {
+      const local = _validarLocalmenteAdmin(clave);
+      if (local) resultado = local.ok
+        ? { autorizado: true, validadoPor: local.validadoPor }
+        : { autorizado: false, error: local.error };
+      else resultado = { autorizado: false, error: 'Sin caché. Conecta a internet primero.' };
+    }
+
+    if (!resultado.autorizado) {
+      document.getElementById('adminPinError').textContent = resultado.error || 'Clave incorrecta';
       _adminPinBuf = '';
       _updAdminDots(0);
-      setTimeout(() => { document.getElementById('adminPinError').textContent = ''; }, 1500);
+      setTimeout(() => { document.getElementById('adminPinError').textContent = ''; }, 1800);
       return;
     }
+
     document.getElementById('adminPinModal').style.display = 'none';
+    _adminPinBuf = '';
+    _updAdminDots(0);
     const res = await API.reabrirGuia({ idGuia: _pinGuiaTarget });
     if (res.ok || res.offline) {
       if (_guiaActual?.idGuia === _pinGuiaTarget) {
         _guiaActual.estado = 'ABIERTA';
         _mostrarDetalleSheet(_guiaActual, false);
       }
-      // Update in list
       const idx = todas.findIndex(g => g.idGuia === _pinGuiaTarget);
       if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrarYBuscar()); }
-      toast('Guía reabierta', 'ok');
+      toast('Guía reabierta · ' + (resultado.validadoPor || 'admin'), 'ok');
     } else {
       toast('Error: ' + res.error, 'danger');
     }

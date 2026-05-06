@@ -20,7 +20,8 @@ const OfflineManager = (() => {
     PREINGRESOS:  'wh_preingresos',
     AJUSTES:      'wh_ajustes',
     AUDITORIAS_C: 'wh_auditorias_c',
-    ADMIN_PIN:    'wh_admin_pin',
+    ADMIN_PIN:    'wh_admin_pin',          // legacy — único PIN local (se eliminará)
+    ADMIN_CACHE:  'wh_admin_cache',        // nuevo — { globalPin, adminPins[], sincronizadoEn }
     LAST_MASTER:  'wh_last_master',
     PN:           'wh_pn',
     ENVASADOS:    'wh_envasados'
@@ -261,6 +262,23 @@ const OfflineManager = (() => {
   const getAjustesCache       = () => cargar(KEYS.AJUSTES)       || [];
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;
+  const getAdminCache         = () => cargar(KEYS.ADMIN_CACHE) || null;
+
+  async function sincronizarAdminCache() {
+    const url = window.WH_CONFIG?.mosGasUrl;
+    if (!url || !navigator.onLine) return false;
+    try {
+      const r = await fetch(url + '?action=getAdminPinsCache');
+      const j = await r.json();
+      if (!j?.ok || !j.data?.globalPin) return false;
+      guardar(KEYS.ADMIN_CACHE, {
+        globalPin: String(j.data.globalPin),
+        adminPins: Array.isArray(j.data.adminPins) ? j.data.adminPins : [],
+        sincronizadoEn: Date.now()
+      });
+      return true;
+    } catch(e) { return false; }
+  }
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);
   const getEnvasadosCache     = () => cargar(KEYS.ENVASADOS)     || [];
@@ -335,7 +353,7 @@ const OfflineManager = (() => {
     getImpresorasCache, getZonasCache, getConfigCache,
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
-    getAdminPin,
+    getAdminPin, getAdminCache, sincronizarAdminCache,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache,
