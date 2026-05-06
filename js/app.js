@@ -1715,6 +1715,17 @@ const App = (() => {
       OfflineManager.precargarOperacional(false).catch(() => {});
     });
 
+    // Indicador de cola de operaciones serializadas (para que el operador vea
+    // que el sistema está procesando — evita el "no respondió, vuelvo a tocar")
+    window.addEventListener('wh:opqueue', (e) => {
+      const ind = document.getElementById('opQueueIndicator');
+      if (!ind) return;
+      const n = e.detail?.count || 0;
+      if (n === 0) { ind.style.display = 'none'; return; }
+      ind.style.display = 'inline-block';
+      ind.textContent = `📤 ${n} en cola`;
+    });
+
     // Ocultar app hasta login
     document.getElementById('topBar').style.display = 'none';
     document.querySelector('main').style.display = 'none';
@@ -4075,13 +4086,31 @@ const GuiasView = (() => {
     vibrate(10);
   }
 
+  // Anti-anulación accidental: si qty=1 y presiona −, requiere doble-tap en 3s
+  let _pendingMinusCb = null;
+  let _pendingMinusTimer = null;
+
   function camQtyMinus(cb) {
     const entry = _camSession[cb];
     if (!entry) return;
     const item = (_guiaActual?.detalle || []).find(d =>
       d.codigoProducto === cb && d.observacion !== 'ANULADO'
     );
+
     if (entry.qty <= 1) {
+      // Confirmación: necesita doble-tap en 3s para anular
+      if (_pendingMinusCb !== cb) {
+        _pendingMinusCb = cb;
+        clearTimeout(_pendingMinusTimer);
+        _pendingMinusTimer = setTimeout(() => { _pendingMinusCb = null; }, 3000);
+        toast('Toca − otra vez en 3s para eliminar', 'warn', 3000);
+        try { SoundFX.warn(); } catch(e) {}
+        vibrate([20, 30, 20]);
+        return;
+      }
+      // Confirmado: anular
+      clearTimeout(_pendingMinusTimer);
+      _pendingMinusCb = null;
       delete _camSession[cb];
       if (item) {
         if (item.idDetalle && !item._local) {
@@ -4093,6 +4122,8 @@ const GuiasView = (() => {
         _mostrarDetalleSheet(_guiaActual, false);
       }
     } else {
+      // qty > 1: decremento normal sin confirmación
+      _pendingMinusCb = null;
       entry.qty--;
       if (item) {
         item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);

@@ -45,6 +45,55 @@ const API = (() => {
     return { ok: false, error: 'Sin conexión y sin caché disponible' };
   }
 
+  // ── COLA DE OPERACIONES ──────────────────────────────────────
+  // Acciones que TOCAN la misma guía/detalle deben procesarse en orden estricto
+  // para evitar race conditions en GAS y errores "Sistema saturado".
+  // El cliente serializa estas acciones; las demás van en paralelo.
+  const _SERIALIZED_ACTIONS = new Set([
+    'agregarDetalle',
+    'actualizarCantidadDetalle',
+    'actualizarFechaVencimiento',
+    'anularDetalle',
+    'cerrarGuia',
+    'reabrirGuia',
+    'crearDespachoRapido',
+    'registrarEnvasado',
+    'registrarMerma',
+    'resolverMerma'
+  ]);
+
+  let _opQueueChain = Promise.resolve();
+  let _opQueueLen   = 0;
+  function _emitQueueState() {
+    try {
+      window.dispatchEvent(new CustomEvent('wh:opqueue', { detail: { count: _opQueueLen } }));
+    } catch(e) {}
+  }
+
+  async function _doFetchWithRetry(GAS_URL, params) {
+    // Hasta 5 intentos con backoff (1s, 2s, 4s, 6s, 10s) — total ~23s antes de rendirse
+    const delays = [1000, 2000, 4000, 6000, 10000];
+    for (let intento = 0; intento < 5; intento++) {
+      try {
+        const res  = await fetch(GAS_URL, {
+          method:  'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body:    JSON.stringify(params)
+        });
+        const json = await res.json();
+        if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
+          if (intento < 4) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
+        }
+        return json;
+      } catch {
+        if (intento < 4) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
+        // Red falló tras 5 intentos → encolar offline
+        const localId = OfflineManager.encolar(params.action, params);
+        return { ok: true, offline: true, localId, data: { idLocal: localId } };
+      }
+    }
+  }
+
   // POST: si offline → encolar y devolver respuesta optimista
   async function post(params) {
     const GAS_URL = _gasUrl();
@@ -57,33 +106,20 @@ const API = (() => {
       return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
 
-    // Reintentar hasta 3 veces si GAS responde "Sistema saturado" (LockService timeout)
-    for (let intento = 0; intento < 3; intento++) {
-      try {
-        const res  = await fetch(GAS_URL, {
-          method:  'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body:    JSON.stringify(params)
-        });
-        const json = await res.json();
-        // Si GAS dice saturado, esperar y reintentar (backoff exponencial: 1s, 2s, 4s)
-        if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
-          if (intento < 2) {
-            await new Promise(r => setTimeout(r, 1000 * Math.pow(2, intento)));
-            continue;
-          }
-        }
-        return json;
-      } catch {
-        if (intento < 2) {
-          await new Promise(r => setTimeout(r, 800));
-          continue;
-        }
-        // Red falló tras 3 intentos → encolar
-        const localId = OfflineManager.encolar(params.action, params);
-        return { ok: true, offline: true, localId, data: { idLocal: localId } };
-      }
+    // Si NO es operación serializada → mandar de inmediato (paralelo)
+    if (!_SERIALIZED_ACTIONS.has(params.action)) {
+      return _doFetchWithRetry(GAS_URL, params);
     }
+
+    // Operación serializada: encolar en chain global
+    _opQueueLen++;
+    _emitQueueState();
+    const exec = _opQueueChain.then(() => _doFetchWithRetry(GAS_URL, params));
+    _opQueueChain = exec.catch(() => null).finally(() => {
+      _opQueueLen--;
+      _emitQueueState();
+    });
+    return exec;
   }
 
   return {
