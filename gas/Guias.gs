@@ -91,6 +91,21 @@ function crearGuia(params) {
 }
 
 function agregarDetalleGuia(params) {
+  // ── LockService: serializa llamadas concurrentes para evitar race conditions
+  // que causan duplicados (cuando dos POSTs casi simultáneos no detectan al
+  // otro y ambos crean filas en lugar de auto-sumar a la existente).
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch(eL) {
+    return { ok: false, error: 'Servidor ocupado, reintenta' };
+  }
+  try {
+    return _agregarDetalleGuiaImpl(params);
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function _agregarDetalleGuiaImpl(params) {
   var sheet     = getSheet('GUIA_DETALLE');
   var idDetalle = _generateId('DET');
 
@@ -213,17 +228,21 @@ function agregarDetalleGuia(params) {
     }
   }
   var nextRow  = sheet.getLastRow() + 1;
+  // FIX: setNumberFormat('@') ANTES del appendRow para garantizar que el
+  // codigoBarra preserve ceros a la izquierda (ej. "00027" no se convierta a 27)
+  sheet.getRange(nextRow, 3).setNumberFormat('@');
   sheet.appendRow([
     idDetalle,
     params.idGuia,
-    cbProd,
+    String(cbProd),
     cantEsperada,
     cantRecibida,
     precioUnit,
     idLote,
     params.observacion || ''
   ]);
-  sheet.getRange(nextRow, 3).setNumberFormat('@').setValue(cbProd);
+  // Re-aplicar setValue con string explícito (defensa redundante)
+  sheet.getRange(nextRow, 3).setValue(String(cbProd));
 
   return {
     ok: true,
@@ -243,6 +262,18 @@ function agregarDetalleGuia(params) {
 
 // ── Actualizar cantidad recibida de un detalle existente ────────────
 function actualizarCantidadDetalle(params) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch(eL) {
+    return { ok: false, error: 'Servidor ocupado, reintenta' };
+  }
+  try {
+    return _actualizarCantidadDetalleImpl(params);
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function _actualizarCantidadDetalleImpl(params) {
   var idDetalle = String(params.idDetalle || '');
   var cantidad  = parseFloat(params.cantidadRecibida);
   if (!idDetalle || isNaN(cantidad)) return { ok: false, error: 'idDetalle y cantidadRecibida requeridos' };
@@ -396,6 +427,18 @@ function actualizarFechaVencimiento(params) {
 // Si la guía padre está CERRADA, devuelve el stock que ya se había aplicado.
 // Si está ABIERTA, solo marca como anulado (stock aún no descontado).
 function anularDetalle(params) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(15000); } catch(eL) {
+    return { ok: false, error: 'Servidor ocupado, reintenta' };
+  }
+  try {
+    return _anularDetalleImpl(params);
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function _anularDetalleImpl(params) {
   var idDetalle = params.idDetalle;
   if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
 
@@ -561,6 +604,19 @@ function autoCloseDayGuias() {
 
 function cerrarGuia(idGuia, usuario, idSesion, opts) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+  // LockService: evita doble cierre concurrente (timeout + reintento del frontend)
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch(eL) {
+    return { ok: false, error: 'Servidor ocupado, reintenta' };
+  }
+  try {
+    return _cerrarGuiaImpl(idGuia, usuario, idSesion, opts);
+  } finally {
+    try { lock.releaseLock(); } catch(e) {}
+  }
+}
+
+function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   opts = opts || {};
   var skipMosSync = opts.skipMosSync === true;  // omitir sync a MOS (uso en cierres masivos para evitar timeout)
 

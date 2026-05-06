@@ -315,6 +315,66 @@ function marcarAlertaRevisada(params) {
 }
 
 // ============================================================
+// Limpieza one-shot de códigos numéricos sin ceros (causados por race
+// conditions en agregarDetalleGuia antes del LockService).
+//
+// Si encuentra fila con codigoProducto = "27" y existe producto real "00027",
+// reescribe la fila como "00027" preservando el formato texto. Después la
+// otra limpieza (limpiarDuplicadosGuiaDetalle) puede mergear cantidades.
+// ============================================================
+function repararCodigosNumericos() {
+  var sheet = getSheet('GUIA_DETALLE');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxCb = hdrs.indexOf('codigoProducto');
+
+  // Construir set de códigos VÁLIDOS desde PRODUCTOS_MASTER (con ceros preservados)
+  var prodsValidos = {};
+  try {
+    var prods = _sheetToObjects(getProductosSheet());
+    prods.forEach(function(p) {
+      var cb = String(p.codigoBarra || '').trim();
+      if (cb) prodsValidos[cb] = true;
+    });
+    // También incluir equivalencias
+    var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+    if (equivSheet) {
+      _sheetToObjects(equivSheet).forEach(function(e) {
+        var cb = String(e.codigoBarra || '').trim();
+        if (cb) prodsValidos[cb] = true;
+      });
+    }
+  } catch(e) {}
+
+  var reparadas = [];
+  for (var i = 1; i < data.length; i++) {
+    var cbActual = String(data[i][idxCb] || '').trim();
+    // Solo procesar códigos puramente numéricos cortos (probablemente perdieron ceros)
+    if (!/^\d+$/.test(cbActual) || cbActual.length >= 12) continue;
+    // Si el código ya existe tal cual en productos válidos, no es bug
+    if (prodsValidos[cbActual]) continue;
+
+    // Buscar si existe versión con ceros: 00027, 0027, 027
+    var candidatos = [
+      cbActual.padStart(5, '0'),
+      cbActual.padStart(4, '0'),
+      cbActual.padStart(6, '0')
+    ];
+    var match = null;
+    for (var c = 0; c < candidatos.length; c++) {
+      if (prodsValidos[candidatos[c]]) { match = candidatos[c]; break; }
+    }
+    if (!match) continue;
+
+    // Reescribir con formato texto + valor correcto
+    sheet.getRange(i + 1, idxCb + 1).setNumberFormat('@').setValue(match);
+    reparadas.push({ fila: i + 1, antes: cbActual, ahora: match });
+  }
+  Logger.log('repararCodigosNumericos: ' + reparadas.length + ' filas reparadas');
+  return { ok: true, data: { reparadas: reparadas.length, detalles: reparadas } };
+}
+
+// ============================================================
 // Limpieza one-shot de duplicados en GUIA_DETALLE.
 // Recorre todas las guías y, si hay 2+ detalles con mismo codigoProducto
 // (no anulados), conserva el PRIMERO (suma sus cantidades) y borra el resto.
