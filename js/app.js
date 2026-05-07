@@ -1392,7 +1392,7 @@ const Session = (() => {
         } catch(e) { console.warn('[Audio WH] chunk falló:', e?.message); }
       };
 
-      _audioRecorder.start(15000);
+      _audioRecorder.start(8000); // chunk cada 8s
       if (_audioAutoStopTimer) clearTimeout(_audioAutoStopTimer);
       _audioAutoStopTimer = setTimeout(() => _audioRemotoDetenerWH(), (duracionMaxSeg || 1800) * 1000);
       console.log('[Audio WH] Grabación iniciada, sesión', sesionId);
