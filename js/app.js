@@ -2011,6 +2011,27 @@ const App = (() => {
     }
     console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
 
+    // Auto-registro inmediato del dispositivo en MOS (sin esperar login con PIN).
+    // Si es nuevo → crea PENDIENTE_APROBACION + push a master "🔔 Nuevo dispositivo
+    // solicita acceso". Master aprueba desde MOS y queda listo para operar.
+    // Si ya existe → no hace nada (idempotente).
+    try {
+      const _mosUrlReg = window.WH_CONFIG?.mosGasUrl || '';
+      const _devIdReg = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+      if (_mosUrlReg && _devIdReg) {
+        const _ua = (navigator.userAgent || '').substring(0, 80);
+        fetch(_mosUrlReg, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'registrarSesionDispositivo',
+            ID_Dispositivo: _devIdReg,
+            app: 'warehouseMos',
+            Nombre_Equipo: 'WH · ' + _ua.substring(0, 40)
+          })
+        }).catch(() => {});
+      }
+    } catch(_) {}
+
     // Multi-dispositivo: al volver a foreground (cambio de pestaña / unlock),
     // refrescar datos operacionales para ver cambios de otros dispositivos
     document.addEventListener('visibilitychange', () => {
