@@ -843,6 +843,13 @@ const Session = (() => {
 
     // Push notifications — registrar token con nombre del operador
     setTimeout(_pushInitWH, 3000);
+
+    // GPS tracking pasivo: cada 5 min mientras la app está visible
+    setTimeout(() => _gpsRegistrarWH(false), 8000);
+    if (_intervalGpsWH) clearInterval(_intervalGpsWH);
+    _intervalGpsWH = setInterval(() => {
+      if (document.visibilityState === 'visible') _gpsRegistrarWH(false);
+    }, 5 * 60 * 1000);
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -1203,6 +1210,159 @@ const Session = (() => {
   }
 
   function getSesion() { return sesionActual; }
+
+  // ── DEVICE ID estable para tracking GPS y audio ──────────
+  function _getDeviceIdWH() {
+    let id = localStorage.getItem('wh_device_id');
+    if (!id) {
+      try { id = crypto.randomUUID ? crypto.randomUUID() : ('WH' + Date.now() + Math.random().toString(36).slice(2)); }
+      catch(_) { id = 'WH' + Date.now() + Math.random().toString(36).slice(2); }
+      localStorage.setItem('wh_device_id', id);
+    }
+    return id;
+  }
+  window._getDeviceIdWH = _getDeviceIdWH;
+
+  // ── AUDIO REMOTO + GPS — escucha comandos del SW y registra ubicación ──
+  let _audioRecorder = null;
+  let _audioStream = null;
+  let _audioSesionId = null;
+  let _audioChunkIdx = 0;
+  let _audioAutoStopTimer = null;
+  let _intervalGpsWH = null;
+
+  const _audioBlobToBase64WH = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onloadend = () => {
+      const dataUrl = r.result || '';
+      const i = dataUrl.indexOf(',');
+      resolve(i >= 0 ? dataUrl.substring(i + 1) : dataUrl);
+    };
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+
+  async function _audioRemotoIniciarWH(sesionId, duracionMaxSeg) {
+    const mosUrl = window.WH_CONFIG?.mosGasUrl;
+    if (!mosUrl) return;
+    if (_audioRecorder) await _audioRemotoDetenerWH();
+    try {
+      _audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/webm';
+      if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = 'audio/mp4';
+      _audioRecorder = new MediaRecorder(_audioStream, { mimeType });
+      _audioSesionId = sesionId;
+      _audioChunkIdx = 0;
+
+      _audioRecorder.ondataavailable = async (evt) => {
+        if (!evt.data || !evt.data.size) return;
+        try {
+          const b64 = await _audioBlobToBase64WH(evt.data);
+          const idx = _audioChunkIdx++;
+          await fetch(mosUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'subirChunkAudio',
+              idSesion: _audioSesionId,
+              idx: idx,
+              audioBase64: b64,
+              mimeType: mimeType
+            })
+          });
+        } catch(e) { console.warn('[Audio WH] chunk falló:', e?.message); }
+      };
+
+      _audioRecorder.start(15000);
+      if (_audioAutoStopTimer) clearTimeout(_audioAutoStopTimer);
+      _audioAutoStopTimer = setTimeout(() => _audioRemotoDetenerWH(), (duracionMaxSeg || 1800) * 1000);
+      console.log('[Audio WH] Grabación iniciada, sesión', sesionId);
+    } catch(e) {
+      console.error('[Audio WH] No se pudo iniciar:', e?.message);
+      try {
+        await fetch(mosUrl, {
+          method: 'POST',
+          body: JSON.stringify({ action: 'detenerEscuchaAudio', idSesion: sesionId })
+        });
+      } catch(_) {}
+      _audioRecorder = null;
+      _audioStream = null;
+      _audioSesionId = null;
+    }
+  }
+
+  async function _audioRemotoDetenerWH() {
+    if (_audioAutoStopTimer) { clearTimeout(_audioAutoStopTimer); _audioAutoStopTimer = null; }
+    try {
+      if (_audioRecorder && _audioRecorder.state !== 'inactive') _audioRecorder.stop();
+      if (_audioStream) _audioStream.getTracks().forEach(t => t.stop());
+    } catch(_) {}
+    _audioRecorder = null;
+    _audioStream = null;
+    const sid = _audioSesionId;
+    _audioSesionId = null;
+    _audioChunkIdx = 0;
+    if (sid) {
+      const mosUrl = window.WH_CONFIG?.mosGasUrl;
+      if (mosUrl) {
+        try {
+          await fetch(mosUrl, {
+            method: 'POST',
+            body: JSON.stringify({ action: 'detenerEscuchaAudio', idSesion: sid })
+          });
+        } catch(_) {}
+      }
+    }
+    console.log('[Audio WH] Grabación detenida');
+  }
+
+  function _gpsRegistrarWH(forzar) {
+    if (!navigator.geolocation) return;
+    if (!sesionActual) return;
+    const mosUrl = window.WH_CONFIG?.mosGasUrl;
+    if (!mosUrl) return;
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        let bateria = '';
+        try {
+          if (navigator.getBattery) {
+            const b = await navigator.getBattery();
+            bateria = Math.round((b.level || 0) * 100);
+          }
+        } catch(_) {}
+        try {
+          const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
+          await fetch(mosUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'registrarUbicacion',
+              deviceId: _getDeviceIdWH(),
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              bateria: bateria,
+              usuarioLogueado: usuario
+            })
+          });
+        } catch(_) {}
+      },
+      (err) => console.warn('[GPS WH] error:', err?.message),
+      { enableHighAccuracy: forzar === true, timeout: 15000, maximumAge: forzar ? 0 : 60000 }
+    );
+  }
+
+  // Suscripción a comandos del SW (audio_start, audio_stop, gps_locate)
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (evt) => {
+      if (evt.data?.type !== 'mos_command') return;
+      const cmd = evt.data.data || {};
+      if (cmd.action === 'audio_start') _audioRemotoIniciarWH(cmd.sesionId, parseInt(cmd.duracionMaxSeg, 10) || 1800);
+      else if (cmd.action === 'audio_stop') _audioRemotoDetenerWH();
+      else if (cmd.action === 'gps_locate') _gpsRegistrarWH(true);
+    });
+  }
+  window._gpsRegistrarWH = _gpsRegistrarWH;
+  window._audioRemotoDetenerWH = _audioRemotoDetenerWH;
 
   // ── PUSH NOTIFICATIONS (FCM) ────────────────────────────
   // Registra token FCM asociado al operador logueado para que MOS
