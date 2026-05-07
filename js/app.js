@@ -357,6 +357,53 @@ function _horaDesdeId(id) {
 // Escapa para insertar en atributos onclick="..." (evita romper comillas)
 function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 function escHtml(s)  { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ── Cargadores: tarifa global vigente (cache local de CONFIG) ──
+function _getTarifaCarreta() {
+  try {
+    const cfg = OfflineManager.getConfigCache() || {};
+    const t = parseFloat(cfg.TARIFA_CARRETA);
+    return isNaN(t) ? 0 : t;
+  } catch { return 0; }
+}
+
+// Calcula resumen {carretas, monto} agregando todos los cargadores de los
+// preingresos pasados. Usa la tarifa snapshoteada por cargador si existe;
+// si no, usa la global vigente como fallback.
+function _resumenCargadoresDia(items) {
+  let carretas = 0, monto = 0;
+  const tarifaGlobal = _getTarifaCarreta();
+  (items || []).forEach(p => {
+    let arr = [];
+    try { arr = JSON.parse(p.cargadores || '[]'); } catch {}
+    if (!Array.isArray(arr)) return;
+    arr.forEach(c => {
+      if (!c || typeof c !== 'object') return;
+      const n = parseInt(c.carretas) || 0;
+      const t = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                 ? parseFloat(c.tarifa) : tarifaGlobal;
+      carretas += n;
+      monto    += n * t;
+    });
+  });
+  return { carretas, monto };
+}
+
+// Para vistas que NO tienen los preingresos en mano (como Guías): mira
+// la cache local y filtra preingresos cuya fecha cae en `key` (YYYY-MM-DD).
+function _resumenCargadoresDiaPorFecha(key) {
+  try {
+    const all = OfflineManager.getPreingresosCache() || [];
+    const items = all.filter(p => {
+      if (!p.fecha) return false;
+      const d = _parseLocalDate(p.fecha);
+      if (isNaN(d)) return false;
+      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return k === key;
+    });
+    return _resumenCargadoresDia(items);
+  } catch { return { carretas: 0, monto: 0 }; }
+}
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
 function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim().toUpperCase(); }
 
@@ -1460,8 +1507,15 @@ const BloqueoRemoto = (() => {
     if (!ses || !ses.idPersonal) return;
     if (!_mosUrl() || !navigator.onLine) return;
     try {
+      // Heartbeat para MOS: deviceId + nombre permiten que registrarSesionDispositivo
+      // actualice Ultima_Conexion y Ultima_Sesion en DISPOSITIVOS. Sin esto los
+      // dispositivos WH siempre muestran "hace Nh" porque jamás se les hacía heartbeat.
+      const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+      const nombreFull = ((ses.nombre || '') + ' ' + (ses.apellido || '')).trim();
       const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
                 + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
+                + '&nombre=' + encodeURIComponent(nombreFull)
+                + '&deviceId=' + encodeURIComponent(devId)
                 + '&appOrigen=warehouseMos';
       const r = await fetch(url);
       const j = await r.json();
@@ -2617,10 +2671,20 @@ const GuiasView = (() => {
 
     container.innerHTML = Object.entries(groupMap)
       .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, items]) =>
-        `<div class="pre-date-hdr">${_gLabel(key)}</div>
-         <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`
-      ).join('');
+      .map(([key, items]) => {
+        // Resumen de cargadores del día (de los preingresos vinculados a guías de ingreso de ese día)
+        const r = _resumenCargadoresDiaPorFecha(key);
+        const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
+        const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
+        const pill = r.carretas > 0
+          ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
+                     class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                <span>🛺</span><span>${r.carretas} cart</span><span>·</span><span>S/ ${r.monto.toFixed(2)}</span>
+              </button>`
+          : '';
+        return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${pill}</div>
+                <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`;
+      }).join('');
 
     // Preservar solo cards optimistas cuyo ID aún no está en la lista real
     optCards.forEach(c => {
@@ -7052,10 +7116,19 @@ const PreingresosView = (() => {
 
     container.innerHTML = Object.entries(groupMap)
       .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, items]) =>
-        `<div class="pre-date-hdr">${_dateLabel(key)}</div>
-         <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`
-      ).join('');
+      .map(([key, items]) => {
+        const r = _resumenCargadoresDia(items);
+        const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
+        const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
+        const pill = r.carretas > 0
+          ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
+                     class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                <span>🛺</span><span>${r.carretas} cart</span><span>·</span><span>S/ ${r.monto.toFixed(2)}</span>
+              </button>`
+          : '';
+        return `<div class="${hdrCls}"><span>${_dateLabel(key)}</span>${mid}${pill}</div>
+                <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`;
+      }).join('');
 
     // Preservar solo cards optimistas cuyo ID aún no está en la lista real
     optCards.forEach(c => {
@@ -8027,7 +8100,19 @@ const PreingresosView = (() => {
     const provNombre = prov?.nombre || pi.idProveedor || '—';
     let cargadores = [];
     try { cargadores = JSON.parse(pi.cargadores || '[]'); } catch {}
-    const cargStr  = cargadores.length ? cargadores.map(c => c.nombre || c.id || String(c)).join(', ') : '—';
+    const tarifaG = _getTarifaCarreta();
+    let totalCarg = 0;
+    const cargLines = cargadores.map(c => {
+      const nombre   = c.nombre || c.id || String(c);
+      const carretas = parseInt(c.carretas) || 0;
+      const t        = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                        ? parseFloat(c.tarifa) : tarifaG;
+      const sub      = carretas * t;
+      totalCarg     += sub;
+      return carretas > 0 && t > 0
+        ? `   • ${nombre} — ${carretas} × S/${fmt(t,2)} = *S/ ${fmt(sub,2)}*`
+        : `   • ${nombre}`;
+    });
     const url      = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
     const lineas   = [
       `*📦 PREINGRESO ${idPreingreso}*`,
@@ -8036,8 +8121,14 @@ const PreingresosView = (() => {
       `💰 *Monto:* ${pi.monto ? 'S/ ' + fmt(pi.monto, 2) : '—'}`,
       `📅 *Fecha:* ${_fmtCorta(pi.fecha)}`,
       `📊 *Estado:* ${pi.estado || '—'}`,
-      `👥 *Cargadores:* ${cargStr}`,
     ];
+    if (cargadores.length) {
+      lineas.push(`👥 *Cargadores:*`);
+      lineas.push(...cargLines);
+      if (totalCarg > 0) lineas.push(`   *TOTAL CARRETAS:* S/ ${fmt(totalCarg, 2)}`);
+    } else {
+      lineas.push(`👥 *Cargadores:* —`);
+    }
     if (pi.comentario) lineas.push(`💬 *Comentario:* ${pi.comentario}`);
     if (pi.idGuia)     lineas.push(`📋 *Guía:* ${pi.idGuia}`);
     lineas.push(
@@ -8056,12 +8147,127 @@ const PreingresosView = (() => {
     _dispararAvisoCajeros(_editItem.idPreingreso);
   }
 
+  // ── Cargadores del día — modal consolidado (preingresos + guías) ──
+  let _cargDiaState = { fecha: '', data: null };
+
+  function _fmtFechaLabel(yyyymmdd) {
+    if (!yyyymmdd || yyyymmdd === '0000-00-00') return 'Sin fecha';
+    const d = new Date(yyyymmdd + 'T12:00:00');
+    if (isNaN(d)) return yyyymmdd;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const yest  = new Date(today.getTime() - 86400000);
+    if (+d.setHours(0,0,0,0) === +today) return 'Hoy';
+    if (+d === +yest) return 'Ayer';
+    return d.toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric' });
+  }
+
+  async function abrirCargadoresDia(fechaKey) {
+    _cargDiaState.fecha = fechaKey;
+    document.getElementById('cargDiaFechaLbl').textContent = _fmtFechaLabel(fechaKey);
+    document.getElementById('cargDiaTarifaInput').value = String(_getTarifaCarreta() || '');
+    document.getElementById('cargDiaContenido').innerHTML =
+      '<div class="text-xs text-slate-500 italic text-center py-6">Cargando…</div>';
+    abrirSheet('sheetCargadoresDia');
+
+    const res = await API.getCargadoresDelDia({ fecha: fechaKey }).catch(() => null);
+    if (!res || !res.ok) {
+      document.getElementById('cargDiaContenido').innerHTML =
+        '<div class="text-xs text-rose-400 text-center py-6">No se pudo cargar</div>';
+      return;
+    }
+    _cargDiaState.data = res.data;
+    _renderCargDiaContent();
+  }
+
+  function _renderCargDiaContent() {
+    const c = document.getElementById('cargDiaContenido');
+    const d = _cargDiaState.data;
+    if (!d) { c.innerHTML = ''; return; }
+    if (!d.cargadores || !d.cargadores.length) {
+      c.innerHTML = '<div class="text-xs text-slate-500 italic text-center py-6">Sin cargadores este día</div>';
+      return;
+    }
+    const cards = d.cargadores.map(cg => `
+      <div class="rounded-lg p-3" style="background:#0f172a;border:1px solid #1e293b">
+        <div class="flex items-center justify-between mb-1">
+          <div class="text-sm font-bold text-amber-300">🛺 ${escHtml(cg.nombre)}</div>
+          <div class="text-sm font-bold text-emerald-400">S/ ${cg.montoTotal.toFixed(2)}</div>
+        </div>
+        <div class="text-[11px] text-slate-500 mb-2">${cg.carretasTotal} carretas</div>
+        <div class="space-y-0.5">
+          ${cg.preingresos.map(pi => `
+            <div class="text-[11px] text-slate-400 flex items-center gap-2">
+              <span class="font-mono text-slate-500">${escHtml(pi.idPreingreso)}</span>
+              <span class="flex-1 truncate">${escHtml(pi.proveedor || '—')}</span>
+              <span class="text-amber-300">${pi.carretas} × S/${pi.tarifa.toFixed(2)}</span>
+            </div>`).join('')}
+        </div>
+      </div>`).join('');
+    c.innerHTML = cards + `
+      <div class="rounded-lg px-3 py-3 mt-3 flex items-center justify-between"
+           style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3)">
+        <div>
+          <div class="text-xs text-slate-400">TOTAL DEL DÍA</div>
+          <div class="text-[11px] text-slate-500">${d.totalCarretas} carretas · ${d.preingresos} preingreso${d.preingresos !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="text-2xl font-bold text-amber-300">S/ ${d.totalMonto.toFixed(2)}</div>
+      </div>`;
+  }
+
+  async function guardarTarifaCarreta() {
+    const v = parseFloat(document.getElementById('cargDiaTarifaInput').value);
+    if (isNaN(v) || v < 0) { toast('Tarifa inválida', 'warn'); return; }
+    toast('Guardando tarifa…', 'info');
+    const res = await API.setConfig('TARIFA_CARRETA', String(v)).catch(() => null);
+    if (!res || !res.ok) { toast('Error guardando tarifa', 'danger'); return; }
+    // Actualizar cache local de CONFIG para que la UI lo refleje sin recarga
+    try {
+      const cfg = OfflineManager.getConfigCache() || {};
+      cfg.TARIFA_CARRETA = String(v);
+      localStorage.setItem('wh_config', JSON.stringify({ data: cfg, ts: Date.now() }));
+    } catch {}
+    toast('Tarifa actualizada', 'ok');
+    // Refrescar el agregado del día (puede haber preingresos legacy sin snapshot)
+    if (_cargDiaState.fecha) abrirCargadoresDia(_cargDiaState.fecha);
+  }
+
+  function compartirCargadoresDiaWA() {
+    const d = _cargDiaState.data;
+    if (!d || !d.cargadores || !d.cargadores.length) {
+      toast('Sin datos para compartir', 'warn'); return;
+    }
+    const lineas = [
+      `*🛺 CARGADORES — ${_fmtFechaLabel(d.fecha)}*`,
+      `─────────────────────`,
+    ];
+    d.cargadores.forEach(cg => {
+      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} cart · *S/ ${cg.montoTotal.toFixed(2)}*`);
+      cg.preingresos.forEach(pi => {
+        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} × S/${pi.tarifa.toFixed(2)}`);
+      });
+    });
+    lineas.push(``, `━━━━━━━━━━━━━━━━━━━━━━━━`);
+    lineas.push(`*TOTAL:* ${d.totalCarretas} carretas · *S/ ${d.totalMonto.toFixed(2)}*`);
+    lineas.push(`_InversionMos Warehouse_`);
+    window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
+  }
+
+  async function imprimirCargadoresDia() {
+    const fecha = _cargDiaState.fecha;
+    if (!fecha) { toast('Abre primero el resumen del día', 'warn'); return; }
+    toast('Enviando a impresora…', 'info');
+    const res = await API.imprimirCargadoresDia({ fecha }).catch(() => null);
+    if (res && res.ok) toast('Ticket impreso', 'ok');
+    else                toast('Error: ' + (res?.error || 'No se pudo imprimir'), 'danger');
+  }
+
   return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
            onFotosSeleccionadas, quitarFoto, verFotos,
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido, reimprimirAviso,
+           abrirCargadoresDia, guardarTarifaCarreta, compartirCargadoresDiaWA, imprimirCargadoresDia,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,

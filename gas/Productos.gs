@@ -1143,6 +1143,27 @@ function getPreingresos(params) {
   return { ok: true, data: rows };
 }
 
+// ── Snapshot de tarifa por carreta ─────────────────────────────
+// Recibe el JSON string de cargadores [{id,nombre,carretas,tarifa?}] y retorna
+// el mismo string pero con `tarifa` rellenada con la tarifa global vigente
+// si no venía. Garantiza que reimpresiones a futuro conserven el monto que
+// se pactó al momento, aunque cambie TARIFA_CARRETA global.
+function _snapshotTarifaCargadores(cargadoresStr) {
+  if (!cargadoresStr) return '';
+  try {
+    var arr = JSON.parse(cargadoresStr);
+    if (!Array.isArray(arr) || !arr.length) return cargadoresStr;
+    var tarifaGlobal = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
+    var out = arr.map(function(c) {
+      if (typeof c !== 'object' || c === null) return c;
+      var t = parseFloat(c.tarifa);
+      if (isNaN(t) || t < 0) t = tarifaGlobal;
+      return { id: c.id, nombre: c.nombre, carretas: c.carretas, tarifa: t };
+    });
+    return JSON.stringify(out);
+  } catch(e) { return cargadoresStr; }
+}
+
 function crearPreingreso(params) {
   var sheet = getSheet('PREINGRESOS');
   // Usar ID del cliente si viene (previene duplicados por retry)
@@ -1154,6 +1175,10 @@ function crearPreingreso(params) {
     if (data[i][0] === id) return { ok: true, data: { idPreingreso: id } };
   }
 
+  // Snapshot de tarifa por carreta para que reimpresiones futuras conserven
+  // el monto pactado al momento, aunque después se cambie la tarifa global.
+  var cargSnapshot = _snapshotTarifaCargadores(params.cargadores);
+
   // Escribir por nombre de columna — funciona con 9 o 12 cols (schema viejo/nuevo)
   var hdrs = data[0];
   var row  = new Array(hdrs.length).fill('');
@@ -1161,7 +1186,7 @@ function crearPreingreso(params) {
   _set('idPreingreso', id);
   _set('fecha',        new Date());
   _set('idProveedor',  params.idProveedor  || '');
-  _set('cargadores',   params.cargadores   || '');
+  _set('cargadores',   cargSnapshot);
   _set('usuario',      params.usuario      || '');
   _set('monto',        parseFloat(params.monto) || 0);
   _set('fotos',        params.fotos        || '');
@@ -1274,13 +1299,16 @@ function actualizarPreingreso(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] !== idPreingreso) continue;
 
-    // Campos editables
-    var editable = { idProveedor: true, monto: true, comentario: true, fotos: true };
+    // Campos editables (cargadores se snapshotea con tarifa antes de escribir)
+    var editable = { idProveedor: true, monto: true, comentario: true, fotos: true, cargadores: true };
     Object.keys(editable).forEach(function(key) {
       if (params[key] === undefined) return;
       var col = hdrs.indexOf(key);
       if (col < 0) return;
-      var val = key === 'monto' ? (parseFloat(params[key]) || 0) : String(params[key]);
+      var val;
+      if (key === 'monto')           val = parseFloat(params[key]) || 0;
+      else if (key === 'cargadores') val = _snapshotTarifaCargadores(params[key]);
+      else                            val = String(params[key]);
       sheet.getRange(i + 1, col + 1).setValue(val);
     });
 

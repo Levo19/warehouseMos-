@@ -174,6 +174,7 @@ function _seedConfig(ss) {
     ['DIAS_ALERTA_VENC_CRITICO','7',     'Días críticos antes del vencimiento'],
     ['EMPRESA_NOMBRE',      'InversionMos', 'Nombre para etiquetas'],
     ['EMPRESA_RUC',         '',          'RUC para documentos'],
+    ['TARIFA_CARRETA',      '10',        'Pago por carreta a cargadores (S/.)'],
     ['VERSION',             '1.0.0',     'Versión del sistema']
   ];
   sheet.getRange(2, 1, rows.length, 3).setValues(rows);

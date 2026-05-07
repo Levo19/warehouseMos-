@@ -180,8 +180,10 @@ function _route(method, e) {
       case 'setConfigValue':     return setConfigValue(params.clave, params.valor);
 
       // ── Reportes públicos ──────────────────────────────────
-      case 'getReporte':          return getReporte(params);
-      case 'imprimirTicketGuia':  return imprimirTicketGuia(params);
+      case 'getReporte':              return getReporte(params);
+      case 'imprimirTicketGuia':      return imprimirTicketGuia(params);
+      case 'getCargadoresDelDia':     return getCargadoresDelDia(params);
+      case 'imprimirCargadoresDia':   return imprimirCargadoresDia(params);
 
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);

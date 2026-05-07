@@ -251,14 +251,30 @@ function linkCard(href, title, sub) {
 function renderPreingreso(d) {
   const border = d.estado === 'PROCESADO' ? '#22c55e' : '#f59e0b';
 
-  // Cargadores
+  // Cargadores: pill con N carretas + subtotal · total al final
   let cargHtml = '<span style="color:#64748b">Sin cargadores</span>';
+  let cargTotalHtml = '';
   if (d.cargadores && d.cargadores.length) {
+    const tarifaG = parseFloat(d.tarifaCarreta) || 0;
+    let sumMonto = 0, sumCart = 0;
     cargHtml = d.cargadores.map(function(c) {
-      const nombre = c.nombre || c.id || String(c);
-      const cart   = c.carretas ? ' <span style="color:#94a3b8;font-size:10px">(' + c.carretas + ' cart.)</span>' : '';
-      return '<span class="carg-pill">' + esc(nombre) + cart + '</span>';
+      const nombre   = c.nombre || c.id || String(c);
+      const carretas = parseInt(c.carretas) || 0;
+      const tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                        ? parseFloat(c.tarifa) : tarifaG;
+      const sub      = carretas * tarifa;
+      sumMonto += sub; sumCart += carretas;
+      const detalle = carretas > 0 && tarifa > 0
+        ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' × S/' + tarifa.toFixed(2) + ' = S/' + sub.toFixed(2) + ')</span>'
+        : (carretas ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' cart.)</span>' : '');
+      return '<span class="carg-pill">' + esc(nombre) + detalle + '</span>';
     }).join('');
+    if (sumMonto > 0) {
+      cargTotalHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:baseline">' +
+        '<span style="font-size:11px;color:#64748b">Total ' + sumCart + ' carretas</span>' +
+        '<span style="font-size:16px;font-weight:700;color:#fbbf24">S/ ' + sumMonto.toFixed(2) + '</span>' +
+        '</div>';
+    }
   }
 
   // Fotos
@@ -299,7 +315,7 @@ function renderPreingreso(d) {
     '</div></div>' +
 
     '<div class="rpt-section" data-key="cargadores"><div class="rpt-section-title">Cargadores (' + (d.cargadores||[]).length + ')</div>' +
-    '<div>' + cargHtml + '</div></div>' +
+    '<div>' + cargHtml + '</div>' + cargTotalHtml + '</div>' +
 
     fotosHtml +
     guiaHtml;

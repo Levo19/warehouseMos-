@@ -4,6 +4,21 @@
 // Acción: getReporte?tipo=preingreso|guia&id=xxx
 // ============================================================
 
+// ── Helpers de formato compartidos ──────────────────────────
+function _padLine48(left, right) {
+  var l = String(left || '');
+  var r = String(right || '');
+  var pad = 48 - l.length - r.length;
+  if (pad < 1) pad = 1;
+  return l + Array(pad + 1).join(' ') + r;
+}
+
+function _fmtMoney(n) {
+  var v = parseFloat(n);
+  if (isNaN(v)) return '0.00';
+  return v.toFixed(2);
+}
+
 // ============================================================
 // imprimirTicketGuia — ESC/POS 80mm con QR al final
 // ============================================================
@@ -314,16 +329,33 @@ function imprimirTicketGuia(params) {
         if (pi.estado) bLn('Estado:  ' + String(pi.estado).toUpperCase());
         if (pi.monto)  bLn('Monto:   S/. ' + pi.monto);
 
-        // Cargadores: uno por línea
+        // Cargadores con detalle: nombre · N x tarifa = subtotal
         var cargs = [];
         try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
         if (cargs.length) {
           bLn('');
           bLn('Cargadores:');
+          var totalCargG = 0;
+          var tarifaGlobalG = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
           cargs.forEach(function(c) {
             var nombre = (typeof c === 'object') ? (c.nombre || c.idPersonal || '') : String(c);
-            if (nombre) bLn('  - ' + nombre);
+            if (!nombre) return;
+            var carretas = (typeof c === 'object' && c.carretas) ? parseInt(c.carretas) || 0 : 0;
+            var tarifa   = (typeof c === 'object' && c.tarifa !== undefined && c.tarifa !== '')
+                           ? (parseFloat(c.tarifa) || 0) : tarifaGlobalG;
+            var sub      = carretas * tarifa;
+            totalCargG  += sub;
+            if (carretas > 0 && tarifa > 0) {
+              bLn(_padLine48('  - ' + nombre, carretas + ' x S/' + _fmtMoney(tarifa) + ' = S/ ' + _fmtMoney(sub)));
+            } else {
+              bLn('  - ' + nombre);
+            }
           });
+          if (totalCargG > 0) {
+            b1(0x1b); b1(0x45); b1(0x01);
+            bLn(_padLine48('  TOTAL CARRETAS', 'S/ ' + _fmtMoney(totalCargG)));
+            b1(0x1b); b1(0x45); b1(0x00);
+          }
         }
 
         // Comentario — RESALTADO en doble alto bold
@@ -580,16 +612,34 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
     bLn(SEP);
   }
 
-  // ── Cargadores: uno por línea ───────────────────────────────
+  // ── Cargadores con detalle: nombre · N x tarifa = subtotal ──
   var cargs = [];
   try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
   if (cargs.length) {
     bLn('');
     bLn('Cargadores:');
+    var totalCarg = 0;
+    var tarifaGlobal = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
     cargs.forEach(function(c) {
       var nombre = (typeof c === 'object') ? (c.nombre || c.idPersonal || '') : String(c);
-      if (nombre) bLn('  - ' + nombre);
+      if (!nombre) return;
+      var carretas = (typeof c === 'object' && c.carretas) ? parseInt(c.carretas) || 0 : 0;
+      var tarifa   = (typeof c === 'object' && c.tarifa !== undefined && c.tarifa !== '')
+                     ? (parseFloat(c.tarifa) || 0) : tarifaGlobal;
+      var sub      = carretas * tarifa;
+      totalCarg   += sub;
+      if (carretas > 0 && tarifa > 0) {
+        bLn(_padLine48('  - ' + nombre, carretas + ' x S/' + _fmtMoney(tarifa) + ' = S/ ' + _fmtMoney(sub)));
+      } else {
+        bLn('  - ' + nombre);
+      }
     });
+    if (totalCarg > 0) {
+      bLn('                                                ');
+      b1(0x1b); b1(0x45); b1(0x01);
+      bLn(_padLine48('  TOTAL CARRETAS', 'S/ ' + _fmtMoney(totalCarg)));
+      b1(0x1b); b1(0x45); b1(0x00);
+    }
   }
 
   // ── Comentario: doble alto bold (resaltado) ─────────────────
@@ -735,6 +785,7 @@ function _reportePreingreso(id) {
       comentario:   pi.comentario || '',
       fotos:        pi.fotos ? String(pi.fotos).split(',').filter(Boolean) : [],
       cargadores:   cargadores,
+      tarifaCarreta:parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0,
       usuario:      pi.usuario   || '',
       idGuia:       pi.idGuia    || '',
       guia:         guiaResumen,
@@ -846,4 +897,192 @@ function _reporteGuia(id) {
       generado:     new Date().toISOString()
     }
   };
+}
+
+// ============================================================
+// CARGADORES DEL DÍA — agregado cross-preingresos
+// ============================================================
+// Lee todos los preingresos de la fecha indicada, parsea el JSON `cargadores`
+// de cada uno, agrupa por id de cargador y suma carretas + monto. Si un
+// preingreso no tiene tarifa snapshoteada (legacy), usa la TARIFA_CARRETA
+// global vigente como fallback.
+function getCargadoresDelDia(params) {
+  var fechaStr = String(params && params.fecha || '').trim();
+  if (!fechaStr) {
+    var hoy = new Date();
+    fechaStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  var rows = _sheetToObjects(getSheet('PREINGRESOS'));
+  var tarifaGlobal = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
+
+  // Resolver nombres de proveedores para mostrar el contexto del preingreso
+  var provMap = {};
+  try {
+    _sheetToObjects(getProveedoresSheet()).forEach(function(p) {
+      provMap[String(p.idProveedor)] = String(p.nombre || '');
+    });
+  } catch(e) {}
+
+  var preingresosDelDia = rows.filter(function(pi) {
+    if (!pi.fecha) return false;
+    var d  = new Date(pi.fecha);
+    if (isNaN(d.getTime())) return false;
+    var ds = Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    return ds === fechaStr;
+  });
+
+  // Agrupar por cargador
+  var byId = {};
+  preingresosDelDia.forEach(function(pi) {
+    var cargs = [];
+    try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
+    if (!Array.isArray(cargs)) return;
+    cargs.forEach(function(c) {
+      if (!c || typeof c !== 'object') return;
+      var id     = String(c.id || c.idPersonal || c.nombre || '');
+      var nombre = String(c.nombre || c.idPersonal || id || '');
+      if (!id || !nombre) return;
+      var carretas = parseInt(c.carretas) || 0;
+      var tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                     ? parseFloat(c.tarifa) : tarifaGlobal;
+      var sub      = carretas * tarifa;
+      if (!byId[id]) byId[id] = { id: id, nombre: nombre, carretasTotal: 0, montoTotal: 0, preingresos: [] };
+      byId[id].carretasTotal += carretas;
+      byId[id].montoTotal    += sub;
+      byId[id].preingresos.push({
+        idPreingreso: pi.idPreingreso,
+        proveedor:    provMap[String(pi.idProveedor)] || pi.idProveedor || '',
+        carretas:     carretas,
+        tarifa:       tarifa,
+        subtotal:     sub,
+        estado:       String(pi.estado || '')
+      });
+    });
+  });
+
+  var cargadores = Object.keys(byId).map(function(k) { return byId[k]; })
+    .sort(function(a, b) { return b.montoTotal - a.montoTotal; });
+
+  var totalCarretas = cargadores.reduce(function(s, c) { return s + c.carretasTotal; }, 0);
+  var totalMonto    = cargadores.reduce(function(s, c) { return s + c.montoTotal; }, 0);
+
+  return {
+    ok: true,
+    data: {
+      fecha:         fechaStr,
+      cargadores:    cargadores,
+      totalCarretas: totalCarretas,
+      totalMonto:    totalMonto,
+      tarifaGlobal:  tarifaGlobal,
+      preingresos:   preingresosDelDia.length
+    }
+  };
+}
+
+// Imprime el consolidado del día en la impresora ALMACEN (TICKET role).
+function imprimirCargadoresDia(params) {
+  var fechaStr = String(params && params.fecha || '').trim();
+  var resumen  = getCargadoresDelDia({ fecha: fechaStr });
+  if (!resumen.ok) return resumen;
+  var d = resumen.data;
+  if (!d.cargadores.length) return { ok: false, error: 'Sin cargadores ese día' };
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  var printerId;
+  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+  catch(e) { return { ok: false, error: e.message }; }
+
+  // Etiqueta de fecha amigable
+  var fechaLabel = d.fecha;
+  try {
+    var fp = new Date(d.fecha + 'T12:00:00');
+    var meses = ['enero','febrero','marzo','abril','mayo','junio',
+                 'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    fechaLabel = fp.getDate() + ' ' + meses[fp.getMonth()] + ' ' + fp.getFullYear();
+  } catch(e) {}
+
+  var B = [];
+  function b1(v)   { B.push(v & 0xff); }
+  function bStr(s) { for (var k = 0; k < s.length; k++) B.push(s.charCodeAt(k) & 0xff); }
+  function bLn(s)  { bStr(s); b1(0x0a); }
+  var SEP  = '================================================';
+  var SEP2 = '------------------------------------------------';
+
+  b1(0x1b); b1(0x40);
+
+  // Header
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x21); b1(0x38);
+  bLn('CARGADORES');
+  b1(0x1b); b1(0x21); b1(0x00);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn(fechaLabel.toUpperCase());
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // Resumen del día (preingresos + tarifa)
+  bLn(_padLine48('Preingresos del día:', String(d.preingresos)));
+  bLn(_padLine48('Tarifa por carreta:',  'S/ ' + _fmtMoney(d.tarifaGlobal)));
+  bLn(SEP2);
+
+  // Por cargador: nombre · N carretas · S/ subtotal + lista de preingresos
+  d.cargadores.forEach(function(c) {
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn(c.nombre.toUpperCase());
+    b1(0x1b); b1(0x45); b1(0x00);
+    bLn(_padLine48('  ' + c.carretasTotal + ' carretas', 'S/ ' + _fmtMoney(c.montoTotal)));
+    c.preingresos.forEach(function(pi) {
+      var lbl = '  - ' + pi.idPreingreso + ' ' + (pi.proveedor || '').substring(0, 22);
+      bLn(_padLine48(lbl, pi.carretas + ' x S/' + _fmtMoney(pi.tarifa)));
+    });
+    bLn('');
+  });
+
+  bLn(SEP);
+  // Total general bien grande
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('TOTAL DEL DIA');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x21); b1(0x38); b1(0x1b); b1(0x45); b1(0x01);
+  bLn('S/ ' + _fmtMoney(d.totalMonto));
+  b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn(d.totalCarretas + ' carretas');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // Feed + corte
+  b1(0x1b); b1(0x4a); b1(160);
+  b1(0x1d); b1(0x56); b1(0x00);
+
+  var blob = Utilities.newBlob(B, 'application/octet-stream');
+  var b64  = Utilities.base64Encode(blob.getBytes());
+
+  try {
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method:  'post',
+      headers: {
+        'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+        'Content-Type':  'application/json'
+      },
+      payload: JSON.stringify({
+        printerId:   parseInt(printerId),
+        title:       'Cargadores ' + d.fecha,
+        contentType: 'raw_base64',
+        content:     b64,
+        source:      'warehouseMos'
+      }),
+      muteHttpExceptions: true
+    });
+    return resp.getResponseCode() === 201
+      ? { ok: true, data: { fecha: d.fecha, totalMonto: d.totalMonto, totalCarretas: d.totalCarretas } }
+      : { ok: false, error: 'PrintNode respuesta ' + resp.getResponseCode() };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
 }

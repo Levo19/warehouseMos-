@@ -376,6 +376,10 @@
       display:flex; align-items:center; gap:8px;
     }
     .pre-date-hdr::after { content:''; flex:1; height:1px; background:#1e293b; }
+    .pre-date-hdr.pre-date-hdr-row::after { display:none; }
+    .pre-hdr-line { flex:1; height:1px; background:#1e293b; }
+    .pre-date-hdr-row .carg-pill-btn { background:#1a1505;border:1px solid #854d0e;color:#fbbf24; }
+    .pre-date-hdr-row .carg-pill-btn:active { background:#2a2510; }
     .pre-date-group { display:flex; flex-direction:column; gap:8px; }
     /* Quick micro-tags */
     .pre-qtag { font-size:9px; font-weight:700; padding:2px 6px;
@@ -4251,6 +4255,41 @@
   <!-- Lista movimientos -->
   <div id="histList" class="overflow-y-auto" style="max-height:40vh">
     <div class="flex justify-center py-6"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     SHEET CARGADORES DEL DÍA
+═══════════════════════════════════════════════════ -->
+<div class="bottom-sheet" id="sheetCargadoresDia" style="max-height:90vh;overflow-y:auto">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <p class="font-bold text-sm text-amber-300">🛺 Cargadores</p>
+      <p id="cargDiaFechaLbl" class="text-xs text-slate-400">—</p>
+    </div>
+    <button onclick="cerrarSheet('sheetCargadoresDia')" class="text-slate-500 text-2xl leading-none w-8 h-8">×</button>
+  </div>
+  <div class="px-3 py-2 mb-3 rounded-lg flex items-center gap-2" style="background:#0f172a;border:1px solid #1e293b">
+    <span class="text-xs text-slate-400 flex-1">Tarifa por carreta:</span>
+    <span class="text-xs text-slate-500">S/</span>
+    <input id="cargDiaTarifaInput" type="number" min="0" step="0.5"
+           class="w-20 px-2 py-1 rounded text-right text-xs text-amber-300 font-bold"
+           style="background:#1e293b;border:1px solid #334155">
+    <button onclick="PreingresosView.guardarTarifaCarreta()"
+            class="text-xs px-3 py-1 rounded font-semibold"
+            style="background:#854d0e;color:#fde68a">Guardar</button>
+  </div>
+  <div id="cargDiaContenido" class="space-y-3 mb-4">
+    <div class="text-xs text-slate-500 italic text-center py-6">Cargando…</div>
+  </div>
+  <div class="flex gap-2 pt-3" style="border-top:1px solid #1e293b">
+    <button onclick="PreingresosView.compartirCargadoresDiaWA()"
+            class="flex-1 px-4 py-2.5 rounded-lg font-semibold text-sm"
+            style="background:#16a34a;color:#fff">📲 WhatsApp</button>
+    <button onclick="PreingresosView.imprimirCargadoresDia()"
+            class="flex-1 px-4 py-2.5 rounded-lg font-semibold text-sm"
+            style="background:#1e40af;color:#fff">🖨️ Imprimir</button>
   </div>
 </div>
 
