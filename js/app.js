@@ -389,20 +389,75 @@ function _resumenCargadoresDia(items) {
   return { carretas, monto };
 }
 
+// Filtra preingresos de un día (key=YYYY-MM-DD) usando la fecha LOCAL del
+// cliente, igual que el pill del header. Centralizado para garantizar que
+// pill y modal vean exactamente la misma data.
+function _preingresosDeFecha(all, key) {
+  return (all || []).filter(p => {
+    if (!p.fecha) return false;
+    const d = _parseLocalDate(p.fecha);
+    if (isNaN(d)) return false;
+    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    return k === key;
+  });
+}
+
 // Para vistas que NO tienen los preingresos en mano (como Guías): mira
 // la cache local y filtra preingresos cuya fecha cae en `key` (YYYY-MM-DD).
 function _resumenCargadoresDiaPorFecha(key) {
   try {
     const all = OfflineManager.getPreingresosCache() || [];
-    const items = all.filter(p => {
-      if (!p.fecha) return false;
-      const d = _parseLocalDate(p.fecha);
-      if (isNaN(d)) return false;
-      const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      return k === key;
-    });
-    return _resumenCargadoresDia(items);
+    return _resumenCargadoresDia(_preingresosDeFecha(all, key));
   } catch { return { carretas: 0, monto: 0 }; }
+}
+
+// Construye el detalle agrupado por cargador (mismo shape que devolvía
+// el endpoint server-side getCargadoresDelDia, pero 100% client-side
+// usando la cache de preingresos. Garantiza consistencia con el pill
+// del header y respuesta instantánea.
+function _calcularCargadoresDelDia(key) {
+  const all = OfflineManager.getPreingresosCache() || [];
+  const items = _preingresosDeFecha(all, key);
+  const tarifaGlobal = _getTarifaCarreta();
+  const provs = OfflineManager.getProveedoresCache() || [];
+  const provMap = {};
+  provs.forEach(p => { provMap[String(p.idProveedor)] = String(p.nombre || ''); });
+
+  const byId = {};
+  items.forEach(pi => {
+    let arr = [];
+    try { arr = JSON.parse(pi.cargadores || '[]'); } catch {}
+    if (!Array.isArray(arr)) return;
+    arr.forEach(c => {
+      if (!c || typeof c !== 'object') return;
+      const id     = String(c.id || c.idPersonal || c.nombre || '');
+      const nombre = String(c.nombre || c.idPersonal || id || '');
+      if (!id || !nombre) return;
+      const carretas = parseInt(c.carretas) || 0;
+      const tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                        ? parseFloat(c.tarifa) : tarifaGlobal;
+      const sub      = carretas * tarifa;
+      if (!byId[id]) byId[id] = { id, nombre, carretasTotal: 0, montoTotal: 0, preingresos: [] };
+      byId[id].carretasTotal += carretas;
+      byId[id].montoTotal    += sub;
+      byId[id].preingresos.push({
+        idPreingreso: pi.idPreingreso,
+        proveedor:    provMap[String(pi.idProveedor)] || pi.idProveedor || '',
+        carretas, tarifa, subtotal: sub,
+        estado: String(pi.estado || '')
+      });
+    });
+  });
+
+  const cargadores = Object.values(byId).sort((a, b) => b.montoTotal - a.montoTotal);
+  return {
+    fecha:         key,
+    cargadores,
+    totalCarretas: cargadores.reduce((s, c) => s + c.carretasTotal, 0),
+    totalMonto:    cargadores.reduce((s, c) => s + c.montoTotal, 0),
+    tarifaGlobal,
+    preingresos:   items.length
+  };
 }
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
 function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim().toUpperCase(); }
@@ -8161,22 +8216,14 @@ const PreingresosView = (() => {
     return d.toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric' });
   }
 
-  async function abrirCargadoresDia(fechaKey) {
+  function abrirCargadoresDia(fechaKey) {
     _cargDiaState.fecha = fechaKey;
     document.getElementById('cargDiaFechaLbl').textContent = _fmtFechaLabel(fechaKey);
     document.getElementById('cargDiaTarifaInput').value = String(_getTarifaCarreta() || '');
-    document.getElementById('cargDiaContenido').innerHTML =
-      '<div class="text-xs text-slate-500 italic text-center py-6">Cargando…</div>';
-    abrirSheet('sheetCargadoresDia');
-
-    const res = await API.getCargadoresDelDia({ fecha: fechaKey }).catch(() => null);
-    if (!res || !res.ok) {
-      document.getElementById('cargDiaContenido').innerHTML =
-        '<div class="text-xs text-rose-400 text-center py-6">No se pudo cargar</div>';
-      return;
-    }
-    _cargDiaState.data = res.data;
+    // Cálculo client-side instantáneo (mismo data que ya alimenta al pill del header).
+    _cargDiaState.data = _calcularCargadoresDelDia(fechaKey);
     _renderCargDiaContent();
+    abrirSheet('sheetCargadoresDia');
   }
 
   function _renderCargDiaContent() {
