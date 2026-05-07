@@ -807,6 +807,23 @@ const Session = (() => {
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
       _aplicarSesion();
+      // Notificar a master+admin que ingresó este operador (push). Idempotente.
+      try {
+        const _mosUrlPush = window.WH_CONFIG?.mosGasUrl || '';
+        if (_mosUrlPush) {
+          const _devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+          const _nombreFull = ((res.data.nombre || '') + ' ' + (res.data.apellido || '')).trim();
+          fetch(_mosUrlPush, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'notificarInicioSesionVendedor',
+              nombre: _nombreFull,
+              appOrigen: 'warehouseMos',
+              deviceId: _devId
+            })
+          }).catch(() => {});
+        }
+      } catch(_) {}
       if (res.data.yaEnSesionHoy) {
         // Continuación en nuevo dispositivo → pantalla de bloqueo
         bloquear();
