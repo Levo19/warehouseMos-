@@ -1549,14 +1549,16 @@ const Session = (() => {
       const token = await messaging.getToken({ vapidKey: _PUSH_VAPID, serviceWorkerRegistration: swReg });
       if (!token) return;
 
-      // Registrar token en MOS GAS asociado al operador
+      // Registrar token en MOS GAS asociado al operador + deviceId (targeted exacto)
       const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
+      const _devIdToken = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
       fetch(mosUrl, {
         method: 'POST',
         body: JSON.stringify({
           action: 'registrarPushToken',
           token, usuario,
           appOrigen: 'warehouseMos',
+          deviceId: _devIdToken,
           dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
         })
       }).catch(() => {});
