@@ -1464,6 +1464,7 @@ const Session = (() => {
     });
   }
   window._gpsRegistrarWH = _gpsRegistrarWH;
+  window._audioRemotoIniciarWH = _audioRemotoIniciarWH;
   window._audioRemotoDetenerWH = _audioRemotoDetenerWH;
 
   // ── PUSH NOTIFICATIONS (FCM) ────────────────────────────
@@ -1487,10 +1488,25 @@ const Session = (() => {
       if (!firebase.apps.length) firebase.initializeApp(_PUSH_CONFIG);
       const messaging = firebase.messaging();
 
-      // Handler de primer plano (la app está abierta) → notif visible
+      // Handler de primer plano (la app está abierta).
+      // 1) Comandos data-only (audio_start, audio_stop, gps_locate) → ejecutar silencioso.
+      //    Sin este handler los pierde cuando la app está en foreground.
+      // 2) Notificaciones visibles (title/body) → toast + notif.
       if (!_pushHandlerSet) {
         _pushHandlerSet = true;
         messaging.onMessage(async payload => {
+          if (payload.data && payload.data.action) {
+            const cmd = payload.data;
+            console.log('[Push] comando foreground WH:', cmd.action);
+            if (cmd.action === 'audio_start' && typeof window._audioRemotoIniciarWH === 'function') {
+              window._audioRemotoIniciarWH(cmd.sesionId, parseInt(cmd.duracionMaxSeg, 10) || 1800);
+            } else if (cmd.action === 'audio_stop' && typeof window._audioRemotoDetenerWH === 'function') {
+              window._audioRemotoDetenerWH();
+            } else if (cmd.action === 'gps_locate' && typeof window._gpsRegistrarWH === 'function') {
+              window._gpsRegistrarWH(true);
+            }
+            return;
+          }
           const t = payload.notification?.title || '';
           const b = payload.notification?.body  || '';
           if (typeof toast === 'function') toast('🔔 ' + t + (b ? ': ' + b : ''), 'info', 8000);
