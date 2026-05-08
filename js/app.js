@@ -1602,10 +1602,12 @@ const BloqueoRemoto = (() => {
       // dispositivos WH siempre muestran "hace Nh" porque jamás se les hacía heartbeat.
       const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
       const nombreFull = ((ses.nombre || '') + ' ' + (ses.apellido || '')).trim();
+      const _ua = (navigator.userAgent || '').substring(0, 200);
       const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
                 + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
                 + '&nombre=' + encodeURIComponent(nombreFull)
                 + '&deviceId=' + encodeURIComponent(devId)
+                + '&userAgent=' + encodeURIComponent(_ua)
                 + '&appOrigen=warehouseMos';
       const r = await fetch(url);
       const j = await r.json();
@@ -2011,26 +2013,11 @@ const App = (() => {
     }
     console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
 
-    // Auto-registro inmediato del dispositivo en MOS (sin esperar login con PIN).
-    // Si es nuevo → crea PENDIENTE_APROBACION + push a master "🔔 Nuevo dispositivo
-    // solicita acceso". Master aprueba desde MOS y queda listo para operar.
-    // Si ya existe → no hace nada (idempotente).
-    try {
-      const _mosUrlReg = window.WH_CONFIG?.mosGasUrl || '';
-      const _devIdReg = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-      if (_mosUrlReg && _devIdReg) {
-        const _ua = (navigator.userAgent || '').substring(0, 80);
-        fetch(_mosUrlReg, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'registrarSesionDispositivo',
-            ID_Dispositivo: _devIdReg,
-            app: 'warehouseMos',
-            Nombre_Equipo: 'WH · ' + _ua.substring(0, 40)
-          })
-        }).catch(() => {});
-      }
-    } catch(_) {}
+    // (Removido: auto-registro al cargar generaba spam de invitaciones cuando
+    // localStorage se limpiaba o el operador abría WH desde otro browser.
+    // El registro real ocurre via polling getEstadoBloqueoUsuario después del
+    // login con PIN — y la verificación de identidad se hace por PIN, no por
+    // dispositivo. El dispositivo solo se trackea para reporting.)
 
     // Multi-dispositivo: al volver a foreground (cambio de pestaña / unlock),
     // refrescar datos operacionales para ver cambios de otros dispositivos
