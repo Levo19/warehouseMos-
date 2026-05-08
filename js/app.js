@@ -1272,6 +1272,121 @@ const Session = (() => {
     }
   }
 
+  // ════════════════════════════════════════════════════════════
+  // VERIFICACIÓN DE DISPOSITIVO (antes del login con PIN)
+  // Igual que ME: el master debe aprobar el dispositivo antes de que pueda
+  // operar. Si no está aprobado, pantalla candado + botón "📨 Solicitar acceso".
+  // ════════════════════════════════════════════════════════════
+  let _verifPollTimer = null;
+  let _verifEstado = 'CARGANDO';
+
+  async function _verificarDispositivoWH() {
+    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+    if (!mosUrl) return; // sin MOS configurado, no bloqueamos
+    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+    if (!devId) return;
+    try {
+      const url = mosUrl + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(devId);
+      const r = await fetch(url);
+      const j = await r.json();
+      if (!j?.ok || !j.data) return;
+      const d = j.data;
+      if (d.estado === 'ACTIVO') {
+        _verifEstado = 'ACTIVO';
+        _ocultarPantallaVerif();
+        if (_verifPollTimer) { clearInterval(_verifPollTimer); _verifPollTimer = null; }
+        return;
+      }
+      if (d.estado === 'INACTIVO') {
+        _verifEstado = 'INACTIVO';
+        _mostrarPantallaVerif('inactivo', d.nombre);
+        return;
+      }
+      if (d.estado === 'PENDIENTE_APROBACION') {
+        _verifEstado = 'PENDIENTE';
+        _mostrarPantallaVerif('pendiente', d.nombre);
+        if (!_verifPollTimer) _verifPollTimer = setInterval(_verificarDispositivoWH, 15 * 1000);
+        return;
+      }
+      // No registrado
+      _verifEstado = 'NO_REGISTRADO';
+      _mostrarPantallaVerif('no_registrado');
+    } catch(_) {}
+  }
+
+  function _ocultarPantallaVerif() {
+    const el = document.getElementById('verifDispScreen');
+    if (el) el.remove();
+  }
+
+  function _mostrarPantallaVerif(tipo, nombre) {
+    let el = document.getElementById('verifDispScreen');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'verifDispScreen';
+      el.style.cssText = 'position:fixed;inset:0;z-index:9998;background:linear-gradient(135deg,#0c1426,#1e293b);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;';
+      document.body.appendChild(el);
+    }
+    const ua = (navigator.userAgent || '').substring(0, 200);
+    let html = '';
+    if (tipo === 'no_registrado') {
+      html = `
+        <div style="text-align:center;max-width:400px;">
+          <div style="font-size:64px;margin-bottom:16px;">🔒</div>
+          <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#f8fafc;">Dispositivo no autorizado</h2>
+          <p style="font-size:14px;color:#94a3b8;margin-bottom:24px;">Este dispositivo no tiene permiso para usar warehouseMos. Solicitá acceso al administrador.</p>
+          <button id="btnSolicitarAcceso" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#0b1220;border:none;padding:14px 24px;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(245,158,11,0.4);">📨 Solicitar acceso</button>
+          <p style="font-size:11px;color:#64748b;margin-top:24px;font-family:'SF Mono',Menlo,monospace;">UUID: ${(typeof window._getDeviceIdWH==='function'?window._getDeviceIdWH():'').substring(0,12)}...</p>
+        </div>`;
+    } else if (tipo === 'pendiente') {
+      html = `
+        <div style="text-align:center;max-width:400px;">
+          <div style="font-size:64px;margin-bottom:16px;animation:wpulse 1.6s ease-in-out infinite;">⌛</div>
+          <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#fbbf24;">Esperando aprobación</h2>
+          <p style="font-size:14px;color:#94a3b8;margin-bottom:8px;">${nombre || 'Tu dispositivo'} está pendiente de aprobación por el administrador.</p>
+          <p style="font-size:12px;color:#64748b;margin-bottom:16px;">Reintenta automáticamente cada 15s.</p>
+          <div style="font-size:11px;color:#475569;background:rgba(255,255,255,0.05);padding:8px 12px;border-radius:8px;display:inline-block;">🔄 Verificando estado...</div>
+        </div>
+        <style>@keyframes wpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.1);opacity:0.7}}</style>`;
+    } else if (tipo === 'inactivo') {
+      html = `
+        <div style="text-align:center;max-width:400px;">
+          <div style="font-size:64px;margin-bottom:16px;">🚫</div>
+          <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#f87171;">Dispositivo desactivado</h2>
+          <p style="font-size:14px;color:#94a3b8;margin-bottom:24px;">El administrador desactivó este dispositivo. Contactá al administrador.</p>
+        </div>`;
+    }
+    el.innerHTML = html;
+    const btn = document.getElementById('btnSolicitarAcceso');
+    if (btn) btn.onclick = _solicitarAccesoDispositivo;
+  }
+
+  async function _solicitarAccesoDispositivo() {
+    const btn = document.getElementById('btnSolicitarAcceso');
+    if (btn) { btn.disabled = true; btn.textContent = '⌛ Enviando...'; }
+    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+    const ua = (navigator.userAgent || '').substring(0, 200);
+    try {
+      await fetch(mosUrl, {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'registrarSesionDispositivo',
+          ID_Dispositivo: devId,
+          app: 'warehouseMos',
+          userAgent: ua
+        })
+      });
+      // Pasar a pantalla "esperando aprobación"
+      _verifEstado = 'PENDIENTE';
+      _mostrarPantallaVerif('pendiente');
+      if (!_verifPollTimer) _verifPollTimer = setInterval(_verificarDispositivoWH, 15 * 1000);
+    } catch(e) {
+      if (btn) { btn.disabled = false; btn.textContent = '📨 Solicitar acceso'; }
+      alert('Error: ' + (e.message || 'sin conexión'));
+    }
+  }
+
   // ── Helpers ────────────────────────────────────────────────
   function _actualizarPuntos(prefix, n) {
     const isLock = prefix === 'lpin';
@@ -2013,11 +2128,12 @@ const App = (() => {
     }
     console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
 
-    // (Removido: auto-registro al cargar generaba spam de invitaciones cuando
-    // localStorage se limpiaba o el operador abría WH desde otro browser.
-    // El registro real ocurre via polling getEstadoBloqueoUsuario después del
-    // login con PIN — y la verificación de identidad se hace por PIN, no por
-    // dispositivo. El dispositivo solo se trackea para reporting.)
+    // ── Verificación de dispositivo ANTES del login (igual que ME) ──
+    // 1. Consulta estado del deviceId (no registra automáticamente).
+    // 2. Si NO_REGISTRADO o INACTIVO → muestra pantalla candado con botón "📨 Solicitar acceso".
+    // 3. Si PENDIENTE_APROBACION → muestra "Esperando aprobación" + polling 15s.
+    // 4. Si ACTIVO → procede al login.
+    _verificarDispositivoWH();
 
     // Multi-dispositivo: al volver a foreground (cambio de pestaña / unlock),
     // refrescar datos operacionales para ver cambios de otros dispositivos
