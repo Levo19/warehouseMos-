@@ -8076,22 +8076,35 @@ const PreingresosView = (() => {
     // 1. Crear preingreso con ID generado en cliente (evita duplicados por retry)
     const idPreingreso = 'PI' + Date.now();
     const cargadores   = _cargadores.length ? JSON.stringify(_cargadores) : '';
-    const res = await API.crearPreingreso({ idPreingreso, idProveedor, cargadores, monto, comentario, usuario: window.WH_CONFIG.usuario })
-      .catch(() => ({ ok: false, error: 'Sin conexión' }));
+    let res;
+    try {
+      res = await API.crearPreingreso({ idPreingreso, idProveedor, cargadores, monto, comentario, usuario: window.WH_CONFIG.usuario });
+    } catch (e) {
+      res = { ok: false, error: e?.message || 'Sin conexión' };
+    }
 
-    if (!res.ok) {
+    if (!res || !res.ok) {
       document.getElementById('optcard_' + tempId)?.remove();
-      toast('Error: ' + res.error, 'danger');
+      toast('Error: ' + (res?.error || 'desconocido'), 'danger');
       btn.disabled = false; btn.textContent = 'Registrar preingreso';
       return;
     }
 
+    // Garantizar feedback visual incluso si _finalizeOptimisticCard lanza por
+    // algún side effect (proveedores no en cache, etc.) — el card NUNCA queda
+    // zombie "Registrando…".
     const idPreingresoReal = res.data?.idPreingreso || idPreingreso;
-    _updateOptimisticId(tempId, idPreingresoReal);
-
-    // 2. Finalizar card inmediatamente — el usuario ya puede ver y usar el preingreso
-    _finalizeOptimisticCard(idPreingresoReal, { idProveedor, monto });
-    toast(`Preingreso ${idPreingresoReal} registrado`, 'ok');
+    try {
+      _updateOptimisticId(tempId, idPreingresoReal);
+      _finalizeOptimisticCard(idPreingresoReal, { idProveedor, monto });
+    } catch (e) {
+      console.warn('[Preingreso] finalize falló, removiendo optcard:', e);
+      document.getElementById('optcard_' + idPreingresoReal)?.remove();
+      document.getElementById('optcard_' + tempId)?.remove();
+    }
+    toast(res.offline
+      ? `Preingreso guardado (offline) — sincronizando…`
+      : `Preingreso ${idPreingresoReal} registrado`, 'ok');
 
     // Inyectar en caché para que abrirDetalle no tenga que ir al GAS
     OfflineManager.inyectarPreingreso({
@@ -8108,7 +8121,7 @@ const PreingresosView = (() => {
     _subirFotosEnBackground(idPreingresoReal, fotosCaptura);
 
     // 4. Disparar aviso a cajeros activos en MosExpress (background, no bloquea)
-    _dispararAvisoCajeros(idPreingresoReal);
+    if (!res.offline) _dispararAvisoCajeros(idPreingresoReal);
   }
 
   // Aviso a cajas abiertas de MosExpress — no bloquea, muestra toast con resultado.

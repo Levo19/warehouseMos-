@@ -77,26 +77,36 @@ const API = (() => {
     return 'L' + Date.now() + Math.random().toString(36).substr(2, 7);
   }
 
+  // Timeout por intento — protege al UI de GAS colgado (ej. _notificarMOS lento).
+  // Si pasa, abortamos y vamos al siguiente intento; si es el último, encolamos
+  // offline (el localId garantiza idempotencia al sincronizar).
+  const _FETCH_TIMEOUT_MS = 15000;
+
   async function _doFetchWithRetry(GAS_URL, params) {
     // 3 intentos: rápido si todo OK, recuperación si red flaquea o lock saturado.
     // Backoff: 600ms, 1500ms (total ~2.1s antes de rendirse).
     // params.localId se mantiene constante en los reintentos → GAS deduplica.
     const delays = [600, 1500];
     for (let intento = 0; intento < 3; intento++) {
+      const ctrl = new AbortController();
+      const tId  = setTimeout(() => ctrl.abort(), _FETCH_TIMEOUT_MS);
       try {
         const res  = await fetch(GAS_URL, {
           method:  'POST',
           headers: { 'Content-Type': 'text/plain' },
-          body:    JSON.stringify(params)
+          body:    JSON.stringify(params),
+          signal:  ctrl.signal
         });
+        clearTimeout(tId);
         const json = await res.json();
         if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
           if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
         }
         return json;
       } catch {
+        clearTimeout(tId);
         if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
-        // Red falló tras 3 intentos → encolar offline (reusa localId si ya existe)
+        // Red falló o timeout tras 3 intentos → encolar offline (reusa localId si ya existe)
         const localId = OfflineManager.encolar(params.action, params);
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
