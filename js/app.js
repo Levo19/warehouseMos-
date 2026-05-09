@@ -1283,6 +1283,21 @@ const Session = (() => {
   // Verifica el estado del dispositivo en MOS y actualiza la pantalla candado.
   // Retorna 'ACTIVO' | 'INACTIVO' | 'PENDIENTE' | 'NO_REGISTRADO' | 'ERROR_RED'.
   // El init de la app espera este resultado: solo continua al login si es 'ACTIVO'.
+  //
+  // Optimizaciones (igual patrón que ME, ver MosExpress/index.html:3715):
+  //   1) Cache local 1h en localStorage — si verificó hace <1h, autoriza al
+  //      instante sin tocar el GAS. Llamada GAS solo en background "silenciosa"
+  //      para refrescar el cache.
+  //   2) Timeout AbortController 6s — evita quedar bloqueado en cold start del
+  //      GAS (que puede tardar 5+s la primera llamada).
+  //   3) Endpoint registrarSesionDispositivo (POST) en vez de
+  //      consultarEstadoDispositivo: en una sola llamada registra el dispositivo
+  //      como PENDIENTE_APROBACION si es nuevo Y devuelve el estado. Antes
+  //      requería 2 round-trips.
+  const _AUTH_CACHE_KEY    = 'wh_device_auth_date';
+  const _AUTH_CACHE_ID_KEY = 'wh_device_auth_id';
+  const _AUTH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
+
   async function _verificarDispositivoWH() {
     const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
     const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
@@ -1292,9 +1307,30 @@ const Session = (() => {
       _ocultarPantallaVerif();
       return 'ACTIVO';
     }
+
+    // ── Cache hit: si verificó hace <1h y el deviceId coincide, autorizar al instante.
     try {
-      const url = mosUrl + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(devId);
-      const r = await fetch(url);
+      const ts = parseInt(localStorage.getItem(_AUTH_CACHE_KEY) || '0', 10);
+      const cachedId = localStorage.getItem(_AUTH_CACHE_ID_KEY);
+      if (ts && cachedId === devId && (Date.now() - ts) < _AUTH_CACHE_TTL_MS) {
+        _verifEstado = 'ACTIVO';
+        _ocultarPantallaVerif();
+        // Refresh silencioso en background (no bloquea init)
+        _verificarDispositivoSilencioso().catch(() => {});
+        return 'ACTIVO';
+      }
+    } catch(_) {}
+
+    try {
+      const ua = (navigator.userAgent || '').substring(0, 200);
+      const url = mosUrl + '?action=registrarSesionDispositivo'
+                + '&ID_Dispositivo=' + encodeURIComponent(devId)
+                + '&app=warehouseMos'
+                + '&userAgent=' + encodeURIComponent(ua);
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 6000);
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(tid);
       const j = await r.json();
       if (!j || j.ok === false) {
         _verifEstado = 'ERROR_RED';
@@ -1302,15 +1338,18 @@ const Session = (() => {
         return 'ERROR_RED';
       }
       const d = j.data || {};
-      if (d.estado === 'ACTIVO') {
+      if (d.estado === 'ACTIVO' || d.autorizado === true) {
         const yaTeniaPolling = !!_verifPollTimer;
         _verifEstado = 'ACTIVO';
         _ocultarPantallaVerif();
         if (_verifPollTimer) { clearInterval(_verifPollTimer); _verifPollTimer = null; }
+        // Persistir cache 1h
+        try {
+          localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
+          localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
+        } catch(_) {}
         // Si veníamos de un estado pendiente/error y el polling detectó ACTIVO,
         // recargar la pestaña para que el resto de init() corra correctamente.
-        // (En la primera llamada desde init(), aún no hay polling — entonces
-        // retornamos ACTIVO y el caller continúa con Session.init() normalmente.)
         if (yaTeniaPolling) {
           setTimeout(() => location.reload(), 600);
         }
@@ -1322,21 +1361,51 @@ const Session = (() => {
         return 'INACTIVO';
       }
       if (d.estado === 'PENDIENTE_APROBACION') {
+        // El backend ya creó el row PENDIENTE en esta misma llamada (no requiere
+        // botón "Solicitar acceso" extra — solo esperar aprobación del admin).
         _verifEstado = 'PENDIENTE';
         _mostrarPantallaVerif('pendiente', d.nombre);
         if (!_verifPollTimer) _verifPollTimer = setInterval(_verificarDispositivoWH, 15 * 1000);
         return 'PENDIENTE';
       }
-      // No registrado: dispositivo nunca pidió acceso. Mostrar candado con botón.
+      // Estado desconocido: tratar como no_registrado por defensa.
       _verifEstado = 'NO_REGISTRADO';
       _mostrarPantallaVerif('no_registrado');
       return 'NO_REGISTRADO';
     } catch(e) {
-      // Error de red / CORS / GAS caído. Mostrar candado de error reintentable.
+      // Error de red / timeout / CORS / GAS caído. Mostrar candado reintentable.
       _verifEstado = 'ERROR_RED';
       _mostrarPantallaVerif('error_red', e && e.message);
       return 'ERROR_RED';
     }
+  }
+
+  // Verificación silenciosa para refrescar cache (no muestra candado, no bloquea).
+  async function _verificarDispositivoSilencioso() {
+    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+    if (!mosUrl || !devId) return;
+    try {
+      const url = mosUrl + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(devId);
+      const ctrl = new AbortController();
+      const tid  = setTimeout(() => ctrl.abort(), 8000);
+      const r = await fetch(url, { signal: ctrl.signal });
+      clearTimeout(tid);
+      const j = await r.json();
+      if (j?.ok && j.data?.estado === 'ACTIVO') {
+        try {
+          localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
+          localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
+        } catch(_) {}
+      } else if (j?.ok && j.data?.estado === 'INACTIVO') {
+        // El admin desactivó el dispositivo: invalidar cache y recargar.
+        try {
+          localStorage.removeItem(_AUTH_CACHE_KEY);
+          localStorage.removeItem(_AUTH_CACHE_ID_KEY);
+        } catch(_) {}
+        location.reload();
+      }
+    } catch(_) {}
   }
 
   function _ocultarPantallaVerif() {
@@ -1741,7 +1810,9 @@ const Session = (() => {
            pinTecla, pinAtras, lockTecla, lockAtras,
            bloquear, confirmarCierre, cerrarTurnoFinal,
            cerrarSesionDesdeLock,
-           getSesion };
+           getSesion,
+           // Exportadas para que App.init las pueda invocar
+           verificarDispositivo: _verificarDispositivoWH };
 })();
 
 // ════════════════════════════════════════════════
@@ -2188,7 +2259,7 @@ const App = (() => {
     //   - botón "Reintentar" (error de red) → reintenta y llama Session.init()
     //   - aprobación remota desde MOS → polling detecta ACTIVO y oculta candado,
     //     pero el resto de init no corrió: el operador debe recargar la pestaña.
-    const verifResult = await _verificarDispositivoWH();
+    const verifResult = await Session.verificarDispositivo();
     if (verifResult !== 'ACTIVO') return;
 
     // Multi-dispositivo: al volver a foreground (cambio de pestaña / unlock),
