@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '1.7.5';
+const VERSION = '1.7.6';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -84,9 +84,17 @@ self.addEventListener('fetch', e => {
   // No interceptar GAS (tanto script.google.com como script.googleusercontent.com)
   if (url.hostname.includes('google.com') || url.hostname.includes('googleusercontent.com')) return;
 
-  // version.json: siempre desde red para detectar cambios
+  // version.json: siempre desde red. Si falla red, devolver caché o respuesta
+  // de error explícita (NUNCA undefined — eso rompe respondWith).
   if (url.pathname.endsWith('version.json')) {
-    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
+    e.respondWith(
+      fetch(e.request).catch(async () => {
+        const cached = await caches.match(e.request);
+        return cached || new Response('{"version":"offline"}', {
+          status: 503, headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
     return;
   }
 
@@ -94,14 +102,19 @@ self.addEventListener('fetch', e => {
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(res => {
-        if (!res || res.status !== 200) return res;
+        // Si la red devuelve algo inválido, fallback a respuesta de error explícita
+        if (!res) return Response.error();
+        if (res.status !== 200) return res;
         // Solo cachear respuestas same-origin o CORS (no opaque)
         if (res.type !== 'basic' && res.type !== 'cors') return res;
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone));
         return res;
-      }).catch(() => {
-        if (e.request.destination === 'document') return caches.match('./index.html');
+      }).catch(async () => {
+        if (e.request.destination === 'document') {
+          const indexCached = await caches.match('./index.html');
+          return indexCached || Response.error();
+        }
         return Response.error();
       });
     })

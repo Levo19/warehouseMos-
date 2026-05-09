@@ -7867,11 +7867,21 @@ const DespachoView = (() => {
       despachadoPorCodigo: it.despachadoPorCodigo || {}
     }));
     _pickupActivo.estado = 'EN_PROCESO';
+    const usuario = window.WH_CONFIG?.usuario || '';
+    _pickupActivo.atendidoPor = usuario;
     _savePickup();
 
-    // Backend: marcar EN_PROCESO
-    API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'EN_PROCESO' }).catch(() => {});
-    // Quitar de pendientes
+    // Backend: marcar EN_PROCESO + tomar lock atendidoPor explícitamente.
+    // Sin tomarLock=true el atendidoPor queda vacío y la card sigue
+    // mostrándose como "▶ Jalar" para todos en el siguiente poll.
+    API.actualizarPickup({
+      idPickup:    _pickupActivo.idPickup,
+      estado:      'EN_PROCESO',
+      lockUsuario: usuario,
+      tomarLock:   true
+    }).catch(() => {});
+    // Quitar de pendientes localmente — el polling lo traerá de vuelta como
+    // EN_PROCESO con atendidoPor=yo, y la UI mostrará "↻ Continuar (yo)".
     _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
 
     cerrarSheet('sheetDespPickup');
@@ -8027,19 +8037,29 @@ const DespachoView = (() => {
     // Si el pickup tiene skuBase en items → flujo moderno checklist (ME)
     const tieneSku = Array.isArray(p.items) && p.items.some(it => it && it.skuBase);
     if (tieneSku) {
-      _pickupActivo = {
-        ...p,
-        atendidoPor: usuario,
-        items: (p.items || []).map(it => ({
-          skuBase:           it.skuBase,
-          nombre:            it.nombre || it.skuBase,
-          solicitado:        parseFloat(it.solicitado) || 0,
-          despachado:        parseFloat(it.despachado) || 0,
-          codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
-          despachadoPorCodigo: it.despachadoPorCodigo || {}
-        }))
-      };
-      _savePickup();
+      // Si ya tengo este pickup activo localmente con progreso, NO resetear los items
+      // (sino se pierde lo despachado). Solo reabrir el sheet con la data en RAM.
+      const yaActivo = _pickupActivo && String(_pickupActivo.idPickup) === String(p.idPickup);
+      if (!yaActivo) {
+        _pickupActivo = {
+          ...p,
+          atendidoPor: usuario,
+          items: (p.items || []).map(it => ({
+            skuBase:           it.skuBase,
+            nombre:            it.nombre || it.skuBase,
+            solicitado:        parseFloat(it.solicitado) || 0,
+            despachado:        parseFloat(it.despachado) || 0,
+            codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
+            despachadoPorCodigo: it.despachadoPorCodigo || {}
+          }))
+        };
+        _savePickup();
+      } else {
+        // Refrescar metadata pero conservar items (con su progreso local)
+        _pickupActivo.estado      = p.estado || _pickupActivo.estado;
+        _pickupActivo.atendidoPor = p.atendidoPor || usuario;
+        _savePickup();
+      }
       try { SoundFX.beep(); } catch(_){}
       vibrate(15);
       _pickupSearch = '';
@@ -8115,14 +8135,36 @@ const DespachoView = (() => {
     // Items con skuBase + codigosOriginales (vienen del cierre de caja ME)
     // resuelven DIRECTO al producto del catálogo — sin fuzzy match.
     const productosMaster = App.getProductosMaestro ? App.getProductosMaestro() : [];
+    function _esCanonico(p) {
+      // Producto canónico = factorConversion 1 (o vacío). Las presentaciones
+      // tienen factorConversion >1 (ej: pack de 24 unidades, factor=24).
+      return parseFloat(p.factorConversion || 1) === 1;
+    }
     function _resolverDirecto(item) {
-      // 1. Por idProducto = skuBase
-      let prod = productosMaster.find(p => String(p.idProducto) === String(item.skuBase));
+      // 1. PREFERIR el canónico cuyo idProducto === skuBase del item
+      //    (es la fila del catálogo cuyo skuBase apunta a sí mismo).
+      let prod = productosMaster.find(p =>
+        String(p.idProducto) === String(item.skuBase) && _esCanonico(p));
       if (prod) return prod;
-      // 2. Por cualquier codigoOriginal en codigosOriginales
+      // 2. Cualquier producto con skuBase === item.skuBase + canónico
+      prod = productosMaster.find(p =>
+        String(p.skuBase || '') === String(item.skuBase) && _esCanonico(p));
+      if (prod) return prod;
+      // 3. Match por idProducto exacto (sin requerir canónico)
+      prod = productosMaster.find(p => String(p.idProducto) === String(item.skuBase));
+      if (prod) return prod;
+      // 4. Por cualquier codigoOriginal — pero buscar primero los canónicos
       if (Array.isArray(item.codigosOriginales)) {
         for (const cod of item.codigosOriginales) {
-          prod = productosMaster.find(p => String(p.codigoBarra) === String(cod) || String(p.idProducto) === String(cod));
+          prod = productosMaster.find(p =>
+            (String(p.codigoBarra) === String(cod) || String(p.idProducto) === String(cod)) &&
+            _esCanonico(p));
+          if (prod) return prod;
+        }
+        // 5. Fallback: cualquier match aunque no sea canónico
+        for (const cod of item.codigosOriginales) {
+          prod = productosMaster.find(p =>
+            String(p.codigoBarra) === String(cod) || String(p.idProducto) === String(cod));
           if (prod) return prod;
         }
       }
@@ -8131,7 +8173,8 @@ const DespachoView = (() => {
 
     _matchResults = items.map(item => {
       // Caso ME (skuBase explícito): resolver directo, sin fuzzy.
-      const qty = parseInt(item.qty || item.solicitado) || 0;
+      // parseFloat para preservar decimales de granel (KGM solicita 1.35 kg).
+      const qty = parseFloat(item.qty || item.solicitado) || 0;
       const nombreBusq = item.nombre || item.skuBase || '';
       if (item.skuBase) {
         const prod = _resolverDirecto(item);

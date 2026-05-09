@@ -3855,17 +3855,23 @@
              onfocus="this.style.borderColor='rgba(99,102,241,.6)'"
              onblur="this.style.borderColor='rgba(51,65,85,.6)'">
     </div>
-    <div style="display:flex;gap:6px;flex-wrap:wrap">
-      <button id="pkckSort_pendientes" onclick="DespachoView.pickupSetSort('pendientes')"
-              class="pkck-sort-btn">⏳ Pendientes</button>
-      <button id="pkckSort_az" onclick="DespachoView.pickupSetSort('az')"
-              class="pkck-sort-btn">🔤 A-Z</button>
-      <button id="pkckSort_zona" onclick="DespachoView.pickupSetSort('zona')"
-              class="pkck-sort-btn">📍 Por zona</button>
-      <button onclick="DespachoView.soltarPickupActivo()" class="pkck-sort-btn"
-              style="margin-left:auto;background:rgba(239,68,68,.15) !important;
-                     border-color:rgba(239,68,68,.4) !important;color:#fca5a5 !important;font-weight:800">
-        🔓 Soltar pickup
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;gap:6px;flex:1;min-width:0">
+        <button id="pkckSort_pendientes" onclick="DespachoView.pickupSetSort('pendientes')"
+                class="pkck-sort-btn">⏳ Pendientes</button>
+        <button id="pkckSort_az" onclick="DespachoView.pickupSetSort('az')"
+                class="pkck-sort-btn">🔤 A-Z</button>
+        <button id="pkckSort_zona" onclick="DespachoView.pickupSetSort('zona')"
+                class="pkck-sort-btn">📍 Por zona</button>
+      </div>
+      <button onclick="DespachoView.soltarPickupActivo()"
+              style="flex-shrink:0;padding:8px 14px;border-radius:10px;cursor:pointer;
+                     background:linear-gradient(135deg,rgba(239,68,68,.22),rgba(220,38,38,.18));
+                     border:1.5px solid rgba(239,68,68,.55);color:#fca5a5;
+                     font-size:.74em;font-weight:900;letter-spacing:.04em;
+                     -webkit-tap-highlight-color:transparent;white-space:nowrap;
+                     box-shadow:0 0 12px -3px rgba(239,68,68,.35)">
+        🔓 SOLTAR
       </button>
     </div>
   </div>
