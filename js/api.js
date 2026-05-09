@@ -72,7 +72,7 @@ const API = (() => {
     'asignarAuditoria', 'ejecutarAuditoria',
     'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
     'actualizarGuia', 'actualizarPickup', 'guardarProgresoPickup',
-    'cerrarPickupConDespacho', 'cerrarTurno'
+    'cerrarPickupConDespacho', 'liberarPickup', 'cerrarTurno'
   ]);
   function _genLocalId() {
     return 'L' + Date.now() + Math.random().toString(36).substr(2, 7);
@@ -166,6 +166,8 @@ const API = (() => {
     actualizarPickup:   (p)     => post({ action: 'actualizarPickup', ...p }),
     guardarProgresoPickup:    (p) => post({ action: 'guardarProgresoPickup',    ...p }),
     cerrarPickupConDespacho:  (p) => post({ action: 'cerrarPickupConDespacho',  ...p }),
+    liberarPickup:            (p) => post({ action: 'liberarPickup',            ...p }),
+    getPickup:                (p) => call({ action: 'getPickup', ...p }),
     agregarDetalle:           (p) => post({ action: 'agregarDetalleGuia',        ...p }),
     actualizarFechaVencimiento: (p) => post({ action: 'actualizarFechaVencimiento',  ...p }),
     actualizarCantidadDetalle:  (p) => post({ action: 'actualizarCantidadDetalle',   ...p }),

@@ -6242,6 +6242,8 @@ const DespachoView = (() => {
     _renderHist();
     _renderPickupActivoBanner();
     badgeUpdate();
+    // Sync con backend en background — detecta si fue cerrado por otro/timeout
+    if (pSaved) _sincronizarPickupActivo();
   }
 
   function pauseCamera() { Scanner.stop(); }
@@ -7174,18 +7176,45 @@ const DespachoView = (() => {
             const min = Math.floor((Date.now() - t) / 60000);
             hace = min < 1 ? 'recién' : min < 60 ? ('hace ' + min + 'm') : ('hace ' + Math.floor(min/60) + 'h');
           } catch(_) {}
+          // Lock visual — atendidoPor distinto al usuario actual = bloqueado
+          const usuario = window.WH_CONFIG?.usuario || '';
+          const atp = String(p.atendidoPor || '').trim();
+          const lockedByOther = atp && usuario && atp !== usuario;
+          const lockedByMe    = atp && usuario && atp === usuario;
+          let btnHtml = '';
+          if (lockedByOther) {
+            btnHtml = `<button disabled class="btn btn-sm flex-shrink-0"
+                       style="background:rgba(71,85,105,.3);color:#94a3b8;border-color:rgba(71,85,105,.5);cursor:not-allowed"
+                       title="Atendido por ${escAttr(atp)}">
+                       🔒 ${escHtml(atp)}
+                     </button>`;
+          } else if (lockedByMe || enProceso) {
+            btnHtml = `<button onclick="DespachoView.abrirPickup('${escAttr(p.idPickup)}')"
+                       class="btn btn-sm flex-shrink-0"
+                       style="background:rgba(99,102,241,.25);color:#a5b4fc;border-color:rgba(99,102,241,.4)">
+                       ↻ Continuar
+                     </button>`;
+          } else {
+            btnHtml = `<button onclick="DespachoView.abrirPickup('${escAttr(p.idPickup)}')"
+                       class="btn btn-sm flex-shrink-0"
+                       style="background:rgba(245,158,11,.25);color:#fbbf24;border-color:rgba(245,158,11,.4)">
+                       ▶ Jalar
+                     </button>`;
+          }
+          const cardBorder = lockedByOther ? 'rgba(71,85,105,.5)' : (enProceso ? 'rgba(99,102,241,.5)' : 'rgba(245,158,11,.5)');
+          const cardBg     = lockedByOther ? 'rgba(71,85,105,.08)' : (enProceso ? 'rgba(99,102,241,.08)' : 'rgba(245,158,11,.08)');
+          const animation  = lockedByOther ? 'none' : (enProceso ? 'none' : 'despPickListPulse 2.4s ease-in-out infinite');
           return `
             <div class="card flex items-center gap-3"
-                 style="border:1.5px solid ${enProceso ? 'rgba(99,102,241,.5)' : 'rgba(245,158,11,.5)'};
-                        background:${enProceso ? 'rgba(99,102,241,.08)' : 'rgba(245,158,11,.08)'};
-                        animation:${enProceso ? 'none' : 'despPickListPulse 2.4s ease-in-out infinite'};">
+                 style="border:1.5px solid ${cardBorder};background:${cardBg};animation:${animation}">
               <div class="flex-shrink-0" style="font-size:24px">${fuenteIcon}</div>
               <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="font-bold text-sm" style="color:${enProceso ? '#a5b4fc' : '#fbbf24'}">${p.idZona || '—'}</span>
+                  <span class="font-bold text-sm" style="color:${lockedByOther?'#94a3b8':(enProceso ? '#a5b4fc' : '#fbbf24')}">${p.idZona || '—'}</span>
                   <span class="text-xs text-slate-400">·</span>
                   <span class="text-xs text-slate-400">${fuenteLbl}</span>
                   <span class="text-xs text-slate-500">· ${hace}</span>
+                  ${atp ? `<span class="text-[10px]" style="color:${lockedByMe?'#a5b4fc':'#94a3b8'};background:rgba(15,23,42,.6);padding:1px 6px;border-radius:6px;font-weight:700">🔒 ${escHtml(atp)}${lockedByMe?' (yo)':''}</span>` : ''}
                 </div>
                 <p class="text-xs text-slate-300 mt-0.5">
                   ${items.length} producto${items.length !== 1 ? 's' : ''} · ${Math.round(totalUds)} uds
@@ -7193,13 +7222,7 @@ const DespachoView = (() => {
                 </p>
                 ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
               </div>
-              <button onclick="DespachoView.abrirPickup('${escAttr(p.idPickup)}')"
-                      class="btn btn-sm flex-shrink-0"
-                      style="background:${enProceso ? 'rgba(99,102,241,.25)' : 'rgba(245,158,11,.25)'};
-                             color:${enProceso ? '#a5b4fc' : '#fbbf24'};
-                             border-color:${enProceso ? 'rgba(99,102,241,.4)' : 'rgba(245,158,11,.4)'}">
-                ${enProceso ? '↻ Continuar' : '▶ Jalar'}
-              </button>
+              ${btnHtml}
             </div>`;
         }).join('');
       } else {
@@ -7211,17 +7234,41 @@ const DespachoView = (() => {
   async function _pollPickups() {
     const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
     const lista = (res && res.ok) ? (res.data || []) : [];
-    // Detectar pickups nuevos vs el snapshot anterior (no en la primera carga)
     const idsActuales = new Set(lista.map(p => p.idPickup));
     const esPrimeraCarga = _ultimosIdsPickups.size === 0 && _pickupsPendientes.length === 0;
     const nuevos = esPrimeraCarga ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');
     _pickupsPendientes = lista;
     _ultimosIdsPickups = idsActuales;
     badgeUpdate();
-    // Si llegaron pickups nuevos, alertar fullscreen + sonido
-    if (nuevos.length > 0 && typeof mostrarAlertaPickupNuevo === 'function') {
-      mostrarAlertaPickupNuevo(nuevos[0]);
+    if (nuevos.length > 0) {
+      // Snooze: si ya estoy despachando un pickup, no abrir overlay fullscreen.
+      // Solo toast suave + sonido corto + count actualizado en FAB.
+      if (_pickupActivo) {
+        try { SoundFX.beep(); } catch(_){}
+        const tot = nuevos[0].items ? nuevos[0].items.reduce((s,it)=>s+(parseFloat(it.solicitado)||0),0) : 0;
+        toast(`📦 Llegó otro pickup · ${nuevos[0].items?.length || 0} productos · ${Math.round(tot)} uds`, 'info', 4000);
+      } else if (typeof mostrarAlertaPickupNuevo === 'function') {
+        mostrarAlertaPickupNuevo(nuevos[0]);
+      }
     }
+  }
+
+  // Toggles de ordenamiento del checklist (search + sort)
+  function pickupSetSearch(val) {
+    _pickupSearch = String(val || '');
+    _renderPickupChecklistInSheet();
+  }
+  function pickupSetSort(modo) {
+    _pickupSort = modo || 'pendientes';
+    _updatePickupSortButtons();
+    _renderPickupChecklistInSheet();
+  }
+  function _updatePickupSortButtons() {
+    ['pendientes','az','zona'].forEach(m => {
+      const btn = document.getElementById('pkckSort_' + m);
+      if (!btn) return;
+      btn.classList.toggle('is-active', m === _pickupSort);
+    });
   }
 
   function startPoll() {
@@ -7281,13 +7328,37 @@ const DespachoView = (() => {
     }) || null;
   }
 
-  // Intenta sumar 1 al item del pickup que matchee. Retorna true si lo absorbió.
+  // ¿Producto envasable / por peso?
+  function _esProductoKg(prod) {
+    if (!prod) return false;
+    const u = String(prod.unidad || '').toUpperCase();
+    if (u === 'KGM' || u === 'KG' || u === 'KGS') return true;
+    if (parseFloat(prod.factorConversion || 1) !== 1) return true;
+    return false;
+  }
+
+  // Intenta sumar al item del pickup que matchee. Retorna true si lo absorbió.
+  // Para productos por kg, abre input modal de cantidad. Para sobrescaneado,
+  // muestra modal de confirmación. Suma normal con tope = solicitado.
   function _intentarSumarAPickup(prod, cb) {
     const item = _matchPickupItem(prod, cb);
     if (!item) return false;
 
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
+
+    // ── Producto envasable: pedir cantidad ────────────────────
+    if (_esProductoKg(prod)) {
+      _abrirModalQtyKg(prod, item, cb, prevDesp, sol);
+      return true; // absorbido (modal lo confirmará después)
+    }
+
+    // ── Detectar sobrescaneado y advertir ─────────────────────
+    if (prevDesp >= sol && sol > 0) {
+      _abrirModalSobrescaneado(item, cb, prevDesp, sol, prod);
+      return true; // detenemos aquí, modal decide
+    }
+
     item.despachado = prevDesp + 1;
     item.despachadoPorCodigo = item.despachadoPorCodigo || {};
     item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
@@ -7334,7 +7405,7 @@ const DespachoView = (() => {
     );
   }
 
-  // Autosave a backend con debounce 4s. Llama guardarProgresoPickup.
+  // Autosave a backend con debounce 4s. Llama guardarProgresoPickup con lock.
   function _scheduleAutosavePickup() {
     if (_autosavePickupTimer) clearTimeout(_autosavePickupTimer);
     const lblEl = document.getElementById('pkactAutosaveLbl');
@@ -7344,10 +7415,16 @@ const DespachoView = (() => {
     _autosavePickupTimer = setTimeout(async () => {
       if (!_pickupActivo) return;
       try {
-        await API.guardarProgresoPickup({
-          idPickup: _pickupActivo.idPickup,
-          items:    _pickupActivo.items
+        const r = await API.guardarProgresoPickup({
+          idPickup:    _pickupActivo.idPickup,
+          items:       _pickupActivo.items,
+          lockUsuario: window.WH_CONFIG?.usuario || ''
         });
+        if (r && r.ok === false && r.conflicto) {
+          if (lblEl) lblEl.textContent = `⚠ atiende ${r.atendidoPor}`;
+          toast(`🔒 ${r.atendidoPor} también está atendiendo este pickup. Tu progreso puede no guardarse.`, 'warn', 6000);
+          return;
+        }
         _autosaveLastTs = Date.now();
         if (lblEl) lblEl.textContent = 'guardado';
         if (wrEl)  wrEl.classList.remove('is-saving');
@@ -7357,15 +7434,115 @@ const DespachoView = (() => {
     }, 4000);
   }
 
+  // ── Modal: producto envasable (kg) — pedir cantidad decimal ──
+  function _abrirModalQtyKg(prod, item, cb, prevDesp, sol) {
+    const overlay = document.getElementById('pkckModalQtyKg');
+    if (!overlay) return;
+    document.getElementById('pkckModalQtyName').textContent = prod.descripcion || item.nombre || cb;
+    document.getElementById('pkckModalQtyMeta').textContent = `Pendiente: ${fmt(sol - prevDesp, 2)} kg · Ya despachado: ${fmt(prevDesp, 2)} kg`;
+    const input = document.getElementById('pkckModalQtyInput');
+    input.value = '';
+    overlay.style.display = 'flex';
+    setTimeout(() => input.focus(), 80);
+
+    const _close = () => { overlay.style.display = 'none'; };
+    document.getElementById('pkckModalQtyCancel').onclick = _close;
+    document.getElementById('pkckModalQtyOk').onclick = () => {
+      const qty = parseFloat(String(input.value).replace(',', '.'));
+      if (!qty || qty <= 0) { toast('Ingresa una cantidad válida', 'warn'); return; }
+      item.despachado = (parseFloat(item.despachado) || 0) + qty;
+      item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+      item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + qty;
+      _savePickup();
+      _renderPickupChecklistInSheet(item.skuBase);
+      _renderPickupActivoBanner();
+      badgeUpdate();
+      const justCompletado = (parseFloat(prevDesp) < parseFloat(sol)) && (item.despachado >= sol);
+      try {
+        if (justCompletado) { SoundFX.pickupItemOk(); _flashItemCompleto(item.skuBase); _checkConfettiSiCompleto(); }
+        else                { SoundFX.beep(); }
+      } catch(_){}
+      vibrate(justCompletado ? [20,30,60] : 12);
+      _scheduleAutosavePickup();
+      _close();
+    };
+    input.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('pkckModalQtyOk').click(); };
+  }
+
+  // ── Modal: sobrescaneado — confirmar o deshacer ──
+  function _abrirModalSobrescaneado(item, cb, prevDesp, sol, prod) {
+    const overlay = document.getElementById('pkckModalSobre');
+    if (!overlay) return;
+    document.getElementById('pkckModalSobreName').textContent = item.nombre || item.skuBase;
+    document.getElementById('pkckModalSobreMeta').textContent =
+      `Pedías ${sol} · llevas ${prevDesp}. Si confirmas, sumarás 1 más.`;
+    overlay.style.display = 'flex';
+    try { SoundFX.warn(); } catch(_){}
+    vibrate([30, 20, 30]);
+    const _close = () => { overlay.style.display = 'none'; };
+    document.getElementById('pkckModalSobreCancel').onclick = _close;
+    document.getElementById('pkckModalSobreOk').onclick = () => {
+      item.despachado = (parseFloat(item.despachado) || 0) + 1;
+      item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+      item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
+      _savePickup();
+      _renderPickupChecklistInSheet(item.skuBase);
+      _renderPickupActivoBanner();
+      badgeUpdate();
+      try { SoundFX.beep(); } catch(_){}
+      vibrate(15);
+      _scheduleAutosavePickup();
+      _close();
+    };
+  }
+
+  // Helper invocado al confirmar qty kg — chequea celebración
+  function _checkConfettiSiCompleto() {
+    if (_pickupTotalmenteCompleto()) {
+      setTimeout(() => {
+        try { SoundFX.pickupOk(); } catch(_){}
+        _confettiCelebracion();
+        _setDespStatus && _setDespStatus('ok', '🎉 ¡Pickup completo! Pulsa "Cerrar despacho"');
+      }, 280);
+    }
+  }
+
   // Render del checklist dentro del sheet — UI moderna con barras de progreso
+  // Estado de filtro/orden del checklist (para #5)
+  let _pickupSearch = '';
+  let _pickupSort   = 'pendientes'; // 'pendientes' | 'az' | 'zona'
+
   function _renderPickupChecklistInSheet(flashSkuBase) {
     const cont = document.getElementById('despPickChecklist');
     if (!cont || !_pickupActivo) return;
     const items = _pickupActivo.items || [];
     const stockMap = {};
     OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
 
-    cont.innerHTML = items.map(it => {
+    // Filtrar por búsqueda + ordenar
+    const q = _pickupSearch.trim().toLowerCase();
+    let filtered = items.filter(it => {
+      if (!q) return true;
+      return String(it.nombre || '').toLowerCase().includes(q) ||
+             String(it.skuBase || '').toLowerCase().includes(q);
+    });
+    filtered = filtered.slice().sort((a, b) => {
+      if (_pickupSort === 'az') return String(a.nombre).localeCompare(String(b.nombre));
+      if (_pickupSort === 'zona') {
+        const za = String((productos.find(p => String(p.idProducto) === String(a.skuBase)) || {}).zona || 'zzz');
+        const zb = String((productos.find(p => String(p.idProducto) === String(b.skuBase)) || {}).zona || 'zzz');
+        if (za !== zb) return za.localeCompare(zb);
+        return String(a.nombre).localeCompare(String(b.nombre));
+      }
+      // Pendientes primero (incompletos arriba, completos abajo)
+      const aPend = (parseFloat(a.despachado)||0) < (parseFloat(a.solicitado)||0) ? 0 : 1;
+      const bPend = (parseFloat(b.despachado)||0) < (parseFloat(b.solicitado)||0) ? 0 : 1;
+      if (aPend !== bPend) return aPend - bPend;
+      return String(a.nombre).localeCompare(String(b.nombre));
+    });
+
+    cont.innerHTML = filtered.map(it => {
       const sol  = parseFloat(it.solicitado) || 0;
       const desp = parseFloat(it.despachado) || 0;
       const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
@@ -7374,20 +7551,36 @@ const DespachoView = (() => {
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
       const flash     = (flashSkuBase && String(flashSkuBase) === String(it.skuBase)) ? 'is-just-completed is-flash' : '';
       const stockD    = parseFloat((stockMap[it.skuBase] || {}).cantidadDisponible || 0);
-      const stockTxt  = stockD > 0 ? `Stock ${fmt(stockD,1)}` : 'sin stock cache';
       const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
       const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
+      // Producto maestro para detectar envasable / unidad
+      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
+      const esKg = prod && (
+        String(prod.unidad || '').toUpperCase() === 'KGM' ||
+        parseFloat(prod.factorConversion || 1) !== 1
+      );
+      // Stock badge — rojo si stockDisp < solicitado pendiente
+      let stockBadge = '';
+      const pendiente = sol - desp;
+      if (stockD <= 0) {
+        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px">sin cache</span>';
+      } else if (stockD < pendiente) {
+        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)} · faltarán ${fmt(pendiente - stockD,1)}</span>`;
+      } else {
+        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmt(stockD,1)}</span>`;
+      }
+      const kgBadge = esKg ? '<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800">⚖ KG</span>' : '';
       return `
         <div class="pkck-card ${cls} ${flash}" data-sku="${escAttr(it.skuBase)}">
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
-              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}</p>
-              <p class="pkck-meta truncate">${escHtml(it.skuBase)} · ${stockTxt}${equivTxt}</p>
+              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}${kgBadge}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
-              <p><span class="pkck-qty">${desp}</span><span class="pkck-qty-sol"> / ${sol}</span></p>
+              <p><span class="pkck-qty">${esKg ? fmt(desp,2) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,2) : sol}</span></p>
               <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
             </div>
           </div>
@@ -7397,7 +7590,7 @@ const DespachoView = (() => {
           </div>
           <div class="pkck-check-overlay">✓</div>
         </div>`;
-    }).join('');
+    }).join('') || `<div class="text-center text-slate-500 text-sm py-6">Sin coincidencias para "${escHtml(q)}"</div>`;
 
     // KPIs hero
     const totalUds  = items.reduce((s,it) => s + (parseFloat(it.solicitado) || 0), 0);
@@ -7650,15 +7843,39 @@ const DespachoView = (() => {
   }
 
   // Abrir un pickup específico por idPickup (botón "Jalar"/"Continuar" en la lista)
-  function abrirPickup(idPickup) {
+  // Aplica lock optimista: si otro operador ya lo está atendiendo, no permite abrir.
+  async function abrirPickup(idPickup) {
     const p = _pickupsPendientes.find(x => String(x.idPickup) === String(idPickup));
     if (!p) return;
+    const usuario = window.WH_CONFIG?.usuario || '';
+    // Si tiene atendidoPor distinto, bloquear
+    const atp = String(p.atendidoPor || '').trim();
+    if (atp && usuario && atp !== usuario) {
+      try { SoundFX.warn(); } catch(_){}
+      toast(`🔒 Lo está atendiendo ${atp}. No se puede tomar.`, 'warn', 3500);
+      return;
+    }
+    // Tomar lock vía backend
+    try {
+      const r = await API.actualizarPickup({
+        idPickup: p.idPickup,
+        estado:   p.estado || 'PENDIENTE',
+        lockUsuario: usuario,
+        tomarLock: true
+      });
+      if (r && r.ok === false && r.conflicto) {
+        try { SoundFX.warn(); } catch(_){}
+        toast(`🔒 Lo está atendiendo ${r.atendidoPor || 'otro operador'}`, 'warn', 3500);
+        return;
+      }
+    } catch(_) { /* offline → seguir, el autosave reintentará el lock */ }
+
     // Si el pickup tiene skuBase en items → flujo moderno checklist (ME)
     const tieneSku = Array.isArray(p.items) && p.items.some(it => it && it.skuBase);
     if (tieneSku) {
-      // Inicializar estructura limpia para tracking
       _pickupActivo = {
         ...p,
+        atendidoPor: usuario,
         items: (p.items || []).map(it => ({
           skuBase:           it.skuBase,
           nombre:            it.nombre || it.skuBase,
@@ -7671,7 +7888,10 @@ const DespachoView = (() => {
       _savePickup();
       try { SoundFX.beep(); } catch(_){}
       vibrate(15);
-      // Ocultar secciones legacy y mostrar checklist
+      _pickupSearch = '';
+      _pickupSort = 'pendientes';
+      const inp = document.getElementById('pkckSearchInput');
+      if (inp) inp.value = '';
       document.getElementById('despPickSecExactos').classList.add('hidden');
       document.getElementById('despPickSecParciales').classList.add('hidden');
       document.getElementById('despPickSecNoFound').classList.add('hidden');
@@ -7680,14 +7900,57 @@ const DespachoView = (() => {
         `${p.idZona || '—'} · ${p.creadoPor || 'cajero'} · ${p.fuente || ''}`;
       _renderPickupChecklistInSheet();
       _renderPickupActivoBanner();
+      _updatePickupSortButtons();
       abrirSheet('sheetDespPickup');
       return;
     }
-    // Fallback legacy: pickup sin skuBase (n8n viejo) → fuzzy match con 3 secciones
+    // Fallback legacy: pickup sin skuBase → fuzzy match con 3 secciones
     _pickupActivo = p;
     try { SoundFX.beep(); } catch(_){}
     _runMatching(p);
     abrirSheet('sheetDespPickup');
+  }
+
+  // Soltar pickup activo — vuelve a PENDIENTE y libera lock para que otro lo tome.
+  async function soltarPickupActivo() {
+    if (!_pickupActivo) return;
+    if (!confirm('¿Soltar este pickup? Otro operador podrá tomarlo.\nEl progreso ya despachado se conserva.')) return;
+    try {
+      await API.liberarPickup({ idPickup: _pickupActivo.idPickup });
+    } catch(_){}
+    try { SoundFX.warn(); } catch(_){}
+    vibrate(20);
+    _pickupActivo = null;
+    _clearPickup();
+    cerrarSheet('sheetDespPickup');
+    _renderPickupActivoBanner();
+    badgeUpdate();
+    toast('🔓 Pickup soltado · disponible para otro operador', 'info', 2800);
+  }
+
+  // Sincronización al hidratar: si en backend ya está cerrado, limpiar local.
+  async function _sincronizarPickupActivo() {
+    if (!_pickupActivo) return;
+    try {
+      const r = await API.getPickup({ idPickup: _pickupActivo.idPickup });
+      if (r && r.ok && r.data) {
+        const estadoBE = String(r.data.estado || '').toUpperCase();
+        if (['COMPLETADO','CANCELADO','PARCIAL'].indexOf(estadoBE) >= 0) {
+          toast(`ℹ Este pickup ya fue ${estadoBE.toLowerCase()} · limpiando estado local`, 'info', 4000);
+          _pickupActivo = null;
+          _clearPickup();
+          _renderPickupActivoBanner();
+          badgeUpdate();
+          return;
+        }
+        // Si otro operador lo está atendiendo, avisar
+        const usuario = window.WH_CONFIG?.usuario || '';
+        const atpBE = String(r.data.atendidoPor || '').trim();
+        if (atpBE && usuario && atpBE !== usuario) {
+          toast(`⚠ Otro operador (${atpBE}) está atendiendo este pickup`, 'warn', 5000);
+        }
+      }
+    } catch(_){}
   }
 
   function _runMatching(pickup) {
@@ -7871,7 +8134,8 @@ const DespachoView = (() => {
            finalizar, confirmarDespacho, cancelar,
            badgeUpdate, startPoll,
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
-           empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo };
+           empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
+           soltarPickupActivo, pickupSetSearch, pickupSetSort };
 })();
 
 // ════════════════════════════════════════════════

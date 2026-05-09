@@ -119,6 +119,10 @@ function _route(method, e) {
       case 'recibirPickupDeME':   return recibirPickupDeME(params);
       case 'guardarProgresoPickup': return guardarProgresoPickup(params);
       case 'cerrarPickupConDespacho': return cerrarPickupConDespacho(params);
+      case 'liberarPickup':         return liberarPickup(params);
+      case 'getPickup':             return getPickup(params);
+      case 'pickupDescontarVenta':  return pickupDescontarVenta(params);
+      case 'setupPickupTriggers':   return setupPickupTriggers();
       case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
       case 'actualizarFechaVencimiento':  return actualizarFechaVencimiento(params);
       case 'actualizarCantidadDetalle':   return actualizarCantidadDetalle(params);

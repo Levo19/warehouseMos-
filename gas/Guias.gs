@@ -799,6 +799,9 @@ function recibirPickupDeME(params) {
   var iNt  = hdrs.indexOf('notas');
   var iCr  = hdrs.indexOf('creadoPor');
   var iFC  = hdrs.indexOf('fechaCreado');
+  // Columnas opcionales — el código las usa si existen, si no degrada limpio
+  var iAt  = hdrs.indexOf('atendidoPor');     // lock multi-operador
+  var iUa  = hdrs.indexOf('ultimaActividad'); // detector pickups atascados
   for (var r = 1; r < data.length; r++) {
     var notas = String(data[iNt >= 0 ? r : 0][iNt] || '');
     if (notas.indexOf('idGuiaME=' + idGuiaME) >= 0) {
@@ -823,6 +826,7 @@ function recibirPickupDeME(params) {
   // Ordenar por nombre para que el operador los lea fácil
   itemsLimpios.sort(function(a, b){ return String(a.nombre).localeCompare(String(b.nombre)); });
 
+  var nowIso = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
   var idPickup = 'PCK-' + new Date().getTime();
   var fila = new Array(hdrs.length).fill('');
   if (iId  >= 0) fila[iId]  = idPickup;
@@ -832,7 +836,9 @@ function recibirPickupDeME(params) {
   if (iZn  >= 0) fila[iZn]  = idZona;
   if (iNt  >= 0) fila[iNt]  = 'idGuiaME=' + idGuiaME + ' · idCaja=' + (params.idCaja || '') + ' · cajero=' + (params.cajero || '');
   if (iCr  >= 0) fila[iCr]  = params.cajero || 'ME_AUTO';
-  if (iFC  >= 0) fila[iFC]  = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+  if (iFC  >= 0) fila[iFC]  = nowIso;
+  if (iAt  >= 0) fila[iAt]  = '';     // pickup nuevo: nadie lo atiende
+  if (iUa  >= 0) fila[iUa]  = nowIso; // primera actividad = creación
   sheet.appendRow(fila);
 
   // Avisar a MOS que hay un pickup nuevo (push a operadores almacén)
@@ -857,6 +863,9 @@ function recibirPickupDeME(params) {
   return { ok: true, data: { idPickup: idPickup, items: itemsLimpios.length } };
 }
 
+// Actualiza el estado de un pickup. Soporta lock optimista por atendidoPor:
+// si params.lockUsuario viene, sólo permite cambios si atendidoPor está vacío
+// o coincide con lockUsuario. Si tomarLock=true, marca atendidoPor=lockUsuario.
 function actualizarPickup(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
@@ -866,12 +875,35 @@ function actualizarPickup(params) {
   var idxId   = headers.indexOf('idPickup');
   var idxEst  = headers.indexOf('estado');
   var idxAte  = headers.indexOf('fechaAtendido');
+  var idxAtp  = headers.indexOf('atendidoPor');
+  var idxUa   = headers.indexOf('ultimaActividad');
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(params.idPickup)) {
-      if (idxEst >= 0) sheet.getRange(i + 1, idxEst + 1).setValue(params.estado);
+      // Lock check — si me piden tomar el pickup y ya lo tiene otro usuario, rechazar
+      if (params.lockUsuario && idxAtp >= 0) {
+        var actual = String(data[i][idxAtp] || '').trim();
+        if (actual && actual !== String(params.lockUsuario).trim()) {
+          return { ok: false, error: 'Pickup atendido por ' + actual, atendidoPor: actual, conflicto: true };
+        }
+      }
+      if (idxEst >= 0 && params.estado) sheet.getRange(i + 1, idxEst + 1).setValue(params.estado);
       if (idxAte >= 0 && params.estado === 'COMPLETADO') {
         sheet.getRange(i + 1, idxAte + 1).setValue(new Date());
+      }
+      // Tomar lock
+      if (params.tomarLock && idxAtp >= 0 && params.lockUsuario) {
+        sheet.getRange(i + 1, idxAtp + 1).setValue(String(params.lockUsuario));
+      }
+      // Liberar lock explícito
+      if (params.liberarLock === true && idxAtp >= 0) {
+        sheet.getRange(i + 1, idxAtp + 1).setValue('');
+      }
+      // Heartbeat de actividad
+      if (idxUa >= 0) {
+        sheet.getRange(i + 1, idxUa + 1).setValue(
+          Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
+        );
       }
       return { ok: true };
     }
@@ -879,9 +911,173 @@ function actualizarPickup(params) {
   return { ok: false, error: 'Pickup no encontrado' };
 }
 
+// Liberar lock de un pickup (operador "suelta" para que otro lo tome).
+// Vuelve estado a PENDIENTE si estaba EN_PROCESO sin progreso.
+function liberarPickup(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h) { return String(h); });
+  var idxId   = headers.indexOf('idPickup');
+  var idxEst  = headers.indexOf('estado');
+  var idxIt   = headers.indexOf('items');
+  var idxAtp  = headers.indexOf('atendidoPor');
+  var idxUa   = headers.indexOf('ultimaActividad');
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) !== String(params.idPickup)) continue;
+    // Si hay progreso, sólo limpia atendidoPor (deja EN_PROCESO para que cualquiera continue)
+    var items = []; try { items = JSON.parse(String(data[i][idxIt] || '[]')); } catch(_){}
+    var hayProgreso = items.some(function(it){ return (parseFloat(it.despachado) || 0) > 0; });
+    if (idxAtp >= 0) sheet.getRange(i + 1, idxAtp + 1).setValue('');
+    if (idxEst >= 0 && !hayProgreso) sheet.getRange(i + 1, idxEst + 1).setValue('PENDIENTE');
+    if (idxUa  >= 0) sheet.getRange(i + 1, idxUa  + 1).setValue(
+      Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
+    );
+    return { ok: true, data: { hayProgreso: hayProgreso } };
+  }
+  return { ok: false, error: 'Pickup no encontrado' };
+}
+
+// Devuelve un pickup específico (para que el frontend hidrate localStorage
+// contra el backend al refrescar y detecte si ya fue cerrado por otro).
+function getPickup(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet || sheet.getLastRow() < 2) return { ok: false, error: 'Pickup no encontrado' };
+  var rows = _sheetToObjects(sheet);
+  var p = rows.find(function(r){ return String(r.idPickup) === String(params.idPickup); });
+  if (!p) return { ok: false, error: 'Pickup no encontrado' };
+  try { p.items = JSON.parse(p.items || '[]'); } catch(_){ p.items = []; }
+  return { ok: true, data: p };
+}
+
+// Ajusta solicitado del pickup cuando ME anula una venta de la caja origen.
+// params: { idCaja, idGuiaME?, itemsAnulados: [{codigoBarra, cantidad}] }
+// Si después del descuento todos los items quedan en 0 → pickup CANCELADO.
+function pickupDescontarVenta(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+  var idCaja    = String(params.idCaja || '').trim();
+  var idGuiaME  = String(params.idGuiaME || '').trim();
+  var itemsAnul = Array.isArray(params.itemsAnulados) ? params.itemsAnulados : [];
+  if (!itemsAnul.length) return { ok: false, error: 'Sin itemsAnulados' };
+  if (!idCaja && !idGuiaME) return { ok: false, error: 'Requiere idCaja o idGuiaME' };
+
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h){return String(h);});
+  var idxId   = headers.indexOf('idPickup');
+  var idxIt   = headers.indexOf('items');
+  var idxEst  = headers.indexOf('estado');
+  var idxNt   = headers.indexOf('notas');
+
+  for (var i = 1; i < data.length; i++) {
+    var notas = String(data[i][idxNt] || '');
+    var match = (idGuiaME && notas.indexOf('idGuiaME=' + idGuiaME) >= 0) ||
+                (idCaja   && notas.indexOf('idCaja='   + idCaja)   >= 0);
+    if (!match) continue;
+    var estado = String(data[i][idxEst] || '');
+    if (estado === 'COMPLETADO' || estado === 'CANCELADO' || estado === 'PARCIAL') {
+      // Ya cerró — no se puede ajustar
+      return { ok: true, data: { ajustado: false, motivo: 'Pickup ya cerrado: ' + estado } };
+    }
+    var items = []; try { items = JSON.parse(String(data[i][idxIt] || '[]')); } catch(_){}
+    if (!items.length) return { ok: true, data: { ajustado: false, motivo: 'Sin items' } };
+
+    var ajustes = 0;
+    itemsAnul.forEach(function(an){
+      var codU = String(an.codigoBarra || '').toUpperCase();
+      var qty  = parseFloat(an.cantidad) || 0;
+      if (!codU || qty <= 0) return;
+      // Buscar item del pickup que tenga ese código en codigosOriginales
+      var it = items.find(function(x){
+        return Array.isArray(x.codigosOriginales) &&
+               x.codigosOriginales.some(function(c){ return String(c).toUpperCase() === codU; });
+      });
+      if (!it) return;
+      it.solicitado = Math.max(0, (parseFloat(it.solicitado) || 0) - qty);
+      ajustes++;
+    });
+
+    // Quitar items con solicitado=0
+    var itemsFinal = items.filter(function(it){ return (parseFloat(it.solicitado) || 0) > 0; });
+    if (!itemsFinal.length) {
+      sheet.getRange(i + 1, idxEst + 1).setValue('CANCELADO');
+      sheet.getRange(i + 1, idxIt  + 1).setValue('[]');
+      return { ok: true, data: { ajustado: true, ajustes: ajustes, cancelado: true } };
+    }
+    sheet.getRange(i + 1, idxIt + 1).setValue(JSON.stringify(itemsFinal));
+    return { ok: true, data: { ajustado: true, ajustes: ajustes, cancelado: false } };
+  }
+  return { ok: false, error: 'Pickup origen no encontrado' };
+}
+
+// Job time-driven: pickups EN_PROCESO sin actividad >2h vuelven a PENDIENTE
+// y atendidoPor='' para que otro operador los tome. Push aviso a roles WH.
+function _jobReabrirPickupsAtascados() {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet || sheet.getLastRow() < 2) return;
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h){return String(h);});
+  var idxId   = headers.indexOf('idPickup');
+  var idxEst  = headers.indexOf('estado');
+  var idxAtp  = headers.indexOf('atendidoPor');
+  var idxUa   = headers.indexOf('ultimaActividad');
+  var idxZn   = headers.indexOf('idZona');
+  if (idxUa < 0) return; // sin esa col, no podemos detectar
+
+  var ahora = Date.now();
+  var THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 horas
+  var reabiertos = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxEst]) !== 'EN_PROCESO') continue;
+    var ua = data[i][idxUa];
+    var t  = ua ? new Date(ua).getTime() : 0;
+    if (!t || (ahora - t) < THRESHOLD_MS) continue;
+    sheet.getRange(i + 1, idxEst + 1).setValue('PENDIENTE');
+    if (idxAtp >= 0) sheet.getRange(i + 1, idxAtp + 1).setValue('');
+    sheet.getRange(i + 1, idxUa + 1).setValue(
+      Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
+    );
+    reabiertos.push({
+      idPickup: data[i][idxId],
+      idZona:   idxZn >= 0 ? data[i][idxZn] : ''
+    });
+  }
+  // Avisar a operadores WH si hubo reaperturas
+  if (reabiertos.length) {
+    try {
+      var mosUrl = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
+      if (mosUrl) {
+        UrlFetchApp.fetch(mosUrl, {
+          method: 'post', contentType: 'application/json',
+          payload: JSON.stringify({
+            action: 'enviarPushNotif',
+            titulo: '⏰ Pickup' + (reabiertos.length>1?'s':'') + ' abandonado' + (reabiertos.length>1?'s':''),
+            cuerpo: reabiertos.length + ' pickup' + (reabiertos.length>1?'s':'') + ' sin movimiento >2h · alguien que retome',
+            soloRolesWH: true
+          }),
+          muteHttpExceptions: true
+        });
+      }
+    } catch(e) { Logger.log('Push reapertura falló: ' + e.message); }
+  }
+  return { ok: true, data: { reabiertos: reabiertos.length } };
+}
+
+// Crea el trigger horario (correr 1 vez desde el editor para activar).
+function setupPickupTriggers() {
+  // Limpiar triggers viejos del mismo handler
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t){
+    if (t.getHandlerFunction() === '_jobReabrirPickupsAtascados') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('_jobReabrirPickupsAtascados').timeBased().everyHours(1).create();
+  return { ok: true, mensaje: 'Trigger horario _jobReabrirPickupsAtascados creado' };
+}
+
 // Guardar progreso del despacho (autosave optimista mientras el operador trabaja).
 // El frontend manda items con despachado actualizado; aquí solo overwrite del JSON
-// y marca estado='EN_PROCESO' para que se vea como "ya empezado".
+// y marca estado='EN_PROCESO' + actualiza ultimaActividad (heartbeat).
 function guardarProgresoPickup(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
@@ -890,8 +1086,19 @@ function guardarProgresoPickup(params) {
   var idxId   = headers.indexOf('idPickup');
   var idxIt   = headers.indexOf('items');
   var idxEst  = headers.indexOf('estado');
+  var idxUa   = headers.indexOf('ultimaActividad');
+  var idxAtp  = headers.indexOf('atendidoPor');
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(params.idPickup)) {
+      // Lock check — si lockUsuario viene, debe coincidir con atendidoPor (si está seteado)
+      if (params.lockUsuario && idxAtp >= 0) {
+        var actual = String(data[i][idxAtp] || '').trim();
+        if (actual && actual !== String(params.lockUsuario).trim()) {
+          return { ok: false, error: 'Pickup atendido por ' + actual, atendidoPor: actual, conflicto: true };
+        }
+        // Si no había lock, tomarlo aquí (autosave implica que estoy trabajando)
+        if (!actual) sheet.getRange(i + 1, idxAtp + 1).setValue(String(params.lockUsuario));
+      }
       var itemsActualizados = Array.isArray(params.items) ? params.items : null;
       if (itemsActualizados && idxIt >= 0) {
         sheet.getRange(i + 1, idxIt + 1).setValue(JSON.stringify(itemsActualizados));
@@ -899,6 +1106,12 @@ function guardarProgresoPickup(params) {
       // Solo cambiar a EN_PROCESO si está PENDIENTE (no degradar COMPLETADO)
       if (idxEst >= 0 && String(data[i][idxEst]) === 'PENDIENTE') {
         sheet.getRange(i + 1, idxEst + 1).setValue('EN_PROCESO');
+      }
+      // Heartbeat
+      if (idxUa >= 0) {
+        sheet.getRange(i + 1, idxUa + 1).setValue(
+          Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
+        );
       }
       return { ok: true };
     }
@@ -972,7 +1185,10 @@ function cerrarPickupConDespacho(params) {
   // Crear GUIA_SALIDA si hubo al menos un item despachado
   var idGuia = null;
   if (huboDespacho) {
-    var nota = 'Pickup ' + idPickup + (noDespachados.length ? ' · sin despachar: ' + noDespachados.join('; ') : '');
+    // Observación estructurada — el frontend puede parsear "[pickup:PCK-X]" para
+    // mostrar "Origen: 📦 Pickup X" y linkear de vuelta. No despachados van legibles.
+    var nota = '[pickup:' + idPickup + '] Pickup ' + idPickup +
+               (noDespachados.length ? ' · sin despachar: ' + noDespachados.join('; ') : '');
     var guiaRes = crearDespachoRapido({
       tipo:     'SALIDA_ZONA',
       idZona:   pickup.idZona,
@@ -986,9 +1202,14 @@ function cerrarPickupConDespacho(params) {
   }
 
   // Actualizar pickup
-  if (idxIt  >= 0) sheet.getRange(rowIdx, idxIt + 1).setValue(JSON.stringify(items));
+  var idxAtp = headers.indexOf('atendidoPor');
+  var idxUa  = headers.indexOf('ultimaActividad');
+  var nowIsoCierre = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+  if (idxIt  >= 0) sheet.getRange(rowIdx, idxIt  + 1).setValue(JSON.stringify(items));
   if (idxEst >= 0) sheet.getRange(rowIdx, idxEst + 1).setValue(nuevoEstado);
-  if (idxAte >= 0) sheet.getRange(rowIdx, idxAte + 1).setValue(Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'"));
+  if (idxAte >= 0) sheet.getRange(rowIdx, idxAte + 1).setValue(nowIsoCierre);
+  if (idxAtp >= 0) sheet.getRange(rowIdx, idxAtp + 1).setValue(''); // libera lock al cerrar
+  if (idxUa  >= 0) sheet.getRange(rowIdx, idxUa  + 1).setValue(nowIsoCierre);
 
   return { ok: true, data: {
     idGuia:        idGuia,
