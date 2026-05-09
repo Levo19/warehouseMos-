@@ -12,8 +12,36 @@ function vibrate(ms = 10) {
 }
 
 // ════════════════════════════════════════════════
+// VOZ — Web Speech API para anuncios audibles en almacén
+// Útil para que el operador no tenga que mirar la pantalla.
+// Funciona offline (síntesis local del SO).
+// ════════════════════════════════════════════════
+function _vozAnunciar(texto, opts) {
+  try {
+    if (!('speechSynthesis' in window)) return;
+    // Cancelar cualquier anuncio anterior para no apilarlos
+    speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance(String(texto || ''));
+    utt.lang   = (opts && opts.lang) || 'es-PE';
+    utt.rate   = (opts && opts.rate) || 1.05;
+    utt.pitch  = (opts && opts.pitch) || 1.0;
+    utt.volume = (opts && opts.volume) || 1.0;
+    // Preferir voz en español si está disponible
+    const voces = speechSynthesis.getVoices() || [];
+    const vEs = voces.find(v => /^es/i.test(v.lang)) || voces.find(v => /spanish/i.test(v.name));
+    if (vEs) utt.voice = vEs;
+    speechSynthesis.speak(utt);
+  } catch(_){}
+}
+function _vozCancelar() {
+  try { if ('speechSynthesis' in window) speechSynthesis.cancel(); } catch(_){}
+}
+window._vozAnunciar = _vozAnunciar;
+
+// ════════════════════════════════════════════════
 // F5 — ALERTA FULLSCREEN PICKUP NUEVO
-// Muestra overlay + sonido fuerte repetido + vibración.
+// Overlay + sonido fuerte repetido + vibración + voz.
+// Almacén con ruido = combo agresivo para captar atención.
 // ════════════════════════════════════════════════
 let _apnSonidoTimer = null;
 function mostrarAlertaPickupNuevo(pickup) {
@@ -25,7 +53,8 @@ function mostrarAlertaPickupNuevo(pickup) {
   const metaEl = document.getElementById('apnMeta');
   const items  = Array.isArray(pickup.items) ? pickup.items : [];
   const totalUds = items.reduce((s, it) => s + (parseFloat(it.solicitado) || 0), 0);
-  if (zonaEl) zonaEl.textContent = pickup.idZona || 'Zona —';
+  const zonaTxt = pickup.idZona || 'sin zona';
+  if (zonaEl) zonaEl.textContent = zonaTxt;
   if (metaEl) metaEl.textContent = items.length + ' productos · ' + Math.round(totalUds) + ' uds · ' + (pickup.creadoPor || 'cajero');
   overlay.style.display = 'flex';
   // Sonido fuerte repetido (almacén con ruido) — 3 ciclos cada 1.6s
@@ -43,11 +72,24 @@ function mostrarAlertaPickupNuevo(pickup) {
   if (_userActivated && navigator.vibrate) {
     navigator.vibrate([400, 200, 400, 200, 600]);
   }
+  // Anuncio por voz — un poco después del primer beep para que se entienda
+  // Ejemplo: "¡Pedido nuevo para zona ZONA-01! 23 productos."
+  setTimeout(() => {
+    _vozAnunciar(`¡Pedido nuevo para zona ${zonaTxt}! ${items.length} producto${items.length!==1?'s':''}.`,
+                 { rate: 1.0, volume: 1.0 });
+  }, 700);
+  // Repetir la voz una vez más a los 4s si no la han cerrado todavía
+  setTimeout(() => {
+    if (overlay.style.display !== 'none') {
+      _vozAnunciar(`Pedido nuevo · zona ${zonaTxt}.`, { rate: 1.05 });
+    }
+  }, 4200);
 }
 function cerrarAlertaPickupNuevo() {
   const overlay = document.getElementById('alertaPickupNuevo');
   if (overlay) overlay.style.display = 'none';
   if (_apnSonidoTimer) { clearInterval(_apnSonidoTimer); _apnSonidoTimer = null; }
+  _vozCancelar();
 }
 // Exponer al window para que onclick en HTML lo encuentre
 window.mostrarAlertaPickupNuevo = mostrarAlertaPickupNuevo;
@@ -6434,6 +6476,15 @@ const DespachoView = (() => {
       return; // absorbido por el pickup, no entra al carrito como extra
     }
 
+    // ── Producto a granel SIEMPRE pide peso, esté o no dentro de pickup.
+    //    Si llega aquí es porque NO matcheó con pickup activo (extra) o
+    //    no hay pickup activo en absoluto. Cualquier caso → modal qty.
+    if (typeof _esProductoPeso === 'function' && _esProductoPeso(prod)) {
+      _abrirModalQtyGranelExtra(prod, cb);
+      _despLastHistory.push(cb);
+      return;
+    }
+
     const stockMap = {};
     OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
     const stockD = parseFloat((stockMap[prod.idProducto] || stockMap[cb] || {}).cantidadDisponible || 0);
@@ -7242,11 +7293,13 @@ const DespachoView = (() => {
     badgeUpdate();
     if (nuevos.length > 0) {
       // Snooze: si ya estoy despachando un pickup, no abrir overlay fullscreen.
-      // Solo toast suave + sonido corto + count actualizado en FAB.
+      // Solo toast suave + sonido corto + voz breve + count actualizado en FAB.
       if (_pickupActivo) {
         try { SoundFX.beep(); } catch(_){}
+        const z = nuevos[0].idZona || 'otra zona';
         const tot = nuevos[0].items ? nuevos[0].items.reduce((s,it)=>s+(parseFloat(it.solicitado)||0),0) : 0;
         toast(`📦 Llegó otro pickup · ${nuevos[0].items?.length || 0} productos · ${Math.round(tot)} uds`, 'info', 4000);
+        _vozAnunciar(`Otro pedido pendiente para zona ${z}`, { rate: 1.1 });
       } else if (typeof mostrarAlertaPickupNuevo === 'function') {
         mostrarAlertaPickupNuevo(nuevos[0]);
       }
@@ -7460,7 +7513,18 @@ const DespachoView = (() => {
     okBtn.onclick = () => {
       const qty = parseFloat(String(input.value).replace(',', '.'));
       if (!qty || qty <= 0) { toast('Ingresa un peso válido', 'warn'); return; }
-      item.despachado = (parseFloat(item.despachado) || 0) + qty;
+      const nuevoTotal = (parseFloat(item.despachado) || 0) + qty;
+      // Sobre-despacho granel: si supera lo solicitado, pedir confirmación
+      if (nuevoTotal > sol && sol > 0) {
+        const exceso = nuevoTotal - sol;
+        const msg = `Estás pesando ${fmt(qty,3)} ${u} pero faltaba solo ${fmt(sol - prevDesp,3)} ${u}.\n\nNuevo total: ${fmt(nuevoTotal,3)} ${u} (${fmt(exceso,3)} ${u} de más)\n\n¿Confirmar igual?`;
+        if (!confirm(msg)) {
+          input.select();
+          try { SoundFX.warn(); } catch(_){}
+          return;
+        }
+      }
+      item.despachado = nuevoTotal;
       item.despachadoPorCodigo = item.despachadoPorCodigo || {};
       item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + qty;
       _savePickup();
@@ -7504,6 +7568,58 @@ const DespachoView = (() => {
       _scheduleAutosavePickup();
       _close();
     };
+  }
+
+  // ── Modal granel para EXTRAS (fuera de pickup o sin pickup activo) ──
+  // Mismo modal qty pero suma al _cart en vez del pickup activo.
+  function _abrirModalQtyGranelExtra(prod, cb) {
+    const overlay = document.getElementById('pkckModalQtyKg');
+    if (!overlay) return;
+    const u = String(prod.unidad || 'kg').toLowerCase();
+    document.getElementById('pkckModalQtyName').textContent = prod.descripcion || cb;
+    const enPickup = _pickupActivo ? ' · fuera de pickup, irá como extra' : '';
+    document.getElementById('pkckModalQtyMeta').textContent =
+      `Producto a granel${enPickup}. Pesa el producto y registra el peso real.`;
+    const okBtn = document.getElementById('pkckModalQtyOk');
+    if (okBtn) okBtn.textContent = 'Confirmar ' + u;
+    const input = document.getElementById('pkckModalQtyInput');
+    input.value = '';
+    overlay.style.display = 'flex';
+    setTimeout(() => input.focus(), 80);
+
+    const _close = () => { overlay.style.display = 'none'; };
+    document.getElementById('pkckModalQtyCancel').onclick = _close;
+    okBtn.onclick = () => {
+      const qty = parseFloat(String(input.value).replace(',', '.'));
+      if (!qty || qty <= 0) { toast('Ingresa un peso válido', 'warn'); return; }
+      const stockMap = {};
+      OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+      const stockD = parseFloat((stockMap[prod.idProducto] || stockMap[cb] || {}).cantidadDisponible || 0);
+      const idx = _cart.findIndex(c => c.codigoBarra === cb);
+      if (idx >= 0) {
+        _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) + qty;
+      } else {
+        _cart.push({
+          codigoBarra: cb, descripcion: prod.descripcion || cb,
+          unidad: prod.unidad || '', cantidad: qty, stockDisp: stockD,
+          _extraPickup: !!_pickupActivo, _granel: true
+        });
+      }
+      _saveCart();
+      _renderCart();
+      _renderDespList && _renderDespList();
+      _updateFooter();
+      badgeUpdate();
+      try { SoundFX.beep(); } catch(_){}
+      vibrate(15);
+      if (_pickupActivo) {
+        toast(`🟠 ${fmt(qty,3)} ${u} de ${prod.descripcion || cb} · fuera de pickup, irá como extra`, 'warn', 3000);
+      } else {
+        toast(`✓ ${fmt(qty,3)} ${u} de ${prod.descripcion || cb}`, 'ok', 2000);
+      }
+      _close();
+    };
+    input.onkeydown = (e) => { if (e.key === 'Enter') okBtn.click(); };
   }
 
   // Helper invocado al confirmar qty kg — chequea celebración
@@ -7590,7 +7706,7 @@ const DespachoView = (() => {
               <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
-              <p><span class="pkck-qty">${esKg ? fmt(desp,2) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,2) : sol}</span></p>
+              <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
               <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
             </div>
           </div>
