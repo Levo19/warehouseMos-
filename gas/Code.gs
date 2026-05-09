@@ -116,6 +116,9 @@ function _route(method, e) {
       case 'crearDespachoRapido': return crearDespachoRapido(params);
       case 'getPickups':          return getPickups(params);
       case 'actualizarPickup':    return actualizarPickup(params);
+      case 'recibirPickupDeME':   return recibirPickupDeME(params);
+      case 'guardarProgresoPickup': return guardarProgresoPickup(params);
+      case 'cerrarPickupConDespacho': return cerrarPickupConDespacho(params);
       case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
       case 'actualizarFechaVencimiento':  return actualizarFechaVencimiento(params);
       case 'actualizarCantidadDetalle':   return actualizarCantidadDetalle(params);

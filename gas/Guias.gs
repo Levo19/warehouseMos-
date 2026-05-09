@@ -751,7 +751,7 @@ function _actualizarLote(idLote, codigoProducto, cantidad, fechaVencimiento, idG
   ]);
 }
 
-// ── PICKUPS (pedidos externos de Cabanossi / n8n) ──────────────
+// ── PICKUPS (cierres de caja ME + cualquier fuente externa que escriba en hoja PICKUPS) ──
 function getPickups(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet || sheet.getLastRow() < 2) return { ok: true, data: [] };
@@ -759,13 +759,102 @@ function getPickups(params) {
   var filtroEstado = params.estado || 'PENDIENTE';
   var rows = _sheetToObjects(sheet);
   var result = rows.filter(function(r) {
-    return !filtroEstado || r.estado === filtroEstado;
+    if (filtroEstado === 'TODOS') return true;
+    // Si filtroEstado tiene comas, OR de varios estados (ej "PENDIENTE,EN_PROCESO")
+    var estados = String(filtroEstado).split(',').map(function(s){return s.trim();});
+    return estados.indexOf(r.estado) >= 0;
   }).map(function(r) {
     try { r.items = JSON.parse(r.items || '[]'); } catch(e) { r.items = []; }
     return r;
   });
-
+  // Más recientes primero (el operador atiende los nuevos)
+  result.sort(function(a, b) {
+    var ta = new Date(a.fechaCreado || 0).getTime();
+    var tb = new Date(b.fechaCreado || 0).getTime();
+    return tb - ta;
+  });
   return { ok: true, data: result };
+}
+
+// ── RECIBIR PICKUP DESDE MosExpress al cierre de caja ──────────
+// Payload: { idGuiaME, idCaja, idZona, cajero, items: [{skuBase,nombre,solicitado,despachado,codigosOriginales}] }
+// Idempotente por idGuiaME — si ya existe un pickup con ese origen, no duplica.
+function recibirPickupDeME(params) {
+  var idGuiaME = String(params.idGuiaME || '').trim();
+  var idZona   = String(params.idZona   || '').trim();
+  if (!idGuiaME) return { ok: false, error: 'Requiere idGuiaME' };
+  if (!params.items || !params.items.length) return { ok: false, error: 'Sin items' };
+
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+
+  // Idempotencia: si ya hay pickup con esta idGuiaME, no duplicar
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0].map(function(h){return String(h);});
+  var iId  = hdrs.indexOf('idPickup');
+  var iSrc = hdrs.indexOf('fuente');
+  var iSt  = hdrs.indexOf('estado');
+  var iIt  = hdrs.indexOf('items');
+  var iZn  = hdrs.indexOf('idZona');
+  var iNt  = hdrs.indexOf('notas');
+  var iCr  = hdrs.indexOf('creadoPor');
+  var iFC  = hdrs.indexOf('fechaCreado');
+  for (var r = 1; r < data.length; r++) {
+    var notas = String(data[iNt >= 0 ? r : 0][iNt] || '');
+    if (notas.indexOf('idGuiaME=' + idGuiaME) >= 0) {
+      return { ok: true, data: { idPickup: data[r][iId], dedup: true } };
+    }
+  }
+
+  // Sanear items: solo skuBase + solicitado > 0
+  var itemsLimpios = params.items
+    .map(function(it){
+      return {
+        skuBase:           String(it.skuBase || '').trim(),
+        nombre:            String(it.nombre || it.skuBase || '').trim(),
+        solicitado:        parseFloat(it.solicitado) || 0,
+        despachado:        parseFloat(it.despachado) || 0,
+        codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : []
+      };
+    })
+    .filter(function(it){ return it.skuBase && it.solicitado > 0; });
+  if (!itemsLimpios.length) return { ok: false, error: 'Items inválidos' };
+
+  // Ordenar por nombre para que el operador los lea fácil
+  itemsLimpios.sort(function(a, b){ return String(a.nombre).localeCompare(String(b.nombre)); });
+
+  var idPickup = 'PCK-' + new Date().getTime();
+  var fila = new Array(hdrs.length).fill('');
+  if (iId  >= 0) fila[iId]  = idPickup;
+  if (iSrc >= 0) fila[iSrc] = 'ME_CIERRE_CAJA';
+  if (iSt  >= 0) fila[iSt]  = 'PENDIENTE';
+  if (iIt  >= 0) fila[iIt]  = JSON.stringify(itemsLimpios);
+  if (iZn  >= 0) fila[iZn]  = idZona;
+  if (iNt  >= 0) fila[iNt]  = 'idGuiaME=' + idGuiaME + ' · idCaja=' + (params.idCaja || '') + ' · cajero=' + (params.cajero || '');
+  if (iCr  >= 0) fila[iCr]  = params.cajero || 'ME_AUTO';
+  if (iFC  >= 0) fila[iFC]  = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+  sheet.appendRow(fila);
+
+  // Avisar a MOS que hay un pickup nuevo (push a operadores almacén)
+  try {
+    var mosUrl = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
+    if (mosUrl) {
+      var totalUds = itemsLimpios.reduce(function(s, it){ return s + it.solicitado; }, 0);
+      UrlFetchApp.fetch(mosUrl, {
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          action: 'enviarPushNotif',
+          titulo: '🚨 Nuevo pickup · ' + (idZona || 'zona'),
+          cuerpo: itemsLimpios.length + ' productos · ' + Math.round(totalUds) + ' uds · cajero ' + (params.cajero || ''),
+          soloRolesWH: true
+        }),
+        muteHttpExceptions: true
+      });
+    }
+  } catch(e) { Logger.log('Push pickup falló: ' + e.message); }
+
+  return { ok: true, data: { idPickup: idPickup, items: itemsLimpios.length } };
 }
 
 function actualizarPickup(params) {
@@ -788,6 +877,125 @@ function actualizarPickup(params) {
     }
   }
   return { ok: false, error: 'Pickup no encontrado' };
+}
+
+// Guardar progreso del despacho (autosave optimista mientras el operador trabaja).
+// El frontend manda items con despachado actualizado; aquí solo overwrite del JSON
+// y marca estado='EN_PROCESO' para que se vea como "ya empezado".
+function guardarProgresoPickup(params) {
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h){return String(h);});
+  var idxId   = headers.indexOf('idPickup');
+  var idxIt   = headers.indexOf('items');
+  var idxEst  = headers.indexOf('estado');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === String(params.idPickup)) {
+      var itemsActualizados = Array.isArray(params.items) ? params.items : null;
+      if (itemsActualizados && idxIt >= 0) {
+        sheet.getRange(i + 1, idxIt + 1).setValue(JSON.stringify(itemsActualizados));
+      }
+      // Solo cambiar a EN_PROCESO si está PENDIENTE (no degradar COMPLETADO)
+      if (idxEst >= 0 && String(data[i][idxEst]) === 'PENDIENTE') {
+        sheet.getRange(i + 1, idxEst + 1).setValue('EN_PROCESO');
+      }
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: 'Pickup no encontrado' };
+}
+
+// Cerrar pickup: emite GUIA_SALIDA real con códigos de barra escaneados.
+// Items NO despachados se anotan en la observación (no en detalle de stock).
+// Marca pickup COMPLETADO o PARCIAL según haya despachado todo o no.
+function cerrarPickupConDespacho(params) {
+  var idPickup = String(params.idPickup || '').trim();
+  if (!idPickup) return { ok: false, error: 'Requiere idPickup' };
+  var usuario = params.usuario || '';
+
+  var sheet = getSheet('PICKUPS');
+  if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
+  var data    = sheet.getDataRange().getValues();
+  var headers = data[0].map(function(h){return String(h);});
+  var idxId   = headers.indexOf('idPickup');
+  var idxIt   = headers.indexOf('items');
+  var idxEst  = headers.indexOf('estado');
+  var idxAte  = headers.indexOf('fechaAtendido');
+  var idxZn   = headers.indexOf('idZona');
+  var idxNt   = headers.indexOf('notas');
+
+  var rowIdx = -1, pickup = null;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === idPickup) {
+      rowIdx = i + 1;
+      pickup = {
+        idZona: String(data[i][idxZn] || ''),
+        notas:  String(data[i][idxNt] || ''),
+        estado: String(data[i][idxEst] || '')
+      };
+      break;
+    }
+  }
+  if (rowIdx < 2) return { ok: false, error: 'Pickup no encontrado' };
+  if (pickup.estado === 'COMPLETADO') return { ok: false, error: 'El pickup ya fue cerrado' };
+
+  // El frontend manda items con despachado y opcionalmente despachoDetalle:
+  //   despachoDetalle: [{codigoBarra, cantidad}, ...] — códigos REALMENTE escaneados
+  // (registrados en GUIA_SALIDA, no el skuBase agrupador).
+  var items = Array.isArray(params.items) ? params.items : [];
+  var despachoDetalle = Array.isArray(params.despachoDetalle) ? params.despachoDetalle : [];
+
+  // Si no nos mandaron despachoDetalle, derivar uno mínimo: por cada item con
+  // despachado>0, usar su primer codigosOriginales (best-effort).
+  if (!despachoDetalle.length) {
+    items.forEach(function(it){
+      var qty = parseFloat(it.despachado) || 0;
+      if (qty <= 0) return;
+      var cod = (it.codigosOriginales && it.codigosOriginales[0]) || it.skuBase || '';
+      if (cod) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
+    });
+  }
+
+  // Items NO despachados (solicitado > despachado) — para observación
+  var noDespachados = items.filter(function(it){
+    return (parseFloat(it.solicitado) || 0) > (parseFloat(it.despachado) || 0);
+  }).map(function(it){
+    var falta = (parseFloat(it.solicitado) || 0) - (parseFloat(it.despachado) || 0);
+    return it.nombre + ' (' + it.skuBase + ') · faltó ' + falta;
+  });
+
+  var totalDespachado = despachoDetalle.reduce(function(s, d){ return s + (parseFloat(d.cantidad) || 0); }, 0);
+  var huboDespacho    = totalDespachado > 0;
+  var nuevoEstado     = noDespachados.length === 0 ? 'COMPLETADO' : (huboDespacho ? 'PARCIAL' : 'CANCELADO');
+
+  // Crear GUIA_SALIDA si hubo al menos un item despachado
+  var idGuia = null;
+  if (huboDespacho) {
+    var nota = 'Pickup ' + idPickup + (noDespachados.length ? ' · sin despachar: ' + noDespachados.join('; ') : '');
+    var guiaRes = crearDespachoRapido({
+      tipo:     'SALIDA_ZONA',
+      idZona:   pickup.idZona,
+      items:    despachoDetalle,    // {codigoBarra, cantidad}
+      usuario:  usuario,
+      nota:     nota,
+      imprimir: params.imprimir !== false
+    });
+    if (!guiaRes.ok) return { ok: false, error: 'Falló GUIA_SALIDA: ' + guiaRes.error };
+    idGuia = guiaRes.data && guiaRes.data.idGuia;
+  }
+
+  // Actualizar pickup
+  if (idxIt  >= 0) sheet.getRange(rowIdx, idxIt + 1).setValue(JSON.stringify(items));
+  if (idxEst >= 0) sheet.getRange(rowIdx, idxEst + 1).setValue(nuevoEstado);
+  if (idxAte >= 0) sheet.getRange(rowIdx, idxAte + 1).setValue(Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'"));
+
+  return { ok: true, data: {
+    idGuia:        idGuia,
+    estado:        nuevoEstado,
+    despachados:   despachoDetalle.length,
+    noDespachados: noDespachados.length
+  }};
 }
 
 function crearDespachoRapido(params) {

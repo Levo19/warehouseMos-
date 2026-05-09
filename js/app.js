@@ -12,6 +12,48 @@ function vibrate(ms = 10) {
 }
 
 // ════════════════════════════════════════════════
+// F5 — ALERTA FULLSCREEN PICKUP NUEVO
+// Muestra overlay + sonido fuerte repetido + vibración.
+// ════════════════════════════════════════════════
+let _apnSonidoTimer = null;
+function mostrarAlertaPickupNuevo(pickup) {
+  if (!pickup) return;
+  const overlay = document.getElementById('alertaPickupNuevo');
+  if (!overlay) return;
+  // Llenar contenido
+  const zonaEl = document.getElementById('apnZona');
+  const metaEl = document.getElementById('apnMeta');
+  const items  = Array.isArray(pickup.items) ? pickup.items : [];
+  const totalUds = items.reduce((s, it) => s + (parseFloat(it.solicitado) || 0), 0);
+  if (zonaEl) zonaEl.textContent = pickup.idZona || 'Zona —';
+  if (metaEl) metaEl.textContent = items.length + ' productos · ' + Math.round(totalUds) + ' uds · ' + (pickup.creadoPor || 'cajero');
+  overlay.style.display = 'flex';
+  // Sonido fuerte repetido (almacén con ruido) — 3 ciclos cada 1.6s
+  try { SoundFX.pickupAlerta(); } catch(_){}
+  if (_apnSonidoTimer) clearInterval(_apnSonidoTimer);
+  let ciclos = 0;
+  _apnSonidoTimer = setInterval(() => {
+    if (overlay.style.display === 'none' || ciclos >= 2) {
+      clearInterval(_apnSonidoTimer); _apnSonidoTimer = null; return;
+    }
+    try { SoundFX.pickupAlerta(); } catch(_){}
+    ciclos++;
+  }, 1700);
+  // Vibración fuerte: 3 pulsos de 400ms con pausas
+  if (_userActivated && navigator.vibrate) {
+    navigator.vibrate([400, 200, 400, 200, 600]);
+  }
+}
+function cerrarAlertaPickupNuevo() {
+  const overlay = document.getElementById('alertaPickupNuevo');
+  if (overlay) overlay.style.display = 'none';
+  if (_apnSonidoTimer) { clearInterval(_apnSonidoTimer); _apnSonidoTimer = null; }
+}
+// Exponer al window para que onclick en HTML lo encuentre
+window.mostrarAlertaPickupNuevo = mostrarAlertaPickupNuevo;
+window.cerrarAlertaPickupNuevo  = cerrarAlertaPickupNuevo;
+
+// ════════════════════════════════════════════════
 // Long press handler
 // ════════════════════════════════════════════════
 function addLongPress(el, cb, ms = 500) {
@@ -6071,9 +6113,10 @@ const EnvasadorView = (() => {
 // DESPACHO RÁPIDO
 // ════════════════════════════════════════════════
 const DespachoView = (() => {
-  const CART_KEY = 'wh_despacho_cart';
-  const ZONA_KEY = 'wh_despacho_zona';
-  const HIST_KEY = 'wh_despacho_hist';
+  const CART_KEY   = 'wh_despacho_cart';
+  const ZONA_KEY   = 'wh_despacho_zona';
+  const HIST_KEY   = 'wh_despacho_hist';
+  const PICKUP_KEY = 'wh_despacho_pickup_activo';
   let _cart = [];
   let _tipoSalida = 'SALIDA_ZONA';
 
@@ -6081,6 +6124,15 @@ const DespachoView = (() => {
   function _loadCart() {
     try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
   }
+  // Pickup activo persistente — sobrevive refresh del browser
+  function _savePickup() {
+    if (_pickupActivo) localStorage.setItem(PICKUP_KEY, JSON.stringify(_pickupActivo));
+    else               localStorage.removeItem(PICKUP_KEY);
+  }
+  function _loadPickup() {
+    try { return JSON.parse(localStorage.getItem(PICKUP_KEY) || 'null'); } catch { return null; }
+  }
+  function _clearPickup() { localStorage.removeItem(PICKUP_KEY); }
   function _saveZona(id) { if (id) localStorage.setItem(ZONA_KEY, id); }
   function _loadZona()   { return localStorage.getItem(ZONA_KEY) || ''; }
   function _saveHist(entry) {
@@ -6182,9 +6234,13 @@ const DespachoView = (() => {
 
   function cargar() {
     _cart = _loadCart();
+    // Rehidratar pickup activo desde localStorage (sobrevive refresh del browser)
+    const pSaved = _loadPickup();
+    if (pSaved) _pickupActivo = pSaved;
     _renderCart();
     _updateFooter();
     _renderHist();
+    _renderPickupActivoBanner();
     badgeUpdate();
   }
 
@@ -6368,6 +6424,14 @@ const DespachoView = (() => {
     const cb   = String(prod._scannedCb || prod.codigoBarra || '');
     const desc = prod.descripcion || cb;
     if (!cb) return;
+
+    // ── HOOK PICKUP: si hay pickup activo y este producto matchea con un item,
+    //    sumar al despachado del pickup en vez de tratarlo como item suelto.
+    if (_pickupActivo && _intentarSumarAPickup(prod, cb)) {
+      _despLastHistory.push(cb);
+      return; // absorbido por el pickup, no entra al carrito como extra
+    }
+
     const stockMap = {};
     OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
     const stockD = parseFloat((stockMap[prod.idProducto] || stockMap[cb] || {}).cantidadDisponible || 0);
@@ -6376,7 +6440,12 @@ const DespachoView = (() => {
       _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) + 1;
       SoundFX.beepDouble(); vibrate(12);
     } else {
-      _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD });
+      _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD, _extraPickup: !!_pickupActivo });
+      // Si hay pickup activo y entró como extra → flash naranja + toast suave
+      if (_pickupActivo) {
+        SoundFX.warn(); vibrate([20, 30]);
+        toast(`🟠 Fuera de pickup · ${desc} se agrega como extra`, 'warn', 2200);
+      }
     }
     _despLastHistory.push(cb);
     _saveCart();
@@ -6956,6 +7025,15 @@ const DespachoView = (() => {
   }
 
   function confirmarDespacho() {
+    // Si hay un pickup activo, ese es el camino: cierra contra cerrarPickupConDespacho
+    // (emite GUIA_SALIDA con códigos reales escaneados + faltantes en observación)
+    if (_pickupActivo) {
+      cerrarSheet('sheetDespFinalizar');
+      const completo = _pickupTotalmenteCompleto();
+      cerrarDespachoPickup(!completo);
+      return;
+    }
+
     const idZona = _tipoSalida === 'SALIDA_ZONA' ? document.getElementById('despZonaSelect').value : '';
     if (_tipoSalida === 'SALIDA_ZONA' && !idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
     if (idZona) _saveZona(idZona);
@@ -7036,45 +7114,121 @@ const DespachoView = (() => {
 
   // ── Badge global (carrito + pickups pendientes) ─────────────
   let _pickupsPendientes = [];
+  let _ultimosIdsPickups = new Set(); // para detectar nuevos llegados
   let _pollTimer = null;
 
   function badgeUpdate() {
     _cart = _loadCart();
     const n   = _cart.length;
-    const hay = _pickupsPendientes.length > 0;
+    const nPickups = _pickupsPendientes.length;
+    const hay = nPickups > 0;
 
-    // Badge topbar 🛒DSP — visible cuando hay items en el carrito
+    // Badge topbar — dinámico: muestra progreso del pickup activo si existe,
+    // si no, modo carrito legacy 🛒DSP. Esconder si no hay nada.
     const despBadge = document.getElementById('despModoIndicador');
-    if (despBadge) despBadge.classList.toggle('hidden', n === 0);
+    if (despBadge) {
+      if (_pickupActivo) {
+        const items     = _pickupActivo.items || [];
+        const totalUds  = items.reduce((s,it) => s + (parseFloat(it.solicitado) || 0), 0);
+        const totalDesp = items.reduce((s,it) => s + (parseFloat(it.despachado) || 0), 0);
+        const completo  = _pickupTotalmenteCompleto();
+        despBadge.classList.remove('hidden');
+        despBadge.textContent = `📦 ${totalDesp}/${totalUds}`;
+        despBadge.style.background = completo ? '#047857' : '#4338ca';
+        despBadge.title = completo ? 'Pickup completo · cerrar despacho' : 'Pickup activo · seguir despachando';
+      } else {
+        despBadge.textContent = '🛒DSP';
+        despBadge.style.background = '#065f46';
+        despBadge.title = 'Volver al Despacho Rápido';
+        despBadge.classList.toggle('hidden', n === 0);
+      }
+    }
 
     // Botón FAB en vista Productos
-    const fabN = document.getElementById('despCartFabN');
-    const dot  = document.getElementById('despPickAlertDot');
-    if (fabN) { fabN.textContent = n; fabN.style.display = n > 0 ? 'inline-flex' : 'none'; }
-    if (dot)  { dot.style.display = hay ? 'block' : 'none'; }
+    const fab     = document.getElementById('btnDespCartFab');
+    const fabN    = document.getElementById('despCartFabN');
+    const fabPick = document.getElementById('despCartFabPickN');
+    const dot     = document.getElementById('despPickAlertDot');
+    if (fabN)    { fabN.textContent = n; fabN.style.display = n > 0 ? 'inline-flex' : 'none'; }
+    if (fabPick) { fabPick.textContent = nPickups; fabPick.style.display = nPickups > 0 ? 'inline-flex' : 'none'; }
+    if (dot)     { dot.style.display = hay ? 'block' : 'none'; }
+    if (fab)     { fab.classList.toggle('has-pickups', hay); }
 
-    // Banner en view-despacho
-    const banner    = document.getElementById('despPickupBanner');
-    const bannerTxt = document.getElementById('despPickupBannerTxt');
-    if (banner && _pickupsPendientes.length > 0) {
-      const p = _pickupsPendientes[0];
-      if (bannerTxt) bannerTxt.textContent = p.idPickup + (p.notas ? ' · ' + p.notas : '');
-      banner.style.display = 'flex';
-    } else if (banner) {
-      banner.style.display = 'none';
+    // Lista de pickups pendientes en view-despacho
+    const listaEl = document.getElementById('despPickupsLista');
+    if (listaEl) {
+      if (_pickupsPendientes.length > 0) {
+        listaEl.style.display = 'block';
+        listaEl.innerHTML = _pickupsPendientes.slice(0, 8).map(p => {
+          const items = Array.isArray(p.items) ? p.items : [];
+          const totalUds = items.reduce((s, it) => s + (parseFloat(it.solicitado) || 0), 0);
+          const totalDesp = items.reduce((s, it) => s + (parseFloat(it.despachado) || 0), 0);
+          const pct = totalUds > 0 ? Math.round((totalDesp / totalUds) * 100) : 0;
+          const enProceso = String(p.estado) === 'EN_PROCESO';
+          const fuente = String(p.fuente || '').toLowerCase();
+          const fuenteIcon = fuente.indexOf('me_cierre') >= 0 ? '🛒' : '📥';
+          const fuenteLbl  = fuente.indexOf('me_cierre') >= 0 ? 'Cierre caja' : (p.fuente || 'Externo');
+          let hace = '';
+          try {
+            const t = new Date(p.fechaCreado).getTime();
+            const min = Math.floor((Date.now() - t) / 60000);
+            hace = min < 1 ? 'recién' : min < 60 ? ('hace ' + min + 'm') : ('hace ' + Math.floor(min/60) + 'h');
+          } catch(_) {}
+          return `
+            <div class="card flex items-center gap-3"
+                 style="border:1.5px solid ${enProceso ? 'rgba(99,102,241,.5)' : 'rgba(245,158,11,.5)'};
+                        background:${enProceso ? 'rgba(99,102,241,.08)' : 'rgba(245,158,11,.08)'};
+                        animation:${enProceso ? 'none' : 'despPickListPulse 2.4s ease-in-out infinite'};">
+              <div class="flex-shrink-0" style="font-size:24px">${fuenteIcon}</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-sm" style="color:${enProceso ? '#a5b4fc' : '#fbbf24'}">${p.idZona || '—'}</span>
+                  <span class="text-xs text-slate-400">·</span>
+                  <span class="text-xs text-slate-400">${fuenteLbl}</span>
+                  <span class="text-xs text-slate-500">· ${hace}</span>
+                </div>
+                <p class="text-xs text-slate-300 mt-0.5">
+                  ${items.length} producto${items.length !== 1 ? 's' : ''} · ${Math.round(totalUds)} uds
+                  ${enProceso ? ` · <span style="color:#a5b4fc;font-weight:700">${pct}% despachado</span>` : ''}
+                </p>
+                ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
+              </div>
+              <button onclick="DespachoView.abrirPickup('${escAttr(p.idPickup)}')"
+                      class="btn btn-sm flex-shrink-0"
+                      style="background:${enProceso ? 'rgba(99,102,241,.25)' : 'rgba(245,158,11,.25)'};
+                             color:${enProceso ? '#a5b4fc' : '#fbbf24'};
+                             border-color:${enProceso ? 'rgba(99,102,241,.4)' : 'rgba(245,158,11,.4)'}">
+                ${enProceso ? '↻ Continuar' : '▶ Jalar'}
+              </button>
+            </div>`;
+        }).join('');
+      } else {
+        listaEl.style.display = 'none';
+      }
     }
   }
 
   async function _pollPickups() {
-    const res = await API.getPickups().catch(() => ({ ok: false }));
-    if (res.ok) _pickupsPendientes = res.data || [];
+    const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
+    const lista = (res && res.ok) ? (res.data || []) : [];
+    // Detectar pickups nuevos vs el snapshot anterior (no en la primera carga)
+    const idsActuales = new Set(lista.map(p => p.idPickup));
+    const esPrimeraCarga = _ultimosIdsPickups.size === 0 && _pickupsPendientes.length === 0;
+    const nuevos = esPrimeraCarga ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');
+    _pickupsPendientes = lista;
+    _ultimosIdsPickups = idsActuales;
     badgeUpdate();
+    // Si llegaron pickups nuevos, alertar fullscreen + sonido
+    if (nuevos.length > 0 && typeof mostrarAlertaPickupNuevo === 'function') {
+      mostrarAlertaPickupNuevo(nuevos[0]);
+    }
   }
 
   function startPoll() {
     if (_pollTimer) return;
     _pollPickups();
-    _pollTimer = setInterval(_pollPickups, 120_000);
+    // Polling 30s — antes era 120s. Ruido de almacén = se necesita aviso rápido.
+    _pollTimer = setInterval(_pollPickups, 30_000);
   }
 
   // ── Matching engine (Fase 2) ────────────────────────────────
@@ -7105,10 +7259,434 @@ const DespachoView = (() => {
   let _pickupActivo = null;
   let _matchResults = []; // [{nombre, qty, producto, score, status, accepted}]
 
+  // ════════════════════════════════════════════════════════════
+  // PICKUP ACTIVO — lógica core
+  // ════════════════════════════════════════════════════════════
+  let _autosavePickupTimer = null;
+  let _autosaveLastTs = 0;
+
+  // Buscar item del pickup que matchee con el producto/código escaneado.
+  function _matchPickupItem(prod, cb) {
+    if (!_pickupActivo || !Array.isArray(_pickupActivo.items)) return null;
+    const cbU  = String(cb || '').toUpperCase();
+    const idP  = String(prod?.idProducto || '').toUpperCase();
+    const skuP = String(prod?.skuBase    || '').toUpperCase();
+    return _pickupActivo.items.find(it => {
+      if (!it) return false;
+      const itSku = String(it.skuBase || '').toUpperCase();
+      if (itSku && (itSku === idP || (skuP && itSku === skuP))) return true;
+      if (Array.isArray(it.codigosOriginales) &&
+          it.codigosOriginales.some(c => String(c).toUpperCase() === cbU)) return true;
+      return false;
+    }) || null;
+  }
+
+  // Intenta sumar 1 al item del pickup que matchee. Retorna true si lo absorbió.
+  function _intentarSumarAPickup(prod, cb) {
+    const item = _matchPickupItem(prod, cb);
+    if (!item) return false;
+
+    const sol      = parseFloat(item.solicitado) || 0;
+    const prevDesp = parseFloat(item.despachado) || 0;
+    item.despachado = prevDesp + 1;
+    item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+    item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
+    _savePickup();
+
+    const justCompletado = prevDesp < sol && item.despachado >= sol;
+    const sobreDespacho  = item.despachado > sol;
+
+    // Re-render lista checklist + banner activo
+    _renderPickupChecklistInSheet(item.skuBase);
+    _renderPickupActivoBanner();
+    badgeUpdate();
+
+    // Sonidos + animaciones según estado
+    if (justCompletado) {
+      try { SoundFX.pickupItemOk(); } catch(_){}
+      vibrate([20, 30, 60]);
+      _flashItemCompleto(item.skuBase);
+      // Si TODOS los items llegaron al 100% → celebración
+      if (_pickupTotalmenteCompleto()) {
+        setTimeout(() => {
+          try { SoundFX.pickupOk(); } catch(_){}
+          _confettiCelebracion();
+          _setDespStatus('ok', '🎉 ¡Pickup completo! Pulsa "Cerrar despacho"');
+        }, 280);
+      }
+    } else if (sobreDespacho) {
+      try { SoundFX.warn(); } catch(_){}
+      vibrate([30, 20, 30]);
+    } else {
+      try { SoundFX.beep(); } catch(_){}
+      vibrate(12);
+    }
+
+    _scheduleAutosavePickup();
+    return true;
+  }
+
+  // ¿Todos los items del pickup están al 100%?
+  function _pickupTotalmenteCompleto() {
+    if (!_pickupActivo) return false;
+    return (_pickupActivo.items || []).every(it =>
+      (parseFloat(it.despachado) || 0) >= (parseFloat(it.solicitado) || 0)
+    );
+  }
+
+  // Autosave a backend con debounce 4s. Llama guardarProgresoPickup.
+  function _scheduleAutosavePickup() {
+    if (_autosavePickupTimer) clearTimeout(_autosavePickupTimer);
+    const lblEl = document.getElementById('pkactAutosaveLbl');
+    const wrEl  = document.getElementById('pkactAutosave');
+    if (lblEl) lblEl.textContent = 'guardando...';
+    if (wrEl)  wrEl.classList.add('is-saving');
+    _autosavePickupTimer = setTimeout(async () => {
+      if (!_pickupActivo) return;
+      try {
+        await API.guardarProgresoPickup({
+          idPickup: _pickupActivo.idPickup,
+          items:    _pickupActivo.items
+        });
+        _autosaveLastTs = Date.now();
+        if (lblEl) lblEl.textContent = 'guardado';
+        if (wrEl)  wrEl.classList.remove('is-saving');
+      } catch (e) {
+        if (lblEl) lblEl.textContent = 'reintentando...';
+      }
+    }, 4000);
+  }
+
+  // Render del checklist dentro del sheet — UI moderna con barras de progreso
+  function _renderPickupChecklistInSheet(flashSkuBase) {
+    const cont = document.getElementById('despPickChecklist');
+    if (!cont || !_pickupActivo) return;
+    const items = _pickupActivo.items || [];
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+
+    cont.innerHTML = items.map(it => {
+      const sol  = parseFloat(it.solicitado) || 0;
+      const desp = parseFloat(it.despachado) || 0;
+      const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
+      const completo  = desp >= sol && sol > 0;
+      const enProg    = desp > 0 && desp < sol;
+      const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
+      const flash     = (flashSkuBase && String(flashSkuBase) === String(it.skuBase)) ? 'is-just-completed is-flash' : '';
+      const stockD    = parseFloat((stockMap[it.skuBase] || {}).cantidadDisponible || 0);
+      const stockTxt  = stockD > 0 ? `Stock ${fmt(stockD,1)}` : 'sin stock cache';
+      const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
+      const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
+      const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
+      return `
+        <div class="pkck-card ${cls} ${flash}" data-sku="${escAttr(it.skuBase)}">
+          <div class="pkck-row">
+            <div class="pkck-icon">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)} · ${stockTxt}${equivTxt}</p>
+            </div>
+            <div class="pkck-qty-wrap">
+              <p><span class="pkck-qty">${desp}</span><span class="pkck-qty-sol"> / ${sol}</span></p>
+              <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
+            </div>
+          </div>
+          <div class="pkck-bar-wrap">
+            <div class="pkck-bar-fill" style="width:${pct}%"></div>
+            ${enProg ? '<div class="pkck-bar-shimmer"></div>' : ''}
+          </div>
+          <div class="pkck-check-overlay">✓</div>
+        </div>`;
+    }).join('');
+
+    // KPIs hero
+    const totalUds  = items.reduce((s,it) => s + (parseFloat(it.solicitado) || 0), 0);
+    const totalDesp = items.reduce((s,it) => s + (parseFloat(it.despachado) || 0), 0);
+    const pctTot    = totalUds > 0 ? Math.round((totalDesp / totalUds) * 100) : 0;
+    const elIt = document.getElementById('pkckKpiItems');
+    const elUd = document.getElementById('pkckKpiUds');
+    const elPc = document.getElementById('pkckKpiPct');
+    if (elIt) elIt.textContent = items.length;
+    if (elUd) elUd.textContent = `${totalDesp}/${totalUds}`;
+    if (elPc) elPc.textContent = pctTot + '%';
+
+    // CTA dinámico
+    const cta  = document.getElementById('btnConfirmarPickup');
+    const hint = document.getElementById('pkckFootHint');
+    if (cta) {
+      const completoTotal = _pickupTotalmenteCompleto();
+      const tieneAlgo     = totalDesp > 0;
+      // Estado del pickup en backend
+      const yaEmpezo = String(_pickupActivo.estado || '').toUpperCase() === 'EN_PROCESO';
+      if (!yaEmpezo && !tieneAlgo) {
+        cta.className = 'pkck-cta';
+        cta.innerHTML = '<span style="font-size:1.2em">▶</span><span>EMPEZAR DESPACHO</span>';
+        cta.onclick = () => DespachoView.empezarPickup();
+        if (hint) hint.textContent = 'Escanea cada producto · los equivalentes cuentan automáticamente';
+      } else if (completoTotal) {
+        cta.className = 'pkck-cta is-cerrar';
+        cta.innerHTML = '<span style="font-size:1.2em">✓</span><span>CERRAR DESPACHO COMPLETO</span>';
+        cta.onclick = () => DespachoView.cerrarDespachoPickup(false);
+        if (hint) hint.textContent = '¡Todos los items despachados!';
+      } else if (tieneAlgo) {
+        cta.className = 'pkck-cta is-parcial';
+        const falt = items.filter(it => (parseFloat(it.despachado)||0) < (parseFloat(it.solicitado)||0)).length;
+        cta.innerHTML = `<span style="font-size:1.2em">↗</span><span>CERRAR PARCIAL · faltan ${falt}</span>`;
+        cta.onclick = () => DespachoView.cerrarDespachoPickup(true);
+        if (hint) hint.textContent = 'Los faltantes irán en la observación de la guía';
+      } else {
+        cta.className = 'pkck-cta';
+        cta.innerHTML = '<span style="font-size:1.2em">▶</span><span>EMPEZAR DESPACHO</span>';
+        cta.onclick = () => DespachoView.empezarPickup();
+      }
+    }
+  }
+
+  // Banner del pickup activo en view-despacho (visible siempre que se está despachando)
+  function _renderPickupActivoBanner() {
+    const banner = document.getElementById('despPickupActivoBanner');
+    if (!banner) return;
+    if (!_pickupActivo) { banner.style.display = 'none'; return; }
+    const items     = _pickupActivo.items || [];
+    const totalUds  = items.reduce((s,it) => s + (parseFloat(it.solicitado) || 0), 0);
+    const totalDesp = items.reduce((s,it) => s + (parseFloat(it.despachado) || 0), 0);
+    const pct       = totalUds > 0 ? Math.round((totalDesp / totalUds) * 100) : 0;
+    const completo  = _pickupTotalmenteCompleto();
+    banner.style.display = 'block';
+    banner.classList.toggle('is-completo', completo);
+    const elZ = document.getElementById('pkactZona');
+    const elP = document.getElementById('pkactProgresoLbl');
+    const elB = document.getElementById('pkactBar');
+    if (elZ) elZ.textContent = '📦 ' + (_pickupActivo.idZona || _pickupActivo.idPickup || 'pickup');
+    if (elP) elP.textContent = `${totalDesp}/${totalUds} uds · ${pct}%`;
+    if (elB) elB.style.width = pct + '%';
+  }
+
+  // Flash visual sobre la card de un item recién completado
+  function _flashItemCompleto(skuBase) {
+    requestAnimationFrame(() => {
+      const card = document.querySelector(`.pkck-card[data-sku="${CSS.escape(String(skuBase))}"]`);
+      if (!card) return;
+      card.classList.add('is-just-completed', 'is-flash');
+      setTimeout(() => card.classList.remove('is-just-completed', 'is-flash'), 950);
+    });
+  }
+
+  // Confetti celebración cuando pickup llega al 100% total
+  function _confettiCelebracion() {
+    const colores = ['#10b981','#34d399','#6366f1','#818cf8','#f59e0b','#fbbf24','#ec4899'];
+    const n = 36;
+    for (let i = 0; i < n; i++) {
+      const c = document.createElement('div');
+      c.className = 'pkck-confetti';
+      c.style.left  = (Math.random() * 100) + 'vw';
+      c.style.background = colores[i % colores.length];
+      c.style.setProperty('--tx',  ((Math.random() - 0.5) * 200) + 'px');
+      c.style.setProperty('--rot', (Math.random() * 1080) + 'deg');
+      c.style.setProperty('--dur', (1.8 + Math.random() * 1.6) + 's');
+      c.style.animationDelay = (Math.random() * 0.3) + 's';
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), 4000);
+    }
+  }
+
+  // Abrir el sheet del pickup activo (botón "Detalle" en banner)
+  function abrirSheetPickupActivo() {
+    if (!_pickupActivo) return;
+    _renderPickupChecklistInSheet();
+    _renderPickupActivoBanner();
+    document.getElementById('despPickTitulo').textContent =
+      'Pickup ' + (_pickupActivo.idPickup || '');
+    document.getElementById('despPickSub').textContent =
+      `${_pickupActivo.idZona || '—'} · ${_pickupActivo.creadoPor || 'cajero'}`;
+    // Ocultar secciones legacy
+    document.getElementById('despPickSecExactos').classList.add('hidden');
+    document.getElementById('despPickSecParciales').classList.add('hidden');
+    document.getElementById('despPickSecNoFound').classList.add('hidden');
+    abrirSheet('sheetDespPickup');
+  }
+
+  // Empezar el despacho de un pickup: marca EN_PROCESO, persiste, cierra sheet,
+  // muestra banner y deja al operador escaneando.
+  async function empezarPickup() {
+    if (!_pickupActivo) return;
+    // Inicializar estructura si viene fresca
+    _pickupActivo.items = (_pickupActivo.items || []).map(it => ({
+      skuBase:           it.skuBase,
+      nombre:            it.nombre || it.skuBase,
+      solicitado:        parseFloat(it.solicitado) || 0,
+      despachado:        parseFloat(it.despachado) || 0,
+      codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
+      despachadoPorCodigo: it.despachadoPorCodigo || {}
+    }));
+    _pickupActivo.estado = 'EN_PROCESO';
+    _savePickup();
+
+    // Backend: marcar EN_PROCESO
+    API.actualizarPickup({ idPickup: _pickupActivo.idPickup, estado: 'EN_PROCESO' }).catch(() => {});
+    // Quitar de pendientes
+    _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== _pickupActivo.idPickup);
+
+    cerrarSheet('sheetDespPickup');
+    _renderPickupActivoBanner();
+    _renderCart();
+    _updateFooter();
+    badgeUpdate();
+    try { SoundFX.beepDouble(); } catch(_){}
+    vibrate(20);
+    toast(`▶ Despacho iniciado · escanea para registrar`, 'ok', 2800);
+  }
+
+  // Cerrar despacho del pickup activo: emite GUIA_SALIDA con códigos reales.
+  // esParcial=true si el operador quiere cerrar antes de tener todo.
+  async function cerrarDespachoPickup(esParcial) {
+    if (!_pickupActivo) return;
+
+    // Si parcial, confirmar con el operador
+    const completo = _pickupTotalmenteCompleto();
+    if (esParcial && !completo) {
+      const items = _pickupActivo.items || [];
+      const falt  = items.filter(it => (parseFloat(it.despachado)||0) < (parseFloat(it.solicitado)||0)).length;
+      if (!confirm(`Cerrar despacho con ${falt} item${falt!==1?'s':''} sin completar?\nLos faltantes quedarán en observación de la guía.`)) return;
+    }
+
+    // Construir despachoDetalle desde despachadoPorCodigo de cada item
+    const despachoDetalle = [];
+    (_pickupActivo.items || []).forEach(it => {
+      const dpc = it.despachadoPorCodigo || {};
+      Object.keys(dpc).forEach(cod => {
+        const qty = parseFloat(dpc[cod]) || 0;
+        if (qty > 0) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
+      });
+    });
+    // Sumar también extras del carrito (escaneos fuera de pickup)
+    _cart.filter(c => c._extraPickup).forEach(c => {
+      despachoDetalle.push({ codigoBarra: c.codigoBarra, cantidad: parseFloat(c.cantidad) || 0 });
+    });
+
+    if (!despachoDetalle.length) {
+      toast('No hay nada despachado todavía', 'warn', 2500);
+      return;
+    }
+
+    // Snapshot para revert si falla
+    const pickupSnap  = JSON.parse(JSON.stringify(_pickupActivo));
+    const cartSnap    = [..._cart];
+
+    // UI optimista: limpiar todo y mostrar feedback
+    cerrarSheet('sheetDespPickup');
+    _cart = [];
+    _saveCart();
+    _renderCart();
+    _updateFooter();
+    toast('⏳ Generando guía de despacho...', 'info', 55000);
+
+    try {
+      const res = await Promise.race([
+        API.cerrarPickupConDespacho({
+          idPickup:        _pickupActivo.idPickup,
+          items:           _pickupActivo.items,
+          despachoDetalle: despachoDetalle,
+          usuario:         window.WH_CONFIG?.usuario || '',
+          imprimir:        false
+        }),
+        new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
+      ]);
+      if (res.ok) {
+        const d = res.data || {};
+        try { SoundFX.pickupOk(); } catch(_){}
+        vibrate([30, 20, 60, 20, 100]);
+        _confettiCelebracion();
+        toast(`✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
+
+        // Imprimir en background si hay guía
+        if (d.idGuia) {
+          try {
+            const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+            const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
+            API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl }).catch(() => {});
+          } catch(_){}
+        }
+        // Historial local
+        const items = (pickupSnap.items || []).filter(it => (parseFloat(it.despachado)||0) > 0).map(it => ({
+          codigoBarra: it.skuBase, descripcion: it.nombre, cantidad: it.despachado
+        }));
+        const zonas = OfflineManager.getZonasCache();
+        const zonaObj = zonas.find(z => String(z.idZona) === String(pickupSnap.idZona));
+        _saveHist({
+          ts: Date.now(), n: items.length, tipo: 'SALIDA_ZONA',
+          idZona: pickupSnap.idZona,
+          nombreZona: zonaObj ? (zonaObj.nombre || zonaObj.idZona) : (pickupSnap.idZona || ''),
+          nota: 'Pickup ' + pickupSnap.idPickup,
+          items, idGuia: d.idGuia || '—', ok: true
+        });
+        _renderHist();
+
+        // Limpiar pickup local
+        _pickupActivo = null;
+        _clearPickup();
+        _renderPickupActivoBanner();
+        badgeUpdate();
+      } else {
+        try { SoundFX.error(); } catch(_){}
+        vibrate([80, 40, 80]);
+        toast('Error: ' + (res.error || 'no se pudo cerrar'), 'danger', 8000);
+        // Revert
+        _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
+      }
+    } catch (e) {
+      try { SoundFX.error(); } catch(_){}
+      vibrate([80, 40, 80]);
+      const msg = e?.timeout ? 'Tiempo agotado' : 'Sin conexión';
+      toast('Error: ' + msg, 'danger', 8000);
+      _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
+    }
+  }
+
+
   function abrirPickupPendiente() {
     if (!_pickupsPendientes.length) return;
-    _pickupActivo = _pickupsPendientes[0];
-    _runMatching(_pickupActivo);
+    abrirPickup(_pickupsPendientes[0].idPickup);
+  }
+
+  // Abrir un pickup específico por idPickup (botón "Jalar"/"Continuar" en la lista)
+  function abrirPickup(idPickup) {
+    const p = _pickupsPendientes.find(x => String(x.idPickup) === String(idPickup));
+    if (!p) return;
+    // Si el pickup tiene skuBase en items → flujo moderno checklist (ME)
+    const tieneSku = Array.isArray(p.items) && p.items.some(it => it && it.skuBase);
+    if (tieneSku) {
+      // Inicializar estructura limpia para tracking
+      _pickupActivo = {
+        ...p,
+        items: (p.items || []).map(it => ({
+          skuBase:           it.skuBase,
+          nombre:            it.nombre || it.skuBase,
+          solicitado:        parseFloat(it.solicitado) || 0,
+          despachado:        parseFloat(it.despachado) || 0,
+          codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
+          despachadoPorCodigo: it.despachadoPorCodigo || {}
+        }))
+      };
+      _savePickup();
+      try { SoundFX.beep(); } catch(_){}
+      vibrate(15);
+      // Ocultar secciones legacy y mostrar checklist
+      document.getElementById('despPickSecExactos').classList.add('hidden');
+      document.getElementById('despPickSecParciales').classList.add('hidden');
+      document.getElementById('despPickSecNoFound').classList.add('hidden');
+      document.getElementById('despPickTitulo').textContent = 'Pickup ' + (p.idPickup || '');
+      document.getElementById('despPickSub').textContent =
+        `${p.idZona || '—'} · ${p.creadoPor || 'cajero'} · ${p.fuente || ''}`;
+      _renderPickupChecklistInSheet();
+      _renderPickupActivoBanner();
+      abrirSheet('sheetDespPickup');
+      return;
+    }
+    // Fallback legacy: pickup sin skuBase (n8n viejo) → fuzzy match con 3 secciones
+    _pickupActivo = p;
+    try { SoundFX.beep(); } catch(_){}
+    _runMatching(p);
     abrirSheet('sheetDespPickup');
   }
 
@@ -7117,11 +7695,42 @@ const DespachoView = (() => {
     const stockMap = {};
     OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
 
+    // Items con skuBase + codigosOriginales (vienen del cierre de caja ME)
+    // resuelven DIRECTO al producto del catálogo — sin fuzzy match.
+    const productosMaster = App.getProductosMaestro ? App.getProductosMaestro() : [];
+    function _resolverDirecto(item) {
+      // 1. Por idProducto = skuBase
+      let prod = productosMaster.find(p => String(p.idProducto) === String(item.skuBase));
+      if (prod) return prod;
+      // 2. Por cualquier codigoOriginal en codigosOriginales
+      if (Array.isArray(item.codigosOriginales)) {
+        for (const cod of item.codigosOriginales) {
+          prod = productosMaster.find(p => String(p.codigoBarra) === String(cod) || String(p.idProducto) === String(cod));
+          if (prod) return prod;
+        }
+      }
+      return null;
+    }
+
     _matchResults = items.map(item => {
-      const { producto, score } = _bestMatch(item.nombre);
+      // Caso ME (skuBase explícito): resolver directo, sin fuzzy.
+      const qty = parseInt(item.qty || item.solicitado) || 0;
+      const nombreBusq = item.nombre || item.skuBase || '';
+      if (item.skuBase) {
+        const prod = _resolverDirecto(item);
+        if (prod) {
+          const stockDisp = parseFloat((stockMap[prod.idProducto] || {}).cantidadDisponible || 0);
+          return { nombre: nombreBusq, qty, producto: prod, score: 1, status: 'exacto', accepted: true, stockDisp,
+                   skuBase: item.skuBase, codigosOriginales: item.codigosOriginales || [] };
+        }
+        // Si no resuelve directo, caer a fuzzy como fallback
+      }
+      // Fallback fuzzy match por nombre cuando el item llega sin skuBase resoluble
+      const { producto, score } = _bestMatch(nombreBusq);
       const stockDisp = producto ? parseFloat((stockMap[producto.idProducto] || {}).cantidadDisponible || 0) : 0;
       const status = score >= 0.75 ? 'exacto' : score >= 0.35 ? 'parcial' : 'nofound';
-      return { nombre: item.nombre, qty: parseInt(item.qty) || 0, producto, score, status, accepted: status === 'exacto', stockDisp };
+      return { nombre: nombreBusq, qty, producto, score, status, accepted: status === 'exacto', stockDisp,
+               skuBase: item.skuBase || '', codigosOriginales: item.codigosOriginales || [] };
     });
 
     // Render las 3 secciones
@@ -7261,7 +7870,8 @@ const DespachoView = (() => {
            incQty, decQty, blurQty, quitarItem,
            finalizar, confirmarDespacho, cancelar,
            badgeUpdate, startPoll,
-           abrirPickupPendiente, elegirMatchParcial, confirmarPickup };
+           abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
+           empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo };
 })();
 
 // ════════════════════════════════════════════════

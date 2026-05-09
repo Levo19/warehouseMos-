@@ -87,5 +87,33 @@ const SoundFX = (() => {
 
     // Ping notificación — para nuevos pendientes
     ping: () => _tone(2200, 0.10, 'sine', 0.7),
+
+    // Click suave — para ajustes manuales +/- (no satura al repetirse)
+    click: () => _tone(1100, 0.04, 'sine', 0.4),
+
+    // Pickup nuevo — alerta fuerte y repetida (almacén con ruido).
+    // 3 ciclos de tonos urgentes para que se escuche aunque haya ruido.
+    pickupAlerta: () => {
+      _tone(1800, 0.20, 'square', 1.0, 0.00);
+      _tone(2400, 0.20, 'square', 1.0, 0.22);
+      _tone(1800, 0.20, 'square', 1.0, 0.55);
+      _tone(2400, 0.20, 'square', 1.0, 0.77);
+      _tone(1800, 0.30, 'square', 1.0, 1.10);
+      _tone(2400, 0.40, 'square', 1.0, 1.35);
+    },
+
+    // Pickup completado — chime grande de éxito (4 notas ascendentes).
+    pickupOk: () => {
+      _tone(523,  0.12, 'triangle', 0.85, 0.00);  // C5
+      _tone(659,  0.12, 'triangle', 0.90, 0.13);  // E5
+      _tone(784,  0.14, 'triangle', 0.95, 0.26);  // G5
+      _tone(1047, 0.30, 'sine',     1.00, 0.40);  // C6 sustained
+    },
+
+    // Pickup item completo — beep agudo + chime corto (sentido de "ok marcado")
+    pickupItemOk: () => {
+      _tone(2200, 0.08, 'sine', 0.7, 0.00);
+      _tone(2800, 0.18, 'sine', 0.8, 0.08);
+    },
   };
 })();
