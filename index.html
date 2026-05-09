@@ -1538,6 +1538,19 @@
   <div class="wh-upd-dots"><span></span><span></span><span></span></div>
 </div>
 
+<!-- ── Verificación de dispositivo (candado) — visible desde el inicio ────────
+     Tapa toda la app hasta que MOS confirme que el dispositivo está ACTIVO.
+     Estados manejados por _verificarDispositivoWH(): cargando → activo |
+     no_registrado | pendiente | inactivo | error_red. -->
+<div id="verifDispScreen"
+     style="position:fixed;inset:0;z-index:9998;background:linear-gradient(135deg,#0c1426,#1e293b);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;">
+  <div style="text-align:center;max-width:400px;">
+    <div style="font-size:64px;margin-bottom:16px;">🔄</div>
+    <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;color:#f8fafc;">Verificando dispositivo</h2>
+    <p style="font-size:13px;color:#94a3b8;">Conectando con MOS...</p>
+  </div>
+</div>
+
 <!-- ── WELCOME OVERLAY (post-login) ───────────────── -->
 <div id="welcomeOverlay" style="display:none;position:fixed;inset:0;z-index:9000;
      background:linear-gradient(135deg,#0a1424 0%,#1e293b 50%,#0a1424 100%);
