@@ -7328,13 +7328,15 @@ const DespachoView = (() => {
     }) || null;
   }
 
-  // ¿Producto envasable / por peso?
-  function _esProductoKg(prod) {
+  // ¿Producto por peso (granel)? Solo la unidad de medida lo determina.
+  // KGM (kilogramos, estándar SUNAT) y variantes locales. Es independiente de
+  // si es envasable o no — un granel puede ser canónico (ajo entero pelado)
+  // o un derivado que también se vende a granel (ajo en polvo). Ambos KGM.
+  // Nota: factorConversion ≠ 1 indica envasado/derivado, NO determina decimal.
+  function _esProductoPeso(prod) {
     if (!prod) return false;
-    const u = String(prod.unidad || '').toUpperCase();
-    if (u === 'KGM' || u === 'KG' || u === 'KGS') return true;
-    if (parseFloat(prod.factorConversion || 1) !== 1) return true;
-    return false;
+    const u = String(prod.unidad || '').toUpperCase().trim();
+    return u === 'KGM' || u === 'KG' || u === 'KGS' || u === 'GMS' || u === 'G';
   }
 
   // Intenta sumar al item del pickup que matchee. Retorna true si lo absorbió.
@@ -7347,9 +7349,9 @@ const DespachoView = (() => {
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
 
-    // ── Producto envasable: pedir cantidad ────────────────────
-    if (_esProductoKg(prod)) {
-      _abrirModalQtyKg(prod, item, cb, prevDesp, sol);
+    // ── Producto a granel (KGM): pedir peso decimal ───────────
+    if (_esProductoPeso(prod)) {
+      _abrirModalQtyGranel(prod, item, cb, prevDesp, sol);
       return true; // absorbido (modal lo confirmará después)
     }
 
@@ -7434,12 +7436,20 @@ const DespachoView = (() => {
     }, 4000);
   }
 
-  // ── Modal: producto envasable (kg) — pedir cantidad decimal ──
-  function _abrirModalQtyKg(prod, item, cb, prevDesp, sol) {
+  // ── Modal: producto a granel (KGM) — pedir peso decimal ──────
+  // Aplica a TODOS los productos cuya unidad sea KGM (granel), sean
+  // canónicos (ajo entero pelado) o derivados a granel (ajo en polvo).
+  // No tiene relación con "envasable": un envasable común se cuenta en NIU.
+  function _abrirModalQtyGranel(prod, item, cb, prevDesp, sol) {
     const overlay = document.getElementById('pkckModalQtyKg');
     if (!overlay) return;
+    const u = String(prod.unidad || 'kg').toLowerCase();
     document.getElementById('pkckModalQtyName').textContent = prod.descripcion || item.nombre || cb;
-    document.getElementById('pkckModalQtyMeta').textContent = `Pendiente: ${fmt(sol - prevDesp, 2)} kg · Ya despachado: ${fmt(prevDesp, 2)} kg`;
+    document.getElementById('pkckModalQtyMeta').textContent =
+      `Pendiente: ${fmt(sol - prevDesp, 3)} ${u} · Ya despachado: ${fmt(prevDesp, 3)} ${u}`;
+    // Cambiar el sufijo del botón confirmar a la unidad real
+    const okBtn = document.getElementById('pkckModalQtyOk');
+    if (okBtn) okBtn.textContent = 'Confirmar ' + u;
     const input = document.getElementById('pkckModalQtyInput');
     input.value = '';
     overlay.style.display = 'flex';
@@ -7447,9 +7457,9 @@ const DespachoView = (() => {
 
     const _close = () => { overlay.style.display = 'none'; };
     document.getElementById('pkckModalQtyCancel').onclick = _close;
-    document.getElementById('pkckModalQtyOk').onclick = () => {
+    okBtn.onclick = () => {
       const qty = parseFloat(String(input.value).replace(',', '.'));
-      if (!qty || qty <= 0) { toast('Ingresa una cantidad válida', 'warn'); return; }
+      if (!qty || qty <= 0) { toast('Ingresa un peso válido', 'warn'); return; }
       item.despachado = (parseFloat(item.despachado) || 0) + qty;
       item.despachadoPorCodigo = item.despachadoPorCodigo || {};
       item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + qty;
@@ -7466,7 +7476,7 @@ const DespachoView = (() => {
       _scheduleAutosavePickup();
       _close();
     };
-    input.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('pkckModalQtyOk').click(); };
+    input.onkeydown = (e) => { if (e.key === 'Enter') okBtn.click(); };
   }
 
   // ── Modal: sobrescaneado — confirmar o deshacer ──
@@ -7554,12 +7564,10 @@ const DespachoView = (() => {
       const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
       const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
-      // Producto maestro para detectar envasable / unidad
+      // Producto maestro para detectar si es a granel (despacho decimal)
       const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
-      const esKg = prod && (
-        String(prod.unidad || '').toUpperCase() === 'KGM' ||
-        parseFloat(prod.factorConversion || 1) !== 1
-      );
+      const esKg = _esProductoPeso(prod);
+      const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
       // Stock badge — rojo si stockDisp < solicitado pendiente
       let stockBadge = '';
       const pendiente = sol - desp;
@@ -7570,7 +7578,9 @@ const DespachoView = (() => {
       } else {
         stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmt(stockD,1)}</span>`;
       }
-      const kgBadge = esKg ? '<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800">⚖ KG</span>' : '';
+      const kgBadge = esKg
+        ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800;letter-spacing:.04em" title="Producto a granel · despacho por peso">⚖ GRANEL · ${unidadLbl}</span>`
+        : '';
       return `
         <div class="pkck-card ${cls} ${flash}" data-sku="${escAttr(it.skuBase)}">
           <div class="pkck-row">
