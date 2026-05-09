@@ -95,6 +95,20 @@ function cerrarAlertaPickupNuevo() {
 window.mostrarAlertaPickupNuevo = mostrarAlertaPickupNuevo;
 window.cerrarAlertaPickupNuevo  = cerrarAlertaPickupNuevo;
 
+// Test rápido desde DevTools console — valida overlay + sonido + voz sin
+// esperar un pickup real. Uso: _testAlertaPickup()
+window._testAlertaPickup = function(zona) {
+  mostrarAlertaPickupNuevo({
+    idZona: zona || 'ZONA-DEMO',
+    creadoPor: 'tester',
+    items: [
+      { skuBase: 'TEST001', solicitado: 5 },
+      { skuBase: 'TEST002', solicitado: 3 },
+      { skuBase: 'TEST003', solicitado: 12 }
+    ]
+  });
+};
+
 // ════════════════════════════════════════════════
 // Long press handler
 // ════════════════════════════════════════════════
@@ -7166,9 +7180,19 @@ const DespachoView = (() => {
   }
 
   // ── Badge global (carrito + pickups pendientes) ─────────────
+  const PICKUPS_SNAPSHOT_KEY = 'wh_pickups_snapshot_ids';
   let _pickupsPendientes = [];
-  let _ultimosIdsPickups = new Set(); // para detectar nuevos llegados
+  // Snapshot persistente — sobrevive refresh para que el detector "nuevo"
+  // funcione aunque cierres la app justo cuando llega un pickup.
+  let _ultimosIdsPickups = new Set(_loadIdsSnapshot());
   let _pollTimer = null;
+  function _loadIdsSnapshot() {
+    try { return JSON.parse(localStorage.getItem(PICKUPS_SNAPSHOT_KEY) || '[]') || []; }
+    catch { return []; }
+  }
+  function _saveIdsSnapshot(idsArr) {
+    try { localStorage.setItem(PICKUPS_SNAPSHOT_KEY, JSON.stringify(idsArr || [])); } catch(_){}
+  }
 
   function badgeUpdate() {
     _cart = _loadCart();
@@ -7286,10 +7310,14 @@ const DespachoView = (() => {
     const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
     const lista = (res && res.ok) ? (res.data || []) : [];
     const idsActuales = new Set(lista.map(p => p.idPickup));
-    const esPrimeraCarga = _ultimosIdsPickups.size === 0 && _pickupsPendientes.length === 0;
-    const nuevos = esPrimeraCarga ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');
+    // "Primera carga real" = no hay snapshot previo guardado en localStorage.
+    // Si hay snapshot (aunque sea vacío []), es continuación de sesión y los
+    // IDs nuevos cuentan como recién llegados aunque hayan venido entre sesiones.
+    const huboSnapshot = localStorage.getItem(PICKUPS_SNAPSHOT_KEY) !== null;
+    const nuevos = !huboSnapshot ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');
     _pickupsPendientes = lista;
     _ultimosIdsPickups = idsActuales;
+    _saveIdsSnapshot([...idsActuales]);
     badgeUpdate();
     if (nuevos.length > 0) {
       // Snooze: si ya estoy despachando un pickup, no abrir overlay fullscreen.
