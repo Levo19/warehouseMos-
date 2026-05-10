@@ -2627,9 +2627,17 @@
   ════════════════════════════════════════════════ -->
   <script>
   (function(){
-    const PERMS = ['notifications', 'camera', 'microphone', 'geolocation', 'audio'];
+    const PERMS = ['notifications', 'camera', 'microphone', 'geolocation', 'audio', 'install'];
     let _stateActual = {}; // perm → 'granted' | 'denied' | 'prompt'
     const AUDIO_TEST_KEY = 'wh_audio_tested_v';
+
+    // Capturar prompt de instalación PWA (Chrome/Edge)
+    let _installPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      _installPrompt = e;
+    });
+    window.addEventListener('appinstalled', () => { _installPrompt = null; });
 
     // Cache de dispositivos físicos detectados — se llena una vez al cargar wizard.
     // Sirve para marcar como 'unsupported' permisos cuyo hardware no existe
@@ -2675,6 +2683,20 @@
           return localStorage.getItem(AUDIO_TEST_KEY + v) === '1' ? 'granted' : 'prompt';
         } catch(_) { return 'prompt'; }
       }
+      if (perm === 'install') {
+        // Ya instalada (display-mode standalone o iOS standalone)
+        const standalone = window.matchMedia?.('(display-mode: standalone)').matches
+                        || window.navigator.standalone === true;
+        if (standalone) return 'granted';
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        // iOS: si ya mostramos instrucciones esta versión, marcar granted
+        try {
+          const v = window._WH_PERMS_VERSION || 'unk';
+          if (localStorage.getItem('wh_install_dismissed_v' + v) === '1') return 'granted';
+        } catch(_){}
+        if (isIOS) return 'prompt';
+        return _installPrompt ? 'prompt' : 'unsupported';
+      }
       // resto: navigator.permissions.query
       if (!navigator.permissions?.query) return 'prompt'; // browser viejo: pedir igual
       try {
@@ -2714,7 +2736,11 @@
           if (btn) { btn.className = 'wh-perm-status is-ok'; btn.textContent = 'N/A'; btn.disabled = true; }
         } else {
           pendientes++;
-          if (btn) { btn.className = 'wh-perm-status is-pedir'; btn.textContent = 'AUTORIZAR'; btn.disabled = false; }
+          if (btn) {
+            btn.className = 'wh-perm-status is-pedir';
+            btn.textContent = (p === 'audio') ? 'PROBAR' : (p === 'install') ? 'INSTALAR' : 'AUTORIZAR';
+            btn.disabled = false;
+          }
         }
       }
       const prog = document.getElementById('whPermsProgress');
@@ -2754,6 +2780,24 @@
           await new Promise((res, rej) => {
             navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 });
           });
+        } else if (perm === 'install') {
+          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+          if (isIOS) {
+            alert('📱 Instalar en iOS:\n\n1. Toca el botón Compartir (cuadrado con flecha)\n2. Desliza y elige "Añadir a inicio"\n3. Toca "Añadir" arriba a la derecha\n\nLa app aparecerá en tu pantalla de inicio como nativa.');
+            // Marcar como granted manual — el usuario ya recibió las instrucciones
+            try {
+              const v = window._WH_PERMS_VERSION || 'unk';
+              localStorage.setItem('wh_install_dismissed_v' + v, '1');
+            } catch(_){}
+          } else if (_installPrompt) {
+            try {
+              _installPrompt.prompt();
+              const result = await _installPrompt.userChoice;
+              if (result.outcome === 'accepted') {
+                _installPrompt = null;
+              }
+            } catch(_){}
+          }
         } else if (perm === 'audio') {
           // No hay API de permisos. Hacemos prueba real:
           // 1. Beep corto via Web Audio API (desbloquea autoplay)
@@ -3173,6 +3217,16 @@
       </div>
       <button class="wh-perm-status is-pedir"
               onclick="WhPerms.pedir('audio')">PROBAR</button>
+    </div>
+
+    <div class="wh-perm-card" data-perm="install">
+      <span class="wh-perm-icon">📱</span>
+      <div class="flex-1 min-w-0">
+        <p class="wh-perm-name">Instalar como app</p>
+        <p class="wh-perm-desc">Acceso directo desde la pantalla de inicio. Funciona offline y se ve como nativa.</p>
+      </div>
+      <button class="wh-perm-status is-pedir"
+              onclick="WhPerms.pedir('install')">INSTALAR</button>
     </div>
 
     <div class="wh-perms-footer">

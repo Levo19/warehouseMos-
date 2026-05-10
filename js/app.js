@@ -1526,8 +1526,10 @@ const Session = (() => {
         <div style="text-align:center;max-width:400px;">
           <div style="font-size:64px;margin-bottom:16px;">🔒</div>
           <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#f8fafc;">Dispositivo no autorizado</h2>
-          <p style="font-size:14px;color:#94a3b8;margin-bottom:24px;">Este dispositivo no tiene permiso para usar warehouseMos. Solicitá acceso al administrador.</p>
-          <button id="btnSolicitarAcceso" style="background:linear-gradient(135deg,#f59e0b,#d97706);color:#0b1220;border:none;padding:14px 24px;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(245,158,11,0.4);">📨 Solicitar acceso</button>
+          <p style="font-size:14px;color:#94a3b8;margin-bottom:20px;">Este dispositivo no tiene permiso para usar warehouseMos.</p>
+          <button id="btnSolicitarAcceso" style="display:block;width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#0b1220;border:none;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(245,158,11,0.4);margin-bottom:10px;">📨 Solicitar acceso al admin (remoto)</button>
+          <div style="font-size:11px;color:#64748b;margin:14px 0 10px;letter-spacing:.05em">─ o si está un admin contigo ─</div>
+          <button id="btnActivarInSitu" style="display:block;width:100%;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(16,185,129,.5);">🔑 Activar in-situ (admin presente)</button>
           <p style="font-size:11px;color:#64748b;margin-top:24px;font-family:'SF Mono',Menlo,monospace;">UUID: ${(typeof window._getDeviceIdWH==='function'?window._getDeviceIdWH():'').substring(0,12)}...</p>
         </div>`;
     } else if (tipo === 'pendiente') {
@@ -1567,6 +1569,8 @@ const Session = (() => {
     el.innerHTML = html;
     const btn = document.getElementById('btnSolicitarAcceso');
     if (btn) btn.onclick = _solicitarAccesoDispositivo;
+    const btnInSitu = document.getElementById('btnActivarInSitu');
+    if (btnInSitu) btnInSitu.onclick = _abrirModalActivarInSitu;
     const btnRetry = document.getElementById('btnReintentarVerif');
     if (btnRetry) btnRetry.onclick = async () => {
       btnRetry.disabled = true;
@@ -1575,6 +1579,102 @@ const Session = (() => {
       if (r === 'ACTIVO') {
         // Continuar con el flujo normal de la app después de salir del candado
         if (typeof Session !== 'undefined' && Session.init) Session.init();
+      }
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // ACTIVACIÓN IN-SITU — admin presente con clave 8 dígitos.
+  // El admin escribe los 8 dig (4 globales + 4 PIN personal) y aprueba al
+  // instante el dispositivo. Mismo flujo que anulaciones de venta o
+  // conversión de NV→CPE en otras apps. Requiere endpoint MOS
+  // aprobarDispositivoEnSitu (gas/Config.gs).
+  // ════════════════════════════════════════════════════════════════════
+  function _abrirModalActivarInSitu() {
+    const ua = (navigator.userAgent || '').substring(0, 80);
+    const esMobile = /iPhone|Android|Mobile|iPad/i.test(navigator.userAgent || '');
+    const prefix   = esMobile ? 'Mobile' : 'Desktop';
+    const ahora    = new Date();
+    const hh       = String(ahora.getHours()).padStart(2, '0');
+    const mm       = String(ahora.getMinutes()).padStart(2, '0');
+    const nomDef   = prefix + ' WH ' + hh + ':' + mm;
+
+    const modal = document.createElement('div');
+    modal.id = 'modalActivarInSitu';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(2,6,23,.85);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:20px;';
+    modal.innerHTML = `
+      <div style="max-width:420px;width:100%;border-radius:20px;padding:22px;background:linear-gradient(135deg,#1e293b,#0f172a);border:1.5px solid rgba(16,185,129,.5);box-shadow:0 30px 60px -10px rgba(0,0,0,.65);">
+        <div style="font-size:36px;margin-bottom:8px">🔑</div>
+        <p style="font-size:1.05em;font-weight:900;color:#f1f5f9;margin-bottom:4px">Activar dispositivo</p>
+        <p style="font-size:.78em;color:#94a3b8;margin-bottom:16px">Un administrador autoriza este dispositivo en este momento con su clave de 8 dígitos.</p>
+        <label style="display:block;font-size:.7em;font-weight:700;color:#94a3b8;margin-bottom:4px;letter-spacing:.04em">NOMBRE DEL DISPOSITIVO</label>
+        <input id="actInsNombre" type="text" value="${escAttr(nomDef)}"
+               style="width:100%;padding:12px;border-radius:10px;background:rgba(15,23,42,.7);border:1.5px solid rgba(51,65,85,.6);color:#f1f5f9;font-size:.92em;outline:none;margin-bottom:14px"
+               placeholder="ej: Tablet WH almacén central">
+        <label style="display:block;font-size:.7em;font-weight:700;color:#94a3b8;margin-bottom:4px;letter-spacing:.04em">CLAVE ADMIN (8 DÍGITOS)</label>
+        <input id="actInsClave" type="password" inputmode="numeric" maxlength="8" pattern="[0-9]{8}"
+               style="width:100%;padding:14px;border-radius:10px;background:rgba(15,23,42,.7);border:1.5px solid rgba(16,185,129,.4);color:#f1f5f9;font-size:1.3em;font-weight:900;letter-spacing:.4em;text-align:center;outline:none;margin-bottom:6px"
+               placeholder="••••••••" autocomplete="off">
+        <p style="font-size:.62em;color:#64748b;margin-bottom:14px;letter-spacing:.04em">Clave global (4) + PIN personal del admin (4)</p>
+        <p id="actInsErr" style="font-size:.75em;color:#fca5a5;margin-bottom:10px;min-height:18px;text-align:center"></p>
+        <div style="display:flex;gap:8px">
+          <button id="actInsCancel" style="flex:1;padding:13px;border-radius:11px;border:1px solid rgba(71,85,105,.55);background:rgba(71,85,105,.3);color:#cbd5e1;font-size:.85em;font-weight:800;cursor:pointer">Cancelar</button>
+          <button id="actInsOk" style="flex:1;padding:13px;border-radius:11px;border:none;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:.85em;font-weight:900;cursor:pointer;box-shadow:0 6px 16px -3px rgba(16,185,129,.5)">✓ ACTIVAR</button>
+        </div>
+        <p style="font-size:.6em;color:#64748b;margin-top:14px;text-align:center;font-family:monospace">UUID: ${(typeof window._getDeviceIdWH==='function'?window._getDeviceIdWH():'').substring(0, 16)}...</p>
+      </div>`;
+    document.body.appendChild(modal);
+    setTimeout(() => document.getElementById('actInsClave')?.focus(), 100);
+
+    document.getElementById('actInsCancel').onclick = () => modal.remove();
+    document.getElementById('actInsOk').onclick = async () => {
+      const nombre = document.getElementById('actInsNombre').value.trim() || nomDef;
+      const clave  = document.getElementById('actInsClave').value.trim();
+      const errEl  = document.getElementById('actInsErr');
+      const okBtn  = document.getElementById('actInsOk');
+      errEl.textContent = '';
+      if (!/^\d{8}$/.test(clave)) { errEl.textContent = 'La clave debe ser 8 dígitos numéricos'; return; }
+      okBtn.disabled = true; okBtn.textContent = '⌛ Validando...';
+      const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+      const devId  = window._getDeviceIdWH ? window._getDeviceIdWH() : '';
+      try {
+        const res = await fetch(mosUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'aprobarDispositivoEnSitu',
+            deviceId: devId,
+            nombreEquipo: nombre,
+            app: 'warehouseMos',
+            userAgent: ua,
+            claveAdmin: clave
+          })
+        });
+        const j = await res.json();
+        if (!j.ok) { errEl.textContent = j.error || 'Error de conexión'; okBtn.disabled = false; okBtn.textContent = '✓ ACTIVAR'; return; }
+        if (!j.data?.autorizado) {
+          errEl.textContent = j.data?.error || 'Clave incorrecta';
+          okBtn.disabled = false; okBtn.textContent = '✓ ACTIVAR';
+          try { SoundFX?.warn?.(); } catch(_){}
+          vibrate([60, 30, 60]);
+          return;
+        }
+        // ✓ Aprobado
+        try { SoundFX?.done?.(); } catch(_){}
+        vibrate([30, 30, 60]);
+        try { localStorage.setItem('wh_perms_check_pending', '1'); } catch(_){}
+        modal.remove();
+        // Quitar pantalla bloqueo y arrancar la app
+        const verif = document.getElementById('verifDispScreen');
+        if (verif) verif.remove();
+        toast(`✓ Aprobado por ${j.data.aprobadoPor || 'admin'} · iniciando...`, 'ok', 3000);
+        setTimeout(() => {
+          if (typeof Session !== 'undefined' && Session.init) Session.init();
+          // Disparar wizard de permisos automáticamente
+          if (window.WhPerms?.auto) window.WhPerms.auto();
+        }, 700);
+      } catch (e) {
+        errEl.textContent = 'Sin conexión con MOS';
+        okBtn.disabled = false; okBtn.textContent = '✓ ACTIVAR';
       }
     };
   }
