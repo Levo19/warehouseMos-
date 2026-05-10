@@ -6290,64 +6290,229 @@ const DespachoView = (() => {
 
   function cargar() {
     _cart = _loadCart();
-    // Rehidratar pickup activo desde localStorage (sobrevive refresh del browser)
+    // Rehidratar pickup activo desde localStorage (sobrevive refresh del browser
+    // y navegación entre módulos — el operador puede ir a otra vista y volver
+    // sin perder el progreso del despacho).
     const pSaved = _loadPickup();
     if (pSaved) _pickupActivo = pSaved;
     _renderCart();
     _updateFooter();
     _renderHist();
     _renderPickupActivoBanner();
+    _renderPickupChecklistInline();
+    _renderExtrasSection();
+    _updateGenerarBtn();
     badgeUpdate();
     // Sync con backend en background — detecta si fue cerrado por otro/timeout
     if (pSaved) _sincronizarPickupActivo();
   }
 
+  // ── Render del checklist inline (en view-despacho, debajo de cám/scan) ──
+  // Reemplaza el sheet modal — todo va en una sola vista.
+  function _renderPickupChecklistInline() {
+    const cont = document.getElementById('despPickupChecklistInline');
+    if (!cont) return;
+    if (!_pickupActivo) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+    const items = _pickupActivo.items || [];
+    if (!items.length) { cont.style.display = 'none'; return; }
+
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+
+    // Orden: pendientes primero, completados al final
+    const sorted = items.slice().sort((a, b) => {
+      const aP = (parseFloat(a.despachado)||0) < (parseFloat(a.solicitado)||0) ? 0 : 1;
+      const bP = (parseFloat(b.despachado)||0) < (parseFloat(b.solicitado)||0) ? 0 : 1;
+      if (aP !== bP) return aP - bP;
+      return String(a.nombre).localeCompare(String(b.nombre));
+    });
+
+    cont.style.display = 'block';
+    cont.innerHTML = sorted.map(it => {
+      const sol  = parseFloat(it.solicitado) || 0;
+      const desp = parseFloat(it.despachado) || 0;
+      const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
+      const completo  = desp >= sol && sol > 0;
+      const enProg    = desp > 0 && desp < sol;
+      const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
+      const stockD    = parseFloat((stockMap[it.skuBase] || {}).cantidadDisponible || 0);
+      const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
+      const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
+      const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
+      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
+      const esKg = _esProductoPeso(prod);
+      const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
+      const pendiente = sol - desp;
+      let stockBadge = '';
+      if (stockD <= 0) {
+        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px">sin cache</span>';
+      } else if (stockD < pendiente) {
+        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)}</span>`;
+      } else {
+        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmt(stockD,1)}</span>`;
+      }
+      const kgBadge = esKg
+        ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800">⚖ ${unidadLbl}</span>`
+        : '';
+      return `
+        <div class="pkck-card ${cls}" data-sku="${escAttr(it.skuBase)}">
+          <div class="pkck-row">
+            <div class="pkck-icon">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}${kgBadge}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
+            </div>
+            <div class="pkck-qty-wrap">
+              <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
+              <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
+            </div>
+          </div>
+          <div class="pkck-bar-wrap">
+            <div class="pkck-bar-fill" style="width:${pct}%"></div>
+            ${enProg ? '<div class="pkck-bar-shimmer"></div>' : ''}
+          </div>
+          <div class="pkck-check-overlay">✓</div>
+        </div>`;
+    }).join('');
+  }
+
+  // Render sección extras (items escaneados fuera del pickup activo)
+  function _renderExtrasSection() {
+    const sec = document.getElementById('despExtrasSection');
+    const list = document.getElementById('despExtrasList');
+    if (!sec || !list) return;
+    if (!_pickupActivo) { sec.style.display = 'none'; return; }
+    const extras = _cart.filter(c => c._extraPickup);
+    if (!extras.length) { sec.style.display = 'none'; return; }
+    sec.style.display = 'block';
+    list.innerHTML = extras.map(c => `
+      <div class="card-sm flex items-center gap-2" style="padding:7px 10px">
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold truncate">${escHtml(c.descripcion)}</p>
+          <p class="text-[10px] text-slate-500 font-mono">${escHtml(c.codigoBarra)}</p>
+        </div>
+        <span class="text-sm font-bold text-amber-300">×${c.cantidad}</span>
+        <button onclick="DespachoView.quitarItem('${escAttr(c.codigoBarra)}')"
+                style="padding:4px 8px;border-radius:7px;border:none;cursor:pointer;
+                       background:rgba(239,68,68,.18);color:#fca5a5;font-size:.7em">✕</button>
+      </div>
+    `).join('');
+  }
+
+  // Actualiza el botón único "GENERAR GUÍA" según contexto
+  function _updateGenerarBtn() {
+    const btn  = document.getElementById('despBtnGenerarGuia');
+    const txt  = document.getElementById('despBtnGenerarTxt');
+    const hint = document.getElementById('despBtnGenerarHint');
+    if (!btn) return;
+    if (_pickupActivo) {
+      const items = _pickupActivo.items || [];
+      const totalDesp = items.reduce((s,it) => s + (parseFloat(it.despachado)||0), 0);
+      const extras = _cart.filter(c => c._extraPickup);
+      const haySomething = totalDesp > 0 || extras.length > 0;
+      const completo = items.length > 0 && items.every(it =>
+        (parseFloat(it.despachado)||0) >= (parseFloat(it.solicitado)||0));
+      btn.disabled = !haySomething;
+      if (txt) {
+        if (!haySomething) txt.textContent = 'GENERAR GUÍA · escanea primero';
+        else if (completo) txt.textContent = 'GENERAR GUÍA · ✓ completo';
+        else {
+          const falt = items.filter(it => (parseFloat(it.despachado)||0) < (parseFloat(it.solicitado)||0)).length;
+          txt.textContent = `GENERAR GUÍA · faltan ${falt} item${falt!==1?'s':''}`;
+        }
+      }
+      if (hint) hint.textContent = haySomething
+        ? (completo ? '¡Todo despachado! · pulsa para emitir guía' : 'Los faltantes irán en la observación')
+        : 'Escanea cada producto del pickup para registrarlo';
+    } else {
+      const n = _cart.length;
+      btn.disabled = n === 0;
+      if (txt) txt.textContent = n === 0 ? 'GENERAR GUÍA · escanea primero' : `GENERAR GUÍA · ${n} producto${n!==1?'s':''}`;
+      if (hint) hint.textContent = n === 0 ? 'Abre la cámara o el scan para empezar' : 'Pulsa para emitir guía de salida';
+    }
+  }
+
+  // Botón único "Generar guía" — decide ruta según haya pickup activo o no
+  function generarGuia() {
+    if (_pickupActivo) {
+      const items = _pickupActivo.items || [];
+      const completo = items.length > 0 && items.every(it =>
+        (parseFloat(it.despachado)||0) >= (parseFloat(it.solicitado)||0));
+      cerrarDespachoPickup(!completo);
+      return;
+    }
+    finalizar(); // flujo legacy carrito → sheet de finalizar
+  }
+
   function pauseCamera() { Scanner.stop(); }
 
-  // ── Abrir / cerrar modal cámara ──────────────────────────────
+  // ── Cámara TELÓN inline ───────────────────────────────────
+  // Modo nuevo: el header de view-despacho se colapsa con animación,
+  // un panel cámara aparece desde arriba (slide-down), y la lista del pickup
+  // de abajo permanece intacta. El operador escanea sin perder de vista
+  // su checklist.
   function abrirDespCamara() {
     _despLastHistory = [];
-    const picker = document.getElementById('despCamPicker');
-    if (picker) picker.style.display = 'none';
     _despTorchOn = false;
-    const tb = document.getElementById('despScanTorchBtn');
-    if (tb) tb.style.background = 'rgba(255,255,255,.14)';
-    const zoomWrap  = document.getElementById('despScanZoomWrap');
-    const zoomRange = document.getElementById('despScanZoomRange');
-    if (zoomWrap)  zoomWrap.style.display = 'none';
-    if (zoomRange) { zoomRange.value = 1; document.getElementById('despScanZoomLabel').textContent = '1×'; }
-    _renderDespList();
-    document.getElementById('despScannerModal').style.display = 'flex';
-    _setDespStatus('ready');
-    Scanner.start('despScanVideo', _onDespResult, err => {
+    // Cerrar SCAN inline si estaba abierto
+    const scanPanel = document.getElementById('despScanInlinePanel');
+    if (scanPanel && scanPanel.style.display !== 'none') {
+      scanPanel.style.display = 'none';
+    }
+    // Telón: colapsar header con animación
+    const header = document.getElementById('despHeaderCollapsible');
+    if (header) header.classList.add('is-collapsed');
+    // Panel cámara aparece desde arriba (slide-down)
+    const camPanel = document.getElementById('despCamInlinePanel');
+    if (camPanel) {
+      camPanel.classList.remove('is-closing');
+      camPanel.style.display = 'block';
+    }
+    const statusEl = document.getElementById('despCamInlineStatus');
+    if (statusEl) statusEl.textContent = 'Iniciando cámara…';
+    // Sonido + vibración suaves
+    try { SoundFX.tick && SoundFX.tick(); SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+
+    // Iniciar scanner sobre el video del panel inline
+    Scanner.start('despScanVideoInline', _onDespResult, err => {
       toast('Error cámara: ' + err, 'danger');
-      document.getElementById('despScannerModal').style.display = 'none';
+      cerrarDespCamara();
     }, { continuous: true, cooldown: 1500 });
-    // Auto-torch + zoom init
+
     setTimeout(async () => {
       if (!Scanner.isActive()) return;
-      const zoomCaps = Scanner.getZoomCaps();
-      if (zoomCaps && zoomWrap && zoomRange) {
-        zoomRange.min = zoomCaps.min; zoomRange.max = zoomCaps.max;
-        zoomRange.step = zoomCaps.step || 0.1; zoomRange.value = zoomCaps.min;
-        zoomWrap.style.display = 'flex';
-      }
+      if (statusEl) statusEl.textContent = 'Apunta a un código…';
       const ok = await Scanner.toggleTorch(true);
-      if (ok) { _despTorchOn = true; if (tb) tb.style.background = 'rgba(251,191,36,.9)'; }
-    }, 900);
+      if (ok) { _despTorchOn = true; }
+      const torchBtn = document.getElementById('despCamInlineTorch');
+      if (torchBtn && _despTorchOn) torchBtn.style.background = 'rgba(251,191,36,.85)';
+    }, 700);
   }
 
   function cerrarDespCamara() {
     clearTimeout(_despStatusTimer);
     _despTorchOn = false;
-    Scanner.stop();
-    document.getElementById('despScannerModal').style.display = 'none';
-    const picker = document.getElementById('despCamPicker');
-    if (picker) picker.style.display = 'none';
-    const total = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
-    if (total > 0) { SoundFX.done(); vibrate(25); }
+    try { Scanner.stop(); } catch(_){}
+    const camPanel = document.getElementById('despCamInlinePanel');
+    if (camPanel) {
+      camPanel.classList.add('is-closing');
+      // Esperar fin de animación antes de ocultar
+      setTimeout(() => {
+        camPanel.style.display = 'none';
+        camPanel.classList.remove('is-closing');
+      }, 350);
+    }
+    // Telón: subir el header de vuelta
+    const header = document.getElementById('despHeaderCollapsible');
+    if (header) header.classList.remove('is-collapsed');
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(10);
     _renderCart();
     _updateFooter();
+    _renderExtrasSection();
+    _updateGenerarBtn();
     badgeUpdate();
   }
 
@@ -6592,20 +6757,47 @@ const DespachoView = (() => {
     }
   }
 
-  // ── Inline scan (input directo en vista principal) ──────────
+  // ── SCAN inline TELÓN ──────────────────────────────────────
+  // Mismo patrón que la cámara: header colapsa, panel scan aparece desde arriba.
+  // Input grande para que el operador escriba el código rápido.
   function toggleDespScanInline() {
-    const wrap = document.getElementById('despScanInlineWrap');
-    const btn  = document.getElementById('despScanToggleBtn');
-    if (!wrap) return;
-    const visible = wrap.style.display !== 'none';
-    if (visible) {
-      wrap.style.display = 'none';
-      if (btn) btn.style.background = 'rgba(251,191,36,.06)';
-    } else {
-      wrap.style.display = 'block';
-      if (btn) btn.style.background = 'rgba(251,191,36,.18)';
-      setTimeout(() => { document.getElementById('despScanInlineInput')?.focus(); }, 80);
+    const panel = document.getElementById('despScanInlinePanel');
+    if (!panel) return;
+    const visible = panel.style.display !== 'none';
+    if (visible) { cerrarDespScan(); return; }
+
+    // Cerrar cámara si estaba abierta
+    const camPanel = document.getElementById('despCamInlinePanel');
+    if (camPanel && camPanel.style.display !== 'none') {
+      try { Scanner.stop(); } catch(_){}
+      camPanel.style.display = 'none';
     }
+    // Telón: colapsar header
+    const header = document.getElementById('despHeaderCollapsible');
+    if (header) header.classList.add('is-collapsed');
+    panel.classList.remove('is-closing');
+    panel.style.display = 'block';
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+    setTimeout(() => { document.getElementById('despScanInlineInput')?.focus(); }, 220);
+  }
+
+  function cerrarDespScan() {
+    const panel = document.getElementById('despScanInlinePanel');
+    if (!panel) return;
+    panel.classList.add('is-closing');
+    setTimeout(() => {
+      panel.style.display = 'none';
+      panel.classList.remove('is-closing');
+    }, 320);
+    const header = document.getElementById('despHeaderCollapsible');
+    if (header) header.classList.remove('is-collapsed');
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+    _renderCart();
+    _updateFooter();
+    _updateGenerarBtn();
+    badgeUpdate();
   }
 
   function _cerrarInlinePicker() {
@@ -6967,6 +7159,10 @@ const DespachoView = (() => {
   function _renderCart() {
     const el = document.getElementById('despCartList');
     if (!el) return;
+    // Si hay pickup activo, el carrito legacy se esconde (los extras tienen
+    // su propia sección visual abajo del checklist del pickup).
+    if (_pickupActivo) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
     if (!_cart.length) {
       el.innerHTML = `
         <div class="card text-center py-10">
@@ -7048,12 +7244,9 @@ const DespachoView = (() => {
   }
 
   function _updateFooter() {
-    const n   = _cart.length;
-    const uds = _cart.reduce((s, c) => s + (parseFloat(c.cantidad) || 0), 0);
-    document.getElementById('despProgress').textContent = `${n} producto${n !== 1 ? 's' : ''}`;
-    document.getElementById('despTotalUds').textContent = `${fmt(uds,2)} unidades total`;
-    const btn = document.getElementById('despBtnFinalizar');
-    if (btn) { btn.disabled = n === 0; btn.style.opacity = n === 0 ? '.4' : '1'; }
+    // El footer legacy fue reemplazado por el botón único "Generar Guía" arriba.
+    // Mantengo la función por compat (algunas funciones internas la llaman).
+    _updateGenerarBtn();
   }
 
   function finalizar() {
@@ -7310,12 +7503,14 @@ const DespachoView = (() => {
     const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
     const lista = (res && res.ok) ? (res.data || []) : [];
     const idsActuales = new Set(lista.map(p => p.idPickup));
-    // "Primera carga real" = no hay snapshot previo guardado en localStorage.
-    // Si hay snapshot (aunque sea vacío []), es continuación de sesión y los
-    // IDs nuevos cuentan como recién llegados aunque hayan venido entre sesiones.
     const huboSnapshot = localStorage.getItem(PICKUPS_SNAPSHOT_KEY) !== null;
     const nuevos = !huboSnapshot ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');
-    _pickupsPendientes = lista;
+    // Filtrar el pickup activo para que NO aparezca en la lista de pendientes
+    // (ya está como checklist abajo — duplicar confunde).
+    const activoId = _pickupActivo ? String(_pickupActivo.idPickup) : null;
+    _pickupsPendientes = activoId
+      ? lista.filter(p => String(p.idPickup) !== activoId)
+      : lista;
     _ultimosIdsPickups = idsActuales;
     _saveIdsSnapshot([...idsActuales]);
     badgeUpdate();
@@ -7450,9 +7645,12 @@ const DespachoView = (() => {
     const justCompletado = prevDesp < sol && item.despachado >= sol;
     const sobreDespacho  = item.despachado > sol;
 
-    // Re-render lista checklist + banner activo
+    // Re-render checklist inline + banner activo + botón generar
     _renderPickupChecklistInSheet(item.skuBase);
+    _renderPickupChecklistInline();
     _renderPickupActivoBanner();
+    _renderExtrasSection();
+    _updateGenerarBtn();
     badgeUpdate();
 
     // Sonidos + animaciones según estado
@@ -7979,10 +8177,14 @@ const DespachoView = (() => {
         });
         _renderHist();
 
-        // Limpiar pickup local
+        // Limpiar pickup local + renders inline
         _pickupActivo = null;
         _clearPickup();
         _renderPickupActivoBanner();
+        _renderPickupChecklistInline();
+        _renderExtrasSection();
+        _updateGenerarBtn();
+        _renderCart();
         badgeUpdate();
       } else {
         try { SoundFX.error(); } catch(_){}
@@ -8008,42 +8210,31 @@ const DespachoView = (() => {
 
   // Abrir un pickup específico por idPickup (botón "Jalar"/"Continuar" en la lista)
   // Aplica lock optimista: si otro operador ya lo está atendiendo, no permite abrir.
+  // OPTIMISTA — abrir pickup al instante (sin esperar backend).
+  // Lock al backend en background. Render directo en view-despacho (sin sheet).
+  // Efectos: sonido beepDouble + vibración patrón + voz + toast.
   async function abrirPickup(idPickup) {
     const p = _pickupsPendientes.find(x => String(x.idPickup) === String(idPickup));
     if (!p) return;
     const usuario = window.WH_CONFIG?.usuario || '';
-    // Si tiene atendidoPor distinto, bloquear
     const atp = String(p.atendidoPor || '').trim();
     if (atp && usuario && atp !== usuario) {
       try { SoundFX.warn(); } catch(_){}
+      vibrate([30, 20, 30]);
       toast(`🔒 Lo está atendiendo ${atp}. No se puede tomar.`, 'warn', 3500);
+      _vozAnunciar('Pickup ocupado por ' + atp, { rate: 1.1 });
       return;
     }
-    // Tomar lock vía backend
-    try {
-      const r = await API.actualizarPickup({
-        idPickup: p.idPickup,
-        estado:   p.estado || 'PENDIENTE',
-        lockUsuario: usuario,
-        tomarLock: true
-      });
-      if (r && r.ok === false && r.conflicto) {
-        try { SoundFX.warn(); } catch(_){}
-        toast(`🔒 Lo está atendiendo ${r.atendidoPor || 'otro operador'}`, 'warn', 3500);
-        return;
-      }
-    } catch(_) { /* offline → seguir, el autosave reintentará el lock */ }
 
-    // Si el pickup tiene skuBase en items → flujo moderno checklist (ME)
     const tieneSku = Array.isArray(p.items) && p.items.some(it => it && it.skuBase);
     if (tieneSku) {
-      // Si ya tengo este pickup activo localmente con progreso, NO resetear los items
-      // (sino se pierde lo despachado). Solo reabrir el sheet con la data en RAM.
+      // Setear pickup activo INMEDIATAMENTE (optimista) — el operador ve resultado al toque
       const yaActivo = _pickupActivo && String(_pickupActivo.idPickup) === String(p.idPickup);
       if (!yaActivo) {
         _pickupActivo = {
           ...p,
           atendidoPor: usuario,
+          estado: 'EN_PROCESO',
           items: (p.items || []).map(it => ({
             skuBase:           it.skuBase,
             nombre:            it.nombre || it.skuBase,
@@ -8053,53 +8244,77 @@ const DespachoView = (() => {
             despachadoPorCodigo: it.despachadoPorCodigo || {}
           }))
         };
-        _savePickup();
       } else {
-        // Refrescar metadata pero conservar items (con su progreso local)
-        _pickupActivo.estado      = p.estado || _pickupActivo.estado;
+        // Conservar progreso local, solo refrescar metadata
+        _pickupActivo.estado      = 'EN_PROCESO';
         _pickupActivo.atendidoPor = p.atendidoPor || usuario;
-        _savePickup();
       }
-      try { SoundFX.beep(); } catch(_){}
-      vibrate(15);
-      _pickupSearch = '';
-      _pickupSort = 'pendientes';
-      const inp = document.getElementById('pkckSearchInput');
-      if (inp) inp.value = '';
-      document.getElementById('despPickSecExactos').classList.add('hidden');
-      document.getElementById('despPickSecParciales').classList.add('hidden');
-      document.getElementById('despPickSecNoFound').classList.add('hidden');
-      document.getElementById('despPickTitulo').textContent = 'Pickup ' + (p.idPickup || '');
-      document.getElementById('despPickSub').textContent =
-        `${p.idZona || '—'} · ${p.creadoPor || 'cajero'} · ${p.fuente || ''}`;
-      _renderPickupChecklistInSheet();
+      _savePickup();
+      // Quitar de la lista de pendientes (ya está activo, no debe duplicarse)
+      _pickupsPendientes = _pickupsPendientes.filter(x => String(x.idPickup) !== String(p.idPickup));
+
+      // Efectos sonoros + visuales — feedback inmediato
+      try { SoundFX.beepDouble(); } catch(_){}
+      vibrate([15, 25, 15]);
+      _vozAnunciar(`Pickup ${p.idZona || ''} jalado`, { rate: 1.05 });
+
+      // Render inline (sin sheet) — todo en una sola vista
       _renderPickupActivoBanner();
-      _updatePickupSortButtons();
-      abrirSheet('sheetDespPickup');
+      _renderPickupChecklistInline();
+      _renderCart();
+      _renderExtrasSection();
+      _updateGenerarBtn();
+      badgeUpdate();
+      toast(`▶ Pickup ${p.idZona || ''} listo · escanea para registrar`, 'ok', 2400);
+
+      // Backend en background — no bloquea la UI
+      API.actualizarPickup({
+        idPickup:    p.idPickup,
+        estado:      'EN_PROCESO',
+        lockUsuario: usuario,
+        tomarLock:   true
+      }).then(r => {
+        if (r && r.ok === false && r.conflicto) {
+          try { SoundFX.warn(); } catch(_){}
+          toast(`⚠ ${r.atendidoPor} también está atendiendo este pickup`, 'warn', 5000);
+        }
+      }).catch(() => { /* offline ok — autosave reintentará */ });
       return;
     }
-    // Fallback legacy: pickup sin skuBase → fuzzy match con 3 secciones
+    // Fallback legacy: pickup sin skuBase → fuzzy match con sheet (caso n8n viejo)
     _pickupActivo = p;
     try { SoundFX.beep(); } catch(_){}
     _runMatching(p);
     abrirSheet('sheetDespPickup');
   }
 
-  // Soltar pickup activo — vuelve a PENDIENTE y libera lock para que otro lo tome.
+  // Soltar pickup activo — vuelve a PENDIENTE para que otro lo tome.
+  // Limpia checklist inline y sección extras. Vista vuelve a estado inicial.
+  // Efectos: warn + vibración + voz + toast naranja.
   async function soltarPickupActivo() {
     if (!_pickupActivo) return;
-    if (!confirm('¿Soltar este pickup? Otro operador podrá tomarlo.\nEl progreso ya despachado se conserva.')) return;
-    try {
-      await API.liberarPickup({ idPickup: _pickupActivo.idPickup });
-    } catch(_){}
+    const idP = _pickupActivo.idPickup;
+    const zona = _pickupActivo.idZona || '';
+    if (!confirm('¿Soltar este pickup?\nEl progreso despachado se conserva en la hoja.\nOtro operador podrá tomarlo.')) return;
+
     try { SoundFX.warn(); } catch(_){}
-    vibrate(20);
+    vibrate([30, 20, 60]);
+    _vozAnunciar(`Pickup ${zona} soltado`, { rate: 1.05 });
+
+    // Limpiar local INMEDIATAMENTE (optimista) — el operador ve la vista limpia
     _pickupActivo = null;
     _clearPickup();
-    cerrarSheet('sheetDespPickup');
     _renderPickupActivoBanner();
+    _renderPickupChecklistInline();
+    _renderExtrasSection();
+    _updateGenerarBtn();
     badgeUpdate();
-    toast('🔓 Pickup soltado · disponible para otro operador', 'info', 2800);
+    toast(`🔓 Pickup ${zona} soltado · ya está disponible para otro operador`, 'info', 3000);
+
+    // Backend en background
+    API.liberarPickup({ idPickup: idP }).catch(() => {});
+    // Forzar refresco de la lista de pendientes (para que reaparezca pronto)
+    setTimeout(() => _pollPickups(), 800);
   }
 
   // Sincronización al hidratar: si en backend ya está cerrado, limpiar local.
@@ -8323,12 +8538,14 @@ const DespachoView = (() => {
            cerrarDespPicker, seleccionarItemDesp,
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
-           toggleDespScanInline, submitDespScanInline, seleccionarItemDespInline,
+           toggleDespScanInline, cerrarDespScan,
+           submitDespScanInline, seleccionarItemDespInline,
            verHistDetalle,
            abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
            selTipo,
            incQty, decQty, blurQty, quitarItem,
            finalizar, confirmarDespacho, cancelar,
+           generarGuia,
            badgeUpdate, startPoll,
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
