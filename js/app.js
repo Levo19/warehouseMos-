@@ -7424,10 +7424,15 @@ const DespachoView = (() => {
     if (dot)     { dot.style.display = hay ? 'block' : 'none'; }
     if (fab)     { fab.classList.toggle('has-pickups', hay); }
 
-    // Lista de pickups pendientes en view-despacho
+    // Lista de pickups pendientes en view-despacho.
+    // Si hay un pickup activo, ESCONDER toda la lista — el operador atiende
+    // uno a la vez. Al soltar el activo, los pendientes vuelven a aparecer.
     const listaEl = document.getElementById('despPickupsLista');
     if (listaEl) {
-      if (_pickupsPendientes.length > 0) {
+      if (_pickupActivo) {
+        listaEl.style.display = 'none';
+        listaEl.innerHTML = '';
+      } else if (_pickupsPendientes.length > 0) {
         listaEl.style.display = 'block';
         listaEl.innerHTML = _pickupsPendientes.slice(0, 8).map(p => {
           const items = Array.isArray(p.items) ? p.items : [];
