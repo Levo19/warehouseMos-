@@ -155,23 +155,56 @@
       0%,100% { transform:scale(1); }
       50%     { transform:scale(1.04); }
     }
-    /* Cards modernizadas — overrides al .prod-card legacy */
-    .prod-card {
-      background:linear-gradient(135deg,#1e293b,#1a2333) !important;
-      border:1px solid rgba(51,65,85,.5);
-      border-left-width:3px !important;
+    /* Cards modernizadas — overrides al .prod-card legacy.
+       Mayor especificidad con #listProductos para ganar siempre. */
+    #listProductos .prod-card,
+    #listProductos.is-grid .prod-card {
+      background:linear-gradient(135deg, #1e293b 0%, #182234 60%, #141d2c 100%) !important;
+      border:1px solid rgba(99,102,241,.18) !important;
+      border-left:5px solid #475569 !important;
       border-radius:14px !important;
-      padding:13px 13px 11px !important;
-      box-shadow:0 4px 14px -4px rgba(0,0,0,.4),
-                 0 1px 2px rgba(0,0,0,.25) !important;
+      padding:14px 14px 12px !important;
+      box-shadow:
+        0 6px 20px -6px rgba(0,0,0,.55),
+        0 2px 4px rgba(0,0,0,.35),
+        inset 0 1px 0 rgba(255,255,255,.04) !important;
       animation: prodCardIn .3s cubic-bezier(.4,0,.2,1) both;
-      transition:transform .18s ease, box-shadow .25s ease, border-color .25s ease;
+      transition:transform .18s ease, box-shadow .25s ease, border-color .25s ease, border-left-color .25s ease;
       position:relative;
+      overflow:hidden;
     }
-    .prod-card.ca-red    { border-left-color:#ef4444 !important; box-shadow:0 4px 14px -4px rgba(239,68,68,.25),0 1px 2px rgba(0,0,0,.25) !important; }
-    .prod-card.ca-amber  { border-left-color:#f59e0b !important; box-shadow:0 4px 14px -4px rgba(245,158,11,.22),0 1px 2px rgba(0,0,0,.25) !important; }
-    .prod-card.ca-green  { border-left-color:#10b981 !important; }
-    .prod-card.ca-slate  { border-left-color:#475569 !important; opacity:.78; }
+    /* Pequeño "shine" diagonal en cada card — más distintivo */
+    #listProductos .prod-card::after {
+      content:'';
+      position:absolute;top:0;right:0;width:60%;height:100%;
+      background:linear-gradient(115deg,transparent 50%,rgba(99,102,241,.04) 70%,transparent 80%);
+      pointer-events:none;
+    }
+    #listProductos .prod-card.ca-red {
+      border-left-color:#ef4444 !important;
+      box-shadow:
+        0 6px 22px -6px rgba(239,68,68,.45),
+        0 2px 4px rgba(0,0,0,.35),
+        inset 0 1px 0 rgba(255,255,255,.04) !important;
+    }
+    #listProductos .prod-card.ca-amber {
+      border-left-color:#f59e0b !important;
+      box-shadow:
+        0 6px 22px -6px rgba(245,158,11,.40),
+        0 2px 4px rgba(0,0,0,.35),
+        inset 0 1px 0 rgba(255,255,255,.04) !important;
+    }
+    #listProductos .prod-card.ca-green {
+      border-left-color:#10b981 !important;
+      box-shadow:
+        0 6px 22px -6px rgba(16,185,129,.30),
+        0 2px 4px rgba(0,0,0,.35),
+        inset 0 1px 0 rgba(255,255,255,.04) !important;
+    }
+    #listProductos .prod-card.ca-slate {
+      border-left-color:#475569 !important;
+      opacity:.78;
+    }
     @keyframes prodCardIn {
       0%   { opacity:0; transform:translateY(6px); }
       100% { opacity:1; transform:translateY(0); }
