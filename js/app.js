@@ -10890,42 +10890,94 @@ const ProductosView = (() => {
       .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
   }
 
+  // Filtro de tipo en historial moderno (Todos / Entradas / Salidas / Ajustes)
+  let _histFiltroTipo = 'all';
+  let _histMovsCache  = []; // movimientos cacheados para re-render con filtro
+  let _histStockCache = 0;
+
   async function verHistorial(codigosStr, nombre) {
     // Acepta barcode único o pipe-separated para grupos multi-barcode
     const codigos = String(codigosStr).split('|').map(s => s.trim()).filter(Boolean);
     _histTarget = { codigos, codigo: codigos[0], nombre };
+    _histFiltroTipo = 'all';
+    document.querySelectorAll('.hist-tipo-chip').forEach(c => {
+      c.classList.toggle('is-active', c.dataset.tipo === 'all');
+    });
 
-    document.getElementById('histNombre').textContent   = nombre;
-    document.getElementById('histCodigo').textContent   = codigos.length > 1
-      ? `${codigos[0]} +${codigos.length - 1} más`
+    document.getElementById('histNombre').textContent = nombre;
+    document.getElementById('histCodigo').textContent = codigos.length > 1
+      ? `${codigos[0]} · ${codigos.length} códigos`
       : codigos[0];
-    document.getElementById('histPrintPanel')?.classList.add('hidden');
-    document.getElementById('histList').innerHTML = '<div class="flex justify-center py-6"><div class="spinner"></div></div>';
+    document.getElementById('histList').innerHTML =
+      '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
     abrirSheet('sheetHistorial');
 
-    // Stock total del grupo
+    // KPIs hero
     const stockTotal = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
     const stockMin   = _s(codigos[0]).stockMinimo || 0;
-    document.getElementById('histStockActual').textContent = fmt(stockTotal);
-    document.getElementById('histStockMin').textContent    = fmt(stockMin);
+    _histStockCache  = stockTotal;
+    // Movs 30d (de la cache local — rápido)
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const gMap = {}; guias.forEach(g => { gMap[g.idGuia] = g; });
+    const hace30 = Date.now() - 30 * 86400000;
+    const codSet = new Set(codigos);
+    const movs30 = detalles.filter(d => {
+      if (!codSet.has(d.codigoProducto)) return false;
+      const f = gMap[d.idGuia]?.fecha;
+      return f && new Date(f).getTime() > hace30;
+    }).length;
+    const setKpi = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = v;
+    };
+    setKpi('histStockActual', fmt(stockTotal));
+    setKpi('histStockMin',    fmt(stockMin));
+    setKpi('histKpiMovs',     movs30);
 
     const local = _movimientosLocal(codigos);
-    if (local.length) _renderHistorial(local, true, stockTotal);
+    if (local.length) {
+      _histMovsCache = local;
+      _renderHistorial(local, true, stockTotal);
+    }
 
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
     if (res.ok) {
       const gasData = res.data || [];
-      // Merge: GAS es autoritativo; agregar registros locales que GAS no incluye (timing o cache stale)
       const gasIds  = new Set(gasData.map(m => m.idGuia).filter(Boolean));
       const extras  = local.filter(m => m.idGuia && !gasIds.has(m.idGuia));
       const merged  = [...gasData, ...extras].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+      _histMovsCache = merged;
       if (merged.length) {
         _renderHistorial(merged, false, stockTotal);
       } else if (!local.length) {
-        document.getElementById('histList').innerHTML =
-          '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+        document.getElementById('histList').innerHTML = `
+          <div class="hist-empty">
+            <div class="hist-empty-icon">📭</div>
+            <p class="text-sm">Sin movimientos registrados</p>
+            <p class="text-xs mt-1 text-slate-600">El producto aún no tiene entradas ni salidas</p>
+          </div>`;
       }
     }
+  }
+
+  // Filtro chip Todos/Entradas/Salidas/Ajustes — re-render desde cache local
+  function histFiltrarTipo(tipo) {
+    _histFiltroTipo = tipo || 'all';
+    document.querySelectorAll('.hist-tipo-chip').forEach(c => {
+      c.classList.toggle('is-active', c.dataset.tipo === _histFiltroTipo);
+    });
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+    _renderHistorial(_histMovsCache, false, _histStockCache);
+  }
+
+  // Auditar desde el modal historial — usa el primer codigoBarra del grupo
+  function histAuditar() {
+    if (!_histTarget?.codigos?.length) return;
+    cerrarSheet('sheetHistorial');
+    const cb = _histTarget.codigos[0];
+    setTimeout(() => abrirAuditBarcode(cb, _histTarget.nombre, ''), 200);
   }
 
   function _renderHistorial(movs, esLocal, stockActual) {
@@ -10941,49 +10993,66 @@ const ProductosView = (() => {
     });
 
     const fBadge = document.getElementById('histFuenteBadge');
-    fBadge.textContent = esLocal ? '📦 Local' : '☁️ GAS';
-    fBadge.className   = esLocal ? 'tag-blue text-xs' : 'tag-ok text-xs';
+    if (fBadge) fBadge.textContent = esLocal ? '📦 caché local' : '☁ sincronizado';
 
-    // Tipos de movimiento para colores bancarios
-    const _tipoMov = (m) => {
+    // Categoriza tipo de movimiento (para clases CSS y filtro)
+    const _categoria = (m) => {
       const t = (m.tipo || '').toUpperCase();
-      if (t.includes('INI'))     return 'ini';    // stock inicial
-      if (m.fuente === 'ajuste' || t.includes('AJUSTE')) return m.esIngreso ? 'ajuste_inc' : 'ajuste_dec';
+      if (t.includes('INI'))     return 'ini';
+      if (m.fuente === 'ajuste' || t.includes('AJUSTE')) return m.esIngreso ? 'ajuste-inc' : 'ajuste-dec';
       return m.esIngreso ? 'ingreso' : 'salida';
     };
-    const _estilos = {
-      ingreso:    { bg:'bg-emerald-950', fg:'text-emerald-400', icon:'↑', sign:'+', label:'Ingreso'  },
-      salida:     { bg:'bg-red-950',     fg:'text-red-400',     icon:'↓', sign:'−', label:'Salida'   },
-      ajuste_inc: { bg:'bg-blue-950',    fg:'text-blue-400',    icon:'⊕', sign:'+', label:'Ajuste ▲' },
-      ajuste_dec: { bg:'bg-amber-950',   fg:'text-amber-400',   icon:'⊖', sign:'−', label:'Ajuste ▼' },
-      ini:        { bg:'bg-violet-950',  fg:'text-violet-400',  icon:'★', sign:'+', label:'Inicial'  }
+    const _label = {
+      ingreso:    'INGRESO',
+      salida:     'SALIDA',
+      'ajuste-inc': 'AJUSTE ▲',
+      'ajuste-dec': 'AJUSTE ▼',
+      ini:        'INICIAL'
     };
+    const _signo = (cat) => (cat === 'ingreso' || cat === 'ajuste-inc' || cat === 'ini') ? '+' : '−';
 
-    document.getElementById('histList').innerHTML = conBal.map(m => {
-      const tipo = _tipoMov(m);
-      const e    = _estilos[tipo] || _estilos.ingreso;
+    // Aplicar filtro chip
+    const filtrados = conBal.filter(m => {
+      if (_histFiltroTipo === 'all') return true;
+      const cat = _categoria(m);
+      if (_histFiltroTipo === 'ingreso') return cat === 'ingreso' || cat === 'ini';
+      if (_histFiltroTipo === 'salida')  return cat === 'salida';
+      if (_histFiltroTipo === 'ajuste')  return cat === 'ajuste-inc' || cat === 'ajuste-dec';
+      return true;
+    });
+
+    if (!filtrados.length) {
+      document.getElementById('histList').innerHTML = `
+        <div class="hist-empty">
+          <div class="hist-empty-icon">${_histFiltroTipo === 'all' ? '📭' : '🔎'}</div>
+          <p class="text-sm">${_histFiltroTipo === 'all' ? 'Sin movimientos registrados' : 'Sin movimientos de este tipo'}</p>
+        </div>`;
+      return;
+    }
+
+    document.getElementById('histList').innerHTML = filtrados.map(m => {
+      const cat = _categoria(m);
+      const lbl = _label[cat] || cat;
+      const sign = _signo(cat);
+      const tipoChip = `<span class="hist-mov-tipo" style="background:rgba(15,23,42,.6);color:#94a3b8">${lbl}</span>`;
       return `
-      <div class="flex items-start gap-2.5 py-2.5 border-b" style="border-color:#1e293b">
-        <div class="flex flex-col items-center gap-0.5 flex-shrink-0 mt-0.5">
-          <span class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${e.bg} ${e.fg}">${e.icon}</span>
-          <span class="text-xs ${e.fg} font-semibold" style="font-size:9px">${e.label}</span>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div class="flex items-baseline justify-between gap-1">
-            <span class="font-black text-base ${e.fg}">${e.sign}${fmt(m.cantidad)}</span>
-            <span class="text-xs text-slate-400 font-mono">${fmtFecha(m.fecha)}</span>
+        <div class="hist-timeline-row is-${cat}">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline justify-between gap-2">
+              <span class="hist-mov-amount is-${cat}">${sign}${fmt(m.cantidad)}</span>
+              <span class="hist-mov-fecha">${fmtFecha(m.fecha)}</span>
+            </div>
+            <p class="hist-mov-meta">
+              ${tipoChip}<span style="color:#94a3b8">${escHtml(m.tipo || '')}</span>${m.idGuia ? ` · <span class="font-mono text-[10px]">${escHtml(m.idGuia)}</span>` : ''}
+            </p>
+            ${m.origen ? `<p class="text-[10px] text-slate-600 truncate mt-0.5">${escHtml(m.origen)}</p>` : ''}
+            <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span class="hist-mov-saldo">Saldo <strong>${fmt(m.bal)}</strong></span>
+              ${m.usuario ? `<span class="text-[10px] text-slate-500">por ${escHtml(m.usuario)}</span>` : ''}
+            </div>
           </div>
-          <p class="text-xs text-slate-400 truncate">${m.tipo}${m.idGuia ? ' · ' + m.idGuia : ''}</p>
-          ${m.origen ? `<p class="text-xs text-slate-500 truncate">${m.origen}</p>` : ''}
-          <div class="flex items-center gap-1 mt-0.5">
-            <span class="text-xs text-slate-600">Saldo:</span>
-            <span class="text-xs text-slate-200 font-bold">${fmt(m.bal)}</span>
-            <span class="text-slate-700 text-xs">·</span>
-            <span class="text-xs text-slate-500">${m.usuario}</span>
-          </div>
-        </div>
-      </div>`;
-    }).join('') || '<p class="text-slate-500 text-sm text-center py-6">Sin movimientos registrados</p>';
+        </div>`;
+    }).join('');
   }
 
   // ── Imprimir historial ──────────────────────────
@@ -12038,6 +12107,7 @@ const ProductosView = (() => {
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial,
+           histFiltrarTipo, histAuditar,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,

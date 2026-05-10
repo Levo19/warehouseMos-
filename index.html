@@ -265,6 +265,117 @@
       .prod-chip-icon { font-size:.95em; }
       .prod-chip-num { font-size:1em; }
     }
+    /* ════ MODAL HISTORIAL MODERNO ════ */
+    .hist-hero {
+      position:relative;border-radius:18px;padding:18px 16px 14px;margin-bottom:12px;
+      background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(14,165,233,.10));
+      border:1px solid rgba(99,102,241,.32);overflow:hidden;
+    }
+    .hist-hero::before {
+      content:'';position:absolute;top:-50%;right:-15%;width:240px;height:240px;
+      background:radial-gradient(circle,rgba(129,140,248,.30),transparent 65%);
+      pointer-events:none;
+    }
+    .hist-hero-emoji {
+      font-size:30px;margin-bottom:6px;display:inline-block;
+      filter:drop-shadow(0 4px 12px rgba(129,140,248,.4));
+    }
+    .hist-hero-title { font-size:1.05em;font-weight:900;color:#f1f5f9;letter-spacing:-.01em;line-height:1.3;margin-bottom:3px; }
+    .hist-hero-sub   { font-size:.7em;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;letter-spacing:.04em; }
+    .hist-hero-kpi-row {
+      display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;position:relative;z-index:1;
+    }
+    .hist-hero-kpi {
+      padding:10px 8px;border-radius:11px;
+      background:rgba(15,23,42,.55);border:1px solid rgba(51,65,85,.55);
+      text-align:center;
+    }
+    .hist-hero-kpi-val { font-size:1.18em;font-weight:900;letter-spacing:-.02em;line-height:1; }
+    .hist-hero-kpi-lbl { font-size:.6em;color:#64748b;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-top:3px; }
+    .hist-hero-kpi.is-stock .hist-hero-kpi-val   { color:#34d399; }
+    .hist-hero-kpi.is-min .hist-hero-kpi-val     { color:#fbbf24; }
+    .hist-hero-kpi.is-movs .hist-hero-kpi-val    { color:#a5b4fc; }
+    /* Botones de acción del modal historial — mismos del detalle */
+    .hist-actions {
+      display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;
+    }
+    .hist-action-btn {
+      padding:11px 8px;border-radius:11px;border:none;cursor:pointer;
+      font-size:.72em;font-weight:900;letter-spacing:.03em;
+      display:flex;flex-direction:column;align-items:center;gap:4px;
+      -webkit-tap-highlight-color:transparent;
+      transition:all .15s ease;
+    }
+    .hist-action-btn:active { transform:scale(.96); }
+    .hist-action-btn.is-auditar {
+      background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;
+      box-shadow:0 4px 12px -3px rgba(99,102,241,.5);
+    }
+    .hist-action-btn.is-ajustar {
+      background:linear-gradient(135deg,#0ea5e9,#0284c7);color:#fff;
+      box-shadow:0 4px 12px -3px rgba(14,165,233,.5);
+    }
+    .hist-action-btn.is-imprimir {
+      background:rgba(71,85,105,.35);color:#cbd5e1;border:1px solid rgba(71,85,105,.55);
+    }
+    .hist-action-btn-icon { font-size:1.3em;line-height:1; }
+    /* Filtros chips para tipo de movimiento */
+    .hist-tipo-chips { display:flex;gap:5px;margin-bottom:10px;overflow-x:auto;scrollbar-width:none; }
+    .hist-tipo-chips::-webkit-scrollbar { display:none; }
+    .hist-tipo-chip {
+      flex-shrink:0;padding:5px 10px;border-radius:999px;cursor:pointer;
+      background:rgba(15,23,42,.55);border:1px solid rgba(51,65,85,.5);
+      font-size:.66em;font-weight:700;color:#94a3b8;
+      -webkit-tap-highlight-color:transparent;
+      transition:all .15s ease;
+    }
+    .hist-tipo-chip.is-active {
+      background:rgba(99,102,241,.22);border-color:rgba(99,102,241,.5);color:#c7d2fe;
+    }
+    /* Timeline modernizada de movimientos */
+    .hist-timeline-row {
+      position:relative;display:flex;gap:11px;padding:10px 0;
+      border-left:2px solid rgba(51,65,85,.4);
+      padding-left:14px;margin-left:8px;
+      animation: histRowIn .25s ease-out both;
+    }
+    @keyframes histRowIn {
+      0%   { opacity:0; transform:translateX(-4px); }
+      100% { opacity:1; transform:translateX(0); }
+    }
+    .hist-timeline-row::before {
+      content:'';position:absolute;left:-7px;top:14px;width:12px;height:12px;border-radius:50%;
+      border:2px solid #1e293b;box-shadow:0 0 0 2px rgba(15,23,42,.5);
+    }
+    .hist-timeline-row.is-ingreso::before    { background:#10b981; }
+    .hist-timeline-row.is-salida::before     { background:#fb923c; }
+    .hist-timeline-row.is-ajuste-inc::before { background:#3b82f6; }
+    .hist-timeline-row.is-ajuste-dec::before { background:#f59e0b; }
+    .hist-timeline-row.is-ini::before        { background:#8b5cf6; }
+    .hist-mov-amount { font-size:1.2em;font-weight:900;letter-spacing:-.02em; }
+    .hist-mov-amount.is-ingreso    { color:#34d399; }
+    .hist-mov-amount.is-salida     { color:#fb923c; }
+    .hist-mov-amount.is-ajuste-inc { color:#60a5fa; }
+    .hist-mov-amount.is-ajuste-dec { color:#fbbf24; }
+    .hist-mov-amount.is-ini        { color:#a78bfa; }
+    .hist-mov-tipo {
+      display:inline-block;font-size:.6em;font-weight:800;letter-spacing:.04em;
+      padding:1px 6px;border-radius:4px;margin-right:6px;
+    }
+    .hist-mov-fecha { font-size:.65em;color:#64748b;font-family:ui-monospace,monospace;letter-spacing:.04em; }
+    .hist-mov-meta  { font-size:.7em;color:#94a3b8;margin-top:3px; }
+    .hist-mov-saldo {
+      font-size:.65em;color:#64748b;margin-top:4px;
+      display:inline-flex;align-items:center;gap:4px;
+      padding:2px 7px;border-radius:5px;background:rgba(15,23,42,.5);
+    }
+    .hist-mov-saldo strong { color:#cbd5e1;font-weight:800; }
+    /* Empty state moderno */
+    .hist-empty {
+      text-align:center;padding:32px 16px;color:#64748b;
+    }
+    .hist-empty-icon { font-size:42px;margin-bottom:8px;opacity:.6; }
+
     /* Indicador sutil de refresh en background (chip "todos" parpadea suave) */
     .prod-chip.is-refreshing .prod-chip-icon { opacity:.4;animation: prodChipRefreshDot 1s linear infinite; }
     @keyframes prodChipRefreshDot {
@@ -5316,53 +5427,72 @@
      BOTTOM SHEET: HISTORIAL DE STOCK
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayHistorial" onclick="cerrarSheet('sheetHistorial')"></div>
-<div class="bottom-sheet" id="sheetHistorial" style="max-height:96vh">
-  <!-- Handle -->
+<div class="bottom-sheet" id="sheetHistorial" style="max-height:96vh;overflow-y:auto">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
 
-  <!-- Cabecera -->
-  <div class="flex items-start justify-between gap-2 mb-1">
-    <div class="flex-1 min-w-0">
-      <p class="font-bold text-base leading-snug" id="histNombre">—</p>
-      <p class="text-xs text-slate-500 font-mono mt-0.5" id="histCodigo">—</p>
-    </div>
-    <div class="flex items-center gap-2 flex-shrink-0">
-      <button onclick="ProductosView.abrirAjusteDesdeHistorial()"
-              title="Ajustar stock"
-              class="w-8 h-8 rounded-full flex items-center justify-center text-blue-400 hover:bg-blue-950 transition-colors border border-blue-800">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
-          <path d="M14.5 3a.5.5 0 0 1 .5.5v9a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5h13zm-13-1A1.5 1.5 0 0 0 0 3.5v9A1.5 1.5 0 0 0 1.5 14h13a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 14.5 2h-13z"/>
-        </svg>
-      </button>
-      <span id="histFuenteBadge" class="tag-blue text-xs flex-shrink-0">📦 Local</span>
-    </div>
-  </div>
-
-  <!-- KPIs resumen -->
-  <div class="flex gap-3 mb-3 mt-2">
-    <div class="flex-1 rounded-lg p-2 text-center" style="background:#0f172a">
-      <p class="text-xs text-slate-500 mb-0.5">Stock actual</p>
-      <p class="font-black text-emerald-400 text-lg" id="histStockActual">—</p>
-    </div>
-    <div class="flex-1 rounded-lg p-2 text-center" style="background:#0f172a">
-      <p class="text-xs text-slate-500 mb-0.5">Mínimo</p>
-      <p class="font-black text-amber-400 text-lg" id="histStockMin">—</p>
+  <!-- Hero header moderno con KPIs -->
+  <div class="hist-hero">
+    <button onclick="cerrarSheet('sheetHistorial')"
+            style="position:absolute;top:10px;right:10px;width:30px;height:30px;
+                   border-radius:9px;border:none;cursor:pointer;color:#94a3b8;font-size:16px;
+                   background:rgba(15,23,42,.6);z-index:2">✕</button>
+    <div class="hist-hero-emoji">📊</div>
+    <p class="hist-hero-title" id="histNombre">—</p>
+    <p class="hist-hero-sub" id="histCodigo">—</p>
+    <div class="hist-hero-kpi-row">
+      <div class="hist-hero-kpi is-stock">
+        <p class="hist-hero-kpi-val" id="histStockActual">—</p>
+        <p class="hist-hero-kpi-lbl">Stock actual</p>
+      </div>
+      <div class="hist-hero-kpi is-min">
+        <p class="hist-hero-kpi-val" id="histStockMin">—</p>
+        <p class="hist-hero-kpi-lbl">Mínimo</p>
+      </div>
+      <div class="hist-hero-kpi is-movs">
+        <p class="hist-hero-kpi-val" id="histKpiMovs">—</p>
+        <p class="hist-hero-kpi-lbl">Movs 30d</p>
+      </div>
     </div>
   </div>
 
-  <!-- Botón imprimir -->
-  <button onclick="ProductosView.imprimirHistorial()"
-          class="btn btn-outline w-full flex items-center justify-center gap-2 text-sm mb-3">
-    <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
-      <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
-      <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
-    </svg>
-    Imprimir historial
-  </button>
+  <!-- Acciones — AUDITAR + AJUSTAR + IMPRIMIR -->
+  <div class="hist-actions">
+    <button class="hist-action-btn is-auditar" onclick="ProductosView.histAuditar()"
+            title="Auditoría · conteo físico">
+      <span class="hist-action-btn-icon">🕵</span>
+      <span>AUDITAR</span>
+    </button>
+    <button class="hist-action-btn is-ajustar" onclick="ProductosView.abrirAjusteDesdeHistorial()"
+            title="Corregir stock manualmente">
+      <span class="hist-action-btn-icon">✏</span>
+      <span>AJUSTAR</span>
+    </button>
+    <button class="hist-action-btn is-imprimir" onclick="ProductosView.imprimirHistorial()"
+            title="Imprimir historial">
+      <span class="hist-action-btn-icon">🖨</span>
+      <span>IMPRIMIR</span>
+    </button>
+  </div>
 
-  <!-- Lista movimientos -->
-  <div id="histList" class="overflow-y-auto" style="max-height:40vh">
+  <!-- Filtros chips por tipo de movimiento -->
+  <div class="hist-tipo-chips">
+    <button class="hist-tipo-chip is-active" data-tipo="all"
+            onclick="ProductosView.histFiltrarTipo('all')">Todos</button>
+    <button class="hist-tipo-chip" data-tipo="ingreso"
+            onclick="ProductosView.histFiltrarTipo('ingreso')">↑ Entradas</button>
+    <button class="hist-tipo-chip" data-tipo="salida"
+            onclick="ProductosView.histFiltrarTipo('salida')">↓ Salidas</button>
+    <button class="hist-tipo-chip" data-tipo="ajuste"
+            onclick="ProductosView.histFiltrarTipo('ajuste')">✏ Ajustes</button>
+  </div>
+
+  <!-- Indicador fuente data (Local/GAS) -->
+  <p class="text-[10px] text-slate-500 mb-2 text-right">
+    <span id="histFuenteBadge">📦 Local</span>
+  </p>
+
+  <!-- Lista movimientos timeline -->
+  <div id="histList">
     <div class="flex justify-center py-6"><div class="spinner"></div></div>
   </div>
 </div>
