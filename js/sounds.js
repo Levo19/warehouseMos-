@@ -115,5 +115,47 @@ const SoundFX = (() => {
       _tone(2200, 0.08, 'sine', 0.7, 0.00);
       _tone(2800, 0.18, 'sine', 0.8, 0.08);
     },
+
+    // ════ Sonidos del flujo de update ════
+
+    // Llegó nueva versión — chime descendente-ascendente moderno (notificación)
+    updateArrived: () => {
+      _tone(523, 0.10, 'sine',     0.7, 0.00);   // C5
+      _tone(784, 0.12, 'triangle', 0.85, 0.10);  // G5
+      _tone(1047, 0.18, 'sine',    0.85, 0.22);  // C6
+    },
+
+    // Update lista para instalar — chime tipo "ta-da" exitoso
+    updateReady: () => {
+      _tone(659,  0.10, 'triangle', 0.8, 0.00);  // E5
+      _tone(880,  0.10, 'triangle', 0.85, 0.10); // A5
+      _tone(1175, 0.12, 'triangle', 0.9, 0.20);  // D6
+      _tone(1568, 0.30, 'sine',     1.0, 0.32);  // G6 sustained
+    },
+
+    // Cohete despegando — sweep ascendente largo + sustain agudo
+    rocket: () => {
+      // Rumble grave (sawtooth) que sube — efecto cohete
+      try {
+        const ctx = _getCtx(); if (!ctx) return;
+        const t = ctx.currentTime;
+        const osc1 = ctx.createOscillator();
+        const g1   = ctx.createGain();
+        osc1.connect(g1); g1.connect(_comp);
+        osc1.type = 'sawtooth';
+        osc1.frequency.setValueAtTime(120, t);
+        osc1.frequency.exponentialRampToValueAtTime(2400, t + 0.85);
+        g1.gain.setValueAtTime(0, t);
+        g1.gain.linearRampToValueAtTime(0.6, t + 0.05);
+        g1.gain.exponentialRampToValueAtTime(0.001, t + 0.95);
+        osc1.start(t); osc1.stop(t + 1.0);
+      } catch(_){}
+      // Beeps agudos al final (señal lift-off completo)
+      _tone(1568, 0.10, 'square', 0.7, 0.85);
+      _tone(2093, 0.18, 'square', 0.9, 0.95);
+    },
+
+    // Tick urgente — countdown final
+    tickUrgent: () => _tone(1500, 0.04, 'square', 0.6),
   };
 })();

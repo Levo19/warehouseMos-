@@ -2448,6 +2448,11 @@
         : 0;
       fill.style.width = (_swProgress.ready ? 100 : pct) + '%';
       if (_swProgress.ready) {
+        // 🎉 Sonido cuando termina la descarga (solo la primera vez)
+        if (!fill.classList.contains('is-ready')) {
+          try { window.SoundFX?.updateReady?.(); } catch(_){}
+          try { if (navigator.vibrate) navigator.vibrate([30, 30, 30, 30, 60]); } catch(_){}
+        }
         fill.classList.add('is-ready');
         if (sh) sh.style.display = 'none';
         if (tit) tit.textContent = '✓ Lista para instalar';
@@ -2471,6 +2476,10 @@
       _autoUpdateCountdown = setInterval(() => {
         secs--;
         if (cdNum) cdNum.textContent = secs;
+        // ⏱ Tick urgente en últimos 5 segundos
+        if (secs > 0 && secs <= 5) {
+          try { window.SoundFX?.tickUrgent?.(); } catch(_){}
+        }
         if (secs <= 0) {
           clearInterval(_autoUpdateCountdown);
           _autoUpdateCountdown = null;
@@ -2495,21 +2504,20 @@
         }).catch(() => {});
       const banner = document.getElementById('whUpdateBanner');
       if (banner) setTimeout(() => banner.classList.add('visible'), 200);
-      // Si el SW ya está en 'installed' (el install ya terminó antes de mostrar el banner)
-      // marcar como ready inmediato
+      // 🔔 Sonido cuando aparece el banner — chime moderno
+      try { window.SoundFX?.updateArrived?.(); } catch(_){}
+      try { if (navigator.vibrate) navigator.vibrate([20, 40, 20]); } catch(_){}
+      // Si el SW ya está en 'installed' (install terminó antes del banner)
       if (worker && worker.state === 'installed') {
         _swProgress.ready = true;
         _updateProgressBar();
-      } else {
-        // Listener de cambios de estado del worker
-        if (worker) {
-          worker.addEventListener('statechange', () => {
-            if (worker.state === 'installed') {
-              _swProgress.ready = true;
-              _updateProgressBar();
-            }
-          });
-        }
+      } else if (worker) {
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed') {
+            _swProgress.ready = true;
+            _updateProgressBar();
+          }
+        });
       }
     }
 
@@ -2522,16 +2530,14 @@
     window._applyUpdate = function() {
       if (!_waitingWorker) return;
       _stopAutoUpdateCountdown();
+      // 🚀 Sonido COHETE despegando — efecto épico antes del reload
+      try { window.SoundFX?.rocket?.(); } catch(_){}
+      try { if (navigator.vibrate) navigator.vibrate([60, 30, 60, 30, 100]); } catch(_){}
       _hideBanner();
       _showOverlay();
-      // Marcar pendiente el wizard de permisos para la nueva versión.
-      // Después del controllerchange + reload, App.init lo dispara.
-      try {
-        const v = (document.querySelector('script[data-app-version]')?.dataset?.appVersion) || '';
-        // Versión la sacamos en el reload via fetch('/version.json')
-        localStorage.setItem('wh_perms_check_pending', '1');
-      } catch(_){}
-      _waitingWorker.postMessage('SKIP_WAITING');
+      try { localStorage.setItem('wh_perms_check_pending', '1'); } catch(_){}
+      // Esperar 900ms para que se escuche el cohete antes del reload
+      setTimeout(() => _waitingWorker.postMessage('SKIP_WAITING'), 900);
     };
 
     window._dismissUpdate = function() {
