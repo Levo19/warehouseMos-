@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '1.9.6';
+const VERSION = '1.9.7';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -51,18 +51,31 @@ const LOCAL_ASSETS = [
   './js/sounds.js',
 ];
 
-// ── Instalar: cachear cada asset individualmente (un fallo no mata el install)
+// ── Instalar: cachear secuencial con reporte de progreso ──
+// Cada asset cacheado dispara postMessage al cliente para mostrar
+// barra de progreso real en el banner de update. Un fallo individual
+// no aborta el install (Promise.allSettled mental).
 self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(cache =>
-      Promise.allSettled(
-        LOCAL_ASSETS.map(url =>
-          cache.add(new Request(url, { cache: 'no-store' }))
-            .catch(err => console.warn('[SW] No se pudo cachear:', url, err))
-        )
-      )
-    )
-  );
+  e.waitUntil((async () => {
+    const cache = await caches.open(CACHE);
+    const total = LOCAL_ASSETS.length;
+    let done = 0;
+    async function _broadcast(payload) {
+      const cs = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+      cs.forEach(c => { try { c.postMessage(payload); } catch(_){} });
+    }
+    await _broadcast({ type: 'sw-install-progress', done: 0, total, version: VERSION });
+    for (const url of LOCAL_ASSETS) {
+      try {
+        await cache.add(new Request(url, { cache: 'no-store' }));
+      } catch (err) {
+        console.warn('[SW] No se pudo cachear:', url, err);
+      }
+      done++;
+      await _broadcast({ type: 'sw-install-progress', done, total, version: VERSION });
+    }
+    await _broadcast({ type: 'sw-install-done', total, version: VERSION });
+  })());
 });
 
 // ── Activar: borrar cachés viejos y reclamar clientes ───────

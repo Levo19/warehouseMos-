@@ -2244,6 +2244,120 @@
     flex-shrink: 0;
     line-height: 1;
   }
+  /* ════ Barra de progreso de descarga del SW ════ */
+  .wh-upd-progress {
+    height:4px;background:rgba(15,23,42,.6);border-radius:999px;
+    overflow:hidden;margin-top:8px;position:relative;
+  }
+  .wh-upd-progress-fill {
+    height:100%;background:linear-gradient(90deg,#3b82f6,#06b6d4);
+    width:0%;transition:width .3s ease;border-radius:999px;
+    box-shadow:0 0 12px rgba(59,130,246,.6);
+  }
+  .wh-upd-progress-fill.is-ready {
+    background:linear-gradient(90deg,#10b981,#34d399);
+    box-shadow:0 0 14px rgba(16,185,129,.6);
+  }
+  .wh-upd-progress-shimmer {
+    position:absolute;inset:0;border-radius:999px;
+    background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,.25) 50%,transparent 100%);
+    animation: whUpdShimmer 1.4s linear infinite;
+  }
+  @keyframes whUpdShimmer {
+    0%   { transform:translateX(-100%); }
+    100% { transform:translateX(100%); }
+  }
+  .wh-upd-banner-btn:disabled {
+    background:rgba(71,85,105,.4) !important;color:#94a3b8 !important;cursor:not-allowed;
+    animation:none !important;box-shadow:none !important;
+  }
+  .wh-upd-countdown {
+    font-size:.65rem;color:#64748b;font-weight:700;margin-top:4px;
+  }
+  /* ════ Wizard de permisos · post-update ════ */
+  .wh-perms-overlay {
+    position:fixed;inset:0;z-index:9998;display:none;
+    background:linear-gradient(135deg,rgba(2,6,23,.92),rgba(15,23,42,.95));
+    backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    align-items:center;justify-content:center;padding:20px;
+    animation: whPermsIn .35s ease-out;
+  }
+  .wh-perms-overlay.is-open { display:flex; }
+  @keyframes whPermsIn {
+    0%   { opacity:0; }
+    100% { opacity:1; }
+  }
+  .wh-perms-modal {
+    max-width:440px;width:100%;max-height:90vh;overflow-y:auto;
+    border-radius:20px;padding:20px;
+    background:linear-gradient(135deg,rgba(30,41,59,.97),rgba(15,23,42,.97));
+    border:1.5px solid rgba(99,102,241,.4);
+    box-shadow:0 30px 60px -10px rgba(0,0,0,.65);
+    animation: whPermsModalPop .4s cubic-bezier(.34,1.56,.64,1);
+  }
+  @keyframes whPermsModalPop {
+    0%   { transform:translateY(20px) scale(.94); opacity:0; }
+    100% { transform:translateY(0) scale(1); opacity:1; }
+  }
+  .wh-perms-emoji {
+    font-size:42px;margin-bottom:6px;display:inline-block;
+    filter:drop-shadow(0 4px 14px rgba(99,102,241,.5));
+  }
+  .wh-perms-title { font-size:1.15em;font-weight:900;color:#f1f5f9;letter-spacing:-.005em;margin-bottom:4px; }
+  .wh-perms-sub   { font-size:.78em;color:#94a3b8;margin-bottom:16px;line-height:1.45; }
+  .wh-perm-card {
+    border-radius:13px;padding:13px;margin-bottom:10px;
+    background:rgba(15,23,42,.55);border:1px solid rgba(51,65,85,.5);
+    display:flex;align-items:center;gap:12px;
+    transition:all .25s ease;
+  }
+  .wh-perm-card.is-granted {
+    background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(15,23,42,.6));
+    border-color:rgba(16,185,129,.5);
+  }
+  .wh-perm-card.is-denied {
+    background:linear-gradient(135deg,rgba(220,38,38,.10),rgba(15,23,42,.6));
+    border-color:rgba(239,68,68,.4);
+  }
+  .wh-perm-icon { font-size:24px;flex-shrink:0; }
+  .wh-perm-name { font-size:.92em;font-weight:800;color:#f1f5f9; }
+  .wh-perm-desc { font-size:.7em;color:#94a3b8;margin-top:2px;line-height:1.3; }
+  .wh-perm-status {
+    flex-shrink:0;padding:6px 12px;border-radius:9px;border:none;cursor:pointer;
+    font-size:.72em;font-weight:900;letter-spacing:.04em;
+    -webkit-tap-highlight-color:transparent;
+    transition:all .18s ease;
+  }
+  .wh-perm-status:active { transform:scale(.94); }
+  .wh-perm-status.is-pedir {
+    background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;
+    box-shadow:0 4px 12px -3px rgba(99,102,241,.5);
+  }
+  .wh-perm-status.is-ok {
+    background:rgba(16,185,129,.18);color:#86efac;cursor:default;
+  }
+  .wh-perm-status.is-denied {
+    background:rgba(220,38,38,.15);color:#fca5a5;
+  }
+  .wh-perms-footer {
+    margin-top:14px;padding-top:14px;border-top:1px solid rgba(51,65,85,.4);
+    display:flex;align-items:center;justify-content:space-between;gap:10px;
+  }
+  .wh-perms-btn-listo {
+    flex:1;padding:13px 16px;border-radius:12px;border:none;cursor:pointer;
+    background:linear-gradient(135deg,#10b981,#059669);color:#fff;
+    font-size:.92em;font-weight:900;letter-spacing:.04em;
+    box-shadow:0 6px 18px -4px rgba(16,185,129,.5);
+    transition:all .2s ease;
+  }
+  .wh-perms-btn-listo:disabled {
+    background:rgba(71,85,105,.4);color:#94a3b8;cursor:not-allowed;
+    box-shadow:none;
+  }
+  .wh-perms-btn-listo:not(:disabled):active { transform:scale(.98); }
+  .wh-perms-progress-text {
+    font-size:.7em;color:#94a3b8;font-weight:700;
+  }
   </style>
   <!-- ── PWA Install prompt ── -->
   <script>
@@ -2300,42 +2414,130 @@
       if (el) el.classList.add('visible');
     }
 
-    let _bannerAutoHideTimer = null;
+    let _autoUpdateTimer = null;
+    let _autoUpdateCountdown = null;
+    let _swProgress = { done: 0, total: 0, ready: false };
+
+    // Listener de mensajes del SW — recibe progreso de install
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data;
+        if (!d || !d.type) return;
+        if (d.type === 'sw-install-progress') {
+          _swProgress.done = d.done; _swProgress.total = d.total;
+          _updateProgressBar();
+        }
+        if (d.type === 'sw-install-done') {
+          _swProgress.done = _swProgress.total = d.total;
+          _swProgress.ready = true;
+          _updateProgressBar();
+        }
+      });
+    }
+
+    function _updateProgressBar() {
+      const fill = document.getElementById('whUpdateProgressFill');
+      const sub  = document.getElementById('whUpdateBannerSub');
+      const tit  = document.getElementById('whUpdateBannerTitle');
+      const btn  = document.getElementById('whUpdateBannerBtn');
+      const sh   = document.getElementById('whUpdateProgressShimmer');
+      const cdEl = document.getElementById('whUpdateCountdown');
+      if (!fill) return;
+      const pct = _swProgress.total > 0
+        ? Math.round((_swProgress.done / _swProgress.total) * 100)
+        : 0;
+      fill.style.width = (_swProgress.ready ? 100 : pct) + '%';
+      if (_swProgress.ready) {
+        fill.classList.add('is-ready');
+        if (sh) sh.style.display = 'none';
+        if (tit) tit.textContent = '✓ Lista para instalar';
+        if (sub) sub.textContent = `Descargada · ${_swProgress.total} archivos`;
+        if (btn) btn.disabled = false;
+        if (cdEl) cdEl.style.display = 'block';
+        _startAutoUpdateCountdown();
+      } else {
+        if (tit) tit.textContent = 'Descargando nueva versión...';
+        if (sub) sub.textContent = `Preparando ${_swProgress.done}/${_swProgress.total} archivos`;
+        if (btn) btn.disabled = true;
+      }
+    }
+
+    // Cuenta regresiva 60s para auto-update si no clickea
+    function _startAutoUpdateCountdown() {
+      if (_autoUpdateTimer) return; // ya activo
+      let secs = 60;
+      const cdNum = document.getElementById('whUpdateCountdownNum');
+      if (cdNum) cdNum.textContent = secs;
+      _autoUpdateCountdown = setInterval(() => {
+        secs--;
+        if (cdNum) cdNum.textContent = secs;
+        if (secs <= 0) {
+          clearInterval(_autoUpdateCountdown);
+          _autoUpdateCountdown = null;
+          window._applyUpdate();
+        }
+      }, 1000);
+      _autoUpdateTimer = true;
+    }
+    function _stopAutoUpdateCountdown() {
+      if (_autoUpdateCountdown) { clearInterval(_autoUpdateCountdown); _autoUpdateCountdown = null; }
+      _autoUpdateTimer = null;
+    }
+
     function _showUpdateBanner(worker) {
       _waitingWorker = worker;
-      // Mostrar versión nueva desde version.json (siempre red)
+      // Versión desde version.json
       fetch('./version.json?t=' + Date.now())
         .then(r => r.json())
         .then(v => {
-          const sub = document.getElementById('whUpdateBannerSub');
-          if (sub) sub.textContent = 'v' + v.version + (v.build ? ' · ' + v.build : '');
-        }).catch(() => {
-          const sub = document.getElementById('whUpdateBannerSub');
-          if (sub) sub.textContent = 'Lista para instalar';
-        });
+          const tit = document.getElementById('whUpdateBannerTitle');
+          if (tit) tit.textContent = 'Nueva versión v' + v.version;
+        }).catch(() => {});
       const banner = document.getElementById('whUpdateBanner');
       if (banner) setTimeout(() => banner.classList.add('visible'), 200);
-      // Auto-hide a 25s — evita que se quede atorado tapando el menú si el
-      // operador no lo cierra. Si hay otra update después, vuelve a aparecer.
-      if (_bannerAutoHideTimer) clearTimeout(_bannerAutoHideTimer);
-      _bannerAutoHideTimer = setTimeout(() => _hideBanner(), 25000);
+      // Si el SW ya está en 'installed' (el install ya terminó antes de mostrar el banner)
+      // marcar como ready inmediato
+      if (worker && worker.state === 'installed') {
+        _swProgress.ready = true;
+        _updateProgressBar();
+      } else {
+        // Listener de cambios de estado del worker
+        if (worker) {
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed') {
+              _swProgress.ready = true;
+              _updateProgressBar();
+            }
+          });
+        }
+      }
     }
 
     function _hideBanner() {
       const banner = document.getElementById('whUpdateBanner');
       if (banner) banner.classList.remove('visible');
-      if (_bannerAutoHideTimer) { clearTimeout(_bannerAutoHideTimer); _bannerAutoHideTimer = null; }
+      _stopAutoUpdateCountdown();
     }
 
     window._applyUpdate = function() {
       if (!_waitingWorker) return;
+      _stopAutoUpdateCountdown();
       _hideBanner();
       _showOverlay();
+      // Marcar pendiente el wizard de permisos para la nueva versión.
+      // Después del controllerchange + reload, App.init lo dispara.
+      try {
+        const v = (document.querySelector('script[data-app-version]')?.dataset?.appVersion) || '';
+        // Versión la sacamos en el reload via fetch('/version.json')
+        localStorage.setItem('wh_perms_check_pending', '1');
+      } catch(_){}
       _waitingWorker.postMessage('SKIP_WAITING');
     };
 
     window._dismissUpdate = function() {
-      _hideBanner();
+      // Solo ocultar si el SW aún no está ready — si ya está, no permitir
+      // dismiss (auto-update va a aplicarse de todas formas).
+      if (!_swProgress.ready) _hideBanner();
     };
 
     window._SWCheck = async function() {
@@ -2408,6 +2610,166 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') _checkForcedUpdate();
     });
+  })();
+  </script>
+
+  <!-- ════════════════════════════════════════════════
+       WIZARD DE PERMISOS · Post-update
+       Solo pide los permisos que NO están otorgados.
+       Cada permiso requiere user gesture (botón individual).
+       Persiste por versión en localStorage para no repetir.
+  ════════════════════════════════════════════════ -->
+  <script>
+  (function(){
+    const PERMS = ['notifications', 'camera', 'microphone', 'geolocation'];
+    let _stateActual = {}; // perm → 'granted' | 'denied' | 'prompt'
+
+    async function _consultarPerm(perm) {
+      // notifications: API distinta
+      if (perm === 'notifications') {
+        if (!('Notification' in window)) return 'unsupported';
+        return Notification.permission; // 'default' (=prompt) | 'granted' | 'denied'
+      }
+      // resto: navigator.permissions.query
+      if (!navigator.permissions?.query) return 'prompt'; // browser viejo: pedir igual
+      try {
+        const res = await navigator.permissions.query({ name: perm });
+        return res.state; // 'granted' | 'denied' | 'prompt'
+      } catch (e) {
+        return 'prompt'; // si la API no soporta ese permiso, pedir
+      }
+    }
+
+    function _normEstado(s) {
+      if (s === 'default')     return 'prompt';
+      if (s === 'unsupported') return 'unsupported';
+      return s;
+    }
+
+    async function _refrescarUI() {
+      let pendientes = 0;
+      let listos = 0;
+      for (const p of PERMS) {
+        const raw = await _consultarPerm(p);
+        const est = _normEstado(raw);
+        _stateActual[p] = est;
+        const card = document.querySelector(`.wh-perm-card[data-perm="${p}"]`);
+        if (!card) continue;
+        const btn = card.querySelector('.wh-perm-status');
+        card.classList.remove('is-granted', 'is-denied');
+        if (est === 'granted') {
+          listos++;
+          card.classList.add('is-granted');
+          if (btn) { btn.className = 'wh-perm-status is-ok'; btn.textContent = '✓ OK'; btn.disabled = true; }
+        } else if (est === 'denied') {
+          card.classList.add('is-denied');
+          if (btn) { btn.className = 'wh-perm-status is-denied'; btn.textContent = '✗ DENEGADO'; }
+        } else if (est === 'unsupported') {
+          listos++; // tratamos unsupported como "no hay nada que hacer"
+          if (btn) { btn.className = 'wh-perm-status is-ok'; btn.textContent = 'N/A'; btn.disabled = true; }
+        } else {
+          pendientes++;
+          if (btn) { btn.className = 'wh-perm-status is-pedir'; btn.textContent = 'AUTORIZAR'; btn.disabled = false; }
+        }
+      }
+      const prog = document.getElementById('whPermsProgress');
+      const btn  = document.getElementById('whPermsBtnListo');
+      if (prog) prog.textContent = `${listos}/${PERMS.length} resueltos · ${pendientes} pendiente${pendientes!==1?'s':''}`;
+      // El botón "Listo" se habilita solo cuando NO hay pendientes (forzado, sin saltar)
+      if (btn) btn.disabled = pendientes > 0;
+      return { pendientes, listos };
+    }
+
+    async function _pedirPerm(perm) {
+      try {
+        if (perm === 'notifications') {
+          await Notification.requestPermission();
+        } else if (perm === 'camera') {
+          const s = await navigator.mediaDevices.getUserMedia({ video: true });
+          s.getTracks().forEach(t => t.stop());
+        } else if (perm === 'microphone') {
+          const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+          s.getTracks().forEach(t => t.stop());
+        } else if (perm === 'geolocation') {
+          await new Promise((res, rej) => {
+            navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 });
+          });
+        }
+      } catch (e) { /* el user denegó o falló — UI lo refleja */ }
+      // Pequeño delay para que el browser actualice el estado interno
+      setTimeout(_refrescarUI, 300);
+    }
+
+    async function _abrirSiHayQuePedir(versionActual) {
+      const flagKey = 'wh_perms_done_v' + (versionActual || 'unk');
+      // Si ya respondimos a TODOS los permisos en esta versión, no abrir
+      if (localStorage.getItem(flagKey) === '1') return false;
+      const { pendientes } = await _refrescarUI();
+      if (pendientes === 0) {
+        // Todos resueltos sin necesidad de pedir → marcar y salir
+        try { localStorage.setItem(flagKey, '1'); } catch(_){}
+        return false;
+      }
+      const ov = document.getElementById('whPermsOverlay');
+      if (ov) ov.classList.add('is-open');
+      window._WH_PERMS_VERSION = versionActual;
+      return true;
+    }
+
+    function _cerrar() {
+      // Solo permite cerrar si todos están resueltos (forzado)
+      const btn = document.getElementById('whPermsBtnListo');
+      if (btn && btn.disabled) return;
+      const ov = document.getElementById('whPermsOverlay');
+      if (ov) ov.classList.remove('is-open');
+      try {
+        const v = window._WH_PERMS_VERSION || 'unk';
+        localStorage.setItem('wh_perms_done_v' + v, '1');
+      } catch(_){}
+    }
+
+    // Trigger automático tras login + tras update
+    async function _autoTrigger() {
+      // Solo si flag pendiente fue marcada por _applyUpdate, o si nunca se ejecutó
+      const pending = localStorage.getItem('wh_perms_check_pending') === '1';
+      let v = 'unk';
+      try {
+        const r = await fetch('./version.json?t=' + Date.now()).then(r => r.json());
+        v = r.version || 'unk';
+      } catch(_){}
+      if (!pending && localStorage.getItem('wh_perms_done_v' + v) === '1') return;
+      // Esperar a que la app esté lista (login terminado)
+      // Detectar que el view actual no sea el login
+      const interval = setInterval(async () => {
+        const topbar = document.getElementById('topBar');
+        const verifPanel = document.getElementById('verifDispositivo');
+        const loginPanel = document.querySelector('[data-login-active]');
+        const blocking = (verifPanel && verifPanel.style.display !== 'none') ||
+                         (loginPanel && loginPanel.style.display !== 'none');
+        if (!blocking && topbar && topbar.offsetHeight > 0) {
+          clearInterval(interval);
+          await _abrirSiHayQuePedir(v);
+          try { localStorage.removeItem('wh_perms_check_pending'); } catch(_){}
+        }
+      }, 800);
+      // Timeout de seguridad — no esperar más de 30s
+      setTimeout(() => clearInterval(interval), 30000);
+    }
+
+    // Exponer al window
+    window.WhPerms = {
+      pedir:  _pedirPerm,
+      cerrar: _cerrar,
+      refrescar: _refrescarUI,
+      auto:   _autoTrigger
+    };
+
+    // Disparar auto cuando termine de cargar la app
+    if (document.readyState === 'complete') {
+      setTimeout(_autoTrigger, 2000);
+    } else {
+      window.addEventListener('load', () => setTimeout(_autoTrigger, 2000));
+    }
   })();
   </script>
   <style>
@@ -2634,16 +2996,88 @@
   }
 </style>
 
-<!-- Banner nueva versión disponible -->
+<!-- Banner nueva versión disponible — con barra de progreso y auto-update -->
 <div id="whUpdateBanner" role="alert" aria-live="polite">
-  <div class="wh-upd-banner-inner">
-    <span class="wh-upd-banner-icon">🚀</span>
-    <div class="wh-upd-banner-texts">
-      <p class="wh-upd-banner-title">Nueva versión disponible</p>
-      <p class="wh-upd-banner-sub" id="whUpdateBannerSub">Cargando…</p>
+  <div class="wh-upd-banner-inner" style="flex-direction:column;align-items:stretch;gap:8px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <span class="wh-upd-banner-icon">🚀</span>
+      <div class="wh-upd-banner-texts">
+        <p class="wh-upd-banner-title" id="whUpdateBannerTitle">Descargando nueva versión...</p>
+        <p class="wh-upd-banner-sub" id="whUpdateBannerSub">Preparando…</p>
+      </div>
+      <button class="wh-upd-banner-btn" id="whUpdateBannerBtn"
+              onclick="window._applyUpdate()" disabled>Actualizar</button>
+      <button class="wh-upd-banner-dismiss" onclick="window._dismissUpdate()" aria-label="Cerrar">✕</button>
     </div>
-    <button class="wh-upd-banner-btn" onclick="window._applyUpdate()">Actualizar</button>
-    <button class="wh-upd-banner-dismiss" onclick="window._dismissUpdate()" aria-label="Cerrar">✕</button>
+    <div class="wh-upd-progress">
+      <div class="wh-upd-progress-fill" id="whUpdateProgressFill" style="width:0%">
+        <div class="wh-upd-progress-shimmer" id="whUpdateProgressShimmer"></div>
+      </div>
+    </div>
+    <p class="wh-upd-countdown" id="whUpdateCountdown" style="display:none">
+      Auto-actualización en <span id="whUpdateCountdownNum">60</span>s
+    </p>
+  </div>
+</div>
+
+<!-- ════ Wizard de permisos · post-update ════
+     Aparece después de actualizar a una versión nueva. Solo pide los
+     permisos que NO están otorgados. Cada uno requiere user gesture
+     individual (limitación del browser). ════════════════════════ -->
+<div id="whPermsOverlay" class="wh-perms-overlay">
+  <div class="wh-perms-modal">
+    <div class="wh-perms-emoji">🛡</div>
+    <p class="wh-perms-title">Configurá tus permisos</p>
+    <p class="wh-perms-sub">
+      Para que la app funcione al 100% necesitamos algunos accesos.
+      Solo te pido lo que falta — los que ya tenés autorizados se omiten.
+    </p>
+
+    <div class="wh-perm-card" data-perm="notifications">
+      <span class="wh-perm-icon">🔔</span>
+      <div class="flex-1 min-w-0">
+        <p class="wh-perm-name">Notificaciones</p>
+        <p class="wh-perm-desc">Avisos de pickups, stock crítico y alertas remotas.</p>
+      </div>
+      <button class="wh-perm-status is-pedir"
+              onclick="WhPerms.pedir('notifications')">AUTORIZAR</button>
+    </div>
+
+    <div class="wh-perm-card" data-perm="camera">
+      <span class="wh-perm-icon">📷</span>
+      <div class="flex-1 min-w-0">
+        <p class="wh-perm-name">Cámara</p>
+        <p class="wh-perm-desc">Escaneo de barcodes, guías y códigos de productos.</p>
+      </div>
+      <button class="wh-perm-status is-pedir"
+              onclick="WhPerms.pedir('camera')">AUTORIZAR</button>
+    </div>
+
+    <div class="wh-perm-card" data-perm="microphone">
+      <span class="wh-perm-icon">🎤</span>
+      <div class="flex-1 min-w-0">
+        <p class="wh-perm-name">Micrófono</p>
+        <p class="wh-perm-desc">Búsqueda por voz y comandos remotos del sistema.</p>
+      </div>
+      <button class="wh-perm-status is-pedir"
+              onclick="WhPerms.pedir('microphone')">AUTORIZAR</button>
+    </div>
+
+    <div class="wh-perm-card" data-perm="geolocation">
+      <span class="wh-perm-icon">📍</span>
+      <div class="flex-1 min-w-0">
+        <p class="wh-perm-name">Ubicación (GPS)</p>
+        <p class="wh-perm-desc">Tracking de actividad y zona de operación.</p>
+      </div>
+      <button class="wh-perm-status is-pedir"
+              onclick="WhPerms.pedir('geolocation')">AUTORIZAR</button>
+    </div>
+
+    <div class="wh-perms-footer">
+      <span class="wh-perms-progress-text" id="whPermsProgress">0/0 listos</span>
+      <button class="wh-perms-btn-listo" id="whPermsBtnListo"
+              onclick="WhPerms.cerrar()" disabled>Listo · usar la app</button>
+    </div>
   </div>
 </div>
 
