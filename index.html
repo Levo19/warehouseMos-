@@ -516,14 +516,19 @@
       margin-bottom:0 !important;
       pointer-events:none;
     }
-    /* Panel inline de cámara — desliza desde arriba */
+    /* Panel inline de cámara — sticky para mantenerse fijo al scrollear.
+       La lista de productos abajo scrollea independientemente, así el
+       operador puede seguir escaneando mientras revisa items lejanos. */
     .desp-cam-inline-panel {
-      position:relative;
+      position:sticky;
+      top:52px; /* alto del topbar */
+      z-index:10;
       border-radius:18px;
       overflow:hidden;
       background:#0f172a;
       border:1.5px solid rgba(14,165,233,.4);
-      box-shadow:0 20px 50px -10px rgba(14,165,233,.3);
+      box-shadow:0 20px 50px -10px rgba(14,165,233,.4),
+                 0 4px 14px rgba(0,0,0,.5);
       margin-bottom:10px;
       animation: despCamSlideDown .45s cubic-bezier(.4,0,.2,1);
       transform-origin:top center;
@@ -580,9 +585,11 @@
       box-shadow:0 4px 12px -2px rgba(220,38,38,.5);
     }
     .desp-cam-inline-btn:active { transform:scale(.96); }
-    /* Panel scan inline — similar pero más compacto, input grande */
+    /* Panel scan inline — sticky igual que cámara para no perderlo al scrollear */
     .desp-scan-inline-panel {
-      position:relative;
+      position:sticky;
+      top:52px;
+      z-index:10;
       border-radius:18px;
       overflow:hidden;
       background:linear-gradient(135deg,rgba(245,158,11,.10),rgba(15,23,42,.98));
@@ -590,6 +597,8 @@
       padding:16px 14px 12px;
       margin-bottom:10px;
       animation: despCamSlideDown .4s cubic-bezier(.4,0,.2,1);
+      box-shadow:0 20px 40px -10px rgba(251,191,36,.25),
+                 0 4px 14px rgba(0,0,0,.5);
     }
     .desp-scan-inline-panel.is-closing {
       animation: despCamSlideUp .3s cubic-bezier(.4,0,.2,1) forwards;
@@ -2587,11 +2596,14 @@
                        background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;
                        font-size:.72em;font-weight:900;-webkit-tap-highlight-color:transparent">✕ CERRAR</button>
       </div>
-      <input id="despScanInlineInput" type="text" inputmode="numeric"
-             placeholder="Escribir código de barras…"
-             autocomplete="off" spellcheck="false"
+      <input id="despScanInlineInput" type="text"
+             placeholder="Apunta el lector al código…"
+             autocomplete="off" spellcheck="false" readonly
              class="desp-scan-inline-input-big"
-             onkeydown="if(event.key==='Enter'){DespachoView.submitDespScanInline();event.preventDefault();}"/>
+             title="Solo lectura · usa el lector de barras físico — el tipeo manual está deshabilitado para evitar errores"/>
+      <p style="font-size:.62em;color:#94a3b8;margin-top:6px;text-align:center;letter-spacing:.04em">
+        🔒 Solo lectura · usa el escáner físico (no se puede escribir manualmente)
+      </p>
       <div id="despScanInlineStatus" style="font-size:.72em;padding:6px 4px 0;min-height:18px;color:#94a3b8"></div>
       <div id="despScanInlinePicker" style="display:none;margin-top:6px;background:rgba(15,23,42,.7);
            border-radius:10px;border:1px solid rgba(251,191,36,.25);padding:6px;max-height:220px;overflow-y:auto"></div>

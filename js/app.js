@@ -6759,7 +6759,73 @@ const DespachoView = (() => {
 
   // ── SCAN inline TELÓN ──────────────────────────────────────
   // Mismo patrón que la cámara: header colapsa, panel scan aparece desde arriba.
-  // Input grande para que el operador escriba el código rápido.
+  // Input READONLY — solo recibe entrada del lector de barras físico (HID)
+  // capturada por listener global de keydown. Esto evita errores de tipeo manual.
+  let _scanHidBuffer = '';
+  let _scanHidLastTs = 0;
+  let _scanHidListener = null;
+  const SCAN_HID_GAP_MS = 80;       // tiempo máx entre chars de un scanner real
+  const SCAN_HID_RESET_MS = 600;    // si pasa más, reinicia el buffer
+  const SCAN_HID_MIN_LEN = 3;       // mínimo de chars para considerar "código válido"
+
+  function _activarScannerHid() {
+    if (_scanHidListener) return;
+    _scanHidBuffer = '';
+    _scanHidLastTs = 0;
+    _scanHidListener = (e) => {
+      // Si el target es OTRO input editable, no interceptar (evita robar foco
+      // a otros campos). El input de scan es readonly, así que no entra acá.
+      const tgt = e.target;
+      const idTgt = tgt && tgt.id;
+      const esOtroInput = tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA') &&
+                          idTgt !== 'despScanInlineInput' && !tgt.readOnly;
+      if (esOtroInput) return;
+
+      const now = Date.now();
+      // Reset buffer si pasó mucho tiempo desde el último char (evita mezclas)
+      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) _scanHidBuffer = '';
+      const dt = now - _scanHidLastTs;
+      _scanHidLastTs = now;
+
+      const inputBox = document.getElementById('despScanInlineInput');
+      const statusEl = document.getElementById('despScanInlineStatus');
+
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        if (_scanHidBuffer.length >= SCAN_HID_MIN_LEN) {
+          if (inputBox) inputBox.value = _scanHidBuffer;
+          submitDespScanInline();
+        }
+        _scanHidBuffer = '';
+        e.preventDefault();
+        return;
+      }
+
+      // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
+      if (!/^[a-zA-Z0-9\-_.]$/.test(e.key)) return;
+
+      // Si el primer char y dt es grande, está bien (es el inicio de la ráfaga).
+      // Si NO es el primero y dt es muy grande, probablemente es tipeo humano → ignorar.
+      // Pero si _scanHidBuffer está vacío, aceptamos (inicio nuevo).
+      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) {
+        _scanHidBuffer = '';
+      }
+      _scanHidBuffer += e.key;
+      if (inputBox) inputBox.value = _scanHidBuffer;
+      if (statusEl && _scanHidBuffer.length === 1) {
+        statusEl.textContent = '⚡ Capturando...';
+        statusEl.style.color = '#fbbf24';
+      }
+    };
+    document.addEventListener('keydown', _scanHidListener, true);
+  }
+  function _desactivarScannerHid() {
+    if (_scanHidListener) {
+      document.removeEventListener('keydown', _scanHidListener, true);
+      _scanHidListener = null;
+    }
+    _scanHidBuffer = '';
+  }
+
   function toggleDespScanInline() {
     const panel = document.getElementById('despScanInlinePanel');
     if (!panel) return;
@@ -6777,9 +6843,12 @@ const DespachoView = (() => {
     if (header) header.classList.add('is-collapsed');
     panel.classList.remove('is-closing');
     panel.style.display = 'block';
+    // Limpiar input + activar listener global de scanner HID
+    const inp = document.getElementById('despScanInlineInput');
+    if (inp) inp.value = '';
+    _activarScannerHid();
     try { SoundFX.click && SoundFX.click(); } catch(_){}
     vibrate(8);
-    setTimeout(() => { document.getElementById('despScanInlineInput')?.focus(); }, 220);
   }
 
   function cerrarDespScan() {
@@ -6792,6 +6861,7 @@ const DespachoView = (() => {
     }, 320);
     const header = document.getElementById('despHeaderCollapsible');
     if (header) header.classList.remove('is-collapsed');
+    _desactivarScannerHid();
     try { SoundFX.click && SoundFX.click(); } catch(_){}
     vibrate(8);
     _renderCart();
