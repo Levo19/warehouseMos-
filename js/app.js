@@ -10437,6 +10437,36 @@ const ProductosView = (() => {
       grp[key].equivs.push(e);
     });
 
+    // ── Pre-cálculo único de caches usadas por flags _dormido / _porVencer ──
+    // Antes cada tap de chip filtro recalculaba O(n×m). Ahora O(m+n) total
+    // al construir grupos: una sola pasada sobre detalles, guías y lotes.
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const lotes    = (OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || []);
+    const gMap = {};
+    guias.forEach(gg => { gMap[gg.idGuia] = gg; });
+    const hace30   = Date.now() - 30 * 86400000;
+    const en7dias  = Date.now() + 7 * 86400000;
+    // codigoBarra → fecha último mov (epoch ms)
+    const ultMovPorCod = {};
+    detalles.forEach(d => {
+      const cb = d.codigoProducto;
+      if (!cb) return;
+      const f = gMap[d.idGuia]?.fecha;
+      if (!f) return;
+      const t = new Date(f).getTime();
+      if (!t) return;
+      if (!ultMovPorCod[cb] || ultMovPorCod[cb] < t) ultMovPorCod[cb] = t;
+    });
+    // codigoBarra → tiene lote por vencer (<7d)
+    const porVencerPorCod = {};
+    lotes.forEach(l => {
+      const cb = l.codigoProducto || l.codigoBarra;
+      if (!cb || !l.fechaVencimiento) return;
+      const t = new Date(l.fechaVencimiento).getTime();
+      if (t > 0 && t < en7dias) porVencerPorCod[cb] = true;
+    });
+
     // 4. Construir grupos finales
     return Object.values(grp).map(g => {
       // Header = producto con menor idProducto (el primero registrado)
@@ -10458,17 +10488,24 @@ const ProductosView = (() => {
         }))
       ];
 
-      // Stock total = suma de todos los hijos
+      // Stock total + bajoMin + flags pre-calculadas (una sola pasada)
       let stockTotal = 0, bajoMin = false;
+      let ultimoMov = 0, porVencer = false;
       children.forEach(c => {
         const s  = _s(c.codigoBarra);
         const st = s.cantidadDisponible || 0;
         const mn = parseFloat(s.stockMinimo || base.stockMinimo || 0);
         stockTotal += st;
         if (mn > 0 && st <= mn) bajoMin = true;
+        const t = ultMovPorCod[c.codigoBarra] || 0;
+        if (t > ultimoMov) ultimoMov = t;
+        if (porVencerPorCod[c.codigoBarra]) porVencer = true;
       });
+      // _dormido = sin movimientos en últimos 30 días
+      const _dormido   = ultimoMov === 0 || ultimoMov < hace30;
+      const _porVencer = porVencer;
 
-      return { skuBase: g.skuBase, base, children, stockTotal, bajoMin };
+      return { skuBase: g.skuBase, base, children, stockTotal, bajoMin, _dormido, _porVencer };
     }).sort((a, b) => String(a.base.descripcion || '').localeCompare(String(b.base.descripcion || ''), 'es'));
   }
 
@@ -10558,10 +10595,9 @@ const ProductosView = (() => {
     const isAuditDone = isAudit && _esGrupoCompleto(g.skuBase);
     const auditCls    = isAuditDone ? 'audit-card-done' : isAudit ? 'audit-card' : '';
 
-    // Estados visuales modernos
-    const dormidoCls  = (nRot === 0 && (!ulti || (Date.now() - new Date(ulti).getTime()) > 30*86400000))
-                        ? 'is-dormido' : '';
-    const vencerCls   = _grupoTieneVencimientoProximo(g) ? 'is-por-vencer' : '';
+    // Estados visuales modernos — flags pre-calculadas en _agrupar (O(1))
+    const dormidoCls  = g._dormido   ? 'is-dormido'    : '';
+    const vencerCls   = g._porVencer ? 'is-por-vencer' : '';
 
     // Highlight del término buscado en la descripción
     const descRender  = _highlightTerm(g.base.descripcion || g.skuBase, _queryActual);
@@ -11056,39 +11092,18 @@ const ProductosView = (() => {
   // ─── Filtros chip (Todos / Stock bajo / Críticos / Vencer / Dormidos) ───
   let _filtroChip = 'all';
 
-  function _grupoTieneVencimientoProximo(g) {
-    const lotes = OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || [];
-    if (!lotes.length) return false;
-    const set = new Set(g.children.map(c => c.codigoBarra));
-    const en7dias = Date.now() + 7 * 86400000;
-    return lotes.some(l => {
-      if (!set.has(l.codigoProducto || l.codigoBarra)) return false;
-      if (!l.fechaVencimiento) return false;
-      const t = new Date(l.fechaVencimiento).getTime();
-      return t > 0 && t < en7dias;
-    });
-  }
-
-  function _grupoEstaDormido(g) {
-    const detalles = OfflineManager.getGuiaDetalleCache();
-    const guias = OfflineManager.getGuiasCache();
-    const gMap = {};
-    guias.forEach(gg => { gMap[gg.idGuia] = gg; });
-    const codigos = new Set(g.children.map(c => c.codigoBarra));
-    const hace30 = Date.now() - 30 * 86400000;
-    return !detalles.some(d => {
-      if (!codigos.has(d.codigoProducto)) return false;
-      const f = gMap[d.idGuia]?.fecha;
-      return f && new Date(f).getTime() > hace30;
-    });
-  }
+  // Helpers ahora son O(1) por item — usan flags pre-calculadas en _agrupar.
+  // Esto evita recalcular cache de detalles/guías/lotes cada tap de chip filtro
+  // (antes era O(n×m) = lento con 2k+ productos).
+  function _grupoTieneVencimientoProximo(g) { return !!g._porVencer; }
+  function _grupoEstaDormido(g)              { return !!g._dormido; }
 
   function _aplicarFiltroChip(grupos) {
     if (_filtroChip === 'all') return grupos;
     if (_filtroChip === 'bajo')    return grupos.filter(g => g.bajoMin && g.stockTotal > 0);
     if (_filtroChip === 'critico') return grupos.filter(g => g.stockTotal === 0);
-    if (_filtroChip === 'vencer')  return grupos.filter(g => _grupoTieneVencimientoProximo(g));
-    if (_filtroChip === 'dormido') return grupos.filter(g => _grupoEstaDormido(g));
+    if (_filtroChip === 'vencer')  return grupos.filter(g => g._porVencer);
+    if (_filtroChip === 'dormido') return grupos.filter(g => g._dormido);
     return grupos;
   }
 
@@ -11104,11 +11119,15 @@ const ProductosView = (() => {
 
   function _renderMetrics() {
     if (!_grupos.length) return;
-    const total   = _grupos.length;
-    const bajo    = _grupos.filter(g => g.bajoMin && g.stockTotal > 0).length;
-    const critico = _grupos.filter(g => g.stockTotal === 0).length;
-    const vencer  = _grupos.filter(g => _grupoTieneVencimientoProximo(g)).length;
-    const dormido = _grupos.filter(g => _grupoEstaDormido(g)).length;
+    // Una sola pasada por _grupos en lugar de 5 .filter() — más rápido en 2k items
+    let total = 0, bajo = 0, critico = 0, vencer = 0, dormido = 0;
+    for (const g of _grupos) {
+      total++;
+      if (g.bajoMin && g.stockTotal > 0) bajo++;
+      if (g.stockTotal === 0) critico++;
+      if (g._porVencer) vencer++;
+      if (g._dormido)   dormido++;
+    }
     const set = (id, n) => {
       const el = document.getElementById(id);
       if (el) el.textContent = n;
