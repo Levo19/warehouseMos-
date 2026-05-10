@@ -2636,6 +2636,11 @@
     window.addEventListener('beforeinstallprompt', (e) => {
       e.preventDefault();
       _installPrompt = e;
+      window._WH_INSTALL_PROMPT = e;
+    });
+    window.addEventListener('appinstalled', () => {
+      _installPrompt = null; window._WH_INSTALL_PROMPT = null;
+      if (window._reportarPermisosWH) _reportarPermisosWH();
     });
     window.addEventListener('appinstalled', () => { _installPrompt = null; });
 
@@ -2738,7 +2743,10 @@
           pendientes++;
           if (btn) {
             btn.className = 'wh-perm-status is-pedir';
-            btn.textContent = (p === 'audio') ? 'PROBAR' : (p === 'install') ? 'INSTALAR' : 'AUTORIZAR';
+            let lbl = 'AUTORIZAR';
+            if (p === 'audio') lbl = 'PROBAR';
+            else if (p === 'install') lbl = (_installPrompt) ? 'INSTALAR' : 'VER CÓMO';
+            btn.textContent = lbl;
             btn.disabled = false;
           }
         }
@@ -2862,7 +2870,44 @@
         const v = window._WH_PERMS_VERSION || 'unk';
         localStorage.setItem('wh_perms_done_v' + v, '1');
       } catch(_){}
+      _reportarPermisosWH();
+      if (window._WH_WIZARD_FORZADO) {
+        try {
+          const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
+          fetch(window.cfg?.mosGasUrl || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec', {
+            method:'POST', body: JSON.stringify({ action:'marcarWizardMostrado', deviceId: id })
+          });
+        } catch(_){}
+        window._WH_WIZARD_FORZADO = false;
+      }
     }
+
+    let _whPermsHooked = false;
+    async function _reportarPermisosWH() {
+      try {
+        const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
+        if (!id) return;
+        const map = { notifications:'notif', camera:'cam', microphone:'mic', geolocation:'geo' };
+        const perms = {};
+        for (const [name, key] of Object.entries(map)) {
+          try {
+            const ps = await navigator.permissions.query({ name });
+            perms[key] = ps.state;
+            if (!_whPermsHooked) ps.onchange = () => _reportarPermisosWH();
+          } catch(_) { perms[key] = 'unsupported'; }
+        }
+        perms.audio   = (localStorage.getItem('wh_audio_ok') === '1') ? 'granted' : 'prompt';
+        perms.install = (matchMedia('(display-mode: standalone)').matches) ? 'granted'
+                      : (window._WH_INSTALL_PROMPT ? 'prompt' : 'unsupported');
+        _whPermsHooked = true;
+        const url = (window.cfg && window.cfg.mosGasUrl) || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
+        await fetch(url, {
+          method:'POST',
+          body: JSON.stringify({ action:'registrarPermisosDispositivo', deviceId:id, permisos:perms })
+        });
+      } catch(_){}
+    }
+    window._reportarPermisosWH = _reportarPermisosWH;
 
     // Trigger automático tras login + tras update
     async function _autoTrigger() {
@@ -2873,7 +2918,20 @@
         const r = await fetch('./version.json?t=' + Date.now()).then(r => r.json());
         v = r.version || 'unk';
       } catch(_){}
-      if (!pending && localStorage.getItem('wh_perms_done_v' + v) === '1') return;
+      // Reportar permisos en cada arranque (silencioso)
+      setTimeout(_reportarPermisosWH, 6000);
+      // Detectar si el admin marcó forzar wizard remoto
+      let forzado = false;
+      try {
+        const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
+        if (id) {
+          const url = (window.cfg && window.cfg.mosGasUrl) || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
+          const r2 = await fetch(url + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(id));
+          const j = await r2.json();
+          if (j?.data?.forzar_wizard) { forzado = true; window._WH_WIZARD_FORZADO = true; }
+        }
+      } catch(_){}
+      if (!forzado && !pending && localStorage.getItem('wh_perms_done_v' + v) === '1') return;
       // Esperar a que la app esté lista (login terminado)
       // Detectar que el view actual no sea el login
       const interval = setInterval(async () => {
