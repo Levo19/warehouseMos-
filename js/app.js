@@ -11181,19 +11181,18 @@ const ProductosView = (() => {
   // ═══════════════════════════════════════════════════════════════════════
   // PRECARGA + AUTO-REFRESH 60s SIN PARPADEO
   //
-  // Antes: cargar() se ejecutaba al entrar al módulo y silentRefresh
-  // re-renderizaba toda la lista (parpadeo visible con 2k cards).
+  // El sistema central (OfflineManager.iniciarRefreshOperacional) ya hace:
+  //   1. Precarga al iniciar la app (PERSONAL, PRODUCTOS_MASTER, EQUIVALENCIAS,
+  //      STOCK_ZONAS, GUIAS_CABECERA, GUIAS_DETALLE, PREINGRESOS, AJUSTES,
+  //      AUDITORIAS, PROVEEDORES — todas las tablas maestras y operacionales).
+  //   2. setInterval 60s para refresh background.
+  //   3. dispatch wh:data-refresh cuando hay cambios → llama silentRefresh.
   //
-  // Ahora:
-  //   1. Precarga al iniciar la app (no esperar a entrar al módulo).
-  //   2. Background refresh cada 60s — descarga catalog + stock fresh.
-  //   3. Render DIFF: solo actualiza cards cuyo snapshot cambió. El resto
-  //      del DOM no se toca → cero parpadeo. Las cards actualizadas
-  //      hacen un flash verde sutil (.is-updated) por 900ms.
+  // Lo que faltaba: silentRefresh usaba _render(innerHTML) que causaba
+  // parpadeo con 2k+ cards. Ahora usa _renderDiff que solo actualiza
+  // las cards que cambiaron (basado en snapshot por skuBase).
   // ═══════════════════════════════════════════════════════════════════════
-  let _bgRefreshTimer = null;
-  let _cardSnapshots  = new Map(); // skuBase → snapshot (string) para diff
-  const BG_REFRESH_MS = 60 * 1000;
+  let _cardSnapshots = new Map(); // skuBase → snapshot (string) para diff
 
   function _snapshotGrupo(g) {
     // Campos que pueden cambiar entre refreshes y deben triggerear update
@@ -11280,25 +11279,6 @@ const ProductosView = (() => {
     });
   }
 
-  // Refresh background — descarga + diff sin spinner.
-  // Indicador visual sutil: chip "todos" parpadea durante el fetch.
-  async function _backgroundRefresh() {
-    const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
-    if (chipAll) chipAll.classList.add('is-refreshing');
-    try {
-      await OfflineManager.precargarOperacional();
-      _buildMap(OfflineManager.getStockCache());
-      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
-      // Aplicar query/filtro y renderizar con diff (no innerHTML completo)
-      const visibles = _aplicarFiltroChip(
-        _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
-      );
-      _renderDiff(visibles);
-      _renderMetrics();
-    } catch (e) { /* silencioso */ }
-    if (chipAll) chipAll.classList.remove('is-refreshing');
-  }
-
   // Helper para filtrar por query sin recargar todo el flow de buscar()
   function _matchQuery(g, q) {
     const qL = String(q).toLowerCase();
@@ -11309,38 +11289,6 @@ const ProductosView = (() => {
     ].join(' ').toLowerCase();
     return tokens.every(t => hay.includes(t));
   }
-
-  function _startBgRefresh() {
-    if (_bgRefreshTimer) return;
-    _bgRefreshTimer = setInterval(_backgroundRefresh, BG_REFRESH_MS);
-  }
-  function _stopBgRefresh() {
-    if (_bgRefreshTimer) { clearInterval(_bgRefreshTimer); _bgRefreshTimer = null; }
-  }
-
-  // Precarga al iniciar la app (no esperar a entrar al módulo).
-  // Si el operador entra al módulo, ya tiene grupos listos — render inmediato.
-  function _precargarAlIniciar() {
-    if (_grupos.length) return; // ya precargado
-    OfflineManager.precargarOperacional?.().then(() => {
-      _buildMap(OfflineManager.getStockCache());
-      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
-      _renderMetrics();
-    }).catch(() => {});
-  }
-  // Activar 1.5s después de inicializar (tras login)
-  setTimeout(_precargarAlIniciar, 1500);
-  // Auto-refresh background mientras la app esté abierta
-  setTimeout(_startBgRefresh, 5000);
-  // Pausar refresh cuando la pestaña está oculta (ahorra batería/datos)
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      _backgroundRefresh();
-      _startBgRefresh();
-    } else {
-      _stopBgRefresh();
-    }
-  });
 
   // ── Auditoría diaria — helpers ────────────────────────────
   function _initAuditDia() {
@@ -11604,13 +11552,32 @@ const ProductosView = (() => {
     }).catch(() => {});
   }
 
-  // Re-render desde caché sin spinner ni API call (llamado por wh:data-refresh)
+  // Re-render desde caché sin spinner ni API call (llamado por wh:data-refresh).
+  // Usa render DIFF: solo las cards cuyo snapshot cambió se actualizan +
+  // flash sutil; el resto del DOM no se toca → cero parpadeo.
   function silentRefresh() {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     _buildMap(OfflineManager.getStockCache());
     _grupos = _agrupar(prods, equivs);
-    _aplicarQuery();
+    // Indicador sutil: chip "todos" parpadea brevemente
+    const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
+    if (chipAll) {
+      chipAll.classList.add('is-refreshing');
+      setTimeout(() => chipAll.classList.remove('is-refreshing'), 800);
+    }
+    // Solo usar diff si la vista de productos está visible y ya hubo render previo
+    const list = document.getElementById('listProductos');
+    const yaRenderizado = list && list.querySelector('.prod-card');
+    if (yaRenderizado && currentView === 'productos') {
+      const visibles = _aplicarFiltroChip(
+        _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
+      );
+      _renderDiff(visibles);
+      _renderMetrics();
+    } else {
+      _aplicarQuery();
+    }
   }
 
   // ── Cámara inline de búsqueda ────────────────────────────────
