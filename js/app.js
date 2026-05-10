@@ -6316,9 +6316,31 @@ const DespachoView = (() => {
     const items = _pickupActivo.items || [];
     if (!items.length) { cont.style.display = 'none'; return; }
 
+    // Stock cache indexado por TODOS los códigos posibles del row
+    // (codigoProducto + idProducto). Así un row guardado por EAN físico
+    // también es accesible si buscamos por idProducto del catálogo.
     const stockMap = {};
-    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    OfflineManager.getStockCache().forEach(s => {
+      const codP = s.codigoProducto;
+      const idP  = s.idProducto;
+      if (codP) stockMap[String(codP)] = s;
+      if (idP)  stockMap[String(idP)]  = s;
+    });
     const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+
+    // Helper: buscar stock probando skuBase + todos los codigosOriginales
+    function _buscarStock(item) {
+      const tryKey = (k) => k && stockMap[String(k)];
+      let row = tryKey(item.skuBase);
+      if (row) return row;
+      if (Array.isArray(item.codigosOriginales)) {
+        for (const c of item.codigosOriginales) {
+          row = tryKey(c);
+          if (row) return row;
+        }
+      }
+      return null;
+    }
 
     // Orden: pendientes primero, completados al final
     const sorted = items.slice().sort((a, b) => {
@@ -6336,17 +6358,21 @@ const DespachoView = (() => {
       const completo  = desp >= sol && sol > 0;
       const enProg    = desp > 0 && desp < sol;
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
-      const stockD    = parseFloat((stockMap[it.skuBase] || {}).cantidadDisponible || 0);
+      const stockRow  = _buscarStock(it);
+      const stockD    = stockRow ? parseFloat(stockRow.cantidadDisponible || 0) : 0;
+      const stockKnown= !!stockRow;
       const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
-      const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
+      const equivTxt  = equivCount > 1 ? ` · ${equivCount} códigos` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
       const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
       const esKg = _esProductoPeso(prod);
       const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
       const pendiente = sol - desp;
       let stockBadge = '';
-      if (stockD <= 0) {
-        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px">sin cache</span>';
+      if (!stockKnown) {
+        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px" title="No hay stock cacheado para este producto en WH">sin info</span>';
+      } else if (stockD <= 0) {
+        stockBadge = '<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock 0</span>';
       } else if (stockD < pendiente) {
         stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)}</span>`;
       } else {
@@ -7943,9 +7969,28 @@ const DespachoView = (() => {
     const cont = document.getElementById('despPickChecklist');
     if (!cont || !_pickupActivo) return;
     const items = _pickupActivo.items || [];
+    // Stock cache indexado por codigoProducto Y idProducto (un row puede
+    // ser accedido por cualquiera de los dos).
     const stockMap = {};
-    OfflineManager.getStockCache().forEach(s => { stockMap[s.codigoProducto || s.idProducto] = s; });
+    OfflineManager.getStockCache().forEach(s => {
+      if (s.codigoProducto) stockMap[String(s.codigoProducto)] = s;
+      if (s.idProducto)     stockMap[String(s.idProducto)]     = s;
+    });
     const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+
+    // Helper: buscar stock probando skuBase + todos los codigosOriginales
+    function _buscarStockSheet(item) {
+      const tryKey = (k) => k && stockMap[String(k)];
+      let row = tryKey(item.skuBase);
+      if (row) return row;
+      if (Array.isArray(item.codigosOriginales)) {
+        for (const c of item.codigosOriginales) {
+          row = tryKey(c);
+          if (row) return row;
+        }
+      }
+      return null;
+    }
 
     // Filtrar por búsqueda + ordenar
     const q = _pickupSearch.trim().toLowerCase();
@@ -7977,9 +8022,11 @@ const DespachoView = (() => {
       const enProg    = desp > 0 && desp < sol;
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
       const flash     = (flashSkuBase && String(flashSkuBase) === String(it.skuBase)) ? 'is-just-completed is-flash' : '';
-      const stockD    = parseFloat((stockMap[it.skuBase] || {}).cantidadDisponible || 0);
+      const stockRow  = _buscarStockSheet(it);
+      const stockD    = stockRow ? parseFloat(stockRow.cantidadDisponible || 0) : 0;
+      const stockKnown= !!stockRow;
       const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
-      const equivTxt  = equivCount > 1 ? ` · ${equivCount} barcodes` : '';
+      const equivTxt  = equivCount > 1 ? ` · ${equivCount} códigos` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
       // Producto maestro para detectar si es a granel (despacho decimal)
       const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
@@ -7988,8 +8035,10 @@ const DespachoView = (() => {
       // Stock badge — rojo si stockDisp < solicitado pendiente
       let stockBadge = '';
       const pendiente = sol - desp;
-      if (stockD <= 0) {
-        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px">sin cache</span>';
+      if (!stockKnown) {
+        stockBadge = '<span style="font-size:.62em;color:#94a3b8;background:rgba(71,85,105,.25);padding:1px 6px;border-radius:6px" title="No hay stock cacheado para este producto en WH">sin info</span>';
+      } else if (stockD <= 0) {
+        stockBadge = '<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock 0</span>';
       } else if (stockD < pendiente) {
         stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)} · faltarán ${fmt(pendiente - stockD,1)}</span>`;
       } else {
