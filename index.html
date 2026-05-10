@@ -256,6 +256,171 @@
       background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(15,23,42,.95));
       border:1px solid rgba(99,102,241,.4);
     }
+    /* ════ BLOQUE 2/3 · Sheet detalle producto + cámara telón ════ */
+    .prod-detail-hero {
+      position:relative;border-radius:18px;padding:18px 16px 14px;margin-bottom:12px;
+      background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(14,165,233,.10));
+      border:1px solid rgba(99,102,241,.32);overflow:hidden;
+    }
+    .prod-detail-hero::before {
+      content:'';position:absolute;top:-50%;right:-15%;width:240px;height:240px;
+      background:radial-gradient(circle,rgba(129,140,248,.30),transparent 65%);
+      pointer-events:none;
+    }
+    .prod-detail-emoji {
+      font-size:30px;margin-bottom:6px;display:inline-block;
+      filter:drop-shadow(0 4px 12px rgba(129,140,248,.4));
+    }
+    .prod-detail-title { font-size:1.05em;font-weight:900;color:#f1f5f9;letter-spacing:-.01em;line-height:1.3;margin-bottom:3px; }
+    .prod-detail-sku   { font-size:.7em;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;letter-spacing:.04em; }
+    .prod-detail-kpi-row {
+      display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;position:relative;z-index:1;
+    }
+    .prod-detail-kpi {
+      padding:9px 8px;border-radius:11px;
+      background:rgba(15,23,42,.55);border:1px solid rgba(51,65,85,.55);
+      text-align:center;
+    }
+    .prod-detail-kpi-val { font-size:1.15em;font-weight:900;color:#f1f5f9;letter-spacing:-.02em;line-height:1; }
+    .prod-detail-kpi-lbl { font-size:.6em;color:#64748b;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-top:3px; }
+    .prod-detail-kpi.is-stock .prod-detail-kpi-val { color:#34d399; }
+    .prod-detail-kpi.is-rot .prod-detail-kpi-val   { color:#a5b4fc; }
+    .prod-detail-kpi.is-codes .prod-detail-kpi-val { color:#fbbf24; }
+    /* Tabs */
+    .prod-detail-tabs {
+      display:flex;gap:4px;border-bottom:1px solid rgba(51,65,85,.5);
+      margin-bottom:12px;overflow-x:auto;scrollbar-width:none;
+    }
+    .prod-detail-tabs::-webkit-scrollbar { display:none; }
+    .prod-detail-tab {
+      padding:9px 13px;background:transparent;border:none;cursor:pointer;
+      color:#64748b;font-size:.78em;font-weight:700;letter-spacing:.02em;
+      white-space:nowrap;flex-shrink:0;
+      border-bottom:2px solid transparent;transition:all .18s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .prod-detail-tab.is-active {
+      color:#c7d2fe;border-bottom-color:rgba(129,140,248,.7);
+    }
+    .prod-detail-tab-content { animation: prodDetailTabIn .25s cubic-bezier(.4,0,.2,1); }
+    @keyframes prodDetailTabIn {
+      0%   { opacity:0; transform:translateY(8px); }
+      100% { opacity:1; transform:translateY(0); }
+    }
+    /* Stock por código de barras */
+    .prod-stock-row {
+      display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:10px;
+      background:rgba(15,23,42,.45);border:1px solid rgba(51,65,85,.4);margin-bottom:6px;
+    }
+    .prod-stock-row.is-canonico { border-color:rgba(16,185,129,.4); }
+    .prod-stock-row.is-equiv    { border-color:rgba(245,158,11,.35); }
+    .prod-stock-tag {
+      font-size:.6em;font-weight:900;letter-spacing:.05em;
+      padding:2px 6px;border-radius:5px;flex-shrink:0;
+    }
+    .prod-stock-tag.is-canonico { background:rgba(16,185,129,.18);color:#86efac; }
+    .prod-stock-tag.is-equiv    { background:rgba(245,158,11,.18);color:#fbbf24; }
+    /* Timeline movimientos */
+    .prod-timeline-item {
+      display:flex;gap:10px;padding:8px 0;border-left:2px solid rgba(51,65,85,.4);
+      padding-left:12px;margin-left:6px;position:relative;
+    }
+    .prod-timeline-item::before {
+      content:'';position:absolute;left:-5px;top:11px;width:8px;height:8px;border-radius:50%;
+      background:rgba(99,102,241,.7);border:2px solid #0f172a;
+    }
+    .prod-timeline-item.is-entrada::before { background:#34d399; }
+    .prod-timeline-item.is-salida::before  { background:#fb923c; }
+    .prod-timeline-fecha { font-size:.66em;color:#64748b;letter-spacing:.04em; }
+    .prod-timeline-tipo  { font-size:.78em;font-weight:800; }
+    .prod-timeline-tipo.is-entrada { color:#34d399; }
+    .prod-timeline-tipo.is-salida  { color:#fb923c; }
+    .prod-timeline-meta  { font-size:.7em;color:#94a3b8; }
+    /* Botones de acción del sheet detalle */
+    .prod-detail-actions {
+      display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+      position:sticky;bottom:0;background:#1e293b;padding:12px 0 4px;
+      margin:14px -2px 0;border-top:1px solid rgba(51,65,85,.4);
+    }
+    .prod-action-btn {
+      padding:11px 8px;border-radius:11px;border:none;cursor:pointer;
+      font-size:.74em;font-weight:900;letter-spacing:.03em;
+      display:flex;flex-direction:column;align-items:center;gap:4px;
+      -webkit-tap-highlight-color:transparent;
+      transition:all .15s ease;
+    }
+    .prod-action-btn:active { transform:scale(.96); }
+    .prod-action-btn.is-despachar {
+      background:linear-gradient(135deg,#10b981,#059669);color:#fff;
+      box-shadow:0 4px 12px -3px rgba(16,185,129,.5);
+    }
+    .prod-action-btn.is-auditar {
+      background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;
+      box-shadow:0 4px 12px -3px rgba(99,102,241,.45);
+    }
+    .prod-action-btn.is-hist {
+      background:rgba(71,85,105,.35);color:#cbd5e1;border:1px solid rgba(71,85,105,.55);
+    }
+    .prod-action-btn-icon { font-size:1.3em;line-height:1; }
+    /* Cámara INLINE telón en productos (igual patrón que pickup) */
+    .prod-cam-telon {
+      position:sticky;top:52px;z-index:10;
+      border-radius:16px;overflow:hidden;
+      background:#0f172a;border:1.5px solid rgba(14,165,233,.4);
+      box-shadow:0 20px 50px -10px rgba(14,165,233,.4),
+                 0 4px 14px rgba(0,0,0,.5);
+      margin-bottom:10px;
+      animation: despCamSlideDown .4s cubic-bezier(.4,0,.2,1);
+    }
+    .prod-cam-telon.is-closing {
+      animation: despCamSlideUp .3s cubic-bezier(.4,0,.2,1) forwards;
+    }
+    /* Header colapsable cuando hay cámara abierta */
+    .prod-header-collapsible.is-collapsed {
+      max-height:0;opacity:0;transform:translateY(-20px);overflow:hidden;
+      margin:0 !important;pointer-events:none;
+      transition:all .35s cubic-bezier(.4,0,.2,1);
+    }
+    /* ════ BLOQUE 3/3 · Swipe gestures + long-press ════ */
+    .prod-card.swipe-left  { background:linear-gradient(90deg,rgba(99,102,241,.18) 0%,transparent 60%); }
+    .prod-card.swipe-right { background:linear-gradient(-90deg,rgba(245,158,11,.18) 0%,transparent 60%); }
+    .prod-card-swipeable {
+      position:relative;
+      transition:transform .18s ease, background .18s ease;
+      touch-action:pan-y;
+    }
+    .prod-card-lp-ripple {
+      position:absolute;border-radius:50%;
+      background:rgba(99,102,241,.28);
+      pointer-events:none;
+      animation: prodLpRipple .6s ease-out;
+    }
+    @keyframes prodLpRipple {
+      0%   { transform:translate(-50%,-50%) scale(0); opacity:.7; }
+      100% { transform:translate(-50%,-50%) scale(8); opacity:0; }
+    }
+    /* Long-press menu */
+    .prod-lp-menu {
+      position:fixed;z-index:1000;
+      background:linear-gradient(135deg,rgba(30,41,59,.97),rgba(15,23,42,.97));
+      border:1.5px solid rgba(99,102,241,.4);border-radius:14px;
+      padding:6px;min-width:180px;
+      box-shadow:0 20px 50px -10px rgba(0,0,0,.6);
+      animation: prodLpMenuIn .2s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes prodLpMenuIn {
+      0%   { opacity:0; transform:scale(.85); }
+      100% { opacity:1; transform:scale(1); }
+    }
+    .prod-lp-menu-item {
+      display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:9px;
+      color:#cbd5e1;font-size:.84em;font-weight:600;cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+      transition:background .12s ease;
+    }
+    .prod-lp-menu-item:hover { background:rgba(99,102,241,.18); }
+    .prod-lp-menu-item:active { background:rgba(99,102,241,.3); }
+    .prod-lp-menu-icon { font-size:1.1em;flex-shrink:0;width:20px;text-align:center; }
 
     .prodtb-side { flex-shrink:0;max-width:240px;display:flex;align-items:center;gap:6px;
                    opacity:1;transition:max-width .22s ease, opacity .18s ease, margin .22s ease; }
@@ -3070,6 +3235,10 @@
   <!-- ── PRODUCTOS ─────────────────────────────── -->
   <section id="view-productos" class="view slide-up">
 
+    <!-- Header colapsable: chips + toolbar + cámara strip.
+         Se oculta con animación cuando se activa cámara con telón. -->
+    <div id="prodHeaderCollapsible" class="prod-header-collapsible">
+
     <!-- ═══ CHIPS DE MÉTRICAS · responsive (compactos en mobile) ═══════
          Se llenan en runtime via ProductosView._renderMetrics(). Tap chip
          filtra la lista. Tap el activo deselecciona (vuelve a "todos").
@@ -3167,27 +3336,90 @@
 
     </div>
 
-    <!-- Cámara inline para búsqueda de productos -->
-    <div id="prodCamStrip" style="display:none;border-radius:12px;overflow:hidden;
-         background:#0f172a;margin-bottom:10px;position:relative;">
+    </div><!-- /prodHeaderCollapsible -->
+
+    <!-- Cámara inline TELÓN para búsqueda de productos (sticky bajo topbar).
+         El header de arriba se oculta con animación cuando esta cámara abre,
+         dejando la lista de productos abajo scrolleable libremente. -->
+    <div id="prodCamStrip" class="prod-cam-telon" style="display:none">
       <video id="prodCamVideo" autoplay playsinline muted
-             style="width:100%;height:200px;object-fit:cover;display:block;"></video>
-      <button onclick="ProductosView.cerrarProdCamara()"
-              style="position:absolute;top:8px;right:8px;width:30px;height:30px;
-                     border-radius:50%;background:rgba(0,0,0,.65);color:#fff;
-                     border:1px solid rgba(255,255,255,.2);font-size:.85em;
-                     cursor:pointer;display:flex;align-items:center;justify-content:center;
-                     -webkit-tap-highlight-color:transparent">✕</button>
-      <div id="prodCamStatus"
-           style="padding:6px 14px;font-size:.74em;font-weight:600;
-                  text-align:center;color:#475569;background:#0f172a;
-                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        — apunta al código de barras —
+             style="width:100%;height:220px;object-fit:cover;display:block;"></video>
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;
+                  background:linear-gradient(180deg,rgba(15,23,42,.95),rgba(15,23,42,1));
+                  border-top:1px solid rgba(51,65,85,.5)">
+        <span id="prodCamStatus" style="flex:1;min-width:0;font-size:.75em;font-weight:700;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          — apunta al código de barras —
+        </span>
+        <button onclick="ProductosView.cerrarProdCamara()"
+                style="flex-shrink:0;padding:7px 13px;border-radius:9px;border:none;cursor:pointer;
+                       background:linear-gradient(135deg,#dc2626,#991b1b);color:#fff;
+                       font-size:.74em;font-weight:900;-webkit-tap-highlight-color:transparent;
+                       box-shadow:0 4px 10px -2px rgba(220,38,38,.45)">✕ CERRAR</button>
       </div>
     </div>
 
     <div id="listProductos" class="space-y-3 pb-4"></div>
   </section>
+
+  <!-- ════════════════════════════════════════════════
+       SHEET: DETALLE PRODUCTO — modal moderno con tabs
+  ════════════════════════════════════════════════ -->
+  <div class="sheet-overlay" id="overlayProdDetalle" onclick="cerrarSheet('sheetProdDetalle')"></div>
+  <div class="bottom-sheet" id="sheetProdDetalle" style="max-height:92vh;overflow-y:auto;padding-bottom:0">
+    <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+
+    <!-- Hero del producto -->
+    <div class="prod-detail-hero">
+      <button onclick="cerrarSheet('sheetProdDetalle')"
+              style="position:absolute;top:10px;right:10px;width:30px;height:30px;
+                     border-radius:9px;border:none;cursor:pointer;color:#94a3b8;font-size:16px;
+                     background:rgba(15,23,42,.6);z-index:2">✕</button>
+      <div class="prod-detail-emoji">📦</div>
+      <p class="prod-detail-title" id="prodDetTitulo">—</p>
+      <p class="prod-detail-sku" id="prodDetSku">—</p>
+      <div class="prod-detail-kpi-row">
+        <div class="prod-detail-kpi is-stock">
+          <p class="prod-detail-kpi-val" id="prodDetKpiStock">—</p>
+          <p class="prod-detail-kpi-lbl">Stock total</p>
+        </div>
+        <div class="prod-detail-kpi is-rot">
+          <p class="prod-detail-kpi-val" id="prodDetKpiRot">—</p>
+          <p class="prod-detail-kpi-lbl">Rotación 30d</p>
+        </div>
+        <div class="prod-detail-kpi is-codes">
+          <p class="prod-detail-kpi-val" id="prodDetKpiCodes">—</p>
+          <p class="prod-detail-kpi-lbl">Códigos</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="prod-detail-tabs">
+      <button class="prod-detail-tab is-active" data-tab="stock" onclick="ProductosView.detSetTab('stock')">📊 Stock</button>
+      <button class="prod-detail-tab"           data-tab="movs"  onclick="ProductosView.detSetTab('movs')">📜 Movimientos</button>
+      <button class="prod-detail-tab"           data-tab="lotes" onclick="ProductosView.detSetTab('lotes')">📅 Lotes</button>
+      <button class="prod-detail-tab"           data-tab="codes" onclick="ProductosView.detSetTab('codes')">🔖 Códigos</button>
+    </div>
+
+    <!-- Contenido tabs -->
+    <div id="prodDetTabContent" class="prod-detail-tab-content"></div>
+
+    <!-- Acciones (siempre visibles abajo) -->
+    <div class="prod-detail-actions">
+      <button class="prod-action-btn is-despachar" onclick="ProductosView.detDespacharActual()">
+        <span class="prod-action-btn-icon">📦</span>
+        <span>DESPACHAR</span>
+      </button>
+      <button class="prod-action-btn is-auditar" onclick="ProductosView.detAuditarActual()">
+        <span class="prod-action-btn-icon">🕵</span>
+        <span>AUDITAR</span>
+      </button>
+      <button class="prod-action-btn is-hist" onclick="ProductosView.detHistorialActual()">
+        <span class="prod-action-btn-icon">📊</span>
+        <span>HISTORIAL</span>
+      </button>
+    </div>
+  </div>
 
 
   <!-- ── CONFIG (oculta, mantenida por compatibilidad) ── -->

@@ -11522,10 +11522,16 @@ const ProductosView = (() => {
   function abrirProdCamara() {
     const strip = document.getElementById('prodCamStrip');
     if (!strip) return;
+    // Telón: colapsar header (chips + toolbar) con animación
+    const header = document.getElementById('prodHeaderCollapsible');
+    if (header) header.classList.add('is-collapsed');
+    strip.classList.remove('is-closing');
     strip.style.display = 'block';
     _setProdCamStatus('ready');
     const btn = document.getElementById('prodCamBtn');
     if (btn) btn.style.background = 'rgba(14,165,233,.25)';
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(10);
     Scanner.start('prodCamVideo', _onProdCamResult, err => {
       toast('Error cámara: ' + err, 'danger');
       cerrarProdCamara();
@@ -11534,11 +11540,22 @@ const ProductosView = (() => {
 
   function cerrarProdCamara() {
     clearTimeout(_prodCamTimer);
-    Scanner.stop();
+    try { Scanner.stop(); } catch(_){}
     const strip = document.getElementById('prodCamStrip');
-    if (strip) strip.style.display = 'none';
+    if (strip) {
+      strip.classList.add('is-closing');
+      setTimeout(() => {
+        strip.style.display = 'none';
+        strip.classList.remove('is-closing');
+      }, 320);
+    }
+    // Restaurar header
+    const header = document.getElementById('prodHeaderCollapsible');
+    if (header) header.classList.remove('is-collapsed');
     const btn = document.getElementById('prodCamBtn');
     if (btn) btn.style.background = '';
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
   }
 
   function toggleProdCamara() {
@@ -11547,12 +11564,359 @@ const ProductosView = (() => {
     else abrirProdCamara();
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // SHEET DETALLE PRODUCTO — Modal moderno con tabs (Stock/Movs/Lotes/Códigos)
+  // Tap en card del producto → abre este sheet con info completa.
+  // Acciones: Despachar (envía a despacho rápido) · Auditar · Historial.
+  // NUNCA precio ni edición — WH solo mueve mercadería en cantidades.
+  // ═══════════════════════════════════════════════════════════════════════
+  let _detSkuActivo = null;
+  let _detTabActivo = 'stock';
+
+  function abrirSheetDetalleProducto(skuBase) {
+    if (!skuBase) return;
+    const grupo = _grupos.find(g => String(g.skuBase) === String(skuBase));
+    if (!grupo) return;
+    _detSkuActivo = skuBase;
+    _detTabActivo = 'stock';
+    // Hero
+    const titEl = document.getElementById('prodDetTitulo');
+    const skuEl = document.getElementById('prodDetSku');
+    if (titEl) titEl.textContent = grupo.base.descripcion || skuBase;
+    if (skuEl) skuEl.textContent = `${skuBase} · ${grupo.base.unidad || ''}`;
+    // KPIs
+    const codigos = grupo.children.map(c => c.codigoBarra).filter(Boolean);
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias = OfflineManager.getGuiasCache();
+    const gMap = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+    const hace30 = Date.now() - 30 * 86400000;
+    const setCodigos = new Set(codigos);
+    const movs30 = detalles.filter(d => {
+      if (!setCodigos.has(d.codigoProducto)) return false;
+      const f = gMap[d.idGuia]?.fecha;
+      return f && new Date(f).getTime() > hace30;
+    }).length;
+    const setKpi = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val;
+    };
+    setKpi('prodDetKpiStock', fmt(grupo.stockTotal));
+    setKpi('prodDetKpiRot',   movs30);
+    setKpi('prodDetKpiCodes', codigos.length);
+    // Tabs
+    document.querySelectorAll('.prod-detail-tab').forEach(t => {
+      t.classList.toggle('is-active', t.dataset.tab === 'stock');
+    });
+    detSetTab('stock');
+    abrirSheet('sheetProdDetalle');
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(10);
+  }
+
+  function detSetTab(tab) {
+    if (!_detSkuActivo) return;
+    _detTabActivo = tab;
+    document.querySelectorAll('.prod-detail-tab').forEach(t => {
+      t.classList.toggle('is-active', t.dataset.tab === tab);
+    });
+    const cont = document.getElementById('prodDetTabContent');
+    if (!cont) return;
+    cont.classList.remove('prod-detail-tab-content');
+    void cont.offsetWidth;
+    cont.classList.add('prod-detail-tab-content');
+    const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
+    if (!grupo) { cont.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Producto no encontrado</p>'; return; }
+
+    if (tab === 'stock') {
+      // Breakdown stock por cada codigoBarra del grupo (canónico + equivalentes)
+      cont.innerHTML = grupo.children.map(c => {
+        const s = _s(c.codigoBarra);
+        const cant = parseFloat(s.cantidadDisponible) || 0;
+        const tag = c.origen === 'equiv' ? 'is-equiv' : 'is-canonico';
+        const tagTxt = c.origen === 'equiv' ? 'EQUIV' : 'CANÓN';
+        return `
+          <div class="prod-stock-row ${tag}">
+            <span class="prod-stock-tag ${tag}">${tagTxt}</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-mono truncate">${escHtml(c.codigoBarra)}</p>
+              <p class="text-[10px] text-slate-500 truncate">${escHtml(c.descripcion || '')}</p>
+            </div>
+            <span class="font-black text-sm ${cant > 0 ? 'text-emerald-400' : 'text-slate-500'}">${fmt(cant)}</span>
+          </div>`;
+      }).join('') +
+      `<p class="text-[10px] text-slate-500 mt-3 text-center">Total grupo: <span class="text-emerald-400 font-bold">${fmt(grupo.stockTotal)}</span> unidades · stock se descuenta por código real al despachar</p>`;
+    } else if (tab === 'movs') {
+      // Timeline últimos 30 movimientos
+      const codSet = new Set(grupo.children.map(c => c.codigoBarra));
+      const movs = detalles
+        .filter(d => codSet.has(d.codigoProducto))
+        .map(d => {
+          const g = gMap[d.idGuia] || {};
+          return {
+            fecha: g.fecha,
+            tipo: g.tipo || '',
+            cant: parseFloat(d.cantidad) || 0,
+            cb: d.codigoProducto,
+            idGuia: d.idGuia
+          };
+        })
+        .filter(m => m.fecha)
+        .sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)))
+        .slice(0, 30);
+      if (!movs.length) {
+        cont.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin movimientos registrados</p>';
+        return;
+      }
+      cont.innerHTML = movs.map(m => {
+        const esEntrada = String(m.tipo).indexOf('ENTRADA') === 0 || String(m.tipo).indexOf('INGRESO') >= 0;
+        const cls = esEntrada ? 'is-entrada' : 'is-salida';
+        const tipoIcon = esEntrada ? '↓' : '↑';
+        return `
+          <div class="prod-timeline-item ${cls}">
+            <div class="flex-1 min-w-0">
+              <p class="prod-timeline-tipo ${cls}">${tipoIcon} ${escHtml(m.tipo)} · ${fmt(m.cant)}</p>
+              <p class="prod-timeline-fecha">${fmtFecha(m.fecha)} · <span class="font-mono">${escHtml(m.cb)}</span></p>
+              <p class="prod-timeline-meta">Guía ${escHtml(m.idGuia)}</p>
+            </div>
+          </div>`;
+      }).join('');
+    } else if (tab === 'lotes') {
+      const lotes = (OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || [])
+        .filter(l => grupo.children.some(c => String(c.codigoBarra) === String(l.codigoProducto || l.codigoBarra)));
+      if (!lotes.length) {
+        cont.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin lotes con vencimiento registrados</p>';
+        return;
+      }
+      const hoy = Date.now();
+      const en7d = hoy + 7 * 86400000;
+      cont.innerHTML = lotes.sort((a,b) =>
+        new Date(a.fechaVencimiento || 0) - new Date(b.fechaVencimiento || 0)
+      ).map(l => {
+        const t = new Date(l.fechaVencimiento || 0).getTime();
+        const critico = t > 0 && t < en7d;
+        const vencido = t > 0 && t < hoy;
+        const color = vencido ? '#f87171' : critico ? '#fbbf24' : '#94a3b8';
+        return `
+          <div class="card-sm flex items-center gap-3" style="border-color:${color}3a">
+            <div style="font-size:18px;flex-shrink:0">${vencido ? '⛔' : critico ? '⚠' : '📅'}</div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-bold" style="color:${color}">${l.fechaVencimiento || 'Sin fecha'}</p>
+              <p class="text-[10px] text-slate-500 font-mono truncate">${escHtml(l.codigoProducto || l.codigoBarra || '')}</p>
+            </div>
+            <span class="font-bold text-sm" style="color:${color}">${fmt(l.cantidadDisponible || l.cantidad || 0)}</span>
+          </div>`;
+      }).join('');
+    } else if (tab === 'codes') {
+      cont.innerHTML = grupo.children.map(c => {
+        const tag = c.origen === 'equiv' ? 'is-equiv' : 'is-canonico';
+        const tagTxt = c.origen === 'equiv' ? 'EQUIV' : 'CANÓNICO';
+        return `
+          <div class="prod-stock-row ${tag}">
+            <span class="prod-stock-tag ${tag}">${tagTxt}</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-mono truncate">${escHtml(c.codigoBarra)}</p>
+              <p class="text-[10px] text-slate-500 truncate">${escHtml(c.descripcion || '')}</p>
+            </div>
+          </div>`;
+      }).join('') +
+      `<p class="text-[10px] text-slate-500 mt-3 text-center">${grupo.children.length} código${grupo.children.length!==1?'s':''} aceptado${grupo.children.length!==1?'s':''} al escanear · canónico es lo nominal, equivalentes son aliases válidos</p>`;
+    }
+  }
+
+  function detDespacharActual() {
+    if (!_detSkuActivo) return;
+    const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
+    if (!grupo) return;
+    cerrarSheet('sheetProdDetalle');
+    try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch(_){}
+    vibrate(15);
+    toast(`📦 Yendo a despacho rápido para ${grupo.base.descripcion || _detSkuActivo}`, 'info', 2500);
+    setTimeout(() => App.nav('despacho'), 250);
+  }
+
+  function detAuditarActual() {
+    if (!_detSkuActivo) return;
+    const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
+    if (!grupo || !grupo.children.length) return;
+    cerrarSheet('sheetProdDetalle');
+    const c0 = grupo.children[0];
+    setTimeout(() => abrirAuditBarcode(c0.codigoBarra, c0.descripcion || grupo.base.descripcion, _detSkuActivo), 200);
+  }
+
+  function detHistorialActual() {
+    if (!_detSkuActivo) return;
+    const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
+    if (!grupo || !grupo.children.length) return;
+    cerrarSheet('sheetProdDetalle');
+    const codigos = grupo.children.map(c => c.codigoBarra).join('|');
+    setTimeout(() => verHistorial(codigos, grupo.base.descripcion || _detSkuActivo), 200);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SWIPE GESTURES + LONG-PRESS en cards de productos (mobile-friendly).
+  // Swipe izquierda → Auditar  ·  Swipe derecha → Historial
+  // Long-press (500ms) → menú contextual
+  // ═══════════════════════════════════════════════════════════════════════
+  let _swipeStartX = null;
+  let _swipeStartY = null;
+  let _swipeCardEl = null;
+  let _lpTimer = null;
+
+  function _attachGestures() {
+    const list = document.getElementById('listProductos');
+    if (!list || list._gestAttached) return;
+    list._gestAttached = true;
+
+    // Click en card body → abre sheet detalle.
+    // Si el click viene de un botón/input interno, NO abrir (deja seguir su acción).
+    list.addEventListener('click', (e) => {
+      if (e.target.closest('button, input, select, textarea, a')) return;
+      const card = e.target.closest('.prod-card');
+      if (!card || !card.id?.startsWith('grp-')) return;
+      const cardId = card.id.replace(/^grp-/, '');
+      const grupo = _grupos.find(g => g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_') === cardId);
+      if (!grupo) return;
+      // Solo abrir si no estamos en medio de un swipe (evita falso positivo)
+      if (_swipeCardEl) return;
+      abrirSheetDetalleProducto(grupo.skuBase);
+    });
+
+    list.addEventListener('touchstart', (e) => {
+      const card = e.target.closest?.('.prod-card');
+      if (!card) return;
+      _swipeStartX = e.touches[0].clientX;
+      _swipeStartY = e.touches[0].clientY;
+      _swipeCardEl = card;
+      card.classList.add('prod-card-swipeable');
+      // Long-press timer
+      clearTimeout(_lpTimer);
+      _lpTimer = setTimeout(() => {
+        if (_swipeCardEl !== card) return;
+        _abrirLpMenu(card, _swipeStartX, _swipeStartY);
+        _lpTimer = null;
+      }, 500);
+    }, { passive: true });
+
+    list.addEventListener('touchmove', (e) => {
+      if (!_swipeCardEl || _swipeStartX === null) return;
+      const dx = e.touches[0].clientX - _swipeStartX;
+      const dy = Math.abs(e.touches[0].clientY - _swipeStartY);
+      if (dy > 12) { _resetSwipe(); return; }
+      if (Math.abs(dx) > 14) {
+        clearTimeout(_lpTimer);
+        _lpTimer = null;
+        _swipeCardEl.classList.toggle('swipe-left',  dx < -30);
+        _swipeCardEl.classList.toggle('swipe-right', dx >  30);
+        _swipeCardEl.style.transform = `translateX(${Math.max(-80, Math.min(80, dx * 0.4))}px)`;
+      }
+    }, { passive: true });
+
+    list.addEventListener('touchend', (e) => {
+      clearTimeout(_lpTimer); _lpTimer = null;
+      if (!_swipeCardEl || _swipeStartX === null) { _resetSwipe(); return; }
+      const dx = (e.changedTouches[0].clientX - _swipeStartX);
+      const card = _swipeCardEl;
+      const sku  = card.id.replace(/^grp-/, '').replace(/_/g, '');
+      // Buscar el grupo real (ojo: el id tiene caracteres reemplazados)
+      const grupo = _grupos.find(g => g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_') === card.id.replace(/^grp-/, ''));
+      if (!grupo) { _resetSwipe(); return; }
+      if (dx < -60) {
+        // Swipe izquierda → Auditar
+        try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch(_){}
+        vibrate(15);
+        const c0 = grupo.children[0];
+        if (c0) abrirAuditBarcode(c0.codigoBarra, c0.descripcion || grupo.base.descripcion, grupo.skuBase);
+      } else if (dx > 60) {
+        // Swipe derecha → Historial
+        try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch(_){}
+        vibrate(15);
+        const codigos = grupo.children.map(c => c.codigoBarra).join('|');
+        verHistorial(codigos, grupo.base.descripcion || grupo.skuBase);
+      }
+      _resetSwipe();
+    });
+
+    list.addEventListener('touchcancel', () => { clearTimeout(_lpTimer); _resetSwipe(); });
+  }
+
+  function _resetSwipe() {
+    if (_swipeCardEl) {
+      _swipeCardEl.style.transform = '';
+      _swipeCardEl.classList.remove('swipe-left', 'swipe-right');
+    }
+    _swipeStartX = null;
+    _swipeStartY = null;
+    _swipeCardEl = null;
+  }
+
+  function _abrirLpMenu(card, clickX, clickY) {
+    if (!card) return;
+    const sku = card.id.replace(/^grp-/, '');
+    const grupo = _grupos.find(g => g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_') === sku);
+    if (!grupo) return;
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(20);
+    // Ripple visual
+    const rip = document.createElement('div');
+    rip.className = 'prod-card-lp-ripple';
+    const rect = card.getBoundingClientRect();
+    rip.style.left = (clickX - rect.left) + 'px';
+    rip.style.top  = (clickY - rect.top) + 'px';
+    card.style.position = 'relative';
+    card.appendChild(rip);
+    setTimeout(() => rip.remove(), 700);
+    // Menú
+    const menu = document.createElement('div');
+    menu.className = 'prod-lp-menu';
+    menu.innerHTML = `
+      <div class="prod-lp-menu-item" data-act="detalle"><span class="prod-lp-menu-icon">📦</span>Ver detalle</div>
+      <div class="prod-lp-menu-item" data-act="despachar"><span class="prod-lp-menu-icon">🚚</span>Despachar este producto</div>
+      <div class="prod-lp-menu-item" data-act="auditar"><span class="prod-lp-menu-icon">🕵</span>Auditar</div>
+      <div class="prod-lp-menu-item" data-act="historial"><span class="prod-lp-menu-icon">📊</span>Historial</div>
+    `;
+    document.body.appendChild(menu);
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let mx = clickX - mw/2, my = clickY - mh - 10;
+    if (mx < 8) mx = 8;
+    if (mx + mw > window.innerWidth - 8) mx = window.innerWidth - mw - 8;
+    if (my < 60) my = clickY + 20;
+    menu.style.left = mx + 'px';
+    menu.style.top  = my + 'px';
+    const close = () => { menu.remove(); document.removeEventListener('click', close); };
+    menu.addEventListener('click', (e) => {
+      const it = e.target.closest?.('.prod-lp-menu-item');
+      if (!it) return;
+      const act = it.dataset.act;
+      close();
+      const c0 = grupo.children[0];
+      if (act === 'detalle')   abrirSheetDetalleProducto(grupo.skuBase);
+      if (act === 'despachar') {
+        try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch(_){}
+        toast(`📦 Yendo a despacho rápido para ${grupo.base.descripcion}`, 'info', 2500);
+        setTimeout(() => App.nav('despacho'), 250);
+      }
+      if (act === 'auditar' && c0) abrirAuditBarcode(c0.codigoBarra, c0.descripcion || grupo.base.descripcion, grupo.skuBase);
+      if (act === 'historial') verHistorial(grupo.children.map(c => c.codigoBarra).join('|'), grupo.base.descripcion);
+    });
+    setTimeout(() => document.addEventListener('click', close, { once: true }), 50);
+  }
+
+  // Llamar attachGestures cada vez que se renderice la lista
+  const _origRender = _render;
+  _render = function(grupos) {
+    _origRender(grupos);
+    setTimeout(_attachGestures, 50);
+  };
+
   return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
-           toggleFiltro, setView, toggleVozBusqueda };
+           toggleFiltro, setView, toggleVozBusqueda,
+           abrirSheetDetalleProducto, detSetTab,
+           detDespacharActual, detAuditarActual, detHistorialActual };
 })();
 
 
