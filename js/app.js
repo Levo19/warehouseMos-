@@ -6328,18 +6328,27 @@ const DespachoView = (() => {
     });
     const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
 
-    // Helper: buscar stock probando skuBase + todos los codigosOriginales
+    // Helper: SUMAR stock de todos los códigos del item (canónico + equivalentes).
+    // En tabla STOCK puede haber rows separados por codigoBarra distinto pero
+    // pertenecen al mismo skuBase. El stock total disponible es la suma.
     function _buscarStock(item) {
-      const tryKey = (k) => k && stockMap[String(k)];
-      let row = tryKey(item.skuBase);
-      if (row) return row;
+      let total = 0;
+      let count = 0;
+      const visited = new Set();
+      const tryKey = (k) => {
+        if (!k) return;
+        const key = String(k);
+        if (visited.has(key)) return;
+        visited.add(key);
+        const r = stockMap[key];
+        if (r) { total += parseFloat(r.cantidadDisponible || 0); count++; }
+      };
       if (Array.isArray(item.codigosOriginales)) {
-        for (const c of item.codigosOriginales) {
-          row = tryKey(c);
-          if (row) return row;
-        }
+        item.codigosOriginales.forEach(c => tryKey(c));
       }
-      return null;
+      // Fallback skuBase si los codigos no encontraron nada
+      if (count === 0) tryKey(item.skuBase);
+      return count > 0 ? { cantidadDisponible: total, codigosEncontrados: count } : null;
     }
 
     // Orden: pendientes primero, completados al final
@@ -7978,18 +7987,24 @@ const DespachoView = (() => {
     });
     const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
 
-    // Helper: buscar stock probando skuBase + todos los codigosOriginales
+    // Helper: SUMAR stock de todos los códigos (canónico + equivalentes).
     function _buscarStockSheet(item) {
-      const tryKey = (k) => k && stockMap[String(k)];
-      let row = tryKey(item.skuBase);
-      if (row) return row;
+      let total = 0;
+      let count = 0;
+      const visited = new Set();
+      const tryKey = (k) => {
+        if (!k) return;
+        const key = String(k);
+        if (visited.has(key)) return;
+        visited.add(key);
+        const r = stockMap[key];
+        if (r) { total += parseFloat(r.cantidadDisponible || 0); count++; }
+      };
       if (Array.isArray(item.codigosOriginales)) {
-        for (const c of item.codigosOriginales) {
-          row = tryKey(c);
-          if (row) return row;
-        }
+        item.codigosOriginales.forEach(c => tryKey(c));
       }
-      return null;
+      if (count === 0) tryKey(item.skuBase);
+      return count > 0 ? { cantidadDisponible: total, codigosEncontrados: count } : null;
     }
 
     // Filtrar por búsqueda + ordenar
