@@ -1683,17 +1683,25 @@
   </style>
 
   <style>
-  /* ── Banner de nueva versión disponible ── */
+  /* ── Banner de nueva versión disponible ──
+     Posicionado SIEMPRE arriba del bottomNav (62px) + safe-area del SO
+     (notch/home indicator de iPhone, gestos Android). Antes era bottom:76px
+     fijo, lo que en algunos dispositivos hacía que el banner cubriera
+     parcialmente el menú de módulos. */
   #whUpdateBanner {
     position: fixed;
-    bottom: 76px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
     left: 50%;
-    transform: translateX(-50%) translateY(140px);
+    transform: translateX(-50%) translateY(180px);
     z-index: 9997;
     width: calc(100% - 32px);
     max-width: 420px;
     transition: transform .45s cubic-bezier(.34,1.56,.64,1);
     pointer-events: none;
+  }
+  /* En desktop con sidebar (no hay bottomNav), el banner puede ir más abajo */
+  @media (min-width: 1024px) {
+    #whUpdateBanner { bottom: 24px; }
   }
   #whUpdateBanner.visible {
     transform: translateX(-50%) translateY(0);
@@ -1823,6 +1831,7 @@
       if (el) el.classList.add('visible');
     }
 
+    let _bannerAutoHideTimer = null;
     function _showUpdateBanner(worker) {
       _waitingWorker = worker;
       // Mostrar versión nueva desde version.json (siempre red)
@@ -1837,11 +1846,16 @@
         });
       const banner = document.getElementById('whUpdateBanner');
       if (banner) setTimeout(() => banner.classList.add('visible'), 200);
+      // Auto-hide a 25s — evita que se quede atorado tapando el menú si el
+      // operador no lo cierra. Si hay otra update después, vuelve a aparecer.
+      if (_bannerAutoHideTimer) clearTimeout(_bannerAutoHideTimer);
+      _bannerAutoHideTimer = setTimeout(() => _hideBanner(), 25000);
     }
 
     function _hideBanner() {
       const banner = document.getElementById('whUpdateBanner');
       if (banner) banner.classList.remove('visible');
+      if (_bannerAutoHideTimer) { clearTimeout(_bannerAutoHideTimer); _bannerAutoHideTimer = null; }
     }
 
     window._applyUpdate = function() {
