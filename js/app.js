@@ -4546,9 +4546,14 @@ const GuiasView = (() => {
     list.insertBefore(div, list.firstChild);
   }
 
-  // ── Búsqueda de candidatos — codigoBarra de PRODUCTOS_MASTER + EQUIVALENCIAS ─
-  // Siempre devuelve copias (no muta el caché).
-  // _scannedCb: código que físicamente se escaneó (puede ser equiv.codigoBarra ≠ prod.codigoBarra)
+  // ── Búsqueda de candidatos — solo codigoBarra de canónico + equivalencias.
+  // Aplica regla de oro WH (ver comentario header en _buscarDespCandidatos).
+  // En guías de INGRESO el caller decide qué hacer si retorna []:
+  //   - Si exacto → procesar normal
+  //   - Si prefijo (length>1) → operador elige cuál
+  //   - Si vacío → ofrecer "registrar producto nuevo" (registrarPN)
+  // En guías de SALIDA, vacío = error "no existe en catálogo".
+  // _scannedCb: código que físicamente se escaneó (puede ser equiv ≠ prod canónico).
   function _buscarCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
@@ -6626,7 +6631,31 @@ const DespachoView = (() => {
     _mostrarDespPicker(candidatos, codStr);
   }
 
-  // ── Búsqueda por codigoBarra — maestro + equivalencias, exacto o prefijo, nunca nuevo ─
+  // ═══════════════════════════════════════════════════════════════════════
+  // REGLA DE ORO WH (en piedra) — qué se acepta al ESCANEAR:
+  //
+  // CUALQUIER GUÍA DE SALIDA (despacho rápido, pickup, transferencias):
+  //   ✓ codigoBarra del canónico (factor=1)
+  //   ✓ codigoBarra de equivalencia activa (apunta al canónico)
+  //   ✗ skuBase puro → ERROR "no existe en catálogo"
+  //   ✗ idProducto puro → ERROR (es ID interno, no escaneable)
+  //   ✗ codigoBarra de presentación (factor != 1) → ERROR
+  //
+  // GUÍA DE INGRESO (preingresos, recepción): además del exacto, dos casos
+  // especiales:
+  //   ↕ PREFIJO — escaneado es prefijo de un codigoBarra existente.
+  //     Ej: catálogo tiene '12345A', operador escanea '12345' → match.
+  //     Caso común: empresas que no codifican EAN bien y se les añade
+  //     letra final para diferenciar variantes.
+  //   + NUEVO — escaneado no es prefijo ni existe → sugerir registrar
+  //     como producto nuevo (registrarPN). Solo en INGRESO, nunca en salida.
+  //
+  // Implementación: _buscarDespCandidatos (salida) y _buscarCandidatos
+  // (ingreso/guías generales). Ambos solo buscan por codigoBarra.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ── Búsqueda por codigoBarra — maestro + equivalencias, exacto o prefijo.
+  // En salidas NUNCA se acepta nuevo: si no existe → error.
   function _buscarDespCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
