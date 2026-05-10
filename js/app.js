@@ -1662,6 +1662,7 @@ const Session = (() => {
         try { SoundFX?.done?.(); } catch(_){}
         vibrate([30, 30, 60]);
         try { localStorage.setItem('wh_perms_check_pending', '1'); } catch(_){}
+        try { window._pedirPersistentStorageWH && window._pedirPersistentStorageWH(); } catch(_){}
         modal.remove();
         // Quitar pantalla bloqueo y arrancar la app
         const verif = document.getElementById('verifDispScreen');

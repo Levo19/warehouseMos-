@@ -2882,6 +2882,18 @@
       }
     }
 
+    // Persistent Storage · pide al SO no borrar localStorage. Silencioso.
+    async function _pedirPersistentStorageWH() {
+      try {
+        if (!navigator.storage || !navigator.storage.persist) return 'unsupported';
+        const ya = await navigator.storage.persisted();
+        if (ya) return 'granted';
+        const ok = await navigator.storage.persist();
+        return ok ? 'granted' : 'prompt';
+      } catch(_) { return 'unsupported'; }
+    }
+    window._pedirPersistentStorageWH = _pedirPersistentStorageWH;
+
     let _whPermsHooked = false;
     async function _reportarPermisosWH() {
       try {
@@ -2899,6 +2911,7 @@
         perms.audio   = (localStorage.getItem('wh_audio_ok') === '1') ? 'granted' : 'prompt';
         perms.install = (matchMedia('(display-mode: standalone)').matches) ? 'granted'
                       : (window._WH_INSTALL_PROMPT ? 'prompt' : 'unsupported');
+        perms.storage = await _pedirPersistentStorageWH();
         _whPermsHooked = true;
         const url = (window.cfg && window.cfg.mosGasUrl) || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
         await fetch(url, {
