@@ -1224,13 +1224,28 @@ const Session = (() => {
   // ───────────────────────────────────────────────
   //  Wake Lock — pantalla activa con sesión
   // ───────────────────────────────────────────────
+  function _whWakeRenderChip(on) {
+    let chip = document.getElementById('whWakeChip');
+    if (!on) { if (chip) chip.remove(); return; }
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.id = 'whWakeChip';
+      chip.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9998;display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:9999px;background:linear-gradient(135deg,rgba(251,191,36,0.18),rgba(245,158,11,0.12));border:1px solid rgba(251,191,36,0.5);color:#fcd34d;font-size:11px;font-weight:800;backdrop-filter:blur(4px);box-shadow:0 2px 6px rgba(0,0,0,0.3);pointer-events:none;font-family:system-ui,sans-serif';
+      chip.innerHTML = '<span>🔆</span><span>Pantalla activa</span>';
+      document.body.appendChild(chip);
+    }
+  }
   async function _activarWakeLock() {
     if (!('wakeLock' in navigator)) return;
     if (_wakeLockSentinel) return;
     if (localStorage.getItem('wh_wakelock') === '0') return;
     try {
       _wakeLockSentinel = await navigator.wakeLock.request('screen');
-      _wakeLockSentinel.addEventListener('release', () => { _wakeLockSentinel = null; });
+      _whWakeRenderChip(true);
+      _wakeLockSentinel.addEventListener('release', () => {
+        _wakeLockSentinel = null;
+        _whWakeRenderChip(false);
+      });
     } catch(e) { /* dispositivo no soporta */ }
   }
   async function _liberarWakeLock() {
@@ -1238,6 +1253,7 @@ const Session = (() => {
       try { await _wakeLockSentinel.release(); } catch(e) {}
       _wakeLockSentinel = null;
     }
+    _whWakeRenderChip(false);
   }
   // Re-activar al volver al foreground
   document.addEventListener('visibilitychange', () => {
@@ -1347,6 +1363,7 @@ const Session = (() => {
 
   async function cerrarTurnoFinal() {
     const res = await API.cerrarTurno({ idSesion: sesionActual.idSesion }).catch(() => ({ ok: false }));
+    _liberarWakeLock();
     _limpiarSesion();
     sesionActual = null;
     clearTimeout(lockTimer);
