@@ -257,25 +257,6 @@
       0%,100% { transform:scale(1); }
       50%     { transform:scale(1.18); }
     }
-    /* Toolbar: toggle modo de vista (lista / grid / compacta) */
-    .prod-view-toggle {
-      display:inline-flex;border-radius:10px;overflow:hidden;
-      border:1px solid rgba(51,65,85,.55);background:rgba(15,23,42,.5);
-      flex-shrink:0;
-    }
-    .prod-view-toggle button {
-      padding:7px 8px;background:transparent;border:none;cursor:pointer;
-      color:#64748b;font-size:.78em;
-      -webkit-tap-highlight-color:transparent;
-      transition:all .15s ease;
-    }
-    .prod-view-toggle button.is-active {
-      background:rgba(99,102,241,.22);color:#c7d2fe;
-    }
-    /* Mobile pequeño (<480px): ocultar toggle vista — poco espacio en toolbar */
-    @media (max-width: 480px) {
-      .prod-view-toggle { display:none !important; }
-    }
     /* Mobile: chips métricas más compactos para evitar overflow */
     @media (max-width: 480px) {
       .prod-chip {
@@ -284,17 +265,20 @@
       .prod-chip-icon { font-size:.95em; }
       .prod-chip-num { font-size:1em; }
     }
-    /* Modo grid — 2 cols */
-    #listProductos.is-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
-    #listProductos.is-grid > .prod-card { padding:10px; }
-    @media (max-width:640px) {
-      #listProductos.is-grid { grid-template-columns:1fr; }
+    /* Indicador sutil de refresh en background (chip "todos" parpadea suave) */
+    .prod-chip.is-refreshing .prod-chip-icon { opacity:.4;animation: prodChipRefreshDot 1s linear infinite; }
+    @keyframes prodChipRefreshDot {
+      0%,100% { opacity:.4; }
+      50%     { opacity:1; }
     }
-    /* Modo compacto — densidad alta */
-    #listProductos.is-compact .prod-card {
-      padding:8px 12px;
+    /* Card actualizada por refresh background — flash suave (no parpadeo) */
+    .prod-card.is-updated {
+      animation: prodCardUpdated .9s ease-out;
     }
-    #listProductos.is-compact .prod-card .prod-card-extra { display:none; }
+    @keyframes prodCardUpdated {
+      0%   { background:linear-gradient(135deg,rgba(16,185,129,.12),rgba(99,102,241,.08)); }
+      100% { background:linear-gradient(135deg, #1e293b 0%, #182234 60%, #141d2c 100%); }
+    }
     /* Botón micrófono búsqueda */
     .prod-mic-btn {
       flex-shrink:0;width:32px;height:32px;border-radius:9px;border:none;cursor:pointer;
@@ -3367,20 +3351,8 @@
         </div>
       </div>
 
-      <!-- Derecha: despacho rápido 🚚 + auditoría + toggle vista -->
+      <!-- Derecha: despacho rápido 🚚 + auditoría -->
       <div class="prodtb-side">
-        <!-- Toggle vista lista/grid/compacta -->
-        <div class="prod-view-toggle" id="prodViewToggle" title="Cambiar densidad de la lista">
-          <button data-view="list" class="is-active" onclick="ProductosView.setView('list')" title="Lista">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg>
-          </button>
-          <button data-view="grid" onclick="ProductosView.setView('grid')" title="Grid">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 0 1 2.5 1h3A1.5 1.5 0 0 1 7 2.5v3A1.5 1.5 0 0 1 5.5 7h-3A1.5 1.5 0 0 1 1 5.5zm8 0A1.5 1.5 0 0 1 10.5 1h3A1.5 1.5 0 0 1 15 2.5v3A1.5 1.5 0 0 1 13.5 7h-3A1.5 1.5 0 0 1 9 5.5zm-8 8A1.5 1.5 0 0 1 2.5 9h3A1.5 1.5 0 0 1 7 10.5v3A1.5 1.5 0 0 1 5.5 15h-3A1.5 1.5 0 0 1 1 13.5zm8 0A1.5 1.5 0 0 1 10.5 9h3a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 1-1.5 1.5h-3A1.5 1.5 0 0 1 9 13.5z"/></svg>
-          </button>
-          <button data-view="compact" onclick="ProductosView.setView('compact')" title="Compacto">
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2 13.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5zm0-3a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z"/></svg>
-          </button>
-        </div>
         <!-- Despacho Rápido — icono camión + 2 badges (carrito + pickups pendientes) -->
         <button id="btnDespCartFab" onclick="App.nav('despacho')" class="desp-cart-fab bolt-btn" title="Despacho Rápido — pickups pendientes y carrito">
           <span style="font-size:18px;line-height:1">🚚</span>

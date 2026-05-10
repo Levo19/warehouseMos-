@@ -11139,22 +11139,6 @@ const ProductosView = (() => {
     set('chipNumDormido', dormido);
   }
 
-  // ─── Toggle vista (lista / grid / compacta) ───
-  function setView(mode) {
-    if (!['list','grid','compact'].includes(mode)) mode = 'list';
-    document.querySelectorAll('#prodViewToggle button').forEach(b => {
-      b.classList.toggle('is-active', b.dataset.view === mode);
-    });
-    const list = document.getElementById('listProductos');
-    if (list) {
-      list.classList.toggle('is-grid',    mode === 'grid');
-      list.classList.toggle('is-compact', mode === 'compact');
-    }
-    try { localStorage.setItem('wh_prod_view', mode); } catch(_){}
-    try { SoundFX.click && SoundFX.click(); } catch(_){}
-    vibrate(8);
-  }
-
   // ─── Búsqueda por voz (Web Speech API) ───
   let _vozRecognition = null;
   let _vozActivo = false;
@@ -11194,14 +11178,169 @@ const ProductosView = (() => {
     if (btn) btn.classList.remove('is-listening');
   }
 
-  // ─── Restaurar vista guardada al cargar ───
-  function _restaurarViewMode() {
-    try {
-      const m = localStorage.getItem('wh_prod_view');
-      if (m && ['list','grid','compact'].includes(m)) setView(m);
-    } catch(_){}
+  // ═══════════════════════════════════════════════════════════════════════
+  // PRECARGA + AUTO-REFRESH 60s SIN PARPADEO
+  //
+  // Antes: cargar() se ejecutaba al entrar al módulo y silentRefresh
+  // re-renderizaba toda la lista (parpadeo visible con 2k cards).
+  //
+  // Ahora:
+  //   1. Precarga al iniciar la app (no esperar a entrar al módulo).
+  //   2. Background refresh cada 60s — descarga catalog + stock fresh.
+  //   3. Render DIFF: solo actualiza cards cuyo snapshot cambió. El resto
+  //      del DOM no se toca → cero parpadeo. Las cards actualizadas
+  //      hacen un flash verde sutil (.is-updated) por 900ms.
+  // ═══════════════════════════════════════════════════════════════════════
+  let _bgRefreshTimer = null;
+  let _cardSnapshots  = new Map(); // skuBase → snapshot (string) para diff
+  const BG_REFRESH_MS = 60 * 1000;
+
+  function _snapshotGrupo(g) {
+    // Campos que pueden cambiar entre refreshes y deben triggerear update
+    return [
+      g.stockTotal,
+      g.bajoMin ? 1 : 0,
+      g._dormido ? 1 : 0,
+      g._porVencer ? 1 : 0,
+      g.children.length,
+      g.base.descripcion || '',
+      g.base.stockMinimo || 0,
+      g.base.stockMaximo || 0
+    ].join('·');
   }
-  setTimeout(_restaurarViewMode, 100); // tras inicialización del DOM
+
+  // Render con diff: si la card existe y su snapshot no cambió, no la toca.
+  // Si cambió, reemplaza el HTML in-place + flash sutil.
+  // Si es nuevo, append. Si desapareció, remove.
+  function _renderDiff(grupos) {
+    const list = document.getElementById('listProductos');
+    if (!list) return;
+    if (!grupos.length) {
+      list.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>';
+      _cardSnapshots.clear();
+      return;
+    }
+
+    // Pre-cómputo de cbCount/cbFecha (usa la misma lógica que _render)
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const hace30   = Date.now() - 30 * 86400000;
+    const gMap = {}; guias.forEach(g => { gMap[g.idGuia] = g; });
+    const cbCount = {}, cbFecha = {};
+    detalles.forEach(d => {
+      const cb = d.codigoProducto;
+      if (!cb) return;
+      const f = gMap[d.idGuia]?.fecha;
+      if (!f) return;
+      if (!cbFecha[cb] || f > cbFecha[cb]) cbFecha[cb] = f;
+      if (new Date(f) >= hace30) cbCount[cb] = (cbCount[cb] || 0) + 1;
+    });
+
+    const newKeys = new Set();
+    let huboCambios = 0;
+    grupos.forEach((g, idx) => {
+      const sid = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+      newKeys.add(sid);
+      const newSnap = _snapshotGrupo(g);
+      const oldSnap = _cardSnapshots.get(sid);
+      const cardEl  = document.getElementById('grp-' + sid);
+
+      if (!cardEl) {
+        // Card nueva → insertar
+        const html = _cardGrupo(g, cbCount, cbFecha);
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        const newCard = tmp.firstElementChild;
+        list.appendChild(newCard);
+        _cardSnapshots.set(sid, newSnap);
+        return;
+      }
+      if (oldSnap === newSnap) {
+        // No cambió — no tocar el DOM (cero parpadeo)
+        return;
+      }
+      // Cambió → reemplazar in-place con flash sutil
+      const html = _cardGrupo(g, cbCount, cbFecha);
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+      const newCard = tmp.firstElementChild;
+      newCard.classList.add('is-updated');
+      cardEl.replaceWith(newCard);
+      _cardSnapshots.set(sid, newSnap);
+      huboCambios++;
+    });
+
+    // Cards eliminados (productos que ya no aparecen)
+    [...list.querySelectorAll('.prod-card')].forEach(c => {
+      const id = c.id?.replace(/^grp-/, '');
+      if (id && !newKeys.has(id)) {
+        c.remove();
+        _cardSnapshots.delete(id);
+      }
+    });
+  }
+
+  // Refresh background — descarga + diff sin spinner.
+  // Indicador visual sutil: chip "todos" parpadea durante el fetch.
+  async function _backgroundRefresh() {
+    const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
+    if (chipAll) chipAll.classList.add('is-refreshing');
+    try {
+      await OfflineManager.precargarOperacional();
+      _buildMap(OfflineManager.getStockCache());
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      // Aplicar query/filtro y renderizar con diff (no innerHTML completo)
+      const visibles = _aplicarFiltroChip(
+        _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
+      );
+      _renderDiff(visibles);
+      _renderMetrics();
+    } catch (e) { /* silencioso */ }
+    if (chipAll) chipAll.classList.remove('is-refreshing');
+  }
+
+  // Helper para filtrar por query sin recargar todo el flow de buscar()
+  function _matchQuery(g, q) {
+    const qL = String(q).toLowerCase();
+    const tokens = qL.split(/\s+/).filter(Boolean);
+    const hay = [
+      g.base.descripcion || '', g.skuBase || '', g.base.idProducto || '',
+      ...g.children.map(c => (c.descripcion || '') + ' ' + (c.codigoBarra || ''))
+    ].join(' ').toLowerCase();
+    return tokens.every(t => hay.includes(t));
+  }
+
+  function _startBgRefresh() {
+    if (_bgRefreshTimer) return;
+    _bgRefreshTimer = setInterval(_backgroundRefresh, BG_REFRESH_MS);
+  }
+  function _stopBgRefresh() {
+    if (_bgRefreshTimer) { clearInterval(_bgRefreshTimer); _bgRefreshTimer = null; }
+  }
+
+  // Precarga al iniciar la app (no esperar a entrar al módulo).
+  // Si el operador entra al módulo, ya tiene grupos listos — render inmediato.
+  function _precargarAlIniciar() {
+    if (_grupos.length) return; // ya precargado
+    OfflineManager.precargarOperacional?.().then(() => {
+      _buildMap(OfflineManager.getStockCache());
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      _renderMetrics();
+    }).catch(() => {});
+  }
+  // Activar 1.5s después de inicializar (tras login)
+  setTimeout(_precargarAlIniciar, 1500);
+  // Auto-refresh background mientras la app esté abierta
+  setTimeout(_startBgRefresh, 5000);
+  // Pausar refresh cuando la pestaña está oculta (ahorra batería/datos)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      _backgroundRefresh();
+      _startBgRefresh();
+    } else {
+      _stopBgRefresh();
+    }
+  });
 
   // ── Auditoría diaria — helpers ────────────────────────────
   function _initAuditDia() {
@@ -11933,7 +12072,7 @@ const ProductosView = (() => {
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
-           toggleFiltro, setView, toggleVozBusqueda,
+           toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,
            detDespacharActual, detAuditarActual, detHistorialActual };
 })();
