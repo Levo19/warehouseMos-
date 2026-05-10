@@ -1122,6 +1122,27 @@ function guardarProgresoPickup(params) {
 // Cerrar pickup: emite GUIA_SALIDA real con códigos de barra escaneados.
 // Items NO despachados se anotan en la observación (no en detalle de stock).
 // Marca pickup COMPLETADO o PARCIAL según haya despachado todo o no.
+// ═══════════════════════════════════════════════════════════════════════
+// REGLA DE ORO WH (escrita en piedra) — manejo de codigos en pickups/guías:
+//
+// 1. MATCHING (al escanear): se acepta cualquiera de:
+//      - skuBase del producto
+//      - codigoBarra del canónico (factorConversion=1)
+//      - codigoBarra de cualquier EQUIVALENCIA activa apuntando al skuBase
+//    Todos cuentan como progreso del MISMO item del pickup (agrupado por sku).
+//
+// 2. TRAZABILIDAD (al cerrar): el frontend acumula despachadoPorCodigo:
+//    { '6959749711163': 4, 'EAN-EQUIV-001': 2 }  ← codigoBarra REALES escaneados
+//
+// 3. GUIA_SALIDA (registro): cada fila de GUIAS_DETALLE lleva el codigoBarra
+//    REAL (canónico o equivalente). NUNCA el skuBase como codigoBarra.
+//    Razón: STOCK_ZONAS descuenta por codigoBarra específico, no por skuBase.
+//    Un producto con 1 canónico + 2 equivalentes activos puede tener 3 rows
+//    de stock distintos — el detalle de la guía debe reflejar de cuál se sacó.
+//
+// 4. skuBase NO es un codigoBarra. Es un agrupador conceptual. Si un sku
+//    aparece en despachoDetalle como "codigoBarra" es un bug aguas arriba.
+// ═══════════════════════════════════════════════════════════════════════
 function cerrarPickupConDespacho(params) {
   var idPickup = String(params.idPickup || '').trim();
   if (!idPickup) return { ok: false, error: 'Requiere idPickup' };
@@ -1154,21 +1175,42 @@ function cerrarPickupConDespacho(params) {
   if (pickup.estado === 'COMPLETADO') return { ok: false, error: 'El pickup ya fue cerrado' };
 
   // El frontend manda items con despachado y opcionalmente despachoDetalle:
-  //   despachoDetalle: [{codigoBarra, cantidad}, ...] — códigos REALMENTE escaneados
-  // (registrados en GUIA_SALIDA, no el skuBase agrupador).
+  //   despachoDetalle: [{codigoBarra, cantidad}, ...] — codigoBarras REALES
+  //   escaneados (canónico o equivalente). NUNCA skuBase.
   var items = Array.isArray(params.items) ? params.items : [];
   var despachoDetalle = Array.isArray(params.despachoDetalle) ? params.despachoDetalle : [];
 
-  // Si no nos mandaron despachoDetalle, derivar uno mínimo: por cada item con
-  // despachado>0, usar su primer codigosOriginales (best-effort).
+  // Si no nos mandaron despachoDetalle, derivar uno mínimo a partir de los
+  // codigosOriginales del item (que solo contiene codigoBarra del canónico
+  // + equivalentes). NO se debe usar skuBase como codigoBarra (regla de oro).
   if (!despachoDetalle.length) {
     items.forEach(function(it){
       var qty = parseFloat(it.despachado) || 0;
       if (qty <= 0) return;
-      var cod = (it.codigosOriginales && it.codigosOriginales[0]) || it.skuBase || '';
-      if (cod) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
+      // Solo aceptamos codigosOriginales (canónico o equivalente). Si por algún
+      // motivo el item no los tiene, registramos warning y saltamos — mejor
+      // perder ese item del despacho que generar GUIA_SALIDA con skuBase
+      // como codigoBarra (rompe el descuento de stock por codigoBarra).
+      var cod = (it.codigosOriginales && it.codigosOriginales[0]) || '';
+      if (!cod) {
+        Logger.log('cerrarPickupConDespacho: item ' + it.skuBase + ' sin codigosOriginales — skipped');
+        return;
+      }
+      despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
     });
   }
+
+  // Validación: ningún codigoBarra del despachoDetalle debe ser un skuBase.
+  // Los skuBase tienen formato típico LEVxxx, IDPROxxxx (sin dígitos EAN puros).
+  // Aquí solo loggeamos warning si detectamos posible inconsistencia.
+  var skusDelPickup = {};
+  items.forEach(function(it){ if (it.skuBase) skusDelPickup[String(it.skuBase)] = true; });
+  despachoDetalle.forEach(function(d){
+    if (skusDelPickup[String(d.codigoBarra)]) {
+      Logger.log('⚠ cerrarPickupConDespacho: codigoBarra=' + d.codigoBarra +
+                 ' coincide con un skuBase del pickup — verificar regla canónico/equivalente');
+    }
+  });
 
   // Items NO despachados (solicitado > despachado) — para observación
   var noDespachados = items.filter(function(it){

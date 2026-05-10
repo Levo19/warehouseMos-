@@ -7725,6 +7725,25 @@ const DespachoView = (() => {
     return u === 'KGM' || u === 'KG' || u === 'KGS' || u === 'GMS' || u === 'G';
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // REGLA DE ORO WH (en piedra) — manejo de codigos:
+  //
+  // ESCANEAR (matching):  acepta skuBase O codigoBarra canónico O codigoBarra
+  //                       de equivalencia activa. Cualquier match suma al MISMO
+  //                       item del pickup (agrupado por skuBase del producto).
+  //
+  // PROGRESO (memoria):   despachadoPorCodigo guarda cuántas unidades se
+  //                       escanearon por cada codigoBarra REAL. Ejemplo:
+  //                         { '6959749711163': 4, 'EAN-EQUIV-001': 2 }
+  //
+  // GUIA_SALIDA:          al cerrar, se desglosa el despacho en filas con
+  //                       codigoBarra REAL (canónico o equivalente). NUNCA
+  //                       skuBase porque el stock se descuenta por codigoBarra
+  //                       específico, no por agrupador. Un producto puede
+  //                       tener stock distinto en su canónico vs sus
+  //                       equivalentes y debe descontarse del que se escaneó.
+  // ═══════════════════════════════════════════════════════════════════════
+
   // Intenta sumar al item del pickup que matchee. Retorna true si lo absorbió.
   // Para productos por kg, abre input modal de cantidad. Para sobrescaneado,
   // muestra modal de confirmación. Suma normal con tope = solicitado.
