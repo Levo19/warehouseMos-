@@ -10516,6 +10516,21 @@ const ProductosView = (() => {
     setTimeout(renderNext, 0);
   }
 
+  // Helper: escapa regex y resalta el término dentro de un texto
+  function _highlightTerm(texto, query) {
+    if (!query || !texto) return escHtml(texto || '');
+    const tokens = query.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
+    if (!tokens.length) return escHtml(texto);
+    const escapeRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const safe = escHtml(texto);
+    let out = safe;
+    tokens.forEach(t => {
+      const re = new RegExp('(' + escapeRe(t) + ')', 'gi');
+      out = out.replace(re, '<span class="prod-search-hl">$1</span>');
+    });
+    return out;
+  }
+
   function _cardGrupo(g, cbCount, cbFecha) {
     const codigos = g.children.map(c => c.codigoBarra).filter(Boolean);
     // Rotación: suma de movimientos de todos los barcodes del grupo en los últimos 30 días
@@ -10543,13 +10558,21 @@ const ProductosView = (() => {
     const isAuditDone = isAudit && _esGrupoCompleto(g.skuBase);
     const auditCls    = isAuditDone ? 'audit-card-done' : isAudit ? 'audit-card' : '';
 
+    // Estados visuales modernos
+    const dormidoCls  = (nRot === 0 && (!ulti || (Date.now() - new Date(ulti).getTime()) > 30*86400000))
+                        ? 'is-dormido' : '';
+    const vencerCls   = _grupoTieneVencimientoProximo(g) ? 'is-por-vencer' : '';
+
+    // Highlight del término buscado en la descripción
+    const descRender  = _highlightTerm(g.base.descripcion || g.skuBase, _queryActual);
+
     return `
-    <div class="prod-card ca ${accentCls} ${auditCls}" id="grp-${sid}">
+    <div class="prod-card ca ${accentCls} ${auditCls} ${dormidoCls} ${vencerCls}" id="grp-${sid}" style="position:relative">
       <!-- Cabecera -->
       <div class="flex items-start gap-2">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <p class="font-bold text-sm leading-snug">${g.base.descripcion || g.skuBase}</p>
+            <p class="font-bold text-sm leading-snug">${descRender}</p>
             ${g.bajoMin ? '<span class="tag-danger text-xs flex-shrink-0">⚠️ MÍN</span>' : ''}
             ${g.stockTotal === 0 ? '<span class="tag-danger text-xs flex-shrink-0">SIN STOCK</span>' : ''}
           </div>
@@ -10726,24 +10749,25 @@ const ProductosView = (() => {
 
     _render(_filtrados);
 
-    // ── Señales visuales post-render ────────────────────────────────
+    // ── Señales visuales + sonoras post-render ──────────────────────
     requestAnimationFrame(() => {
       if (exactGrupo) {
         const sid  = exactGrupo.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
         const card = document.getElementById('grp-' + sid);
         if (card) {
-          card.classList.add('card-exact-match');
-          // Auto-expandir si tiene hijos
+          // ✓ Match exacto = animación + sonido + scroll a la card
+          card.classList.add('is-match-exact');
+          setTimeout(() => card.classList.remove('is-match-exact'), 1300);
           const panel = document.getElementById('eqs-' + sid);
           const chev  = document.getElementById('chev-' + sid);
           if (panel && panel.classList.contains('hidden')) {
             panel.classList.remove('hidden');
             if (chev) chev.style.transform = 'rotate(180deg)';
           }
-          // Scroll suave al centro
           card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          try { SoundFX.beepDouble(); } catch(_){}
+          vibrate([10, 20, 30]);
         }
-        // Atenuar los demás resultados parciales
         _filtrados.forEach(g => {
           if (g !== exactGrupo) {
             const s = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -10751,13 +10775,18 @@ const ProductosView = (() => {
             if (el) el.classList.add('card-dim');
           }
         });
-      } else {
-        // Solo coincidencias parciales: leve realce
+      } else if (_filtrados.length > 0) {
+        // ↕ Match parcial (prefijo / contenido) = borde ámbar pulsante
         _filtrados.forEach(g => {
           const sid = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
           const el  = document.getElementById('grp-' + sid);
-          if (el) el.classList.add('card-hi');
+          if (el) el.classList.add('is-match-prefix');
         });
+        try { SoundFX.beep && SoundFX.beep(); } catch(_){}
+      } else {
+        // ✗ Sin coincidencias
+        try { SoundFX.warn && SoundFX.warn(); } catch(_){}
+        vibrate([40, 20, 40]);
       }
     });
   }
@@ -11014,14 +11043,146 @@ const ProductosView = (() => {
   function _aplicarQuery() {
     if (_auditModo) {
       _filtrados = _grupos.filter(g => _auditDia?.skus.includes(g.skuBase));
-      _render(_filtrados);
+      _render(_aplicarFiltroChip(_filtrados));
     } else if (_queryActual) {
       buscar(_queryActual);
     } else {
       _filtrados = [..._grupos];
-      _render(_filtrados);
+      _render(_aplicarFiltroChip(_filtrados));
     }
+    _renderMetrics();
   }
+
+  // ─── Filtros chip (Todos / Stock bajo / Críticos / Vencer / Dormidos) ───
+  let _filtroChip = 'all';
+
+  function _grupoTieneVencimientoProximo(g) {
+    const lotes = OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || [];
+    if (!lotes.length) return false;
+    const set = new Set(g.children.map(c => c.codigoBarra));
+    const en7dias = Date.now() + 7 * 86400000;
+    return lotes.some(l => {
+      if (!set.has(l.codigoProducto || l.codigoBarra)) return false;
+      if (!l.fechaVencimiento) return false;
+      const t = new Date(l.fechaVencimiento).getTime();
+      return t > 0 && t < en7dias;
+    });
+  }
+
+  function _grupoEstaDormido(g) {
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias = OfflineManager.getGuiasCache();
+    const gMap = {};
+    guias.forEach(gg => { gMap[gg.idGuia] = gg; });
+    const codigos = new Set(g.children.map(c => c.codigoBarra));
+    const hace30 = Date.now() - 30 * 86400000;
+    return !detalles.some(d => {
+      if (!codigos.has(d.codigoProducto)) return false;
+      const f = gMap[d.idGuia]?.fecha;
+      return f && new Date(f).getTime() > hace30;
+    });
+  }
+
+  function _aplicarFiltroChip(grupos) {
+    if (_filtroChip === 'all') return grupos;
+    if (_filtroChip === 'bajo')    return grupos.filter(g => g.bajoMin && g.stockTotal > 0);
+    if (_filtroChip === 'critico') return grupos.filter(g => g.stockTotal === 0);
+    if (_filtroChip === 'vencer')  return grupos.filter(g => _grupoTieneVencimientoProximo(g));
+    if (_filtroChip === 'dormido') return grupos.filter(g => _grupoEstaDormido(g));
+    return grupos;
+  }
+
+  function toggleFiltro(filter) {
+    _filtroChip = (_filtroChip === filter && filter !== 'all') ? 'all' : filter;
+    document.querySelectorAll('#prodChipsRow .prod-chip').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.filter === _filtroChip);
+    });
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+    _aplicarQuery();
+  }
+
+  function _renderMetrics() {
+    if (!_grupos.length) return;
+    const total   = _grupos.length;
+    const bajo    = _grupos.filter(g => g.bajoMin && g.stockTotal > 0).length;
+    const critico = _grupos.filter(g => g.stockTotal === 0).length;
+    const vencer  = _grupos.filter(g => _grupoTieneVencimientoProximo(g)).length;
+    const dormido = _grupos.filter(g => _grupoEstaDormido(g)).length;
+    const set = (id, n) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = n;
+    };
+    set('chipNumAll',     total);
+    set('chipNumBajo',    bajo);
+    set('chipNumCritico', critico);
+    set('chipNumVencer',  vencer);
+    set('chipNumDormido', dormido);
+  }
+
+  // ─── Toggle vista (lista / grid / compacta) ───
+  function setView(mode) {
+    if (!['list','grid','compact'].includes(mode)) mode = 'list';
+    document.querySelectorAll('#prodViewToggle button').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.view === mode);
+    });
+    const list = document.getElementById('listProductos');
+    if (list) {
+      list.classList.toggle('is-grid',    mode === 'grid');
+      list.classList.toggle('is-compact', mode === 'compact');
+    }
+    try { localStorage.setItem('wh_prod_view', mode); } catch(_){}
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(8);
+  }
+
+  // ─── Búsqueda por voz (Web Speech API) ───
+  let _vozRecognition = null;
+  let _vozActivo = false;
+  function toggleVozBusqueda() {
+    if (_vozActivo) { _detenerVoz(); return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { toast('Tu navegador no soporta búsqueda por voz', 'warn'); return; }
+    _vozRecognition = new SR();
+    _vozRecognition.lang = 'es-PE';
+    _vozRecognition.continuous = false;
+    _vozRecognition.interimResults = true;
+    const btn = document.getElementById('prodMicBtn');
+    if (btn) btn.classList.add('is-listening');
+    _vozActivo = true;
+    toast('🎤 Habla ahora · ej: "vinagre"', 'info', 2200);
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+    vibrate(15);
+    _vozRecognition.onresult = (e) => {
+      const last = e.results[e.results.length - 1];
+      const text = last[0].transcript.trim();
+      const inp = document.getElementById('inputBuscarProd');
+      if (inp) inp.value = text;
+      if (last.isFinal) {
+        buscar(text);
+        _detenerVoz();
+      }
+    };
+    _vozRecognition.onerror = () => _detenerVoz();
+    _vozRecognition.onend = () => _detenerVoz();
+    try { _vozRecognition.start(); } catch(_){ _detenerVoz(); }
+  }
+  function _detenerVoz() {
+    try { _vozRecognition && _vozRecognition.stop(); } catch(_){}
+    _vozRecognition = null;
+    _vozActivo = false;
+    const btn = document.getElementById('prodMicBtn');
+    if (btn) btn.classList.remove('is-listening');
+  }
+
+  // ─── Restaurar vista guardada al cargar ───
+  function _restaurarViewMode() {
+    try {
+      const m = localStorage.getItem('wh_prod_view');
+      if (m && ['list','grid','compact'].includes(m)) setView(m);
+    } catch(_){}
+  }
+  setTimeout(_restaurarViewMode, 100); // tras inicialización del DOM
 
   // ── Auditoría diaria — helpers ────────────────────────────
   function _initAuditDia() {
@@ -11343,12 +11504,14 @@ const ProductosView = (() => {
     if (!found) {
       _setProdCamStatus('no_existe', cNorm + ' · no existe en catálogo');
       SoundFX.warn(); vibrate([50, 25, 50]);
+      _vozAnunciar && _vozAnunciar('No encontrado', { rate: 1.1 });
       return;
     }
 
-    // Encontrado: llenar búsqueda, filtrar lista, cerrar cámara tras breve feedback
-    SoundFX.beep(); vibrate(15);
+    // ✓ Match perfecto al escanear: efecto fuerte + sonido + voz + flash card
+    SoundFX.beepDouble(); vibrate([15, 30, 60]);
     _setProdCamStatus('ok', found.descripcion || cNorm);
+    _vozAnunciar && _vozAnunciar(found.descripcion || 'Producto encontrado', { rate: 1.05 });
     const inp = document.getElementById('inputBuscarProd');
     const searchCode = found.codigoBarra || cNorm;
     if (inp) { inp.value = searchCode; }
@@ -11388,7 +11551,8 @@ const ProductosView = (() => {
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial,
-           abrirProdCamara, cerrarProdCamara, toggleProdCamara };
+           abrirProdCamara, cerrarProdCamara, toggleProdCamara,
+           toggleFiltro, setView, toggleVozBusqueda };
 })();
 
 
