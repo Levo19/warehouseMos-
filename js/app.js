@@ -1229,6 +1229,10 @@ const Session = (() => {
   function _whWakeRenderChip(on) {
     let chip = document.getElementById('whWakeChip');
     if (!on) { if (chip) chip.remove(); return; }
+    // En móvil el chip tapa la topbar → la función sigue activa pero no se muestra.
+    // En tablet/desktop (>=768px) sí se muestra discreto arriba a la derecha.
+    const esMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (esMobile) return;
     if (!chip) {
       chip = document.createElement('div');
       chip.id = 'whWakeChip';
@@ -3646,18 +3650,28 @@ const GuiasView = (() => {
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg>
     </button>`;
 
+    // Foto block (izquierda) — thumb si existe, placeholder con tipo si no
+    const fotoUrl = g.foto ? _normalizeDriveUrl(g.foto) : '';
+    const fotoIcon = isIngreso ? '↓' : '↑';
+    const fotoBlock = fotoUrl
+      ? `<div class="gcard-photo" onclick="event.stopPropagation();Photos&&Photos.lightbox('${escAttr(fotoUrl)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`
+      : `<div class="gcard-photo placeholder" title="${tipoLabel}">${fotoIcon}</div>`;
+
     return `
     <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
          onclick="GuiasView.verDetalle('${escAttr(g.idGuia)}')">
-      <div class="card-row-top">
-        <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${tipoLabel}</span>
-        <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${fotoTag}${estadoDot}</div>
-      </div>
-      <p class="card-name">${escHtml(provNombre)}</p>
-      <div class="card-row-bottom">
-        <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${metaExtra}</span>
-        <div class="card-actions">${waBtn}${printBtn}</div>
+      ${fotoBlock}
+      <div class="gcard-body">
+        <div class="card-row-top">
+          <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${tipoLabel}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${estadoDot}</div>
+        </div>
+        <p class="card-name" style="font-size:16px">${escHtml(provNombre)}</p>
+        <div class="card-row-bottom">
+          <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${metaExtra}</span>
+          <div class="card-actions">${waBtn}${printBtn}</div>
+        </div>
       </div>
     </div>`;
   }
@@ -4139,16 +4153,34 @@ const GuiasView = (() => {
                             border:1px solid rgba(124,58,237,.4);margin-right:4px;flex-shrink:0;vertical-align:middle">i</span>`
             : '';
           const rowBg = isVencido ? 'rgba(239,68,68,.07)' : '';
+          // Mini-badge tipo match (✓ canónico · ↕E equivalente · ↕C completo · 🆕 nuevo)
+          const matchBadge = (() => {
+            const obs = String(d.observacion || '').toUpperCase();
+            if (obs === 'PN_PENDIENTE') return '<span class="item-match-badge imb-nuevo" title="Producto nuevo pendiente">🆕</span>';
+            if (d._indirect)            return '<span class="item-match-badge imb-equiv" title="Equivalente">↕E</span>';
+            return '<span class="item-match-badge imb-canonico" title="Canónico">✓</span>';
+          })();
+          // Sync dot: muestra estado de guardado (saving/saved)
+          const syncDot = d._local
+            ? '<span class="sync-dot on-saving" title="guardando…"></span>'
+            : '<span class="sync-dot on-saved" title="guardado"></span>';
           return `
-          <div class="flex items-center gap-3 py-3 px-1 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
-               style="${rowBg ? 'background:' + rowBg + ';border-radius:8px' : ''}"
+          <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
+               style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px"
                data-det-id="${d.idDetalle || ''}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-slate-100 leading-snug">${iTag}${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
-              <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}${d._local ? ' · guardando…' : ''}</p>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                ${matchBadge}
+                <p class="font-bold text-slate-100 leading-tight" style="font-size:15px;flex:1;min-width:0">${iTag}${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
+              </div>
+              <p class="text-xs text-slate-500 font-mono mt-1" style="display:flex;align-items:center;gap:6px">
+                <span>${escHtml(d.codigoProducto)}</span>
+                ${syncDot}
+                ${d._local ? '<span style="color:#fbbf24">guardando…</span>' : ''}
+              </p>
               ${venc}
             </div>
-            <span class="text-base font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
+            <span class="text-lg font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : '×' + fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -9551,18 +9583,32 @@ const PreingresosView = (() => {
            + Guía
          </button>`;
 
+    // Foto block (izquierda): carousel si múltiples, thumb si una, placeholder si ninguna
+    const urls = p.fotos ? String(p.fotos).split(',').map(s => s.trim()).filter(Boolean).map(_normalizeDriveUrl) : [];
+    let fotoBlock;
+    if (urls.length > 1 && window.Photos && Photos.carouselHTML) {
+      fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation()">${Photos.carouselHTML(urls, {size:'sm'})}</div>`;
+    } else if (urls.length === 1) {
+      fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation();Photos&&Photos.lightbox('${escAttr(urls[0])}')"><img src="${escAttr(urls[0])}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`;
+    } else {
+      fotoBlock = `<div class="gcard-photo placeholder" title="Sin foto">📷</div>`;
+    }
+
     return `
     <div class="pre-card" id="pre-${(p.idPreingreso||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
          style="border-left-color:${borderColor}"
          onclick="PreingresosView.abrirDetalle('${escAttr(p.idPreingreso)}')">
-      <div class="card-row-top">
-        <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${chipTxt}</span>
-        <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
-      </div>
-      <p class="card-name">${escHtml(provNombre)}</p>
-      <div class="card-row-bottom">
-        <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${montoStr}</span>
-        <div class="card-actions">${waBtn}${actionBtn}</div>
+      ${fotoBlock}
+      <div class="gcard-body">
+        <div class="card-row-top">
+          <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${chipTxt}</span>
+          <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
+        </div>
+        <p class="card-name" style="font-size:16px">${escHtml(provNombre)}</p>
+        <div class="card-row-bottom">
+          <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${montoStr}</span>
+          <div class="card-actions">${waBtn}${actionBtn}</div>
+        </div>
       </div>
     </div>`;
   }
@@ -9637,6 +9683,9 @@ const PreingresosView = (() => {
         container.insertBefore(c, container.firstChild);
       }
     });
+
+    // Activar carruseles de fotos (autoplay 4s + swipe + dots)
+    if (window.Photos && Photos.initCarousels) Photos.initCarousels(container);
 
     // Sincronizar panel tablet (columna derecha de Guías)
     renderTppList();

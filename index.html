@@ -1234,14 +1234,33 @@
       0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,.9); transform:scale(1); }
       55%     { box-shadow:0 0 0 7px rgba(239,68,68,0); transform:scale(1.15); }
     }
-    /* ── Guía / Preingreso cards — v2 ───────────────── */
+    /* ── Guía / Preingreso cards — v3 modernizadas ────── */
     .guia-card, .pre-card {
-      background:#1e293b; border-radius:12px; padding:13px 14px;
-      display:flex; flex-direction:column; gap:7px;
-      cursor:pointer; border-left:4px solid #334155; min-height:96px;
-      transition:opacity .1s,transform .1s;
+      background: linear-gradient(135deg, rgba(30,41,59,.92), rgba(15,23,42,.95));
+      border-radius:14px; padding:14px 16px;
+      display:flex; flex-direction:row; gap:12px; align-items:stretch;
+      cursor:pointer; border-left:4px solid #334155; min-height:104px;
+      transition:opacity .12s, transform .1s, box-shadow .2s, border-color .2s;
+      box-shadow: 0 2px 8px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.03);
+      position:relative;
     }
-    .guia-card:active, .pre-card:active { opacity:.85; transform:scale(.99); }
+    .guia-card:active, .pre-card:active {
+      opacity:.88; transform:scale(.985);
+      box-shadow: 0 4px 14px rgba(0,0,0,.28);
+    }
+    /* Foto block lateral izquierdo (thumb 60x60 o placeholder) */
+    .gcard-photo {
+      width:60px; height:60px; border-radius:10px; flex-shrink:0;
+      background:#0f172a; border:1px solid rgba(51,65,85,.6);
+      overflow:hidden; display:flex; align-items:center; justify-content:center;
+      align-self:center; position:relative;
+    }
+    .gcard-photo img { width:100%; height:100%; object-fit:cover; }
+    .gcard-photo.placeholder {
+      background: linear-gradient(135deg, rgba(30,41,59,.7), rgba(15,23,42,.8));
+      color:#475569; font-size:22px;
+    }
+    .gcard-body { flex:1; display:flex; flex-direction:column; gap:6px; min-width:0; }
     .card-row-top {
       display:flex; align-items:center; justify-content:space-between; gap:6px;
     }
