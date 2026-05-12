@@ -2941,18 +2941,21 @@
             gain.gain.value = 0.15;
             osc.start();
             osc.stop(ctx.currentTime + 0.18);
-          } catch(_){}
+            var _whAudioOK = true;
+          } catch(_) { var _whAudioOK = false; }
           if ('speechSynthesis' in window) {
             try {
               speechSynthesis.cancel();
               const u = new SpeechSynthesisUtterance('Voz activa, listo para usar');
               u.lang = 'es-PE'; u.rate = 1.05; u.volume = 1;
               speechSynthesis.speak(u);
+              _whAudioOK = true;
             } catch(_){}
           }
-          // Confirm con el user
-          const escucho = confirm('🔊 ¿Escuchaste el beep y la voz?\n\nSi NO escuchaste, revisa el volumen del dispositivo y vuelve a probar.');
-          if (escucho) {
+          // Auto-marcar OK si el navegador permitió beep/speak. Antes usábamos
+          // confirm() pero en algunas PWAs (Android instalada, standalone)
+          // confirm() no aparece → el wizard quedaba atascado.
+          if (_whAudioOK) {
             try {
               const v = window._WH_PERMS_VERSION || 'unk';
               localStorage.setItem(AUDIO_TEST_KEY + v, '1');
