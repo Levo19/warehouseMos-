@@ -13744,13 +13744,80 @@ const Welcome = (() => {
     if (loginScr) loginScr.style.display = 'flex';
   }
 
+  // ── Desbloqueo temporal de 1 hora (admin/master con clave 8 dig) ──
+  // Permite a un admin habilitar el almacén pasado el horario para que
+  // los operadores entren sin que el monitor los expulse. Se guarda
+  // localStorage('wh_desbloqueo_hasta', ts) y _checkCierreInminente lo
+  // respeta. Expira automático a las 1h.
+  const _WH_DESBLOQUEO_KEY = 'wh_desbloqueo_hasta';
+
+  function _desbloqueoVigente() {
+    try {
+      const hasta = parseInt(localStorage.getItem(_WH_DESBLOQUEO_KEY) || '0', 10);
+      return hasta && Date.now() < hasta ? hasta : 0;
+    } catch(_) { return 0; }
+  }
+
+  function abrirDesbloqueoTemporal() {
+    const m = document.getElementById('whDesbloqueoModal');
+    const inp = document.getElementById('whDesbloqueoClave');
+    const err = document.getElementById('whDesbloqueoErr');
+    if (inp) inp.value = '';
+    if (err) err.textContent = '';
+    if (m) m.style.display = 'flex';
+    setTimeout(() => { if (inp) inp.focus(); }, 60);
+  }
+
+  function cerrarDesbloqueoTemporal() {
+    const m = document.getElementById('whDesbloqueoModal');
+    if (m) m.style.display = 'none';
+  }
+
+  async function confirmarDesbloqueoTemporal() {
+    const inp = document.getElementById('whDesbloqueoClave');
+    const err = document.getElementById('whDesbloqueoErr');
+    const btn = document.getElementById('whDesbloqueoBtn');
+    const clave = String(inp?.value || '').trim();
+    if (err) err.textContent = '';
+    if (!/^\d{8}$/.test(clave)) {
+      if (err) err.textContent = 'La clave debe ser de 8 dígitos numéricos';
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Validando...'; }
+    try {
+      const r = await API.post('verificarClaveAdmin', {
+        clave: clave,
+        accion: 'DESBLOQUEO_HORARIO_WH',
+        appOrigen: 'warehouseMos',
+        detalle: 'Habilitación operativa 1 hora pasado el horario'
+      });
+      if (!r || !r.data || !r.data.autorizado) {
+        if (err) err.textContent = (r && r.data && r.data.error) || 'Clave incorrecta';
+        return;
+      }
+      // OK → setear flag de 1h
+      const hasta = Date.now() + 60 * 60 * 1000;
+      try { localStorage.setItem(_WH_DESBLOQUEO_KEY, String(hasta)); } catch(_){}
+      cerrarDesbloqueoTemporal();
+      cerrarAlmacenCerrado();
+      toast(`🔓 Desbloqueo OK · ${r.data.nombre || 'admin'} · 1 hora`, 'ok', 5000);
+      // Volver al login para que el operador entre
+      const loginScr = document.getElementById('loginScreen');
+      if (loginScr) loginScr.style.display = 'flex';
+    } catch(e) {
+      if (err) err.textContent = 'Error de red: ' + (e?.message || 'reintenta');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '🔓 Desbloquear 1h'; }
+    }
+  }
+
   // ── Aviso 5 min antes del cierre + verificación periódica ──
   let _avisoMostrado = false;
   let _cierreInterval = null;
 
   function iniciarMonitorHorario(rol) {
     const rolUp = String(rol || '').toUpperCase();
-    if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') return;  // sin restricción
+    if (rolUp === 'MASTER' || rolUp === 'ADMIN' || rolUp === 'ADMINISTRADOR') return;  // sin restricción
     if (_cierreInterval) clearInterval(_cierreInterval);
     _cierreInterval = setInterval(() => _checkCierreInminente(), 60 * 1000); // cada minuto
     _checkCierreInminente();
@@ -13762,6 +13829,17 @@ const Welcome = (() => {
     const cierreH = (dia === 7) ? 16 : 19;
     const aperturaH = 7;
     const horaActual = ahora.getHours() + ahora.getMinutes() / 60;
+
+    // Si hay desbloqueo temporal vigente → ignorar bloqueo
+    const desHasta = _desbloqueoVigente();
+    if (desHasta) {
+      // Actualizar el contador visible en overlay (si está abierto)
+      const minRest = Math.ceil((desHasta - Date.now()) / 60000);
+      const elInfo = document.getElementById('acDesbloqueoInfo');
+      const elMin  = document.getElementById('acDesbloqueoMin');
+      if (elInfo && elMin) { elMin.textContent = String(minRest); elInfo.style.display = 'block'; }
+      return;
+    }
 
     // Fuera de horario → forzar logout y pantalla de cierre
     if (horaActual >= cierreH || horaActual < aperturaH) {
@@ -13783,7 +13861,8 @@ const Welcome = (() => {
     }
   }
 
-  return { mostrar, cerrar, mostrarAlmacenCerrado, cerrarAlmacenCerrado, intentarAccesoAdmin, iniciarMonitorHorario };
+  return { mostrar, cerrar, mostrarAlmacenCerrado, cerrarAlmacenCerrado, intentarAccesoAdmin, iniciarMonitorHorario,
+           abrirDesbloqueoTemporal, cerrarDesbloqueoTemporal, confirmarDesbloqueoTemporal };
 })();
 
 const LogsView = (() => {
