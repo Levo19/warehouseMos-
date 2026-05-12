@@ -46,15 +46,26 @@
     return { fecha, total: 0, cargadores: [] };
   }
 
-  async function abrir(fecha) {
+  function abrir(fecha) {
     fecha = fecha || _hoyStr();
-    await Promise.all([_cargarMaster(), _cargarResumen(fecha)]);
-    _render();
+    // Optimista: abre el modal INMEDIATO con lo cacheado
     document.getElementById('overlayCargadores').style.display = 'block';
     document.getElementById('modalCargadores').classList.add('open');
     const inp = document.getElementById('cargBuscarInput');
-    if (inp) { inp.value = ''; inp.focus(); }
-    _filtrar('');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 100); }
+    // Render con cache si hay; placeholder si no
+    if (_master.length || _resumen.length) {
+      _render();
+      _filtrar('');
+    } else {
+      const listEl = document.getElementById('cargCoincidencias');
+      if (listEl) listEl.innerHTML = '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Cargando cargadores…</p>';
+    }
+    // Fetch en background, refresca UI cuando llega
+    Promise.all([_cargarMaster(), _cargarResumen(fecha)]).then(() => {
+      _render();
+      _filtrar(inp ? inp.value : '');
+    }).catch(() => {});
   }
 
   function cerrar() {

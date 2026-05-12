@@ -10,10 +10,19 @@
   let _data = { pendientes: [], descartado: [], solucionado: [] };
   let _producto = null;
 
-  async function abrirCesta() {
-    await refresh();
+  function abrirCesta() {
+    // Optimista: abre el sheet INMEDIATO con lo cacheado, refresh en background
     document.getElementById('overlayMermasCesta').style.display = 'block';
     document.getElementById('sheetMermasCesta').classList.add('open');
+    // Render con lo que haya (puede estar vacío la primera vez)
+    if (_data && (_data.pendientes || _data.descartado || _data.solucionado)) {
+      _render();
+    } else {
+      const cont = document.getElementById('mermaSecPendientes');
+      if (cont) cont.innerHTML = '<p class="mc-empty">Cargando…</p>';
+    }
+    // Fetch en background — al volver, _render() actualiza la UI
+    refresh().catch(() => {});
   }
 
   function cerrarCesta() {
