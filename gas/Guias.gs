@@ -1169,6 +1169,53 @@ function cerrarPickupConDespacho(params) {
   });
 }
 
+// Helper: ¿ya existe alguna GUIA con [pickup:idPickup] en su comentario que NO
+// esté ANULADA? Retorna la más reciente. Solo busca SALIDA_ZONA. Sirve como
+// defensa última contra duplicados si la primera llamada creó la guía pero
+// falló al marcar el pickup como terminal.
+function _buscarGuiaPorPickupReciente(idPickup) {
+  try {
+    var sheet = getSheet('GUIAS');
+    if (!sheet) return null;
+    var data = sheet.getDataRange().getValues();
+    if (data.length < 2) return null;
+    var hdrs = data[0].map(function(h){ return String(h); });
+    var idxId   = hdrs.indexOf('idGuia');
+    var idxTipo = hdrs.indexOf('tipo');
+    var idxFec  = hdrs.indexOf('fecha');
+    var idxCom  = hdrs.indexOf('comentario');
+    var idxEst  = hdrs.indexOf('estado');
+    if (idxId < 0 || idxCom < 0 || idxEst < 0) return null;
+
+    var marca = '[pickup:' + idPickup + ']';
+    var found = null;
+    for (var i = data.length - 1; i >= 1; i--) {
+      var tipo = String(data[i][idxTipo] || '');
+      if (tipo !== 'SALIDA_ZONA') continue;
+      var estado = String(data[i][idxEst] || '').toUpperCase();
+      if (estado === 'ANULADA') continue;
+      var coment = String(data[i][idxCom] || '');
+      if (coment.indexOf(marca) < 0) continue;
+      // Si tiene el prefijo [ANULADA-DUPLICADO] tampoco la consideramos
+      if (coment.indexOf('[ANULADA-DUPLICADO]') === 0) continue;
+      found = {
+        idGuia:       String(data[i][idxId] || ''),
+        fecha:        data[i][idxFec],
+        estadoGuia:   estado,
+        // Estado a forzar en el pickup. Si el comentario tiene "sin despachar:"
+        // significa que fue parcial; si no, completo. (Heurística leve, en caso
+        // de duda preferir COMPLETADO para que no se pueda reabrir).
+        estadoPickup: coment.indexOf('sin despachar:') >= 0 ? 'PARCIAL' : 'COMPLETADO'
+      };
+      break;
+    }
+    return found;
+  } catch(e) {
+    Logger.log('_buscarGuiaPorPickupReciente error: ' + e.message);
+    return null;
+  }
+}
+
 function _cerrarPickupConDespachoImpl(params) {
   var idPickup = String(params.idPickup || '').trim();
   if (!idPickup) return { ok: false, error: 'Requiere idPickup' };
@@ -1198,12 +1245,44 @@ function _cerrarPickupConDespachoImpl(params) {
     }
   }
   if (rowIdx < 2) return { ok: false, error: 'Pickup no encontrado' };
-  // Idempotencia: cualquier estado terminal bloquea. Antes solo bloqueaba COMPLETADO
-  // y permitía re-cerrar pickups PARCIAL/CANCELADO, generando guías duplicadas.
+  // ── IDEMPOTENCIA NIVEL 1: por estado del pickup ──
   var estUpper = String(pickup.estado || '').toUpperCase();
   var TERMINALES = { 'COMPLETADO': true, 'PARCIAL': true, 'CANCELADO': true };
   if (TERMINALES[estUpper]) {
     return { ok: false, error: 'El pickup ya fue cerrado (estado=' + estUpper + ')', yaCerrado: true };
+  }
+
+  // ── IDEMPOTENCIA NIVEL 2: por DATO en GUIAS ──
+  // Antes de crear cualquier guía, buscar si YA existe una guía con
+  // [pickup:idPickup] en su comentario. Si existe, el primer cierre ya
+  // creó su guía pero algo falló al marcar el pickup como terminal
+  // (timeout PrintNode, throw no atrapado, etc). En ese caso reusamos
+  // la guía existente y forzamos el estado del pickup, sin crear duplicado.
+  //
+  // Esta defensa es independiente del estado del pickup y cubre:
+  //   - Doble-click cuando el frontend viejo no tiene el lock
+  //   - Falla parcial: guía creada pero pickup quedó en EN_PROCESO
+  //   - Reintentos automáticos del cliente tras timeout de respuesta
+  var guiaExistente = _buscarGuiaPorPickupReciente(idPickup);
+  if (guiaExistente) {
+    // Forzar el pickup a estado terminal (idempotente: si ya lo está, no cambia)
+    var nowFix = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+    if (idxEst >= 0) sheet.getRange(rowIdx, idxEst + 1).setValue(guiaExistente.estadoPickup || 'COMPLETADO');
+    if (idxAte >= 0) sheet.getRange(rowIdx, idxAte + 1).setValue(nowFix);
+    var idxAtpFx = headers.indexOf('atendidoPor');
+    var idxUaFx  = headers.indexOf('ultimaActividad');
+    if (idxAtpFx >= 0) sheet.getRange(rowIdx, idxAtpFx + 1).setValue('');
+    if (idxUaFx  >= 0) sheet.getRange(rowIdx, idxUaFx  + 1).setValue(nowFix);
+    Logger.log('cerrarPickupConDespacho IDEMPOTENT: reusing existing guía ' + guiaExistente.idGuia + ' for pickup ' + idPickup);
+    return {
+      ok: true,
+      data: {
+        idGuia:        guiaExistente.idGuia,
+        estado:        guiaExistente.estadoPickup || 'COMPLETADO',
+        yaCerrado:     true,
+        idempotente:   true
+      }
+    };
   }
 
   // El frontend manda items con despachado y opcionalmente despachoDetalle:
