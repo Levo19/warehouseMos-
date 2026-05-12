@@ -2921,6 +2921,12 @@ const App = (() => {
   function _moverNavPill() {
     const pill = document.getElementById('navPill');
     if (!pill) return;
+    const bottomNav = document.getElementById('bottomNav');
+    // En modo sidebar (tablet/desktop), el bottom-nav está oculto → no mover pill
+    if (!bottomNav || getComputedStyle(bottomNav).display === 'none') {
+      pill.classList.remove('ready');
+      return;
+    }
     const active = document.querySelector('#bottomNav .nav-btn-v3.active');
     if (!active) { pill.classList.remove('ready'); return; }
     const row = active.parentElement;

@@ -1635,6 +1635,9 @@
     ═══════════════════════════════════════════════════════ */
     /* ─── Sidebar width token ─────────────────────────── */
     :root { --sidebar-w: 192px; }
+    /* Tablets grandes (12.9" iPad Pro y similares): sidebar más ancho */
+    @media (min-width:1200px) { :root { --sidebar-w: 224px; } }
+    @media (min-width:1600px) { :root { --sidebar-w: 256px; } }
 
     /* ─── Grid de 7 sectores iguales ──────────────────── */
     #sideNav {
@@ -1696,10 +1699,18 @@
     }
     .side-btn:active { background:rgba(255,255,255,.05); }
     .side-btn.nav-btn.active {
-      background:rgba(96,165,250,.14);
-      color:#60a5fa;
-      box-shadow:inset 0 0 0 1px rgba(96,165,250,.22);
+      background:linear-gradient(135deg, rgba(59,130,246,.20), rgba(124,58,237,.14));
+      color:#dbeafe;
+      box-shadow:inset 0 0 0 1px rgba(96,165,250,.4), 0 4px 16px rgba(59,130,246,.18);
     }
+    .side-btn.nav-btn.active svg {
+      color:#60a5fa;
+      filter:drop-shadow(0 2px 6px rgba(96,165,250,.45));
+      transform:scale(1.06);
+      transition:transform .22s, filter .22s;
+    }
+    /* Side-btn ripple effect en tap (compatibilidad con nav-btn-v3) */
+    .side-btn.nav-btn-v3 { overflow:hidden; }
     .side-btn-label { line-height:1; flex:1; }
     .side-btn svg { flex-shrink:0; }
 
@@ -1756,16 +1767,23 @@
     }
 
     /* ═══════════════════════════════════════════════════════
-       TABLET LANDSCAPE — 768px+ en horizontal
+       TABLET / DESKTOP — sidebar vertical
+       Aparece cuando:
+       - landscape ≥ 768px (iPad mini+ horizontal)
+       - cualquier orientación ≥ 900px (tablets grandes 10"+ portrait)
     ═══════════════════════════════════════════════════════ */
-    @media (min-width:768px) and (orientation:landscape) {
+    @media (min-width:768px) and (orientation:landscape),
+           (min-width:900px) {
       /* Mostrar sidebar (grid), ocultar bottom nav */
       #sideNav   { display:grid; }
       #bottomNav { display:none !important; }
 
-      /* Topbar: desplazar a la derecha del sidebar, ocultar logo, título y avatar */
+      /* Topbar: desplazar a la derecha del sidebar, ocultar logo y título (ya están en sidebar) */
       #topBar    { margin-left:var(--sidebar-w); }
-      #whLogo, #topBarSep, #topBarRight, #pageTitle { display:none !important; }
+      #whLogo, #topBarSep, #pageTitle { display:none !important; }
+      /* topBarRight queda visible para conservar 🗑 cesta + pnStatus + opQueue.
+         Ocultamos solo el avatar (ya hay user card en sidebar). */
+      #topBarRight #topAvatar, #topBarRight .relative { display:none !important; }
 
       /* Contenido principal: margen izquierdo + sin padding-bottom para bottom-nav */
       #mainContent { margin-left:var(--sidebar-w); padding-bottom:20px; padding-left:16px; padding-right:16px; padding-top:16px; }
@@ -4929,9 +4947,21 @@
     </div>
   </div>
 
-  <!-- ── Sector 2: Guías ── -->
+  <!-- ── Sector 2: Dashboard ── -->
   <div class="side-mod-row" style="grid-row:2">
-    <button class="nav-btn side-btn" data-view="guias" onclick="App.nav('guias')">
+    <button class="nav-btn side-btn nav-btn-v3" data-view="dashboard" data-nav="dashboard"
+            data-lp="dashboard" onclick="App.nav('dashboard')">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm6 4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V6zM2 11a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-3zm11-7a1 1 0 0 1 1-1h0a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h0a1 1 0 0 1-1-1V4z"/>
+      </svg>
+      <span class="side-btn-label">Dashboard</span>
+    </button>
+  </div>
+
+  <!-- ── Sector 3: Guías ── -->
+  <div class="side-mod-row" style="grid-row:3">
+    <button class="nav-btn side-btn nav-btn-v3" data-view="guias" data-nav="guias"
+            data-lp="guias" onclick="App.nav('guias')">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
       </svg>
@@ -4940,9 +4970,10 @@
     </button>
   </div>
 
-  <!-- ── Sector 3: Productos ── -->
-  <div class="side-mod-row" style="grid-row:3">
-    <button class="nav-btn side-btn" data-view="productos" onclick="App.nav('productos')">
+  <!-- ── Sector 4: Productos ── -->
+  <div class="side-mod-row" style="grid-row:4">
+    <button class="nav-btn side-btn nav-btn-v3" data-view="productos" data-nav="productos"
+            data-lp="productos" onclick="App.nav('productos')">
       <span style="position:relative;display:inline-flex;flex-shrink:0">
         <span id="sideNavDotAudit"
               style="display:none;position:absolute;top:-3px;right:-5px;
@@ -4950,20 +4981,10 @@
                      background:#f97316;border:2px solid #0b1120;z-index:2;
                      box-shadow:0 0 5px rgba(249,115,22,.8)"></span>
         <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
+          <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5l2.404.961L10.404 2 8.186 1.113zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
         </svg>
       </span>
       <span class="side-btn-label" id="sideNavLblProductos">Productos</span>
-    </button>
-  </div>
-
-  <!-- ── Sector 4: Tools ── -->
-  <div class="side-mod-row" style="grid-row:4">
-    <button class="nav-btn side-btn" data-view="tools" onclick="App.nav('tools')">
-      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
-      </svg>
-      <span class="side-btn-label">Tools</span>
     </button>
   </div>
 
