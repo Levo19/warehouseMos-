@@ -863,9 +863,22 @@ function recibirPickupDeME(params) {
   return { ok: true, data: { idPickup: idPickup, items: itemsLimpios.length } };
 }
 
+// Normaliza nombre de operador para comparar locks de pickup. Tolera
+// dobles espacios / mayúsculas / trims — necesario porque PERSONAL a veces
+// guarda nombres con espacios extra y al comparar ===-estricto el mismo
+// operador queda bloqueado de sí mismo desde otro device.
+function _normUser_(u) {
+  return String(u || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+function _sameUser_(a, b) {
+  var na = _normUser_(a), nb = _normUser_(b);
+  return !!na && !!nb && na === nb;
+}
+
 // Actualiza el estado de un pickup. Soporta lock optimista por atendidoPor:
 // si params.lockUsuario viene, sólo permite cambios si atendidoPor está vacío
-// o coincide con lockUsuario. Si tomarLock=true, marca atendidoPor=lockUsuario.
+// o coincide con lockUsuario (comparación normalizada). Si tomarLock=true,
+// marca atendidoPor=lockUsuario.
 function actualizarPickup(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
@@ -880,10 +893,12 @@ function actualizarPickup(params) {
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(params.idPickup)) {
-      // Lock check — si me piden tomar el pickup y ya lo tiene otro usuario, rechazar
+      // Lock check — si me piden tomar el pickup y ya lo tiene OTRO usuario
+      // (no yo mismo desde otro device), rechazar. Comparación normalizada
+      // para tolerar dobles espacios/mayúsculas entre devices.
       if (params.lockUsuario && idxAtp >= 0) {
         var actual = String(data[i][idxAtp] || '').trim();
-        if (actual && actual !== String(params.lockUsuario).trim()) {
+        if (actual && !_sameUser_(actual, params.lockUsuario)) {
           return { ok: false, error: 'Pickup atendido por ' + actual, atendidoPor: actual, conflicto: true };
         }
       }
@@ -1090,10 +1105,12 @@ function guardarProgresoPickup(params) {
   var idxAtp  = headers.indexOf('atendidoPor');
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(params.idPickup)) {
-      // Lock check — si lockUsuario viene, debe coincidir con atendidoPor (si está seteado)
+      // Lock check — si lockUsuario viene, debe coincidir con atendidoPor (si está
+      // seteado). Comparación normalizada para tolerar dobles espacios/mayúsculas
+      // entre devices del mismo operador.
       if (params.lockUsuario && idxAtp >= 0) {
         var actual = String(data[i][idxAtp] || '').trim();
-        if (actual && actual !== String(params.lockUsuario).trim()) {
+        if (actual && !_sameUser_(actual, params.lockUsuario)) {
           return { ok: false, error: 'Pickup atendido por ' + actual, atendidoPor: actual, conflicto: true };
         }
         // Si no había lock, tomarlo aquí (autosave implica que estoy trabajando)
@@ -1144,6 +1161,15 @@ function guardarProgresoPickup(params) {
 //    aparece en despachoDetalle como "codigoBarra" es un bug aguas arriba.
 // ═══════════════════════════════════════════════════════════════════════
 function cerrarPickupConDespacho(params) {
+  // Lock + idempotencia robusta: evita que doble-click o reintentos paralelos
+  // generen múltiples GUIA_SALIDA. Estados terminales (COMPLETADO/PARCIAL/CANCELADO)
+  // se rechazan; solo PENDIENTE y EN_PROCESO admiten el cierre.
+  return _conLock('cerrarPickupConDespacho', function() {
+    return _cerrarPickupConDespachoImpl(params);
+  });
+}
+
+function _cerrarPickupConDespachoImpl(params) {
   var idPickup = String(params.idPickup || '').trim();
   if (!idPickup) return { ok: false, error: 'Requiere idPickup' };
   var usuario = params.usuario || '';
@@ -1172,7 +1198,13 @@ function cerrarPickupConDespacho(params) {
     }
   }
   if (rowIdx < 2) return { ok: false, error: 'Pickup no encontrado' };
-  if (pickup.estado === 'COMPLETADO') return { ok: false, error: 'El pickup ya fue cerrado' };
+  // Idempotencia: cualquier estado terminal bloquea. Antes solo bloqueaba COMPLETADO
+  // y permitía re-cerrar pickups PARCIAL/CANCELADO, generando guías duplicadas.
+  var estUpper = String(pickup.estado || '').toUpperCase();
+  var TERMINALES = { 'COMPLETADO': true, 'PARCIAL': true, 'CANCELADO': true };
+  if (TERMINALES[estUpper]) {
+    return { ok: false, error: 'El pickup ya fue cerrado (estado=' + estUpper + ')', yaCerrado: true };
+  }
 
   // El frontend manda items con despachado y opcionalmente despachoDetalle:
   //   despachoDetalle: [{codigoBarra, cantidad}, ...] — codigoBarras REALES
@@ -1313,4 +1345,136 @@ function _validarTipoGuia(tipo) {
                  'SALIDA_DEVOLUCION','SALIDA_ZONA','SALIDA_JEFATURA',
                  'SALIDA_ENVASADO','SALIDA_MERMA'];
   return validos.indexOf(tipo) >= 0;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ONE-SHOT: corregirPickupPCK_1778539364666
+// ────────────────────────────────────────────────────────────────────
+// Incidente 2026-05-12 (11:34-11:35): el pickup PCK-1778539364666 generó
+// 3 GUIA_SALIDA duplicadas (G1778603697440, G1778603712456, G1778603728910)
+// por doble-click del operador en "Cerrar Pickup". Stock fue descontado de
+// más en varios productos. Esta función:
+//
+//   1. Anula detalle por detalle de las 3 guías  → cada anularDetalle()
+//      reverte el stock de esa línea automáticamente
+//   2. Crea una guía nueva SALIDA_ZONA en ZONA-02 con la lista consolidada
+//      (15 líneas únicas, suma sin duplicados — calculada manualmente)
+//   3. Marca el pickup como COMPLETADO con referencia a la nueva guía
+//
+// EJECUTAR UNA SOLA VEZ desde el editor de Apps Script.
+// Idempotencia: si las 3 guías ya tienen todos los detalles ANULADOS,
+// anularDetalle retorna {yaAnulado:true} sin descontar otra vez.
+// ════════════════════════════════════════════════════════════════════
+function corregirPickupPCK_1778539364666() {
+  var idPickup = 'PCK-1778539364666';
+  var guiasAAnular = ['G1778603697440', 'G1778603712456', 'G1778603728910'];
+  var idZona = 'ZONA-02';
+  var usuario = 'fix-script-2026-05-12';
+
+  // Despacho consolidado (sin duplicados) — derivado del análisis manual
+  // de las 3 guías. Cada línea es lo que REALMENTE quiso despachar el
+  // operador (canónico o equivalente), tomando el máximo no repetido +
+  // sumando los items huérfanos del pickup que no entraron a ninguna guía.
+  var despachoLimpio = [
+    { codigoBarra: 'WHANNODO100GR',  cantidad: 1 },
+    { codigoBarra: 'WHNAXMTO001KG',  cantidad: 3 }, // extra fuera del pickup
+    { codigoBarra: 'WHORLIRO250GR',  cantidad: 2 },
+    { codigoBarra: 'WHORLIRO050GR',  cantidad: 1 },
+    { codigoBarra: 'WHPIEODO050GR',  cantidad: 2 },
+    { codigoBarra: 'WHANEODO050GR',  cantidad: 7 },
+    { codigoBarra: '6973360692632',  cantidad: 2 },
+    { codigoBarra: 'TONYJG003',      cantidad: 1 },
+    { codigoBarra: '7750844410062',  cantidad: 1 },
+    { codigoBarra: 'WHCLOOIO050GR',  cantidad: 1 },
+    { codigoBarra: 'WHAVXUNO001KG',  cantidad: 1 },
+    { codigoBarra: '7756034140481',  cantidad: 1 },
+    { codigoBarra: '6937518108314',  cantidad: 4 }, // huérfano del pickup
+    { codigoBarra: '7752285038911',  cantidad: 1 }, // huérfano del pickup
+    { codigoBarra: '8445292343428',  cantidad: 1 }  // huérfano del pickup
+  ];
+
+  // ── 1. Anular detalles de las 3 guías (reverte stock por cada anulación) ──
+  var sheetDet = getSheet('GUIA_DETALLE');
+  var data = sheetDet.getDataRange().getValues();
+  var hdrs = data[0];
+  var idxIdDet = hdrs.indexOf('idDetalle');
+  var idxIdG   = hdrs.indexOf('idGuia');
+  var idxObs   = hdrs.indexOf('observacion');
+
+  var anulados = 0, yaAnulados = 0, errores = [];
+  for (var i = 1; i < data.length; i++) {
+    var ig = String(data[i][idxIdG] || '');
+    if (guiasAAnular.indexOf(ig) < 0) continue;
+    var idDet = String(data[i][idxIdDet] || '');
+    if (!idDet) continue;
+    if (String(data[i][idxObs] || '').toUpperCase() === 'ANULADO') { yaAnulados++; continue; }
+    var resA = anularDetalle({ idDetalle: idDet, usuario: usuario });
+    if (resA.ok) anulados++;
+    else errores.push(idDet + ': ' + resA.error);
+  }
+  Logger.log('Anulados: ' + anulados + ' · YaAnulados: ' + yaAnulados + ' · Errores: ' + errores.length);
+  if (errores.length) Logger.log('Detalle errores: ' + JSON.stringify(errores));
+
+  // ── 2. Marcar las 3 guías viejas como anuladas en el comentario ────────
+  // No se "eliminan" físicamente (deja rastro auditable) pero el comentario
+  // las marca claramente. Los detalles ya están ANULADOS → no descuentan stock.
+  var sheetG = getSheet('GUIAS');
+  var dataG  = sheetG.getDataRange().getValues();
+  var hdrsG  = dataG[0];
+  var idxIdGG  = hdrsG.indexOf('idGuia');
+  var idxComG  = hdrsG.indexOf('comentario');
+  var idxEstG  = hdrsG.indexOf('estado');
+  for (var r = 1; r < dataG.length; r++) {
+    var ig2 = String(dataG[r][idxIdGG] || '');
+    if (guiasAAnular.indexOf(ig2) < 0) continue;
+    var comAct = String(dataG[r][idxComG] || '');
+    if (comAct.indexOf('[ANULADA-DUPLICADO]') < 0) {
+      sheetG.getRange(r + 1, idxComG + 1).setValue('[ANULADA-DUPLICADO] ' + comAct + ' · consolidada en fix 2026-05-12');
+    }
+    sheetG.getRange(r + 1, idxEstG + 1).setValue('ANULADA');
+  }
+
+  // ── 3. Crear guía nueva consolidada ────────────────────────────────────
+  var nuevaGuia = crearDespachoRapido({
+    tipo:     'SALIDA_ZONA',
+    idZona:   idZona,
+    items:    despachoLimpio,
+    usuario:  usuario,
+    nota:     '[pickup:' + idPickup + '] [FIX-CONSOLIDADO 2026-05-12] Reemplaza G1778603697440 + G1778603712456 + G1778603728910 (duplicadas por doble-click).',
+    imprimir: true
+  });
+  Logger.log('Nueva guía consolidada: ' + JSON.stringify(nuevaGuia));
+
+  // ── 4. Marcar pickup COMPLETADO con ref a la nueva guía ───────────────
+  var idGuiaNueva = nuevaGuia && nuevaGuia.data ? nuevaGuia.data.idGuia : '';
+  var sheetPick = getSheet('PICKUPS');
+  var dataP = sheetPick.getDataRange().getValues();
+  var hdrsP = dataP[0];
+  var idxIdP   = hdrsP.indexOf('idPickup');
+  var idxEstP  = hdrsP.indexOf('estado');
+  var idxNtP   = hdrsP.indexOf('notas');
+  var idxAteP  = hdrsP.indexOf('fechaAtendido');
+  var idxUaP   = hdrsP.indexOf('ultimaActividad');
+  for (var rp = 1; rp < dataP.length; rp++) {
+    if (String(dataP[rp][idxIdP]) !== idPickup) continue;
+    sheetPick.getRange(rp + 1, idxEstP + 1).setValue('COMPLETADO');
+    var notaAct = String(dataP[rp][idxNtP] || '');
+    if (notaAct.indexOf('FIX-CONSOLIDADO') < 0) {
+      sheetPick.getRange(rp + 1, idxNtP + 1).setValue(notaAct + ' · FIX-CONSOLIDADO ' + idGuiaNueva);
+    }
+    var nowIso = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+    sheetPick.getRange(rp + 1, idxAteP + 1).setValue(nowIso);
+    sheetPick.getRange(rp + 1, idxUaP + 1).setValue(nowIso);
+    break;
+  }
+
+  return {
+    ok: true,
+    detallesAnulados: anulados,
+    yaAnulados:       yaAnulados,
+    erroresAnulacion: errores,
+    guiaNueva:        idGuiaNueva,
+    pickup:           idPickup,
+    estadoPickup:     'COMPLETADO'
+  };
 }

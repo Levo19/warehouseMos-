@@ -8484,11 +8484,13 @@ const DespachoView = (() => {
             const min = Math.floor((Date.now() - t) / 60000);
             hace = min < 1 ? 'recién' : min < 60 ? ('hace ' + min + 'm') : ('hace ' + Math.floor(min/60) + 'h');
           } catch(_) {}
-          // Lock visual — atendidoPor distinto al usuario actual = bloqueado
+          // Lock visual — atendidoPor distinto al usuario actual = bloqueado.
+          // Comparación normalizada para tolerar dobles espacios / mayúsculas
+          // entre devices del mismo operador.
           const usuario = window.WH_CONFIG?.usuario || '';
           const atp = String(p.atendidoPor || '').trim();
-          const lockedByOther = atp && usuario && atp !== usuario;
-          const lockedByMe    = atp && usuario && atp === usuario;
+          const lockedByMe    = atp && usuario && _sameUser(atp, usuario);
+          const lockedByOther = atp && usuario && !lockedByMe;
           let btnHtml = '';
           if (lockedByOther) {
             btnHtml = `<button disabled class="btn btn-sm flex-shrink-0"
@@ -8620,7 +8622,21 @@ const DespachoView = (() => {
 
   // ── Pickup pendiente ────────────────────────────────────────
   let _pickupActivo = null;
+  let _pickupClosing = false; // lock anti-doble-click en cerrarDespachoPickup
   let _matchResults = []; // [{nombre, qty, producto, score, status, accepted}]
+
+  // Normalización de nombre de operador para comparar locks de pickup.
+  // Tolera dobles espacios, mayúsculas y trims (causa real: el nombre
+  // guardado en PERSONAL a veces tiene espacios extra, y al comparar
+  // ===-estricto contra el usuario de otro device el operador se
+  // bloquea de sí mismo).
+  function _normUser(u) {
+    return String(u || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+  function _sameUser(a, b) {
+    var na = _normUser(a), nb = _normUser(b);
+    return na && nb && na === nb;
+  }
 
   // ════════════════════════════════════════════════════════════
   // PICKUP ACTIVO — lógica core
@@ -9182,8 +9198,17 @@ const DespachoView = (() => {
 
   // Cerrar despacho del pickup activo: emite GUIA_SALIDA con códigos reales.
   // esParcial=true si el operador quiere cerrar antes de tener todo.
+  //
+  // Lock _pickupClosing previene cierres concurrentes: si el operador
+  // hace doble-click o el botón sigue clickeable durante la espera, las
+  // llamadas extra retornan sin tocar el backend. Sin esto se generan
+  // múltiples GUIA_SALIDA con items duplicados (bug histórico).
   async function cerrarDespachoPickup(esParcial) {
     if (!_pickupActivo) return;
+    if (_pickupClosing) {
+      toast('⏳ Ya se está procesando el cierre · espera...', 'warn', 2500);
+      return;
+    }
 
     // Si parcial, confirmar con el operador
     const completo = _pickupTotalmenteCompleto();
@@ -9211,6 +9236,10 @@ const DespachoView = (() => {
       toast('No hay nada despachado todavía', 'warn', 2500);
       return;
     }
+
+    // Tomar el lock ANTES de cualquier UI optimista y await
+    _pickupClosing = true;
+    _setGenerarGuiaBusy(true);
 
     // Snapshot para revert si falla
     const pickupSnap  = JSON.parse(JSON.stringify(_pickupActivo));
@@ -9242,13 +9271,23 @@ const DespachoView = (() => {
         _confettiCelebracion();
         toast(`✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
 
-        // Imprimir en background si hay guía
+        // Imprimir en background si hay guía — toast warning si falla (antes era silencioso)
         if (d.idGuia) {
           try {
             const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
             const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
-            API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl }).catch(() => {});
-          } catch(_){}
+            API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl })
+              .then(r => {
+                if (r && r.ok === false) {
+                  toast('🖨 Guía generada pero ticket NO se imprimió: ' + (r.error || 'error PrintNode'), 'warn', 8000);
+                }
+              })
+              .catch(err => {
+                toast('🖨 Guía generada pero ticket NO se imprimió: ' + (err?.message || 'sin red'), 'warn', 8000);
+              });
+          } catch(eImp){
+            toast('🖨 Guía generada pero ticket NO se imprimió: ' + (eImp.message || eImp), 'warn', 8000);
+          }
         }
         // Historial local
         const items = (pickupSnap.items || []).filter(it => (parseFloat(it.despachado)||0) > 0).map(it => ({
@@ -9287,7 +9326,26 @@ const DespachoView = (() => {
       const msg = e?.timeout ? 'Tiempo agotado' : 'Sin conexión';
       toast('Error: ' + msg, 'danger', 8000);
       _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
+    } finally {
+      _pickupClosing = false;
+      _setGenerarGuiaBusy(false);
     }
+  }
+
+  // Pone/quita estado "ocupado" en el botón Generar Guía y CTAs del pickup.
+  // Llamado solo desde cerrarDespachoPickup para impedir doble-click visible.
+  function _setGenerarGuiaBusy(busy) {
+    try {
+      const btn = document.getElementById('btnGenerarGuia');
+      if (btn) {
+        btn.disabled = !!busy;
+        if (busy) btn.classList.add('is-busy'); else btn.classList.remove('is-busy');
+      }
+      document.querySelectorAll('.pkck-cta').forEach(el => {
+        el.style.pointerEvents = busy ? 'none' : '';
+        el.style.opacity       = busy ? '0.55' : '';
+      });
+    } catch(_){}
   }
 
 
@@ -9306,7 +9364,8 @@ const DespachoView = (() => {
     if (!p) return;
     const usuario = window.WH_CONFIG?.usuario || '';
     const atp = String(p.atendidoPor || '').trim();
-    if (atp && usuario && atp !== usuario) {
+    // Lock real: bloquear solo si OTRO operador (no yo mismo en otro device).
+    if (atp && usuario && !_sameUser(atp, usuario)) {
       try { SoundFX.warn(); } catch(_){}
       vibrate([30, 20, 30]);
       toast(`🔒 Lo está atendiendo ${atp}. No se puede tomar.`, 'warn', 3500);
@@ -9420,10 +9479,10 @@ const DespachoView = (() => {
           badgeUpdate();
           return;
         }
-        // Si otro operador lo está atendiendo, avisar
+        // Si otro operador (no yo mismo en otro device) lo está atendiendo, avisar
         const usuario = window.WH_CONFIG?.usuario || '';
         const atpBE = String(r.data.atendidoPor || '').trim();
-        if (atpBE && usuario && atpBE !== usuario) {
+        if (atpBE && usuario && !_sameUser(atpBE, usuario)) {
           toast(`⚠ Otro operador (${atpBE}) está atendiendo este pickup`, 'warn', 5000);
         }
       }

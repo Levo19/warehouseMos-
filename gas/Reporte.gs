@@ -4,6 +4,119 @@
 // Acción: getReporte?tipo=preingreso|guia&id=xxx
 // ============================================================
 
+// ════════════════════════════════════════════════════════════
+// _clasificarDetallesPorPickup — divide los detalles de una guía
+// en 3 secciones cuando la guía proviene de un pickup ME→WH.
+// ────────────────────────────────────────────────────────────
+// Devuelve { hasPickup, ok[], extras[], faltantes[] } donde:
+//   ok        = detalles cuyo total escaneado coincide EXACTO con lo
+//               solicitado para ese item del pickup
+//   extras    = detalles que aportan MÁS de lo solicitado (sobrante)
+//               o detalles cuyo codigoBarra no está en ningún item
+//               del pickup (escaneo fuera del pickup)
+//   faltantes = items del pickup que se solicitaron y NO se llegaron
+//               a despachar completo (incluye despachado=0)
+//
+// Si la guía no tiene marca de pickup en su comentario, retorna
+// { hasPickup:false } y el ticket usa lista única.
+// ════════════════════════════════════════════════════════════
+function _clasificarDetallesPorPickup(g, dets) {
+  var out = { hasPickup: false, ok: [], extras: [], faltantes: [] };
+  var comentario = String(g.comentario || '');
+  var m = comentario.match(/\[pickup:([^\]]+)\]/);
+  if (!m) return out;
+  var idPickup = m[1];
+
+  var sheetP = null;
+  try { sheetP = getSheet('PICKUPS'); } catch(e) { return out; }
+  if (!sheetP) return out;
+
+  var dataP = sheetP.getDataRange().getValues();
+  if (!dataP.length) return out;
+  var hdrsP   = dataP[0].map(function(h){return String(h);});
+  var idxId   = hdrsP.indexOf('idPickup');
+  var idxItms = hdrsP.indexOf('items');
+  if (idxId < 0 || idxItms < 0) return out;
+
+  var rowJson = null;
+  for (var r = 1; r < dataP.length; r++) {
+    if (String(dataP[r][idxId]) === idPickup) {
+      rowJson = String(dataP[r][idxItms] || '');
+      break;
+    }
+  }
+  if (!rowJson) return out;
+
+  var pickupItems;
+  try { pickupItems = JSON.parse(rowJson); } catch(e) { return out; }
+  if (!Array.isArray(pickupItems)) return out;
+
+  out.hasPickup = true;
+
+  // Mapa codigoBarra (upper) → { item del pickup, índice }
+  var codToItem = {};
+  pickupItems.forEach(function(it, idx) {
+    var codos = (it.codigosOriginales || []);
+    codos.forEach(function(c) {
+      if (!c) return;
+      codToItem[String(c).trim().toUpperCase()] = { item: it, idx: idx };
+    });
+    // Permitir match por skuBase / idProducto también (la trazabilidad
+    // del pickup acepta cualquiera de los códigos del array codigosOriginales,
+    // pero a veces el pickup contiene idProducto IDPRO… mezclado).
+    if (it.skuBase) codToItem[String(it.skuBase).trim().toUpperCase()] = { item: it, idx: idx };
+  });
+
+  // Acumular despachado por item del pickup (suma de cantidades de detalles
+  // cuyo codigoBarra mapea a ese item)
+  var despPorIdx = {};
+  var detsExtra  = []; // detalles cuyo codigoBarra no pertenece al pickup
+
+  dets.forEach(function(d) {
+    var cb = String(d.codigoProducto || '').trim().toUpperCase();
+    var hit = codToItem[cb];
+    if (hit) {
+      despPorIdx[hit.idx] = (despPorIdx[hit.idx] || 0) + (parseFloat(d.cantidad) || 0);
+      // Lo asociamos para luego decidir si va a "ok" o "extras"
+      d._pickupIdx = hit.idx;
+    } else {
+      detsExtra.push(d);
+    }
+  });
+
+  // Clasificar cada detalle individual de la guía
+  dets.forEach(function(d) {
+    if (typeof d._pickupIdx === 'undefined') return; // ya está en detsExtra
+    var it = pickupItems[d._pickupIdx];
+    var sol  = parseFloat(it.solicitado) || 0;
+    var desp = parseFloat(despPorIdx[d._pickupIdx]) || 0;
+    if (desp > sol + 1e-9) {
+      out.extras.push(d);
+    } else {
+      out.ok.push(d);
+    }
+  });
+
+  // Los detalles cuyo código no estaba en el pickup → "extras" (escaneos libres)
+  detsExtra.forEach(function(d) { out.extras.push(d); });
+
+  // Items del pickup que NO se despacharon o se despacharon parcial → "faltantes"
+  pickupItems.forEach(function(it, idx) {
+    var sol  = parseFloat(it.solicitado) || 0;
+    var desp = parseFloat(despPorIdx[idx]) || 0;
+    if (sol > 0 && desp + 1e-9 < sol) {
+      out.faltantes.push({
+        skuBase:     it.skuBase     || '',
+        nombre:      it.nombre      || it.skuBase || '(sin nombre)',
+        solicitado:  sol,
+        despachado:  desp
+      });
+    }
+  });
+
+  return out;
+}
+
 // ── Helpers de formato compartidos ──────────────────────────
 function _padLine48(left, right) {
   var l = String(left || '');
@@ -195,48 +308,101 @@ function imprimirTicketGuia(params) {
   bLn(SEP);
 
   // ── CUADRO 2: productos ─────────────────────────────────────
-  // Header sección
-  b1(0x1b); b1(0x61); b1(0x01);  // center
-  b1(0x1b); b1(0x45); b1(0x01);  // bold
-  bLn('PRODUCTOS');
-  b1(0x1b); b1(0x45); b1(0x00);
-  b1(0x1b); b1(0x61); b1(0x00);  // left
-  bLn(SEP2);
+  // Si la guía proviene de un pickup ([pickup:PCK-X] en comentario), imprimimos
+  // en 3 secciones: DESPACHADO (OK) · EXTRAS/SOBRANTES · FALTANTES. Caso contrario,
+  // lista única como antes.
+  var pickupClasif = _clasificarDetallesPorPickup(g, dets);
 
-  // Items con cantidad bold grande, word-wrap inteligente del nombre
-  dets.forEach(function(d) {
+  // Helper para renderizar un detalle de la guía con cantidad bold + word-wrap
+  function _imprimirItemDetalle(d) {
     var tag    = d.esProductoNuevo ? 'n' : d.esIncompleto ? 'i' : ' ';
     var nombre = String(d.descripcion || '').toUpperCase();
     var cant   = d.cantidad % 1 === 0 ? String(Math.round(d.cantidad)) : String(d.cantidad);
     var marca  = (tag === 'n' ? '[N] ' : tag === 'i' ? '[!] ' : '');
     var prefix = cant + 'x ';
-    var anchoP = 48 - prefix.length;     // ancho disponible primera línea
-    var anchoR = 48 - 4;                  // ancho con sangría continuaciones
-
+    var anchoP = 48 - prefix.length;
+    var anchoR = 48 - 4;
     var lineas = _wrapPalabras(marca + nombre, anchoP, anchoR);
-
-    // Línea 1: cantidad bold + primera porción del nombre
     b1(0x1b); b1(0x45); b1(0x01);
     bStr(prefix);
     b1(0x1b); b1(0x45); b1(0x00);
     bLn(lineas[0] || '');
-    // Continuaciones con sangría
-    for (var li = 1; li < lineas.length; li++) {
-      bLn('    ' + lineas[li]);
-    }
-    // Código de barra debajo (sangría)
-    if (d.codigoProducto) {
-      bLn('    ' + String(d.codigoProducto));
-    }
-    // Fecha de vencimiento (si tiene)
-    if (d.fechaVencimiento) {
-      bLn('    Venc: ' + fmtVenc(d.fechaVencimiento));
-    }
-  });
+    for (var li = 1; li < lineas.length; li++) bLn('    ' + lineas[li]);
+    if (d.codigoProducto) bLn('    ' + String(d.codigoProducto));
+    if (d.fechaVencimiento) bLn('    Venc: ' + fmtVenc(d.fechaVencimiento));
+  }
 
-  if (!dets.length) bLn('  (sin items registrados)');
+  // Helper para items "faltantes" del pickup (no están en GUIA_DETALLE).
+  // Muestra: solicitado vs despachado=0 (o despachado < solicitado).
+  function _imprimirItemFaltante(it) {
+    var nombre = String(it.nombre || '').toUpperCase();
+    var sol    = parseFloat(it.solicitado) || 0;
+    var desp   = parseFloat(it.despachado) || 0;
+    var falta  = sol - desp;
+    var qFalta = falta % 1 === 0 ? String(Math.round(falta)) : String(falta);
+    var prefix = '-' + qFalta + ' ';
+    var anchoP = 48 - prefix.length;
+    var anchoR = 48 - 4;
+    var lineas = _wrapPalabras(nombre, anchoP, anchoR);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bStr(prefix);
+    b1(0x1b); b1(0x45); b1(0x00);
+    bLn(lineas[0] || '');
+    for (var li = 1; li < lineas.length; li++) bLn('    ' + lineas[li]);
+    bLn('    (pidio ' + sol + ', llego ' + desp + ')');
+  }
 
-  bLn(SEP);
+  if (pickupClasif.hasPickup) {
+    // ─── Sección 1: DESPACHADO OK (solicitado === despachado) ───
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('DESPACHADO OK (' + pickupClasif.ok.length + ')');
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP2);
+    if (pickupClasif.ok.length) {
+      pickupClasif.ok.forEach(_imprimirItemDetalle);
+    } else {
+      bLn('  (ninguno coincidio exacto)');
+    }
+    bLn(SEP);
+
+    // ─── Sección 2: EXTRAS / SOBRANTES (despachado > solicitado, o no en pickup) ───
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('EXTRAS / SOBRANTES (' + pickupClasif.extras.length + ')');
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    if (pickupClasif.extras.length) {
+      bLn('(producto pedido en mayor cant.');
+      bLn(' o no estaba en el pickup)');
+      bLn(SEP2);
+      pickupClasif.extras.forEach(_imprimirItemDetalle);
+    } else {
+      bLn(SEP2);
+      bLn('  (sin extras)');
+    }
+    bLn(SEP);
+
+    // ─── Sección 3: FALTANTES (despachado < solicitado o no despachado) ───
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('NO DESPACHADO (' + pickupClasif.faltantes.length + ')');
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    if (pickupClasif.faltantes.length) {
+      bLn('(quedaron pendientes)');
+      bLn(SEP2);
+      pickupClasif.faltantes.forEach(_imprimirItemFaltante);
+    } else {
+      bLn(SEP2);
+      bLn('  Sin faltantes - PICKUP COMPLETO');
+    }
+    bLn(SEP);
+  } else {
+    // Comportamiento clásico — lista única "PRODUCTOS"
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('PRODUCTOS');
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP2);
+    dets.forEach(_imprimirItemDetalle);
+    if (!dets.length) bLn('  (sin items registrados)');
+    bLn(SEP);
+  }
 
   // ── CUADRO 3: QR Code para reporte en tiempo real ───────────
   function _imprimirQR(url, titulo, sub1, sub2) {
