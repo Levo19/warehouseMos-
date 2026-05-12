@@ -2606,6 +2606,8 @@
 
     function _showUpdateBanner(worker) {
       _waitingWorker = worker;
+      // Si está snoozeado, no mostrar (el user pidió 5min de paz)
+      if (_isWhUpdateSnoozed()) return;
       // Versión desde version.json
       fetch('./version.json?t=' + Date.now())
         .then(r => r.json())
@@ -2652,10 +2654,17 @@
     };
 
     window._dismissUpdate = function() {
-      // Solo ocultar si el SW aún no está ready — si ya está, no permitir
-      // dismiss (auto-update va a aplicarse de todas formas).
-      if (!_swProgress.ready) _hideBanner();
+      // Posponer 5 min — guarda timestamp en localStorage.
+      // Permite dismiss SIEMPRE (incluso si está ready) — el user decide cuándo.
+      try { localStorage.setItem('wh_upd_snooze_until', String(Date.now() + 5 * 60 * 1000)); } catch(_){}
+      _hideBanner();
     };
+    function _isWhUpdateSnoozed() {
+      try {
+        const until = parseInt(localStorage.getItem('wh_upd_snooze_until') || '0', 10);
+        return until && Date.now() < until;
+      } catch(_) { return false; }
+    }
 
     window._SWCheck = async function() {
       if (!_reg) return;
