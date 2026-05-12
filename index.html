@@ -2649,8 +2649,16 @@
       _hideBanner();
       _showOverlay();
       try { localStorage.setItem('wh_perms_check_pending', '1'); } catch(_){}
-      // Esperar 900ms para que se escuche el cohete antes del reload
-      setTimeout(() => _waitingWorker.postMessage('SKIP_WAITING'), 900);
+      // 250ms (lo justo para que arranque el cohete) + fallback reload 3s
+      // si controllerchange no dispara (antes esperaba 900ms y no había
+      // fallback → overlay infinito si el SW se trababa).
+      setTimeout(() => {
+        _waitingWorker.postMessage('SKIP_WAITING');
+        setTimeout(() => {
+          const ov = document.getElementById('whUpdateOverlay');
+          if (ov && ov.classList.contains('visible')) window.location.reload();
+        }, 3000);
+      }, 250);
     };
 
     window._dismissUpdate = function() {
