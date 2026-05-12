@@ -9210,6 +9210,18 @@ const DespachoView = (() => {
       return;
     }
 
+    // PRE-CHECK de versión: garantiza que el código que va a procesar el
+    // cierre es la última publicada. Si la PWA está atascada con versión
+    // vieja, esto bloquea + fuerza reload antes de que se generen
+    // duplicados u otros bugs corregidos en versiones posteriores.
+    if (typeof window._preCheckVersion === 'function') {
+      const ok = await window._preCheckVersion();
+      if (!ok) {
+        toast('🔄 Actualizando · evitando duplicados', 'info', 4000);
+        return;
+      }
+    }
+
     // Si parcial, confirmar con el operador
     const completo = _pickupTotalmenteCompleto();
     if (esParcial && !completo) {

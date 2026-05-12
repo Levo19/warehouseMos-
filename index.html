@@ -2744,6 +2744,53 @@
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') _checkForcedUpdate();
     });
+
+    // ── PRE-CHECK síncrono para acciones críticas ─────────────────────
+    // Antes de ejecutar cerrar pickup / generar guía / cobrar / etc.,
+    // llamar a window._preCheckVersion(). Si la versión local difiere de
+    // la publicada, bloquea la acción y fuerza reload (evita duplicados
+    // por código viejo). Cache 30s para no recargar version.json en
+    // cada acción consecutiva.
+    let _preCheckCache = { ts: 0, ok: true };
+    window._preCheckVersion = async function() {
+      // Si ya se disparó force-update, bloquear inmediatamente
+      if (_forceUpdateTriggered) return false;
+      // Cache: si chequeé hace <30s y estaba OK, no refetch
+      const now = Date.now();
+      if (now - _preCheckCache.ts < 30000 && _preCheckCache.ok) return true;
+      try {
+        const r = await fetch('./version.json?t=' + now, { cache: 'no-store' });
+        if (!r.ok) {
+          _preCheckCache = { ts: now, ok: true };
+          return true; // tolerante: si la red falla, no bloquear
+        }
+        const j = await r.json();
+        // Si no hay baseline aún, setearla ahora (primera carga muy rápida)
+        if (_APP_VERSION_BL === null) _APP_VERSION_BL = j.version;
+        if (j && j.version && j.version !== _APP_VERSION_BL) {
+          _forceUpdateTriggered = true;
+          // Mostrar overlay con mensaje específico de actualización forzada
+          const el = document.getElementById('whUpdateOverlay');
+          if (el) {
+            el.classList.add('visible');
+            const sub = el.querySelector('.wh-upd-sub');
+            if (sub) sub.textContent = 'Versión nueva v' + j.version + ' · evitando duplicados';
+          }
+          try { localStorage.setItem('wh_force_resync', '1'); } catch(_){}
+          // Update SW + reload tras 1.5s (suficiente para que el SW descargue)
+          if (window._SWCheck) { try { await window._SWCheck(); } catch(_){} }
+          setTimeout(() => { location.reload(true); }, 1500);
+          _preCheckCache = { ts: now, ok: false };
+          return false;
+        }
+        _preCheckCache = { ts: now, ok: true };
+        return true;
+      } catch(_) {
+        // Red flaky: no bloquear (el check periódico atrapará)
+        _preCheckCache = { ts: now, ok: true };
+        return true;
+      }
+    };
   })();
   </script>
 
