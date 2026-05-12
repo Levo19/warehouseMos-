@@ -217,24 +217,39 @@ function imprimirTicketGuia(params) {
   try {
     var prods   = _sheetToObjects(getProductosSheet());
     var prodMap = {};
+
+    // PASO 1 — índice skuBase → desc del CANÓNICO (factor=1, activo).
+    // Fuente de verdad para resolver presentaciones y equivalentes.
+    var canonicoPorSku = {};
     prods.forEach(function(p) {
-      var desc = p.descripcion || p.idProducto;
-      if (!desc) return;
-      prodMap[p.idProducto] = desc;
-      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
-      // skuBase solo para producto BASE (factor=1) — evita que presentaciones sobreescriban
       var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
-      if (esBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
+      if (!esBase || !p.skuBase) return;
+      var sk = String(p.skuBase).trim().toUpperCase();
+      canonicoPorSku[sk] = p.descripcion || p.idProducto || sk;
     });
-    // Equivalentes → resuelven al producto base via skuBase
+
+    // PASO 2 — cada producto apunta al canónico de su skuBase.
+    // Presentaciones (factor!=1) ya NO ganan sobre el canónico.
+    prods.forEach(function(p) {
+      var sk = String(p.skuBase || '').trim().toUpperCase();
+      var desc = canonicoPorSku[sk] || p.descripcion || p.idProducto;
+      if (!desc) return;
+      if (p.idProducto)  prodMap[p.idProducto] = desc;
+      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+      if (sk)            prodMap[sk] = desc;
+    });
+
+    // PASO 3 — equivalentes: SIEMPRE al canónico de su skuBase.
+    // Sobrescriben cualquier mapeo previo (incluyendo presentaciones con
+    // el mismo codigoBarra que el equivalente).
     try {
       var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
       if (equivSheet) {
         _sheetToObjects(equivSheet).forEach(function(e) {
-          if (!e.codigoBarra || !e.skuBase) return;
-          var skuKey = String(e.skuBase).trim().toUpperCase();
-          var desc   = prodMap[skuKey];
-          if (desc) prodMap[String(e.codigoBarra).trim()] = desc;
+          if (!e.codigoBarra) return;
+          var sk = String(e.skuBase || '').trim().toUpperCase();
+          var desc = canonicoPorSku[sk] || prodMap[sk] || String(e.descripcion || '') || String(e.codigoBarra);
+          prodMap[String(e.codigoBarra).trim()] = desc;
         });
       }
     } catch(e) {}
@@ -1025,24 +1040,39 @@ function _reporteGuia(id) {
   try {
     var prods   = _sheetToObjects(getProductosSheet());
     var prodMap = {};
+
+    // PASO 1 — índice skuBase → desc del CANÓNICO (factor=1, activo).
+    // Fuente de verdad para resolver presentaciones y equivalentes.
+    var canonicoPorSku = {};
     prods.forEach(function(p) {
-      var desc = p.descripcion || p.idProducto;
-      if (!desc) return;
-      prodMap[p.idProducto] = desc;
-      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
-      // skuBase solo para producto BASE (factor=1) — evita que presentaciones sobreescriban
       var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
-      if (esBase && p.skuBase) prodMap[String(p.skuBase).trim().toUpperCase()] = desc;
+      if (!esBase || !p.skuBase) return;
+      var sk = String(p.skuBase).trim().toUpperCase();
+      canonicoPorSku[sk] = p.descripcion || p.idProducto || sk;
     });
-    // Equivalentes → resuelven al producto base via skuBase
+
+    // PASO 2 — cada producto apunta al canónico de su skuBase.
+    // Presentaciones (factor!=1) ya NO ganan sobre el canónico.
+    prods.forEach(function(p) {
+      var sk = String(p.skuBase || '').trim().toUpperCase();
+      var desc = canonicoPorSku[sk] || p.descripcion || p.idProducto;
+      if (!desc) return;
+      if (p.idProducto)  prodMap[p.idProducto] = desc;
+      if (p.codigoBarra) prodMap[String(p.codigoBarra).trim()] = desc;
+      if (sk)            prodMap[sk] = desc;
+    });
+
+    // PASO 3 — equivalentes: SIEMPRE al canónico de su skuBase.
+    // Sobrescriben cualquier mapeo previo (incluyendo presentaciones con
+    // el mismo codigoBarra que el equivalente).
     try {
       var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
       if (equivSheet) {
         _sheetToObjects(equivSheet).forEach(function(e) {
-          if (!e.codigoBarra || !e.skuBase) return;
-          var skuKey = String(e.skuBase).trim().toUpperCase();
-          var desc   = prodMap[skuKey];
-          if (desc) prodMap[String(e.codigoBarra).trim()] = desc;
+          if (!e.codigoBarra) return;
+          var sk = String(e.skuBase || '').trim().toUpperCase();
+          var desc = canonicoPorSku[sk] || prodMap[sk] || String(e.descripcion || '') || String(e.codigoBarra);
+          prodMap[String(e.codigoBarra).trim()] = desc;
         });
       }
     } catch(e) {}
