@@ -1557,3 +1557,191 @@ function corregirPickupPCK_1778539364666() {
     estadoPickup:     'COMPLETADO'
   };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// GENÉRICO: _consolidarGuiasPickupDuplicadas
+// ─────────────────────────────────────────────────────────────────────
+// Cuando un pickup se cierra varias veces seguidas (doble-click del
+// operador), se generan múltiples GUIA_SALIDA con los mismos items.
+// Esta función las consolida automáticamente:
+//   1. Lee los detalles activos de cada guía duplicada
+//   2. Para cada codigoBarra → cantidad = MAX entre las guías (asume
+//      que la última pasada del operador refleja lo realmente despachado)
+//   3. Incluye items huérfanos del JSON del pickup (despachadoPorCodigo
+//      que no aparecen en ninguna de las guías)
+//   4. Anula detalle por detalle de las viejas → stock vuelve
+//   5. Marca las viejas como ANULADA con prefijo [ANULADA-DUPLICADO]
+//   6. Crea UNA guía nueva con la lista consolidada (imprime ticket)
+//   7. Marca el pickup como COMPLETADO con referencia
+//
+// EJECUTAR DESDE EL EDITOR DE GAS. Idempotente: si ya fueron anuladas
+// no descuentan stock de nuevo.
+// ════════════════════════════════════════════════════════════════════
+function _consolidarGuiasPickupDuplicadas(opts) {
+  var idsGuias = opts.idsGuias || [];
+  var idPickup = opts.idPickup;
+  var idZona   = opts.idZona;
+  var usuario  = opts.usuario || 'fix-script';
+  if (!idsGuias.length || !idPickup) {
+    return { ok: false, error: 'Requiere idsGuias[] e idPickup' };
+  }
+
+  // ── 1. Leer detalles activos de las guías duplicadas ─────────────
+  var sheetDet = getSheet('GUIA_DETALLE');
+  var dataDet  = sheetDet.getDataRange().getValues();
+  var hdrsDet  = dataDet[0];
+  var idxIdDet = hdrsDet.indexOf('idDetalle');
+  var idxIdG   = hdrsDet.indexOf('idGuia');
+  var idxCb    = hdrsDet.indexOf('codigoProducto');
+  var idxRec   = hdrsDet.indexOf('cantidadRecibida');
+  var idxObs   = hdrsDet.indexOf('observacion');
+
+  var porCodigo = {};
+  var detallesAAnular = [];
+  for (var i = 1; i < dataDet.length; i++) {
+    var ig = String(dataDet[i][idxIdG] || '');
+    if (idsGuias.indexOf(ig) < 0) continue;
+    var obs = String(dataDet[i][idxObs] || '').toUpperCase();
+    var idDet = String(dataDet[i][idxIdDet] || '');
+    if (obs === 'ANULADO') continue;
+    detallesAAnular.push(idDet);
+    var cb  = String(dataDet[i][idxCb] || '');
+    var qty = parseFloat(dataDet[i][idxRec]) || 0;
+    if (!porCodigo[cb]) porCodigo[cb] = {};
+    porCodigo[cb][ig] = (porCodigo[cb][ig] || 0) + qty;
+  }
+
+  // ── 2. Consolidar (max por cb) ──────────────────────────────────
+  var despachoConsolidado = [];
+  Object.keys(porCodigo).forEach(function(cb) {
+    var perGuia = porCodigo[cb];
+    var maxQ = 0;
+    Object.keys(perGuia).forEach(function(g) {
+      if (perGuia[g] > maxQ) maxQ = perGuia[g];
+    });
+    if (maxQ > 0) despachoConsolidado.push({ codigoBarra: cb, cantidad: maxQ });
+  });
+
+  // ── 3. Incluir huérfanos del JSON del pickup ────────────────────
+  var sheetPick = getSheet('PICKUPS');
+  var dataPick  = sheetPick.getDataRange().getValues();
+  var hdrsPick  = dataPick[0];
+  var idxIdP    = hdrsPick.indexOf('idPickup');
+  var idxIt     = hdrsPick.indexOf('items');
+
+  var pickupRow = -1, pickupItems = null;
+  for (var r = 1; r < dataPick.length; r++) {
+    if (String(dataPick[r][idxIdP]) === idPickup) {
+      pickupRow = r + 1;
+      try { pickupItems = JSON.parse(String(dataPick[r][idxIt] || '[]')); } catch(_){}
+      break;
+    }
+  }
+
+  var cubiertos = {};
+  despachoConsolidado.forEach(function(d) {
+    cubiertos[String(d.codigoBarra).trim().toUpperCase()] = true;
+  });
+  if (pickupItems && Array.isArray(pickupItems)) {
+    pickupItems.forEach(function(it) {
+      var dpc = it.despachadoPorCodigo || {};
+      Object.keys(dpc).forEach(function(cb) {
+        var qty = parseFloat(dpc[cb]) || 0;
+        if (qty <= 0) return;
+        var cbU = String(cb).trim().toUpperCase();
+        if (cubiertos[cbU]) return;
+        despachoConsolidado.push({ codigoBarra: String(cb), cantidad: qty });
+        cubiertos[cbU] = true;
+      });
+    });
+  }
+
+  // ── 4. Anular detalles (reverte stock automáticamente) ──────────
+  var anulados = 0, errores = [];
+  detallesAAnular.forEach(function(idDet) {
+    var res = anularDetalle({ idDetalle: idDet, usuario: usuario });
+    if (res.ok) anulados++;
+    else errores.push(idDet + ': ' + (res.error || 'err'));
+  });
+
+  // ── 5. Marcar guías viejas como ANULADA con prefijo ─────────────
+  var sheetG  = getSheet('GUIAS');
+  var dataG   = sheetG.getDataRange().getValues();
+  var hdrsG   = dataG[0];
+  var idxIdGG = hdrsG.indexOf('idGuia');
+  var idxComG = hdrsG.indexOf('comentario');
+  var idxEstG = hdrsG.indexOf('estado');
+  var hoyStr  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  for (var rg = 1; rg < dataG.length; rg++) {
+    var ig2 = String(dataG[rg][idxIdGG] || '');
+    if (idsGuias.indexOf(ig2) < 0) continue;
+    var comAct = String(dataG[rg][idxComG] || '');
+    if (comAct.indexOf('[ANULADA-DUPLICADO]') < 0) {
+      sheetG.getRange(rg + 1, idxComG + 1).setValue('[ANULADA-DUPLICADO] ' + comAct + ' · consolidada en fix ' + hoyStr);
+    }
+    sheetG.getRange(rg + 1, idxEstG + 1).setValue('ANULADA');
+  }
+
+  // ── 6. Crear guía nueva consolidada ─────────────────────────────
+  if (!despachoConsolidado.length) {
+    return {
+      ok: false,
+      error: 'No hay items consolidados para crear guía nueva',
+      detallesAnulados: anulados,
+      erroresAnulacion: errores,
+      guiasAnuladas: idsGuias
+    };
+  }
+  var nuevaGuia = crearDespachoRapido({
+    tipo:     'SALIDA_ZONA',
+    idZona:   idZona,
+    items:    despachoConsolidado,
+    usuario:  usuario,
+    nota:     '[pickup:' + idPickup + '] [FIX-CONSOLIDADO ' + hoyStr + '] '
+            + 'Reemplaza ' + idsGuias.join(' + ') + ' (duplicadas por doble-click).',
+    imprimir: true
+  });
+  var idGuiaNueva = nuevaGuia && nuevaGuia.data ? nuevaGuia.data.idGuia : '';
+
+  // ── 7. Marcar pickup COMPLETADO ─────────────────────────────────
+  if (pickupRow >= 2) {
+    var idxEstP = hdrsPick.indexOf('estado');
+    var idxNtP  = hdrsPick.indexOf('notas');
+    var idxAteP = hdrsPick.indexOf('fechaAtendido');
+    var idxUaP  = hdrsPick.indexOf('ultimaActividad');
+    var idxAtpP = hdrsPick.indexOf('atendidoPor');
+    sheetPick.getRange(pickupRow, idxEstP + 1).setValue('COMPLETADO');
+    var notaAct = String(dataPick[pickupRow - 1][idxNtP] || '');
+    if (notaAct.indexOf('FIX-CONSOLIDADO') < 0) {
+      sheetPick.getRange(pickupRow, idxNtP + 1).setValue(notaAct + ' · FIX-CONSOLIDADO ' + idGuiaNueva);
+    }
+    var nowIso = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+    if (idxAteP >= 0) sheetPick.getRange(pickupRow, idxAteP + 1).setValue(nowIso);
+    if (idxUaP  >= 0) sheetPick.getRange(pickupRow, idxUaP  + 1).setValue(nowIso);
+    if (idxAtpP >= 0) sheetPick.getRange(pickupRow, idxAtpP + 1).setValue(''); // libera lock
+  }
+
+  Logger.log('CONSOLIDACIÓN OK: ' + idsGuias.join(',') + ' → ' + idGuiaNueva +
+             ' (' + despachoConsolidado.length + ' items, ' + anulados + ' detalles anulados)');
+
+  return {
+    ok: true,
+    pickup:           idPickup,
+    guiasAnuladas:    idsGuias,
+    detallesAnulados: anulados,
+    erroresAnulacion: errores,
+    guiaNueva:        idGuiaNueva,
+    itemsConsolidados: despachoConsolidado.length,
+    estadoPickup:     'COMPLETADO'
+  };
+}
+
+// ── ONE-SHOT: incidente 2026-05-12 14:50 pickup PCK-1778365859327 ──
+function corregirPickupPCK_1778365859327() {
+  return _consolidarGuiasPickupDuplicadas({
+    idsGuias: ['G1778615429513', 'G1778615445751', 'G1778615467341'],
+    idPickup: 'PCK-1778365859327',
+    idZona:   'ZONA-02',
+    usuario:  'fix-script-2026-05-12'
+  });
+}
