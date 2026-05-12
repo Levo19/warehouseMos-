@@ -5,6 +5,52 @@
 // ============================================================
 
 // ════════════════════════════════════════════════════════════
+// Diagnóstico para entender por qué un ticket no muestra 3 secciones.
+// Ejecutar desde el editor: diagnosticarTicketPickup('GXXXXXX')
+// Retorna el estado completo del clasificador para esa guía.
+// ════════════════════════════════════════════════════════════
+function diagnosticarTicketPickup(idGuia) {
+  var idG = String(idGuia || '').trim();
+  if (!idG) return { ok: false, error: 'idGuia requerido' };
+
+  var guias = _sheetToObjects(getSheet('GUIAS'));
+  var g = guias.find(function(x){ return x.idGuia === idG; });
+  if (!g) return { ok: false, error: 'Guía no encontrada: ' + idG };
+
+  // Construir dets igual que imprimirTicketGuia
+  var dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
+    .filter(function(d){ return d.idGuia === idG && d.observacion !== 'ANULADO'; })
+    .map(function(d){
+      return {
+        codigoProducto:  String(d.codigoProducto || ''),
+        descripcion:     String(d.descripcion || d.codigoProducto || ''),
+        cantidad:        parseFloat(d.cantidadReal || d.cantidadRecibida || d.cantidadEsperada || 0),
+        observacion:     String(d.observacion || '')
+      };
+    });
+
+  var matchPickup = String(g.comentario || '').match(/\[pickup:([^\]]+)\]/);
+  var clasif = _clasificarDetallesPorPickup(g, dets);
+
+  var resumen = {
+    idGuia:           idG,
+    comentario:       String(g.comentario || ''),
+    matchRegex:       matchPickup ? matchPickup[1] : null,
+    detsCount:        dets.length,
+    detsCodigos:      dets.map(function(d){ return d.codigoProducto; }),
+    hasPickup:        clasif.hasPickup,
+    okCount:          clasif.ok.length,
+    extrasCount:      clasif.extras.length,
+    faltantesCount:   clasif.faltantes.length,
+    okList:           clasif.ok.map(function(d){ return d.codigoProducto + ' x' + d.cantidad; }),
+    extrasList:       clasif.extras.map(function(d){ return d.codigoProducto + ' x' + d.cantidad; }),
+    faltantesList:    clasif.faltantes.map(function(f){ return f.skuBase + ' falt ' + (f.solicitado - f.despachado); })
+  };
+  Logger.log(JSON.stringify(resumen, null, 2));
+  return resumen;
+}
+
+// ════════════════════════════════════════════════════════════
 // _clasificarDetallesPorPickup — divide los detalles de una guía
 // en 3 secciones cuando la guía proviene de un pickup ME→WH.
 // ────────────────────────────────────────────────────────────
@@ -84,10 +130,13 @@ function _clasificarDetallesPorPickup(g, dets) {
     }
   });
 
-  // Clasificar cada detalle individual de la guía
+  // Clasificar cada detalle individual de la guía. Forzar la descripción
+  // al NOMBRE DEL CANÓNICO (que viene en it.nombre del pickup) para que el
+  // ticket nunca muestre nombre de equivalente / presentación.
   dets.forEach(function(d) {
     if (typeof d._pickupIdx === 'undefined') return; // ya está en detsExtra
     var it = pickupItems[d._pickupIdx];
+    if (it && it.nombre) d.descripcion = String(it.nombre);
     var sol  = parseFloat(it.solicitado) || 0;
     var desp = parseFloat(despPorIdx[d._pickupIdx]) || 0;
     if (desp > sol + 1e-9) {
