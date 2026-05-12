@@ -4160,10 +4160,17 @@ const GuiasView = (() => {
             if (d._indirect)            return '<span class="item-match-badge imb-equiv" title="Equivalente">↕E</span>';
             return '<span class="item-match-badge imb-canonico" title="Canónico">✓</span>';
           })();
-          // Sync dot: muestra estado de guardado (saving/saved)
-          const syncDot = d._local
-            ? '<span class="sync-dot on-saving" title="guardando…"></span>'
-            : '<span class="sync-dot on-saved" title="guardado"></span>';
+          // Sync dot: refleja estado real (local/saving/failed/saved)
+          let syncDot, syncLbl = '';
+          if (d._saveFailed) {
+            syncDot = '<span class="sync-dot on-failed" title="error al guardar — toca para reintentar"></span>';
+            syncLbl = '<span style="color:#f87171">⚠ no guardado</span>';
+          } else if (d._local || d._saving) {
+            syncDot = '<span class="sync-dot on-saving" title="guardando…"></span>';
+            syncLbl = '<span style="color:#fbbf24">guardando…</span>';
+          } else {
+            syncDot = '<span class="sync-dot on-saved" title="guardado"></span>';
+          }
           return `
           <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
                style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px"
@@ -4176,7 +4183,7 @@ const GuiasView = (() => {
               <p class="text-xs text-slate-500 font-mono mt-1" style="display:flex;align-items:center;gap:6px">
                 <span>${escHtml(d.codigoProducto)}</span>
                 ${syncDot}
-                ${d._local ? '<span style="color:#fbbf24">guardando…</span>' : ''}
+                ${syncLbl}
               </p>
               ${venc}
             </div>
@@ -4843,6 +4850,8 @@ const GuiasView = (() => {
     if (zoomRange) { zoomRange.value = 1; document.getElementById('scanZoomLabel').textContent = '1×'; }
     document.getElementById('scannerModal').classList.add('open');
     _setScanStatus('ready');
+    // F6: sonido scanReady para feedback "cámara lista"
+    if (SoundFX.scanReady) setTimeout(() => SoundFX.scanReady(), 200);
     Scanner.start('scanVideo', _onCamResult, err => {
       toast('Error cámara: ' + err, 'danger');
       document.getElementById('scannerModal').classList.remove('open');
@@ -5314,6 +5323,8 @@ const GuiasView = (() => {
         _selQty = existing.cantidadRecibida;
         _selOrigQty = existing.cantidadRecibida;
       }
+      existing._saving = true;
+      existing._saveFailed = false;
       _mostrarDetalleSheet(_guiaActual, false);
       vibrate(12);
       SoundFX.beepDouble();
@@ -5321,9 +5332,24 @@ const GuiasView = (() => {
         API.actualizarCantidadDetalle({
           idDetalle: existing.idDetalle,
           cantidadRecibida: existing.cantidadRecibida
-        }).catch(() => {});
+        }).then(r => {
+          existing._saving = false;
+          if (r && r.ok) {
+            existing._saveFailed = false;
+            if (SoundFX.savedTick) SoundFX.savedTick();
+          } else if (!r || !r.offline) {
+            existing._saveFailed = true;
+          }
+          _mostrarDetalleSheet(_guiaActual, false);
+        }).catch(() => {
+          existing._saving = false;
+          existing._saveFailed = true;
+          _mostrarDetalleSheet(_guiaActual, false);
+        });
+      } else {
+        existing._saving = false;
       }
-      return true; // auto-suma: el caller no debe reproducir beep adicional
+      return true;
     }
 
     const localId = 'DL' + Date.now();
@@ -5424,7 +5450,23 @@ const GuiasView = (() => {
     if (item) {
       item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
       if (item.idDetalle && !item._local) {
-        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+        item._saving = true;
+        item._saveFailed = false;
+        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida })
+          .then(r => {
+            item._saving = false;
+            if (r && r.ok) {
+              if (SoundFX.savedTick) SoundFX.savedTick();
+            } else if (!r || !r.offline) {
+              item._saveFailed = true;
+            }
+            _mostrarDetalleSheet(_guiaActual, false);
+          })
+          .catch(() => {
+            item._saving = false;
+            item._saveFailed = true;
+            _mostrarDetalleSheet(_guiaActual, false);
+          });
       }
       _mostrarDetalleSheet(_guiaActual, false);
     }
