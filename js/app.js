@@ -11427,6 +11427,11 @@ const ProductosView = (() => {
           </svg>
           Historial
         </button>
+        <button id="memb-${sid}" onclick="event.stopPropagation();ProductosView.imprimirMembrete('${escAttr(g.skuBase)}','${escAttr(g.base.idProducto || '')}','${sid}')"
+                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1"
+                title="Imprimir membrete (canónico + equivalentes)">
+          🖨 Membrete
+        </button>
         ${/* Botón ojo: solo barcode único en modo auditoría */
           isAudit && !hasChildren ? (() => {
             const c0   = g.children[0];
@@ -12878,10 +12883,63 @@ const ProductosView = (() => {
     setTimeout(_attachGestures, 50);
   };
 
+  // ── Imprimir membrete con lockout 2s anti-doble-click ──
+  const _membLock = new Set();
+  function imprimirMembrete(skuBase, idProducto, sid) {
+    const key = String(skuBase || idProducto);
+    if (_membLock.has(key)) {
+      if (typeof toast === 'function') toast('Espera 2s para reimprimir', 'info', 1200);
+      return;
+    }
+    _membLock.add(key);
+
+    // Feedback inmediato visual: deshabilitar botón 2s
+    const btn = document.getElementById('memb-' + sid);
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = '.55';
+      btn.style.pointerEvents = 'none';
+    }
+    setTimeout(() => {
+      _membLock.delete(key);
+      if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.pointerEvents = '';
+      }
+    }, 2000);
+
+    // Toast optimista al instante
+    if (typeof toast === 'function') toast('🖨 Imprimiendo membrete…', 'info', 1500);
+
+    // Mandar todos los codigoBarra al GAS (canónico + equivalentes) si están disponibles
+    const grupo = _grupos.find(gr => gr.skuBase === skuBase);
+    const barcodes = grupo
+      ? grupo.children.map(c => String(c.codigoBarra || '')).filter(Boolean)
+      : [];
+
+    API.imprimirMembrete({
+      idProducto: idProducto || skuBase,
+      barcodes: barcodes.length ? JSON.stringify(barcodes) : ''
+    }).then(res => {
+      if (res && res.ok) {
+        if (typeof toast === 'function') toast('✓ Membrete enviado a impresora', 'ok', 1800);
+        if (typeof SoundFX !== 'undefined' && SoundFX.savedTick) SoundFX.savedTick();
+        if (navigator.vibrate) navigator.vibrate(10);
+      } else {
+        const msg = (res && res.error) || 'Error desconocido';
+        if (typeof toast === 'function') toast('Impresora: ' + msg, 'warn', 3500);
+        if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn();
+      }
+    }).catch(e => {
+      if (typeof toast === 'function') toast('Sin conexión a impresora', 'warn', 3500);
+    });
+  }
+
   return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
-           verHistorial, imprimirHistorial,
+           verHistorial, imprimirHistorial, imprimirMembrete,
            histFiltrarTipo, histAuditar,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,

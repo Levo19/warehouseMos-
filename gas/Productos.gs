@@ -1647,8 +1647,8 @@ function imprimirMembrete(params) {
   bLn('SKU: ' + sku);
   b1(0x1b); b1(0x21); b1(0x00);   // normal
 
-  // Separador "===..." debajo del SKU
-  b1(0x1b); b1(0x61); b1(0x00);   // left
+  // Separador "===..." debajo del SKU (centrado explícito)
+  b1(0x1b); b1(0x61); b1(0x01);   // center
   bLn(SEPEQ);
 
   // ── EAN barcodes: tamaño uniforme h=80 w=2 ──────────────────
@@ -1663,8 +1663,8 @@ function imprimirMembrete(params) {
     b1(bd.length & 0xff);
     bStr(bd);
     b1(0x0a);                       // LF tras barcode
-    b1(0x1b); b1(0x61); b1(0x00);   // left
-    // "---" entre barcodes; "===" antes de sección SKU o al final
+    // Separadores también centrados (consistencia visual)
+    b1(0x1b); b1(0x61); b1(0x01);   // center
     var isLast = (ei === numEan - 1);
     bLn(isLast ? SEPEQ : SEPDA);
   }
@@ -1684,7 +1684,7 @@ function imprimirMembrete(params) {
     b1(skuBd.length & 0xff);
     bStr(skuBd);
     b1(0x0a);
-    b1(0x1b); b1(0x61); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x01);   // center (consistencia)
     bLn(SEPEQ);
   }
 
