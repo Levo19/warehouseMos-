@@ -1224,6 +1224,16 @@
     @media (orientation:landscape), (min-width:600px) {
       .wh-mid { max-width:80px; opacity:1; letter-spacing:-.2px; }
     }
+    /* Efecto decorativo: tap → expandir "WareHouse" temporal en móvil */
+    #whLogo.wh-expanded .wh-mid {
+      max-width:80px !important; opacity:1 !important; letter-spacing:-.2px !important;
+    }
+    #whLogo.wh-expanded { animation: whBounce .4s ease-out; }
+    @keyframes whBounce {
+      0%   { transform:scale(1); }
+      50%  { transform:scale(1.12); }
+      100% { transform:scale(1); }
+    }
     #logoAlertDot {
       position:absolute; top:1px; right:-3px;
       width:9px; height:9px; border-radius:50%;
@@ -1848,13 +1858,77 @@
   ══════════════════════════════════════════════════════ */
 
   /* ── Nav bottom: pill indicator bajo icono activo ── */
+  /* ── Bottom nav v3 — Pill flotante con animación ── */
+  #bottomNav .nav-row {
+    position:relative; display:flex; height:100%;
+    max-width:600px; margin:0 auto;
+    align-items:stretch; padding:6px 8px;
+  }
+  .nav-pill {
+    position:absolute; top:6px; bottom:6px;
+    width:0; left:0;
+    border-radius:18px;
+    background:linear-gradient(135deg, rgba(59,130,246,.18), rgba(124,58,237,.14));
+    border:1px solid rgba(59,130,246,.35);
+    box-shadow:0 4px 16px rgba(59,130,246,.18), inset 0 1px 0 rgba(255,255,255,.05);
+    transition:left .32s cubic-bezier(.4,1.4,.5,1), width .32s cubic-bezier(.4,1.4,.5,1), opacity .2s;
+    opacity:0; pointer-events:none; z-index:0;
+  }
+  .nav-pill.ready { opacity:1; }
+  .nav-btn-v3 {
+    position:relative; z-index:1; flex:1;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:3px; padding:6px 4px;
+    background:none; border:none; cursor:pointer;
+    font-size:10.5px; font-weight:700; letter-spacing:.04em;
+    color:#64748b;
+    transition:color .22s, transform .15s;
+    -webkit-tap-highlight-color:transparent;
+    border-radius:18px;
+  }
+  .nav-btn-v3:active { transform:scale(.93); }
+  .nav-btn-v3 .nav-ico {
+    display:inline-flex; align-items:center; justify-content:center;
+    transition:transform .22s cubic-bezier(.4,1.4,.5,1), filter .22s;
+  }
+  .nav-btn-v3 .nav-lbl { transition:color .22s, font-weight .22s; }
+  .nav-btn-v3.active {
+    color:#e2e8f0;
+  }
+  .nav-btn-v3.active .nav-ico {
+    transform:scale(1.12) translateY(-1px);
+    filter:drop-shadow(0 2px 6px rgba(96,165,250,.45));
+  }
+  .nav-btn-v3.active .nav-ico svg {
+    color:#60a5fa;
+  }
+  .nav-btn-v3.active .nav-lbl {
+    color:#dbeafe; font-weight:800;
+  }
+  /* Ripple tap effect */
+  .nav-ripple {
+    position:absolute; border-radius:50%;
+    background:radial-gradient(circle, rgba(96,165,250,.4) 0%, transparent 70%);
+    pointer-events:none;
+    transform:translate(-50%,-50%) scale(0);
+    animation:navRipple .55s ease-out forwards;
+  }
+  @keyframes navRipple {
+    0%   { transform:translate(-50%,-50%) scale(0);   opacity:1; }
+    100% { transform:translate(-50%,-50%) scale(3.5); opacity:0; }
+  }
+  /* Tablet: nav centrado tipo "isla" */
+  @media (min-width:768px) {
+    #bottomNav .nav-row { max-width:520px; padding:6px 12px; }
+  }
+  /* Legacy fallback (no usar el ::after underline en v3) */
   #bottomNav .nav-btn { position:relative; transition:color .15s; }
-  #bottomNav .nav-btn::after {
+  #bottomNav .nav-btn:not(.nav-btn-v3)::after {
     content:''; position:absolute; bottom:5px; left:50%; transform:translateX(-50%);
     width:0; height:3px; border-radius:2px; background:#3b82f6;
     transition:width .22s cubic-bezier(.34,1.56,.64,1);
   }
-  #bottomNav .nav-btn.active::after { width:22px; }
+  #bottomNav .nav-btn:not(.nav-btn-v3).active::after { width:22px; }
 
   /* ── Badges de conteo en nav (mobile) ── */
   .nav-badge {
@@ -3343,7 +3417,7 @@
   <!-- Izquierda: logo + modo badge + título -->
   <div class="flex items-center gap-2 min-w-0">
     <!-- Logo WareHouse — retráctil en portrait móvil → WH -->
-    <button id="whLogo" onclick="App.nav('dashboard')" title="WareHouse · Ir al Dashboard">
+    <button id="whLogo" onclick="App._whLogoEfecto && App._whLogoEfecto()" title="WareHouse">
       <span class="wh-w">W</span><span class="wh-mid">are</span><span class="wh-h">H</span><span class="wh-mid">ouse</span>
       <span class="wh-glare" aria-hidden="true"></span>
       <span id="logoAlertDot" class="hidden"></span>
@@ -4965,52 +5039,65 @@
      NAVBAR INFERIOR — 3 módulos uniformes
 ═══════════════════════════════════════════════════ -->
 <nav id="bottomNav"
-     style="position:fixed;bottom:0;left:0;right:0;z-index:30;height:62px;
-            background:#0f172a;border-top:1px solid #1e293b;">
-  <div style="display:flex;height:100%;">
+     style="position:fixed;bottom:0;left:0;right:0;z-index:30;height:70px;
+            background:linear-gradient(180deg,rgba(15,23,42,.95),rgba(2,6,23,.98));
+            border-top:1px solid #1e293b;backdrop-filter:blur(12px);">
+  <!-- Indicador pill que se desliza al tab activo -->
+  <div id="navPill" class="nav-pill"></div>
+  <div class="nav-row">
 
-    <!-- Guías -->
-    <button data-view="guias" onclick="App.nav('guias')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;position:relative;">
-      <span id="badgeGuias" class="nav-badge" data-hidden="true">0</span>
-      <svg width="26" height="26" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
-      </svg>
-      Guías
+    <!-- 📊 Dashboard -->
+    <button data-view="dashboard" data-nav="dashboard" onclick="App.nav('dashboard')"
+            class="nav-btn nav-btn-v3" data-lp="dashboard">
+      <span class="nav-ico">
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor" class="nav-svg-outline">
+          <path d="M0 0v3h3V0H0zm5 0v3h3V0H5zm5 0v3h3V0h-3zM0 5v3h3V5H0zm5 0v3h3V5H5zm5 0v3h3V5h-3zM0 10v3h3v-3H0zm5 0v3h3v-3H5z" opacity=".0"/>
+          <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm6 4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V6zM2 11a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-3zm11-7a1 1 0 0 1 1-1h0a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h0a1 1 0 0 1-1-1V4z"/>
+        </svg>
+      </span>
+      <span class="nav-lbl">Dashboard</span>
     </button>
 
-    <!-- Productos — módulo central, icono más grande -->
-    <button id="navBtnProductos" data-view="productos" onclick="App.nav('productos')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;position:relative;">
-      <!-- Punto naranja de auditoría pendiente -->
+    <!-- 📋 Guías (centro, lo más usado) -->
+    <button data-view="guias" data-nav="guias" onclick="App.nav('guias')"
+            class="nav-btn nav-btn-v3" data-lp="guias">
+      <span id="badgeGuias" class="nav-badge" data-hidden="true">0</span>
+      <span class="nav-ico">
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M4 0h5.293A1 1 0 0 1 10 .293L13.707 4a1 1 0 0 1 .293.707V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2zm5.5 1.5v2a1 1 0 0 0 1 1h2L9.5 1.5zM4.5 8a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7zm0 2.5a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4zM4.5 6a.5.5 0 0 0 0 1h7a.5.5 0 0 0 0-1h-7z"/>
+        </svg>
+      </span>
+      <span class="nav-lbl">Guías</span>
+    </button>
+
+    <!-- 📦 Productos -->
+    <button id="navBtnProductos" data-view="productos" data-nav="productos" onclick="App.nav('productos')"
+            class="nav-btn nav-btn-v3" data-lp="productos">
       <span style="position:relative;display:inline-block;">
         <span id="navDotAudit"
               style="display:none;position:absolute;top:-3px;right:-5px;
                      width:8px;height:8px;border-radius:50%;
                      background:#f97316;border:2px solid #0f172a;z-index:2;
                      box-shadow:0 0 5px rgba(249,115,22,.8)"></span>
-        <svg width="28" height="28" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M1 2a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V2zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2zM1 7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5 0a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V7z"/>
-        </svg>
+        <span class="nav-ico">
+          <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8.186 1.113a.5.5 0 0 0-.372 0L1.846 3.5l2.404.961L10.404 2 8.186 1.113zm3.564 1.426L5.596 5 8 5.961 14.154 3.5l-2.404-.961zm3.25 1.7-6.5 2.6v7.922l6.5-2.6V4.24zM7.5 14.762V6.838L1 4.239v7.923l6.5 2.6zM7.443.184a1.5 1.5 0 0 1 1.114 0l7.129 2.852A.5.5 0 0 1 16 3.5v8.662a1 1 0 0 1-.629.928l-7.185 2.874a.5.5 0 0 1-.372 0L.63 13.09a1 1 0 0 1-.63-.928V3.5a.5.5 0 0 1 .314-.464L7.443.184z"/>
+          </svg>
+        </span>
       </span>
-      <span id="navLblProductos">Productos</span>
+      <span class="nav-lbl">Productos</span>
     </button>
-
-    <!-- Tools -->
-    <button data-view="tools" onclick="App.nav('tools')"
-            class="nav-btn flex-1 flex flex-col items-center justify-center gap-1 text-slate-400"
-            style="font-size:10px;font-weight:600;letter-spacing:.04em;border:none;background:none;cursor:pointer;padding-bottom:4px;">
-      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M1 0 0 1l2.2 3.081a1 1 0 0 0 .815.419h.07a1 1 0 0 1 .708.293l2.675 2.675-2.617 2.654A3.003 3.003 0 0 0 0 13a3 3 0 1 0 5.878-.851l2.654-2.617.968.968-.305.914a1 1 0 0 0 .242 1.023l3.27 3.27a.997.997 0 0 0 1.414 0l1.586-1.586a.997.997 0 0 0 0-1.414l-3.27-3.27a1 1 0 0 0-1.023-.242L10.5 9.5l-.96-.96 2.68-2.643A3.005 3.005 0 0 0 16 3c0-.269-.035-.53-.102-.777l-2.14 2.141L12 4l-.364-1.757L13.777.102a3 3 0 0 0-3.675 3.68L7.462 6.46 4.793 3.793a1 1 0 0 1-.293-.707v-.071a1 1 0 0 0-.419-.814L1 0zm9.646 10.646a.5.5 0 0 1 .708 0l2.914 2.915a.5.5 0 0 1-.707.707l-2.915-2.914a.5.5 0 0 1 0-.708zM3 11l.471.242.529.026.287.445.445.287.026.529L5 13l-.242.471-.026.529-.445.287-.287.445-.529.026L3 15l-.471-.242L2 14.732l-.287-.445L1.268 14l-.026-.529L1 13l.242-.471.026-.529.445-.287.287-.445.529-.026L3 11z"/>
-      </svg>
-      Tools
-    </button>
-
 
   </div>
 </nav>
+
+<!-- Long-press sub-menu sheet ─────────────────────── -->
+<div class="sheet-overlay" id="overlayNavLp" onclick="App.cerrarLpMenu()" style="display:none"></div>
+<div class="bottom-sheet" id="sheetNavLp" style="padding-bottom:calc(env(safe-area-inset-bottom) + 16px)">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
+  <p id="navLpTitle" class="font-bold text-base mb-3"></p>
+  <div id="navLpList" class="act-sheet-list"></div>
+</div>
 
 
 <!-- ════════════════════════════════════════════════

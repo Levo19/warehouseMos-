@@ -1777,6 +1777,13 @@ const Session = (() => {
     document.getElementById('topBar').style.display = '';
     document.querySelector('main').style.display = '';
     document.querySelector('nav').style.display = '';
+    // Nav v3: bind interacciones + posicionar pill al activo
+    setTimeout(() => {
+      if (typeof App !== 'undefined') {
+        if (App._bindNavV3) App._bindNavV3();
+        if (App._moverNavPill) App._moverNavPill();
+      }
+    }, 150);
   }
 
   function _ocultarApp() {
@@ -2614,6 +2621,8 @@ const App = (() => {
     document.querySelectorAll('.nav-btn').forEach(b => {
       b.classList.toggle('active', b.dataset.view === viewName);
     });
+    // F-nav-v3: mover la píldora al botón activo
+    _moverNavPill();
 
     const titles = {
       dashboard:   'Dashboard',
@@ -2905,6 +2914,132 @@ const App = (() => {
 
   function abrirMas() { abrirSheet('sheetMas'); }
   function navMas(viewName) { cerrarSheet('sheetMas'); nav(viewName); }
+
+  // ════════════════════════════════════════════════
+  // Bottom nav v3 — Pill flotante + long-press menú + sonido
+  // ════════════════════════════════════════════════
+  function _moverNavPill() {
+    const pill = document.getElementById('navPill');
+    if (!pill) return;
+    const active = document.querySelector('#bottomNav .nav-btn-v3.active');
+    if (!active) { pill.classList.remove('ready'); return; }
+    const row = active.parentElement;
+    const rb = row.getBoundingClientRect();
+    const ab = active.getBoundingClientRect();
+    pill.style.left  = (ab.left - rb.left) + 'px';
+    pill.style.width = ab.width + 'px';
+    pill.classList.add('ready');
+  }
+  window.addEventListener('resize', () => _moverNavPill());
+  window.addEventListener('orientationchange', () => setTimeout(_moverNavPill, 250));
+
+  // Long-press menú con sub-acciones por tab
+  const _LP_ACCIONES = {
+    dashboard: {
+      titulo: '📊 Dashboard · acción rápida',
+      items: [
+        { ico:'⚠', tit:'Ver alertas',     sub:'Stock bajo + diferencias', act:() => { nav('dashboard'); if (typeof Dashboard !== 'undefined' && Dashboard.verTodasAlertas) Dashboard.verTodasAlertas(); } },
+        { ico:'🔄', tit:'Forzar sync',     sub:'Recargar datos del server', act:() => { OfflineManager.precargarOperacional?.(true); if (typeof toast === 'function') toast('Sincronizando…', 'info', 1500); } },
+        { ico:'🏠', tit:'Ir al inicio',    sub:'Cargar Dashboard',           act:() => nav('dashboard') }
+      ]
+    },
+    guias: {
+      titulo: '📋 Guías · acción rápida',
+      items: [
+        { ico:'📋', tit:'Nueva guía',         sub:'Ingreso o salida',          act:() => { nav('guias'); setTimeout(() => abrirTypePicker(), 180); } },
+        { ico:'📥', tit:'Nuevo preingreso',   sub:'Recepción de proveedor',    act:() => { nav('preingresos'); setTimeout(() => { if (window.PreingresosView && PreingresosView.nuevo) PreingresosView.nuevo(); }, 200); } },
+        { ico:'🛺', tit:'Cargadores del día', sub:'Sumar al resumen',          act:() => { if (window.Cargadores) Cargadores.abrir(); } },
+        { ico:'🗑', tit:'Cesta de mermas',    sub:'Pendientes + procesar',     act:() => { if (window.Mermas) Mermas.abrirCesta(); } }
+      ]
+    },
+    productos: {
+      titulo: '📦 Productos · acción rápida',
+      items: [
+        { ico:'⚠', tit:'Bajo mínimo',         sub:'Productos críticos',        act:() => { nav('productos'); if (window.ProductosView && ProductosView.toggleFiltro) setTimeout(() => ProductosView.toggleFiltro('bajo'), 250); } },
+        { ico:'📅', tit:'Por vencer',         sub:'Lotes próximos a expirar',  act:() => { nav('productos'); if (window.ProductosView && ProductosView.toggleFiltro) setTimeout(() => ProductosView.toggleFiltro('porVencer'), 250); } },
+        { ico:'🕵', tit:'Modo auditoría',     sub:'Verificar conteo físico',   act:() => { nav('productos'); if (window.ProductosView && ProductosView.toggleAuditoriaDia) setTimeout(() => ProductosView.toggleAuditoriaDia(), 250); } }
+      ]
+    }
+  };
+
+  function _abrirLpNavMenu(navKey) {
+    const cfg = _LP_ACCIONES[navKey];
+    if (!cfg) return;
+    document.getElementById('navLpTitle').textContent = cfg.titulo;
+    const list = document.getElementById('navLpList');
+    list.innerHTML = '';
+    cfg.items.forEach((it, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'act-sheet-item';
+      btn.innerHTML = `<span class="act-sheet-ico">${it.ico}</span>
+        <span><span class="act-sheet-tit">${it.tit}</span>
+          <span class="act-sheet-sub">${it.sub}</span></span>`;
+      btn.onclick = () => { cerrarLpMenu(); try { it.act(); } catch(e){ console.warn(e); } };
+      list.appendChild(btn);
+    });
+    document.getElementById('overlayNavLp').style.display = 'block';
+    document.getElementById('sheetNavLp').classList.add('open');
+    if (navigator.vibrate) navigator.vibrate(15);
+    if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click();
+  }
+  function cerrarLpMenu() {
+    document.getElementById('overlayNavLp').style.display = 'none';
+    document.getElementById('sheetNavLp').classList.remove('open');
+  }
+
+  // Bind long-press + tap-ripple + sound on todos los .nav-btn-v3
+  function _bindNavV3() {
+    document.querySelectorAll('.nav-btn-v3').forEach(btn => {
+      if (btn._v3Bound) return;
+      btn._v3Bound = true;
+      let lpTimer = null;
+      let lpFired = false;
+      const startLp = (x, y) => {
+        lpFired = false;
+        lpTimer = setTimeout(() => {
+          lpFired = true;
+          const key = btn.dataset.lp;
+          if (key) _abrirLpNavMenu(key);
+        }, 550);
+        // Ripple visual
+        const rip = document.createElement('span');
+        rip.className = 'nav-ripple';
+        const rect = btn.getBoundingClientRect();
+        rip.style.left = (x - rect.left) + 'px';
+        rip.style.top  = (y - rect.top) + 'px';
+        rip.style.width = rip.style.height = '40px';
+        btn.appendChild(rip);
+        setTimeout(() => rip.remove(), 600);
+      };
+      const cancelLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = null; } };
+      btn.addEventListener('touchstart', e => {
+        const t = e.touches[0];
+        startLp(t.clientX, t.clientY);
+      }, { passive: true });
+      btn.addEventListener('touchend',    cancelLp);
+      btn.addEventListener('touchcancel', cancelLp);
+      btn.addEventListener('touchmove',   cancelLp);
+      btn.addEventListener('mousedown',   e => startLp(e.clientX, e.clientY));
+      btn.addEventListener('mouseup',     cancelLp);
+      btn.addEventListener('mouseleave',  cancelLp);
+
+      // Bloquear el click si long-press disparó
+      btn.addEventListener('click', e => {
+        if (lpFired) { e.preventDefault(); e.stopImmediatePropagation(); lpFired = false; return; }
+        if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click();
+        if (navigator.vibrate) navigator.vibrate(8);
+      }, true);
+    });
+  }
+  // Logo WH: tap → animación expandir "WareHouse" temporalmente (decorativo)
+  function _whLogoEfecto() {
+    const logo = document.getElementById('whLogo');
+    if (!logo) return;
+    logo.classList.add('wh-expanded');
+    if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click();
+    if (navigator.vibrate) navigator.vibrate(8);
+    setTimeout(() => logo.classList.remove('wh-expanded'), 1600);
+  }
 
   // ════════════════════════════════════════════════
   // F2-F7 — Action sheet + Type picker + Subtype picker + Entidad picker
@@ -3387,6 +3522,8 @@ const App = (() => {
            actualizarChipDia, actualizarBadgeMermas,
            abrirHistorial, cerrarHistorial,
            copiarHistorialJSON, descargarHistorialJSON,
+           cerrarLpMenu,
+           _bindNavV3, _moverNavPill, _whLogoEfecto,
            getUsuario,
            _registrarCierre };
 })();
