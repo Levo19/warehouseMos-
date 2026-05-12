@@ -157,5 +157,33 @@ const SoundFX = (() => {
 
     // Tick urgente — countdown final
     tickUrgent: () => _tone(1500, 0.04, 'square', 0.6),
+
+    // ── F2-F7: 8 sonidos nuevos ──────────────────────────────────
+    // scanReady — cámara entra a estado LISTO (tick suave 800Hz)
+    scanReady:   () => _tone(800, 0.06, 'sine', 0.35),
+    // scanLocked — intento de escanear con modal abierto (buzz grave)
+    scanLocked:  () => _tone(200, 0.20, 'square', 0.45),
+    // savedTick — server confirmó guardado (clic cristalino agudo)
+    savedTick:   () => _tone(3000, 0.04, 'sine', 0.45),
+    // saveRetry — op pasó a estado retry (doble tic descendente)
+    saveRetry:   () => { _tone(1800, 0.05, 'sine', 0.5); setTimeout(() => _tone(1200, 0.05, 'sine', 0.5), 80); },
+    // saveLost — op falló N veces, requiere acción (alias semántico de warn)
+    saveLost:    function() { this.warn(); },
+    // scanIncompleto — código prefijo, 2 notas ascendentes (tono pregunta)
+    scanIncompleto: () => {
+      _tone(800,  0.10, 'square', 0.5);
+      setTimeout(() => _tone(1200, 0.12, 'square', 0.55), 110);
+    },
+    // scanNuevo — código no existe (chime curioso 3 notas ascendentes)
+    scanNuevo: () => {
+      _tone(600, 0.08, 'sine', 0.5);
+      setTimeout(() => _tone(900,  0.08, 'sine', 0.55), 90);
+      setTimeout(() => _tone(1200, 0.12, 'sine', 0.6),  180);
+    },
+    // productoVerificado — MOS aprobó producto nuevo (chime cristalino 2 notas)
+    productoVerificado: () => {
+      _tone(2000, 0.08, 'sine', 0.5);
+      setTimeout(() => _tone(2800, 0.14, 'sine', 0.6), 90);
+    }
   };
 })();

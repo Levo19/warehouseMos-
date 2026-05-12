@@ -24,7 +24,9 @@ var SHEET_NAMES = {
   SESIONES:          'SESIONES',
   DESEMPENO:         'DESEMPENO',
   SYNC_LOG:          'SYNC_LOG',
-  PICKUPS:           'PICKUPS'
+  PICKUPS:           'PICKUPS',
+  OPS_LOG:           'OPS_LOG',
+  CARGADORES_LOG:    'CARGADORES_LOG'
 };
 
 var HEADERS = {
@@ -77,7 +79,10 @@ var HEADERS = {
                       'puntuacion','calificacion',
                       'montoBase','montoBonus','montoTotal','estado'],
   PICKUPS:           ['idPickup','fuente','estado','items','idZona',
-                      'notas','creadoPor','fechaCreado','fechaAtendido']
+                      'notas','creadoPor','fechaCreado','fechaAtendido'],
+  OPS_LOG:           ['idOp','idGuia','tipo','payload','estado','deviceId','usuario',
+                      'fechaCreado','fechaAplicado','error','resultado'],
+  CARGADORES_LOG:    ['idLog','fecha','idCargador','nombre','addedBy','deviceId','ts','estado']
 };
 
 // ============================================================
@@ -474,6 +479,33 @@ function _seedEnvasados(ss) {
     ['ENV003','P002',3,'KG','P202',5.82,6,0,103.0,hoy,'envasador1','COMPLETADO','G007','','Sobraron 30g de otro lote']
   ];
   sheet.getRange(2, 1, rows.length, HEADERS.ENVASADOS.length).setValues(rows);
+}
+
+// ============================================================
+// F0 — Agregar tablas OPS_LOG y CARGADORES_LOG al SS existente
+// Ejecutar UNA vez tras desplegar F0
+// ============================================================
+function setupExtenderF0() {
+  var ss = SpreadsheetApp.openById(
+    PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID')
+  );
+  var tablas = ['OPS_LOG','CARGADORES_LOG'];
+  var existentes = ss.getSheets().map(function(s){ return s.getName(); });
+  tablas.forEach(function(nombre) {
+    if (existentes.indexOf(nombre) >= 0) {
+      Logger.log('⏭ Ya existe: ' + nombre);
+      return;
+    }
+    var sheet = ss.insertSheet(nombre);
+    var hdrs  = HEADERS[nombre];
+    if (hdrs) sheet.getRange(1, 1, 1, hdrs.length).setValues([hdrs]);
+    sheet.getRange(1, 1, 1, hdrs.length)
+         .setBackground('#1e3a5f').setFontColor('#ffffff')
+         .setFontWeight('bold').setFontSize(10);
+    sheet.setFrozenRows(1);
+    Logger.log('✅ Creada: ' + nombre);
+  });
+  Logger.log('✅ F0 tablas listas');
 }
 
 // ============================================================

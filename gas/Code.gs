@@ -219,6 +219,37 @@ function _route(method, e) {
       case 'getSesionActiva':    return getSesionActiva(params);
       case 'getDesempenoDia':    return getDesempenoDia(params);
       case 'getResumenPersonal': return getResumenPersonal(params);
+      case 'getRolUsuario':      return getRolUsuario(params);
+
+      // ── F0: Auth (clave admin para reabrir guía / procesar mermas) ──
+      case 'verificarClaveAdmin': return verificarClaveAdmin(params);
+
+      // ── F0: Cargadores (independientes de preingreso) ──────
+      case 'listarCargadoresMaster':  return listarCargadoresMaster(params);
+      case 'addCargadorDia':          return addCargadorDia(params);
+      case 'removeCargadorDia':       return removeCargadorDia(params);
+      case 'getResumenCargadoresDia': return getResumenCargadoresDia(params);
+
+      // ── F0: Mermas V2 (cesta moderna) ──────────────────────
+      case 'getMermasCesta':           return getMermasCesta(params);
+      case 'agregarAMermas':           return agregarAMermas(params);
+      case 'solucionarMerma':          return solucionarMerma(params);
+      case 'procesarEliminacionMermas':return procesarEliminacionMermas(params);
+      case 'contadorMermasPendientes': return contadorMermasPendientes(params);
+
+      // ── F0: Fotos (Drive genérico) ─────────────────────────
+      case 'subirFotoEntidad':    return subirFotoEntidad(params);
+      case 'eliminarFotoEntidad': return eliminarFotoEntidad(params);
+
+      // ── F0: Op-log ─────────────────────────────────────────
+      case 'aplicarOp':           return aplicarOp(params);
+      case 'listarOpsPendientes': return listarOpsPendientes(params);
+
+      // ── F0: Productos extra (reconciliación inversa caso 4) ──
+      case 'getProductosCambiadosDesde': return getProductosCambiadosDesde(params);
+
+      // ── Historial completo de guía (admin/master only) ──
+      case 'getHistorialGuia':    return getHistorialGuia(params);
 
       default:
         return { ok: false, error: 'Acción no reconocida: ' + action };

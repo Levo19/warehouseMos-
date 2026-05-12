@@ -263,6 +263,32 @@ function getProductosNuevosRecientes(params) {
   return { ok: true, data: resultado };
 }
 
+// ── F0: productos cambiados desde un timestamp (para reconciliación caso 4) ──
+// Retorna PRODUCTO_NUEVO con estado APROBADO cuya fechaAprobacion >= since.
+// Frontend usa esto para detectar cambios desde el último polling y actualizar
+// los items con badge "🆕 PENDIENTE" → nombre canónico/equivalente real.
+function getProductosCambiadosDesde(params) {
+  var sinceTs = String(params.since || '').trim();
+  var sinceMs = 0;
+  if (sinceTs) {
+    var d = new Date(sinceTs);
+    if (!isNaN(d.getTime())) sinceMs = d.getTime();
+  }
+  try {
+    var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
+    var cambios = rows.filter(function(r) {
+      var est = String(r.estado || '').toUpperCase();
+      if (est !== 'APROBADO' && est !== 'RECHAZADO') return false;
+      if (!sinceMs) return true;
+      var f = r.fechaAprobacion ? new Date(r.fechaAprobacion).getTime() : 0;
+      return f >= sinceMs;
+    });
+    return { ok: true, data: cambios, generadoEn: new Date().toISOString() };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 function registrarProductoNuevo(params) {
   var sheet = getSheet('PRODUCTO_NUEVO');
   var id    = _generateId('PN');

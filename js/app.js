@@ -992,6 +992,8 @@ const Session = (() => {
   function _aplicarSesion() {
     window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
     window.WH_CONFIG.idSesion  = sesionActual.idSesion;
+    window.WH_CONFIG.idPersonal= sesionActual.idPersonal;
+    window.WH_CONFIG.rol       = String(sesionActual.rol || '').toUpperCase();
 
     // Activar wake lock — pantalla activa mientras hay sesión
     _activarWakeLock();
@@ -2557,14 +2559,23 @@ const App = (() => {
       if (currentView === 'envasador'   && stockChanged)       EnvasadorView.silentRefresh();
     });
 
-    // Pull-to-refresh en la vista principal
+    // Pull-to-refresh en la vista principal — también dispara OpLog.flush()
+    // para que el operador pueda forzar reconciliación de ops pendientes.
     const mainContent = document.getElementById('mainContent');
     PullToRefresh.init(mainContent, () => {
+      if (window.OpLog && typeof OpLog.flush === 'function') OpLog.flush();
+      if (window.Mermas && typeof Mermas.refreshBadge === 'function') Mermas.refreshBadge();
       if (currentView === 'guias')        GuiasView.cargar();
       else if (currentView === 'productos')    ProductosView.cargar();
       else if (currentView === 'dashboard')    cargarDashboard();
       else if (currentView === 'preingresos')  PreingresosView.cargar?.();
     });
+
+    // F10: modo nocturno auto vía prefers-color-scheme (default ya dark)
+    // y bonus: refrescar badge mermas al cargar la app
+    setTimeout(() => {
+      if (window.Mermas && typeof Mermas.refreshBadge === 'function') Mermas.refreshBadge();
+    }, 1500);
 
     // Vibración en navegación entre módulos
     document.querySelectorAll('.nav-btn').forEach(btn => {
@@ -2891,6 +2902,465 @@ const App = (() => {
   function abrirMas() { abrirSheet('sheetMas'); }
   function navMas(viewName) { cerrarSheet('sheetMas'); nav(viewName); }
 
+  // ════════════════════════════════════════════════
+  // F2-F7 — Action sheet + Type picker + Subtype picker + Entidad picker
+  // ════════════════════════════════════════════════
+  let _tpState = { direccion: '', subtipo: '', entidad: null };
+  let _entidadPickerState = { tipo: '', lista: [], onPick: null };
+  let _reabrirCtx = null;          // {idGuia} pendiente de clave admin
+  const ADMIN_REMEMBER_KEY = 'wh_admin_remember_until';
+
+  function abrirActionDia() {
+    document.getElementById('overlayActionDia').style.display = 'block';
+    document.getElementById('sheetActionDia').classList.add('open');
+  }
+  function cerrarActionDia() {
+    document.getElementById('overlayActionDia').style.display = 'none';
+    document.getElementById('sheetActionDia').classList.remove('open');
+  }
+
+  function abrirTypePicker() {
+    _tpState = { direccion: '', subtipo: '', entidad: null };
+    document.getElementById('overlayTypePicker').style.display = 'block';
+    document.getElementById('sheetTypePicker').classList.add('open');
+  }
+  function cerrarTypePicker() {
+    document.getElementById('overlayTypePicker').style.display = 'none';
+    document.getElementById('sheetTypePicker').classList.remove('open');
+  }
+  function volverTypePicker() {
+    cerrarSubtypePicker();
+    abrirTypePicker();
+  }
+
+  function elegirDireccion(dir) {
+    _tpState.direccion = dir;
+    cerrarTypePicker();
+    abrirSubtypePicker(dir);
+  }
+
+  function abrirSubtypePicker(dir) {
+    const title = dir === 'INGRESO' ? '↓ INGRESO · ¿de dónde viene?' : '↑ SALIDA · ¿a dónde va?';
+    const opts = dir === 'INGRESO'
+      ? [
+          { tipo: 'INGRESO_PROVEEDOR',  ico: '🛺', titulo: 'De PROVEEDOR',         desc: 'Compra normal · catálogo proveedores' },
+          { tipo: 'INGRESO_JEFATURA',   ico: '👤', titulo: 'De JEFATURA',          desc: 'Devolución admin · admin+master MOS' },
+          { tipo: 'INGRESO_DEVOLUCION', ico: '📍', titulo: 'De ZONA (devolución)', desc: 'Material que regresa de una zona' }
+        ]
+      : [
+          { tipo: 'SALIDA_ZONA',        ico: '📍', titulo: 'A ZONA (despacho)', desc: 'Lo más frecuente · catálogo de zonas' },
+          { tipo: 'SALIDA_JEFATURA',    ico: '👤', titulo: 'A JEFATURA',        desc: 'Entrega a admin · admin+master MOS' },
+          { tipo: 'SALIDA_DEVOLUCION',  ico: '🛺', titulo: 'Devol. a PROVEEDOR', desc: 'Casos especiales · catálogo proveedores' }
+        ];
+    document.getElementById('subtypeTitle').textContent = title;
+    const html = opts.map(o => `
+      <button class="act-sheet-item" onclick="App.elegirSubtipo('${o.tipo}')">
+        <span class="act-sheet-ico">${o.ico}</span>
+        <span><span class="act-sheet-tit">${o.titulo}</span>
+          <span class="act-sheet-sub">${o.desc}</span></span>
+      </button>`).join('');
+    document.getElementById('subtypeOptions').innerHTML = html;
+    document.getElementById('overlaySubtypePicker').style.display = 'block';
+    document.getElementById('sheetSubtypePicker').classList.add('open');
+  }
+  function cerrarSubtypePicker() {
+    document.getElementById('overlaySubtypePicker').style.display = 'none';
+    document.getElementById('sheetSubtypePicker').classList.remove('open');
+  }
+
+  function elegirSubtipo(subtipo) {
+    _tpState.subtipo = subtipo;
+    cerrarSubtypePicker();
+
+    // Tipos que requieren entidad
+    if (/PROVEEDOR/.test(subtipo)) {
+      abrirEntidadPicker('proveedor', (ent) => _completarNuevaGuia(subtipo, ent));
+    } else if (/JEFATURA/.test(subtipo)) {
+      abrirEntidadPicker('jefatura', (ent) => _completarNuevaGuia(subtipo, ent));
+    } else if (/ZONA|DEVOLUCION/.test(subtipo)) {
+      abrirEntidadPicker('zona', (ent) => _completarNuevaGuia(subtipo, ent));
+    } else {
+      _completarNuevaGuia(subtipo, null);
+    }
+  }
+
+  function _completarNuevaGuia(subtipo, entidad) {
+    if (window.GuiasView && GuiasView.crearConTipo) {
+      GuiasView.crearConTipo(subtipo, entidad);
+    } else {
+      // Fallback: abrir el sheetGuia legacy con tipo pre-seleccionado
+      const sel = document.getElementById('guiaTipo');
+      if (sel) sel.value = subtipo;
+      abrirSheet('sheetGuia');
+    }
+  }
+
+  function abrirEntidadPicker(tipo, onPick) {
+    _entidadPickerState = { tipo, lista: [], onPick };
+    const titles = { proveedor: 'Elegir proveedor', jefatura: 'Elegir jefatura', zona: 'Elegir zona' };
+    document.getElementById('entidadPickerTitle').textContent = titles[tipo] || 'Elegir';
+    document.getElementById('entidadPickerSearch').value = '';
+
+    let lista = [];
+    if (tipo === 'proveedor') {
+      lista = (OfflineManager.getProveedoresCache() || []).filter(p => {
+        const n = String(p.nombre || '').trim().toUpperCase();
+        const activo = String(p.estado || '') === '1';
+        return activo && n.indexOf('CARGADOR') !== 0;
+      });
+    } else if (tipo === 'jefatura') {
+      lista = (OfflineManager.getPersonalCache() || []).filter(p => {
+        const rol = String(p.rol || '').toUpperCase();
+        return rol === 'ADMIN' || rol === 'MASTER';
+      });
+    } else if (tipo === 'zona') {
+      lista = OfflineManager.getZonasCache?.() || [];
+    }
+    _entidadPickerState.lista = lista;
+    _renderEntidadPicker(lista);
+    document.getElementById('overlayEntidadPicker').style.display = 'block';
+    document.getElementById('sheetEntidadPicker').classList.add('open');
+  }
+  function cerrarEntidadPicker() {
+    document.getElementById('overlayEntidadPicker').style.display = 'none';
+    document.getElementById('sheetEntidadPicker').classList.remove('open');
+  }
+  function _renderEntidadPicker(list) {
+    const cont = document.getElementById('entidadPickerList');
+    if (!list.length) { cont.innerHTML = '<p style="color:#64748b;font-size:13px;text-align:center;padding:18px 0">Sin coincidencias</p>'; return; }
+    const tipo = _entidadPickerState.tipo;
+    const nameOf = e => tipo === 'jefatura'
+      ? `${e.nombre || ''} ${e.apellido || ''}`.trim()
+      : (e.nombre || e.descripcion || e.idZona || e.idProveedor || '');
+    const idOf = e => e.idProveedor || e.idPersonal || e.idZona || '';
+    cont.innerHTML = list.slice(0, 50).map(e => `
+      <div class="ep-item" onclick="App._pickEntidad('${(idOf(e)||'').replace(/'/g,'&#39;')}')">
+        <div style="flex:1">
+          <div class="ep-item-name">${nameOf(e)}</div>
+        </div>
+      </div>`).join('');
+  }
+  function filtrarEntidad(q) {
+    q = String(q || '').toLowerCase().trim();
+    const all = _entidadPickerState.lista;
+    if (!q) return _renderEntidadPicker(all);
+    const out = all.filter(e => {
+      const txt = (e.nombre || e.descripcion || e.apellido || '').toLowerCase();
+      return txt.includes(q);
+    });
+    _renderEntidadPicker(out);
+  }
+  function _pickEntidad(id) {
+    const list = _entidadPickerState.lista;
+    const ent = list.find(e => (e.idProveedor || e.idPersonal || e.idZona) === id);
+    cerrarEntidadPicker();
+    if (typeof _entidadPickerState.onPick === 'function') {
+      _entidadPickerState.onPick(ent);
+    }
+  }
+  function dictarEntidad() {
+    if (!window.Voice || !Voice.supported().stt) {
+      if (typeof toast === 'function') toast('Dictado por voz no disponible', 'warn');
+      return;
+    }
+    const inp = document.getElementById('entidadPickerSearch');
+    const mic = document.getElementById('entidadPickerMic');
+    if (mic) mic.classList.add('listening');
+    Voice.listen({
+      onResult: (txt, final) => { if (inp) { inp.value = txt; filtrarEntidad(txt); } },
+      onEnd:    () => { if (mic) mic.classList.remove('listening'); }
+    });
+  }
+
+  function dictarCargador() {
+    if (!window.Voice || !Voice.supported().stt) return;
+    const inp = document.getElementById('cargBuscarInput');
+    const mic = document.getElementById('cargMic');
+    if (mic) mic.classList.add('listening');
+    Voice.listen({
+      onResult: (txt) => { if (inp) { inp.value = txt; if (window.Cargadores) Cargadores._filtrar(txt); } },
+      onEnd:    () => { if (mic) mic.classList.remove('listening'); }
+    });
+  }
+
+  function dictarBuscarGuia() {
+    if (!window.Voice || !Voice.supported().stt) {
+      if (typeof toast === 'function') toast('Dictado por voz no disponible', 'warn');
+      return;
+    }
+    const inp = document.getElementById('inputBuscarGuia');
+    const mic = document.getElementById('micBuscarGuia');
+    if (mic) mic.classList.add('listening');
+    Voice.listen({
+      onResult: (txt) => {
+        if (inp) {
+          inp.value = txt;
+          if (window.GuiasView) GuiasView.buscar(txt);
+        }
+      },
+      onEnd:    () => { if (mic) mic.classList.remove('listening'); },
+      onError:  () => { if (mic) mic.classList.remove('listening'); }
+    });
+  }
+
+  function dictarBuscarPre() {
+    if (!window.Voice || !Voice.supported().stt) {
+      if (typeof toast === 'function') toast('Dictado por voz no disponible', 'warn');
+      return;
+    }
+    const inp = document.getElementById('inputBuscarPre');
+    const mic = document.getElementById('micBuscarPre');
+    if (mic) mic.classList.add('listening');
+    Voice.listen({
+      onResult: (txt) => {
+        if (inp) {
+          inp.value = txt;
+          if (window.PreingresosView) PreingresosView.buscar(txt);
+        }
+      },
+      onEnd:    () => { if (mic) mic.classList.remove('listening'); },
+      onError:  () => { if (mic) mic.classList.remove('listening'); }
+    });
+  }
+
+  // ── Reabrir guía con clave admin ──
+  function abrirReabrirAdmin(idGuia) {
+    _reabrirCtx = { idGuia };
+    // Ventana de gracia 5 min: si la guía se cerró hace < 5 min, no pedir clave
+    if (_dentroGraciaCierre(idGuia)) {
+      if (typeof toast === 'function') toast('🕒 Reabriendo en gracia (sin clave)', 'info');
+      return _ejecutarReabrir(idGuia);
+    }
+    // Recordar 30 min
+    const remUntil = parseInt(localStorage.getItem(ADMIN_REMEMBER_KEY) || '0', 10);
+    if (remUntil && Date.now() < remUntil) {
+      return _ejecutarReabrir(idGuia);
+    }
+    document.getElementById('reabrirAdminInput').value = '';
+    document.getElementById('reabrirAdminRemember').checked = false;
+    document.getElementById('overlayReabrirAdmin').style.display = 'block';
+    document.getElementById('sheetReabrirAdmin').classList.add('open');
+    setTimeout(() => document.getElementById('reabrirAdminInput').focus(), 200);
+  }
+  function cerrarReabrirAdmin() {
+    document.getElementById('overlayReabrirAdmin').style.display = 'none';
+    document.getElementById('sheetReabrirAdmin').classList.remove('open');
+    _reabrirCtx = null;
+  }
+  async function confirmarReabrirAdmin() {
+    if (!_reabrirCtx) return;
+    const clave = document.getElementById('reabrirAdminInput').value.trim();
+    if (clave.length !== 8) return (typeof toast === 'function' && toast('Clave debe ser de 8 dígitos', 'warn'));
+    try {
+      const res = await API.verificarClaveAdmin({ clave });
+      if (!res || !res.ok) return (typeof toast === 'function' && toast('Clave incorrecta', 'warn'));
+      if (document.getElementById('reabrirAdminRemember').checked) {
+        localStorage.setItem(ADMIN_REMEMBER_KEY, String(Date.now() + 30 * 60 * 1000));
+      }
+      const idGuia = _reabrirCtx.idGuia;
+      cerrarReabrirAdmin();
+      await _ejecutarReabrir(idGuia);
+    } catch(e) {
+      if (typeof toast === 'function') toast('Error de conexión', 'warn');
+    }
+  }
+  async function _ejecutarReabrir(idGuia) {
+    try {
+      const usuario = getUsuario();
+      const res = await API.reabrirGuia({ idGuia, usuario });
+      if (res && res.ok) {
+        if (typeof toast === 'function') toast('✓ Guía reabierta', 'ok');
+        if (typeof SoundFX !== 'undefined' && SoundFX.done) SoundFX.done();
+        OfflineManager.precargarOperacional?.(true);
+        if (window.GuiasView && GuiasView.silentRefresh) GuiasView.silentRefresh();
+      } else if (typeof toast === 'function') {
+        toast('No se pudo reabrir: ' + ((res && res.error) || '?'), 'warn');
+      }
+    } catch(e) {
+      if (typeof toast === 'function') toast('Sin conexión', 'warn');
+    }
+  }
+  function _dentroGraciaCierre(idGuia) {
+    try {
+      const map = JSON.parse(localStorage.getItem('wh_gracia_cierre') || '{}');
+      const ts = map[idGuia];
+      if (!ts) return false;
+      return (Date.now() - ts) < 5 * 60 * 1000;
+    } catch(_) { return false; }
+  }
+  function _registrarCierre(idGuia) {
+    try {
+      const map = JSON.parse(localStorage.getItem('wh_gracia_cierre') || '{}');
+      map[idGuia] = Date.now();
+      localStorage.setItem('wh_gracia_cierre', JSON.stringify(map));
+    } catch(_){}
+  }
+
+  // ── Procesar mermas (clave admin) ──
+  function abrirProcesarMermas() {
+    document.getElementById('procesarMermasInput').value = '';
+    document.getElementById('overlayProcesarMermas').style.display = 'block';
+    document.getElementById('sheetProcesarMermas').classList.add('open');
+    setTimeout(() => document.getElementById('procesarMermasInput').focus(), 200);
+  }
+  function cerrarProcesarMermas() {
+    document.getElementById('overlayProcesarMermas').style.display = 'none';
+    document.getElementById('sheetProcesarMermas').classList.remove('open');
+  }
+  async function confirmarProcesarMermas() {
+    const clave = document.getElementById('procesarMermasInput').value.trim();
+    if (clave.length !== 8) return (typeof toast === 'function' && toast('Clave de 8 dígitos', 'warn'));
+    if (window.Mermas) {
+      const res = await Mermas.procesarEliminacion(clave);
+      if (res) cerrarProcesarMermas();
+    }
+  }
+
+  // ── Helpers públicos ──
+  function getUsuario() {
+    try { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; } catch(_) { return ''; }
+  }
+
+  async function actualizarChipDia() {
+    if (typeof Cargadores !== 'undefined') {
+      const n = await Cargadores.refreshCountDia();
+      const el = document.getElementById('chipCargadoresDia');
+      if (el) el.textContent = '🛺 ' + n;
+    }
+  }
+  async function actualizarBadgeMermas() {
+    if (typeof Mermas !== 'undefined') {
+      const n = await Mermas.refreshBadge();
+      const btn = document.getElementById('topCestaBtn');
+      if (btn) btn.classList.toggle('has-pending', n > 0);
+    }
+  }
+
+  // ════════════════════════════════════════════════
+  // 📜 Historial completo de guía (admin/master)
+  // ════════════════════════════════════════════════
+  let _historialActual = null;
+
+  async function abrirHistorial(idGuia, titulo) {
+    document.getElementById('histGuiaTitle').textContent = `${idGuia} · ${titulo || ''}`;
+    document.getElementById('histLoading').style.display  = 'block';
+    document.getElementById('histTimeline').style.display = 'none';
+    document.getElementById('histError').style.display    = 'none';
+    document.getElementById('overlayHistorialGuia').style.display = 'block';
+    document.getElementById('sheetHistorialGuia').classList.add('open');
+    try {
+      const rol = String(window.WH_CONFIG?.rol || '').toUpperCase();
+      const res = await API.getHistorialGuia({
+        idGuia,
+        idPersonal: window.WH_CONFIG?.idPersonal || '',
+        usuario:    window.WH_CONFIG?.usuario   || '',
+        rol
+      });
+      if (!res || !res.ok) {
+        document.getElementById('histLoading').style.display = 'none';
+        const err = document.getElementById('histError');
+        err.textContent = (res && res.error) || 'Error al obtener historial';
+        err.style.display = 'block';
+        return;
+      }
+      _historialActual = res.data;
+      _renderHistorial(res.data);
+    } catch(e) {
+      document.getElementById('histLoading').style.display = 'none';
+      const err = document.getElementById('histError');
+      err.textContent = 'Sin conexión: ' + e.message;
+      err.style.display = 'block';
+    }
+  }
+
+  function cerrarHistorial() {
+    document.getElementById('overlayHistorialGuia').style.display = 'none';
+    document.getElementById('sheetHistorialGuia').classList.remove('open');
+    _historialActual = null;
+  }
+
+  function _evtCssClass(tipo) {
+    const t = String(tipo || '').toUpperCase();
+    if (t === 'CREACION')           return 'evt-creacion';
+    if (t.indexOf('CIERRE') >= 0 || t.indexOf('CERRAR') >= 0) return 'evt-cierre';
+    if (t.indexOf('STOCK') >= 0)    return 'evt-stock';
+    if (t.indexOf('PN_') >= 0)      return 'evt-pn';
+    if (t.indexOf('MERMA') >= 0)    return 'evt-merma';
+    if (t.indexOf('OP_') === 0)     return 'evt-op';
+    if (t.indexOf('LEGACY') >= 0)   return 'evt-legacy';
+    return '';
+  }
+
+  function _renderHistorial(data) {
+    document.getElementById('histLoading').style.display = 'none';
+    const cont = document.getElementById('histTimeline');
+    cont.style.display = 'block';
+    const eventos = data.eventos || [];
+    if (!eventos.length) {
+      cont.innerHTML = '<p style="text-align:center;color:#64748b;padding:30px">Sin eventos registrados.</p>';
+      return;
+    }
+
+    let html = '';
+    let lastDay = '';
+    eventos.forEach((e, i) => {
+      const ts = e.ts ? new Date(e.ts) : null;
+      const dayKey = ts ? ts.toISOString().substring(0, 10) : 'sin fecha';
+      if (dayKey !== lastDay) {
+        const label = ts
+          ? ts.toLocaleDateString('es-PE', { weekday: 'long', day: 'numeric', month: 'long' })
+          : 'Sin fecha';
+        html += `<div class="hist-day-sep">${label}</div>`;
+        lastDay = dayKey;
+      }
+      const horaStr = ts ? ts.toTimeString().substring(0, 5) : '--:--';
+      const detStr = JSON.stringify(e.detalle || {}, null, 2);
+      html += `
+        <div class="hist-event ${_evtCssClass(e.tipo)}">
+          <span class="hist-icon">${e.icono || '•'}</span>
+          <div class="hist-body">
+            <div class="hist-titulo">${_escHtml(e.titulo || e.tipo || '')}</div>
+            <div class="hist-meta">
+              <span class="hist-meta-ts">${horaStr}</span>
+              ${e.usuario  ? '<span>· ' + _escHtml(e.usuario)  + '</span>' : ''}
+              ${e.deviceId ? '<span>· 📱 ' + _escHtml(e.deviceId.substring(0,10)) + '</span>' : ''}
+              ${e.estado   ? '<span>· ' + _escHtml(e.estado)   + '</span>' : ''}
+              ${e.error    ? '<span style="color:#f87171">· ' + _escHtml(e.error) + '</span>' : ''}
+            </div>
+            <div class="hist-detalle" onclick="this.classList.toggle('expanded')">${_escHtml(detStr)}</div>
+          </div>
+        </div>`;
+    });
+    cont.innerHTML = html;
+  }
+
+  function _escHtml(s) {
+    return String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+  }
+
+  async function copiarHistorialJSON() {
+    if (!_historialActual) return;
+    const text = JSON.stringify(_historialActual, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      if (typeof toast === 'function') toast('JSON copiado al portapapeles', 'ok');
+    } catch(e) {
+      if (typeof toast === 'function') toast('No se pudo copiar', 'warn');
+    }
+  }
+
+  function descargarHistorialJSON() {
+    if (!_historialActual) return;
+    const text = JSON.stringify(_historialActual, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `historial_${_historialActual.idGuia}_${Date.now()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return { init, nav, abrirMas, navMas,
            toggleModoEnvasador,
            toggleUserMenu, closeUserMenu,
@@ -2900,7 +3370,21 @@ const App = (() => {
            cargarDashboard, showUsuarioDialog,
            cargarProductosMaestro, cargarProveedoresMaestro,
            getProductosMaestro, getProveedoresMaestro,
-           getView: () => currentView };
+           getView: () => currentView,
+           // F2-F7 ───
+           abrirActionDia, cerrarActionDia,
+           abrirTypePicker, cerrarTypePicker, volverTypePicker,
+           elegirDireccion, elegirSubtipo,
+           abrirSubtypePicker, cerrarSubtypePicker,
+           abrirEntidadPicker, cerrarEntidadPicker, filtrarEntidad, _pickEntidad,
+           dictarEntidad, dictarCargador, dictarBuscarGuia, dictarBuscarPre,
+           abrirReabrirAdmin, cerrarReabrirAdmin, confirmarReabrirAdmin,
+           abrirProcesarMermas, cerrarProcesarMermas, confirmarProcesarMermas,
+           actualizarChipDia, actualizarBadgeMermas,
+           abrirHistorial, cerrarHistorial,
+           copiarHistorialJSON, descargarHistorialJSON,
+           getUsuario,
+           _registrarCierre };
 })();
 
 // ════════════════════════════════════════════════
@@ -3239,7 +3723,9 @@ const GuiasView = (() => {
                 <span>🛺</span><span>${r.carretas} cart</span><span>·</span><span>S/ ${r.monto.toFixed(2)}</span>
               </button>`
           : '';
-        return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${pill}</div>
+        const addBtn = `<button class="day-header-add" onclick="App.abrirActionDia()" title="Crear (guía/preingreso/cargador)">+</button>`;
+        const countChip = `<span class="day-chip" title="${items.length} guías del día">📋 ${items.length}</span>`;
+        return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${countChip}${pill}${addBtn}</div>
                 <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`;
       }).join('');
 
@@ -3474,11 +3960,17 @@ const GuiasView = (() => {
           Notas${g.comentario ? ' ✓' : ''}
         </button>
         ${abierta ? `
-        <button onclick="GuiasView.editarGuia()" class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs bg-slate-800 text-slate-400 transition-colors ml-auto">
+        <button onclick="GuiasView.editarGuia()" class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs bg-slate-800 text-slate-400 transition-colors">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/>
           </svg>
           Editar
+        </button>` : ''}
+        ${(['ADMIN','MASTER'].includes(String(window.WH_CONFIG?.rol || '').toUpperCase())) ? `
+        <button onclick="App.abrirHistorial('${escAttr(g.idGuia)}','${escAttr(_getProvNombre(g.idProveedor) || g.usuario || '')}')"
+                class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs bg-slate-800 text-slate-400 transition-colors ml-auto"
+                title="Historial completo (admin/master)">
+          📜 Historial
         </button>` : ''}
       </div>`;
 
@@ -4387,6 +4879,18 @@ const GuiasView = (() => {
     if (!bar) return;
     clearTimeout(_statusResetTimer);
 
+    // F6: aplicar clase de estado de cámara al bar (border colorido por estado)
+    bar.classList.remove('cam-state-listo','cam-state-procesando','cam-state-preguntando','cam-state-descubrir','cam-state-bloqueado');
+    const stateClass = {
+      ready: 'cam-state-listo',
+      ok: 'cam-state-listo',
+      prefijo: 'cam-state-preguntando',
+      no_existe: 'cam-state-descubrir',
+      blocked: 'cam-state-bloqueado',
+      procesando: 'cam-state-procesando'
+    }[type];
+    if (stateClass) bar.classList.add(stateClass);
+
     if (type === 'ready') {
       bar.innerHTML = '<span style="color:#334155;font-size:.75em">— listo para escanear —</span>';
       bar.style.background = '#0f172a';
@@ -4426,6 +4930,7 @@ const GuiasView = (() => {
     if (picker?.style.display === 'flex') return;
 
     const candidatos = _buscarCandidatos(codStr);
+    const esIngreso = String(_guiaActual?.tipo || '').toUpperCase().startsWith('INGRESO');
 
     if (!candidatos.length) {
       // Acumular en lista persistente (deduplicar por código)
@@ -4434,24 +4939,47 @@ const GuiasView = (() => {
         _renderCamList();
       }
       _setScanStatus('no_existe', codStr + ' · no registrado');
-      SoundFX.warn();
-      vibrate([60, 30, 60]);
+      // Caso 3: en INGRESO, código nuevo → sonido scanNuevo + vibración curiosa
+      if (esIngreso && SoundFX.scanNuevo) {
+        SoundFX.scanNuevo();
+        vibrate([40, 30, 40]);
+      } else {
+        SoundFX.warn();
+        vibrate([60, 30, 60]);
+      }
       return;
     }
     if (candidatos[0]._exacto) {
       const autoSum = _agregarProductoDirecto(candidatos[0], false);
       _addToCamList(candidatos[0]);
       _setScanStatus('ok', candidatos[0].descripcion || (candidatos[0]._scannedCb || candidatos[0].codigoBarra));
-      if (!autoSum) SoundFX.beep(); // beepDouble ya sonó en auto-suma
+      if (!autoSum) SoundFX.beep();
       return;
     }
-    // Prefijo → picker overlay
+    // Caso 2: prefijo → picker overlay + sonido scanIncompleto
     _setScanStatus('prefijo', 'Prefijo · ' + candidatos.length + ' productos coinciden');
+    if (SoundFX.scanIncompleto) SoundFX.scanIncompleto();
+    vibrate(30);
     _mostrarCamPicker(candidatos, codStr);
   }
 
   function _mostrarCamPicker(candidatos, codStr) {
     document.getElementById('camPickerCod').textContent = codStr;
+    const esIngreso = String(_guiaActual?.tipo || '').toUpperCase().startsWith('INGRESO');
+    const noneBtn = esIngreso
+      ? `<button onclick="GuiasView.cerrarCamPicker();GuiasView.abrirModalPN('${escAttr(codStr)}','${escAttr(_guiaActual?.idGuia || '')}')"
+                style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
+                       border:1.5px dashed #7c3aed;margin-top:8px;background:rgba(124,58,237,.08);
+                       display:flex;align-items:center;gap:10px;cursor:pointer;
+                       -webkit-tap-highlight-color:transparent">
+          <div style="flex-shrink:0;width:32px;height:32px;border-radius:8px;background:#7c3aed33;
+                      display:flex;align-items:center;justify-content:center;font-size:1.1em">🆕</div>
+          <div style="flex:1">
+            <p style="font-size:.83em;font-weight:800;color:#c084fc">Ninguno · es otro código</p>
+            <p style="font-size:.69em;color:#94a3b8;margin-top:2px">Registrar ${codStr} como nuevo</p>
+          </div>
+        </button>`
+      : '';
     document.getElementById('camPickerList').innerHTML = candidatos.map(p => {
       const cb      = String(p._scannedCb || p.codigoBarra || '');
       const display = String(p.codigoBarra || cb);
@@ -4474,7 +5002,7 @@ const GuiasView = (() => {
           <p style="font-size:.69em;color:#64748b;font-family:monospace;margin-top:2px">${cbHtml}</p>
         </div>
       </button>`;
-    }).join('');
+    }).join('') + noneBtn;
     const picker = document.getElementById('camPicker');
     picker.style.display = 'flex';
   }
@@ -5346,6 +5874,19 @@ const GuiasView = (() => {
         _mostrarDetalleSheet(_guiaActual, false);
         render(_filtrarYBuscar());
       }
+      // F9: Ventana de gracia 5min + TTS post-cierre (cantidad + nombre producto)
+      if (typeof App !== 'undefined' && App._registrarCierre) App._registrarCierre(_guiaActual.idGuia);
+      try {
+        if (window.Voice && Voice.supported().tts) {
+          const items = (_guiaActual.detalle || [])
+            .filter(d => d.observacion !== 'ANULADO' && (parseFloat(d.cantidadRecibida) || 0) > 0)
+            .map(d => ({
+              cantidad: parseFloat(d.cantidadRecibida) || 0,
+              nombre:   d.descripcionProducto || d.codigoProducto
+            }));
+          if (items.length) setTimeout(() => Voice.leerItems(items), 800);
+        }
+      } catch(_){}
     } else {
       // Revertir si GAS rechazó
       _guiaActual.estado = 'ABIERTA';
@@ -5733,8 +6274,33 @@ const GuiasView = (() => {
     abrirCarrusel([_normalizeDriveUrl(_guiaActual.foto)], _guiaActual.idGuia);
   }
 
+  // ── F2-F7 — Crear guía desde type picker + entidad ──
+  function crearConTipo(subtipo, entidad) {
+    nueva();
+    const sel = document.getElementById('guiaTipo');
+    if (sel) {
+      sel.value = subtipo;
+      // Disparar el change handler para sincronizar UI (mostrar/ocultar zona/proveedor)
+      sel.dispatchEvent(new Event('change'));
+    }
+    if (entidad) {
+      if (entidad.idProveedor) {
+        const ps = document.getElementById('guiaProveedor');
+        if (ps) ps.value = entidad.idProveedor;
+      } else if (entidad.idZona) {
+        const zs = document.getElementById('guiaZona');
+        if (zs) zs.value = entidad.idZona;
+      } else if (entidad.idPersonal) {
+        const com = document.getElementById('guiaComentario');
+        if (com) com.value = `Jefatura: ${entidad.nombre || ''} ${entidad.apellido || ''}`.trim();
+      }
+    }
+    abrirSheet('sheetGuia');
+  }
+
   return {
     cargar, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
+    crearConTipo,
     filtrarTablet, _searchFocusGuiaTablet,
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,

@@ -3,6 +3,34 @@
 // Login por PIN, sesiones, desempeño y cierre de turno
 // ============================================================
 
+// ── F0: rol del usuario actual (para filtrar tipos de guía en picker) ──
+// params: { idPersonal? | usuario? | pin? }
+// Retorna: { ok, data: { idPersonal, nombre, rol } }
+function getRolUsuario(params) {
+  var id   = String(params.idPersonal || '').trim();
+  var nick = String(params.usuario    || '').trim();
+  var pin  = String(params.pin        || '').trim();
+  if (!id && !nick && !pin) return { ok: false, error: 'identificador requerido' };
+
+  var personal = _getPersonalWH();
+  var op;
+  if (id)        op = personal.find(function(p){ return String(p.idPersonal) === id; });
+  else if (pin)  op = personal.find(function(p){ return String(p.pin) === pin; });
+  else           op = personal.find(function(p){
+    return String(p.nombre || '').toLowerCase() === nick.toLowerCase() ||
+           String(p.usuario || '').toLowerCase() === nick.toLowerCase();
+  });
+  if (!op) return { ok: false, error: 'usuario no encontrado' };
+
+  return { ok: true, data: {
+    idPersonal: op.idPersonal,
+    nombre:     op.nombre,
+    apellido:   op.apellido,
+    rol:        String(op.rol || '').toUpperCase()
+  }};
+}
+
+
 // ── Login ───────────────────────────────────────────────────
 function loginPersonal(params) {
   var pin = String(params.pin || '').trim();

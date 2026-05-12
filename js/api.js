@@ -260,6 +260,43 @@ const API = (() => {
     imprimirHistorialStock: (p)  => post({ action: 'imprimirHistorialStock', ...p }),
 
     // Auditoría diaria de stock (desde módulo Productos)
-    auditarProducto:      (p)   => post({ action: 'auditarProducto', ...p })
+    auditarProducto:      (p)   => post({ action: 'auditarProducto', ...p }),
+
+    // ── F0+ : genéricos para módulos nuevos ─────────────────────
+    get:  (action, p={}) => call({ action, ...p }),
+    post: (action, p={}) => post({ action, ...p }),
+
+    // ── F0: Auth ────────────────────────────────────────────────
+    verificarClaveAdmin: (p)   => post({ action: 'verificarClaveAdmin', ...p }),
+
+    // ── F0: Cargadores independientes ───────────────────────────
+    listarCargadoresMaster:  ()    => call({ action: 'listarCargadoresMaster' }),
+    addCargadorDia:          (p)   => post({ action: 'addCargadorDia', ...p }),
+    removeCargadorDia:       (p)   => post({ action: 'removeCargadorDia', ...p }),
+    getResumenCargadoresDia: (p={})=> call({ action: 'getResumenCargadoresDia', ...p }),
+
+    // ── F0: Mermas V2 ───────────────────────────────────────────
+    getMermasCesta:           ()   => call({ action: 'getMermasCesta' }),
+    agregarAMermas:           (p)  => post({ action: 'agregarAMermas', ...p }),
+    solucionarMerma:          (p)  => post({ action: 'solucionarMerma', ...p }),
+    procesarEliminacionMermas:(p)  => post({ action: 'procesarEliminacionMermas', ...p }),
+    contadorMermasPendientes: ()   => call({ action: 'contadorMermasPendientes' }),
+
+    // ── F0: Fotos genérico ──────────────────────────────────────
+    subirFotoEntidad:    (p) => post({ action: 'subirFotoEntidad', ...p }),
+    eliminarFotoEntidad: (p) => post({ action: 'eliminarFotoEntidad', ...p }),
+
+    // ── F0: Op-log ──────────────────────────────────────────────
+    aplicarOp:           (p) => post({ action: 'aplicarOp', ...p }),
+    listarOpsPendientes: (p={}) => call({ action: 'listarOpsPendientes', ...p }),
+
+    // ── F0: Productos extra (reconciliación caso 4) ─────────────
+    getProductosCambiadosDesde: (p={}) => call({ action: 'getProductosCambiadosDesde', ...p }),
+
+    // ── F0: Personal — rol del usuario ──────────────────────────
+    getRolUsuario:       (p={}) => call({ action: 'getRolUsuario', ...p }),
+
+    // ── Historial completo de guía (admin/master only) ──────────
+    getHistorialGuia:    (p={}) => call({ action: 'getHistorialGuia', ...p })
   };
 })();
