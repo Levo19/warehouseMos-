@@ -8319,7 +8319,33 @@ const DespachoView = (() => {
     abrirSheet('sheetDespFinalizar');
   }
 
+  let _dspGenerarBusy = false;
+  function _setDspGenerarBusy(busy) {
+    _dspGenerarBusy = !!busy;
+    const btn = document.getElementById('btnConfirmarDespacho');
+    if (!btn) return;
+    btn.disabled = !!busy;
+    btn.classList.toggle('opacity-50', !!busy);
+    btn.classList.toggle('pointer-events-none', !!busy);
+    if (busy) {
+      btn.dataset._lbl = btn.innerHTML;
+      btn.innerHTML = '⏳ Generando guía...';
+    } else if (btn.dataset._lbl) {
+      btn.innerHTML = btn.dataset._lbl;
+      delete btn.dataset._lbl;
+    }
+  }
+
   function confirmarDespacho() {
+    // ─── LOCK ANTI-DOBLE-CLICK ───────────────────────────────
+    // Bug histórico (12 may + 13 may): triple click generaba 3 guías en
+    // <30s. El backend ahora tiene idempotencia, pero acá bloqueamos en
+    // origen para que ni siquiera intente.
+    if (_dspGenerarBusy) {
+      toast('Espera, ya estamos generando la guía...', 'warn');
+      return;
+    }
+
     // Si hay un pickup activo, ese es el camino: cierra contra cerrarPickupConDespacho
     // (emite GUIA_SALIDA con códigos reales escaneados + faltantes en observación)
     if (_pickupActivo) {
@@ -8333,14 +8359,20 @@ const DespachoView = (() => {
     if (_tipoSalida === 'SALIDA_ZONA' && !idZona) { toast('Selecciona la zona de destino', 'warn'); return; }
     if (idZona) _saveZona(idZona);
     const nota = document.getElementById('despNotaFinal')?.value?.trim() || '';
+    // idempotencyKey: identificador único de ESTE click. Si el cliente
+    // reintenta por timeout, el backend reconoce el key y retorna la guía
+    // ya creada en vez de duplicarla.
+    const idempotencyKey = 'DSP-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
     const payload = {
       idZona,
       tipo:    _tipoSalida,
       nota,
       usuario: window.WH_CONFIG?.usuario || '',
       items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad })),
-      imprimir: false  // GAS no imprime — frontend dispara impresión separada para no bloquear
+      imprimir: false,  // GAS no imprime — frontend dispara impresión separada para no bloquear
+      idempotencyKey
     };
+    _setDspGenerarBusy(true);
 
     // Resolver nombre de zona para historial
     const zonas = OfflineManager.getZonasCache();
@@ -8398,6 +8430,8 @@ const DespachoView = (() => {
       toast('Error: ' + msg, 'danger', 8000);
       if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
       _renderHist();
+    }).finally(() => {
+      _setDspGenerarBusy(false);
     });
   }
 

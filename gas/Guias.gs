@@ -1373,16 +1373,59 @@ function _cerrarPickupConDespachoImpl(params) {
 }
 
 function crearDespachoRapido(params) {
+  return _conLock('crearDespachoRapido', function() {
+    return _crearDespachoRapidoImpl(params);
+  });
+}
+
+function _crearDespachoRapidoImpl(params) {
   var idZona   = params.idZona   || '';
   var tipo     = params.tipo     || 'SALIDA_ZONA';
   var items    = params.items    || [];
   var usuario  = params.usuario  || '';
   var nota     = params.nota     || '';
   var imprimir = params.imprimir !== false;
+  var idempotencyKey = String(params.idempotencyKey || '').trim();
 
   // idZona solo requerido cuando el tipo es SALIDA_ZONA
   if (tipo === 'SALIDA_ZONA' && !idZona) return { ok: false, error: 'idZona requerido' };
   if (!items.length) return { ok: false, error: 'Carrito vacío' };
+
+  // ── IDEMPOTENCIA ──────────────────────────────────────────
+  // Bug histórico: triple-click en "Generar guía" creaba 3 GUIA_SALIDA
+  // con timestamps separados por <30s (incidente PCK-1778539364666 del
+  // 2026-05-12 + repetición 2026-05-13 7:41-7:42). Aunque el frontend
+  // ya tenga lock, defendemos también acá:
+  //   - Si llega idempotencyKey del cliente y ya vimos esa key → retornar
+  //     la guía existente sin re-crear, sin re-descontar stock, sin re-
+  //     imprimir.
+  //   - Si no llega key, computamos una "fingerprint" del payload (usuario
+  //     + tipo + idZona + items canónicos + minuto) y usamos esa.
+  // TTL 120s (suficiente para reintentos por timeout o doble-click).
+  var cache = CacheService.getScriptCache();
+  var keyEfectiva = idempotencyKey;
+  if (!keyEfectiva) {
+    // Fingerprint: minuto actual + payload normalizado
+    var minuto = Math.floor(Date.now() / 60000);
+    var itemsCanon = items.map(function(it) {
+      return String(it.codigoBarra || '').trim().toUpperCase() + ':' + (parseFloat(it.cantidad) || 0);
+    }).sort().join('|');
+    keyEfectiva = 'dr_' + usuario + '_' + tipo + '_' + idZona + '_' + minuto + '_' + itemsCanon;
+    // Truncar — CacheService key máx 250 chars
+    if (keyEfectiva.length > 240) {
+      keyEfectiva = 'dr_' + Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, keyEfectiva)
+        .map(function(b){ return (b < 0 ? b + 256 : b).toString(16); }).join('');
+    }
+  } else {
+    keyEfectiva = 'dr_' + keyEfectiva;
+  }
+  try {
+    var prev = cache.get(keyEfectiva);
+    if (prev) {
+      Logger.log('crearDespachoRapido idempotente: hit cache, retornando ' + prev);
+      return { ok: true, data: { idGuia: prev, errores: [], impresion: { ok: true, dedup: true }, dedup: true } };
+    }
+  } catch(_) {}
 
   var comentario = nota || ('Despacho rápido' + (tipo !== 'SALIDA_ZONA' ? ' · ' + tipo : ''));
 
@@ -1390,6 +1433,11 @@ function crearDespachoRapido(params) {
   var guiaRes = crearGuia({ tipo: tipo, idZona: idZona || null, usuario: usuario, comentario: comentario });
   if (!guiaRes.ok) return guiaRes;
   var idGuia = guiaRes.data.idGuia;
+
+  // Reservar la key INMEDIATAMENTE después de crear la guía (antes de
+  // detalles + cerrar), para que cualquier retry concurrent reciba el
+  // idGuia. El lock externo previene la race, pero esto es defensa extra.
+  try { cache.put(keyEfectiva, idGuia, 120); } catch(_) {}
 
   // 2. Registrar cada ítem
   var errores = [];
