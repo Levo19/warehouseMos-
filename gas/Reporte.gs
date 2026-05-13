@@ -719,15 +719,35 @@ function imprimirAvisoCajeros(params) {
   var blob  = Utilities.newBlob(bytes, 'application/octet-stream');
   var b64   = Utilities.base64Encode(blob.getBytes());
 
-  // 6. Enviar a cada PrintNode
-  var resultados = [];
+  // 6. Deduplicar por PrintNode_ID: varias cajas pueden compartir la
+  //    misma impresora física. Antes mandábamos un job por caja y eso
+  //    causaba 2-3 impresiones idénticas si había 2-3 cajas abiertas
+  //    apuntando al mismo printer (bug histórico 2026-05-13).
+  //    Ahora: 1 job por printer único, pero el resultado lista TODAS las
+  //    cajas que reciben ese aviso (para auditoría/UI).
+  var porPrinter = {};
   cajasAbiertas.forEach(function(caja) {
-    var printerId = parseInt(caja.PrintNode_ID);
+    var pid = String(caja.PrintNode_ID || '').trim();
+    if (!pid) return;
+    if (!porPrinter[pid]) porPrinter[pid] = { printerId: pid, cajas: [] };
+    porPrinter[pid].cajas.push(caja);
+  });
+
+  // 7. Enviar UN job por printer único
+  var resultados = [];
+  Object.keys(porPrinter).forEach(function(pid) {
+    var grupo = porPrinter[pid];
+    var printerId = parseInt(grupo.printerId);
+    var cajasDelPrinter = grupo.cajas;
     if (!printerId) {
-      resultados.push({ vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
-                        printNodeId: caja.PrintNode_ID, ok: false, error: 'PrintNode_ID inválido' });
+      cajasDelPrinter.forEach(function(c) {
+        resultados.push({ vendedor: c.Vendedor, zona: c.Zona_ID, estacion: c.Estacion,
+                          printNodeId: c.PrintNode_ID, ok: false,
+                          error: 'PrintNode_ID inválido', dedupCount: cajasDelPrinter.length });
+      });
       return;
     }
+    var okJob = false, errMsg = '';
     try {
       var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
         method:  'post',
@@ -745,16 +765,20 @@ function imprimirAvisoCajeros(params) {
         muteHttpExceptions: true
       });
       var code = resp.getResponseCode();
-      resultados.push({
-        vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
-        printNodeId: caja.PrintNode_ID,
-        ok: code === 201,
-        error: code === 201 ? '' : ('PrintNode ' + code)
-      });
+      okJob = (code === 201);
+      if (!okJob) errMsg = 'PrintNode ' + code;
     } catch(e) {
-      resultados.push({ vendedor: caja.Vendedor, zona: caja.Zona_ID, estacion: caja.Estacion,
-                        printNodeId: caja.PrintNode_ID, ok: false, error: e.message });
+      errMsg = e.message;
     }
+    // 1 resultado por caja (para la UI), pero todas comparten el mismo job
+    cajasDelPrinter.forEach(function(c) {
+      resultados.push({
+        vendedor: c.Vendedor, zona: c.Zona_ID, estacion: c.Estacion,
+        printNodeId: c.PrintNode_ID,
+        ok: okJob, error: errMsg,
+        dedupCount: cajasDelPrinter.length  // info: cuántas cajas comparten esta impresora
+      });
+    });
   });
 
   var algunOk = resultados.some(function(r) { return r.ok; });
