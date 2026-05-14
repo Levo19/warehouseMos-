@@ -2654,6 +2654,10 @@ const App = (() => {
       case 'logs':        LogsView.cargar(); break;
       case 'diagnostico': DiagnosticoView.cargar(); break;
     }
+
+    // Flotante del despacho: mostrar si hay despacho activo y NO estás en
+    // la vista despacho; ocultar al entrar a despacho.
+    try { DespachoView.renderFlotante(); } catch(_){}
   }
 
   function toggleModoEnvasador() {
@@ -7647,7 +7651,118 @@ const DespachoView = (() => {
       } catch(_){}
       toast('✓ ' + nombre + detalle + ' — sumado al despacho', 'ok', 3000);
     }
+    _renderDespFlotante();
     return true;
+  }
+
+  // ── FLOTANTE del despacho activo (control remoto cross-módulo) ──
+  // Resuelve el "producto activo": del pickup (_pickupItemActivo) o del
+  // despacho rápido (_despItemActivo). Retorna lo que el flotante necesita.
+  function _despProductoActivo() {
+    const productos = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+    if (_pickupActivo && _pickupItemActivo) {
+      const it = (_pickupActivo.items || []).find(x => String(x.skuBase) === String(_pickupItemActivo));
+      if (it) {
+        const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
+        const esG = _esProductoPeso(prod);
+        return {
+          tipo: 'pickup', id: it.skuBase, nombre: it.nombre || it.skuBase,
+          cantidad: parseFloat(it.despachado) || 0, solicitado: parseFloat(it.solicitado) || 0,
+          esGranel: esG, unidad: esG ? String((prod && prod.unidad) || 'kg').toLowerCase() : ''
+        };
+      }
+    }
+    if (!_pickupActivo && _despItemActivo) {
+      const ci = _cart.find(c => c.codigoBarra === _despItemActivo);
+      if (ci) {
+        const prod = productos.find(p =>
+          String(p.codigoBarra) === String(ci.codigoBarra) ||
+          String(p.idProducto) === String(ci.codigoBarra));
+        const esG = _esProductoPeso(prod) || _esProductoPeso({ unidad: ci.unidad });
+        return {
+          tipo: 'cart', id: ci.codigoBarra, nombre: ci.descripcion || ci.codigoBarra,
+          cantidad: parseFloat(ci.cantidad) || 0, solicitado: null,
+          esGranel: esG, unidad: esG ? String((prod && prod.unidad) || ci.unidad || 'kg').toLowerCase() : ''
+        };
+      }
+    }
+    return null;
+  }
+
+  // Muestra/oculta y re-renderiza el flotante. Visible SOLO si hay despacho
+  // activo Y NO estás en la vista despacho (ahí ya tenés el control completo).
+  function _renderDespFlotante() {
+    const flot = document.getElementById('despFlotante');
+    if (!flot) return;
+    const enDespacho = !!(window.App && App.getView && App.getView() === 'despacho');
+    const activo = _despProductoActivo();
+    if (!hayDespachoActivo() || enDespacho || !activo) {
+      flot.style.display = 'none';
+      return;
+    }
+    const nom   = document.getElementById('despflotNombre');
+    const meta  = document.getElementById('despflotMeta');
+    const ctrls = document.getElementById('despflotCtrls');
+    if (nom) nom.textContent = activo.nombre;
+    if (meta) {
+      meta.textContent = activo.tipo === 'pickup'
+        ? 'Pickup · ' + fmt(activo.cantidad, activo.esGranel ? 3 : 0) + '/' +
+          fmt(activo.solicitado, activo.esGranel ? 3 : 0) + (activo.esGranel ? ' ' + activo.unidad : '')
+        : 'Despacho rápido' + (activo.esGranel ? ' · ' + activo.unidad : '');
+    }
+    if (ctrls) {
+      if (activo.esGranel) {
+        ctrls.innerHTML =
+          '<input type="number" inputmode="decimal" step="0.001" min="0" class="despflot-granel" ' +
+          'value="' + fmt(activo.cantidad, 3) + '" ' +
+          'onchange="DespachoView.flotSetGranel(this.value)" ' +
+          'onkeydown="if(event.key===\'Enter\')this.blur()">' +
+          '<span class="despflot-unit">' + activo.unidad + '</span>';
+      } else {
+        ctrls.innerHTML =
+          '<button class="despflot-btn despflot-btn-menos" onclick="DespachoView.flotMenos()"' +
+          (activo.cantidad <= 0 ? ' disabled' : '') + '>−</button>' +
+          '<span class="despflot-val">' + fmt(activo.cantidad, 0) + '</span>' +
+          '<button class="despflot-btn despflot-btn-mas" onclick="DespachoView.flotMas()">+</button>';
+      }
+    }
+    const goto = document.getElementById('despflotGoto');
+    if (goto) goto.onclick = () => { try { App.nav('despacho'); } catch(_){} };
+    flot.style.display = 'block';
+    flot.classList.remove('is-flash');
+    void flot.offsetWidth; // reflow → reinicia la animación de flash
+    flot.classList.add('is-flash');
+  }
+
+  function flotMas() {
+    const a = _despProductoActivo();
+    if (!a) return;
+    if (a.tipo === 'pickup') _pkckMas(a.id);
+    else _adjustQty(a.id, q => q + 1);
+    _renderDespFlotante();
+  }
+  function flotMenos() {
+    const a = _despProductoActivo();
+    if (!a) return;
+    if (a.tipo === 'pickup') _pkckMenos(a.id);
+    else _adjustQty(a.id, q => Math.max(0, q - 1));
+    _renderDespFlotante();
+  }
+  function flotSetGranel(val) {
+    const a = _despProductoActivo();
+    if (!a) return;
+    const qty = parseFloat(String(val).replace(',', '.'));
+    if (isNaN(qty) || qty < 0) return;
+    if (a.tipo === 'pickup') {
+      _pkckSetGranel(a.id, qty);
+    } else {
+      const idx = _cart.findIndex(c => c.codigoBarra === a.id);
+      if (idx >= 0) {
+        _cart[idx].cantidad = qty;
+        _saveCart(); _renderCart(); _updateFooter(); badgeUpdate();
+      }
+    }
+    _renderDespFlotante();
   }
 
   // ── Callback scanner ─────────────────────────────────────────
@@ -7666,6 +7781,11 @@ const DespachoView = (() => {
       const prod = candidatos[0];
       _agregarDespDirecto(prod); // maneja sobrestock internamente
       const cb   = String(prod._scannedCb || prod.codigoBarra || '');
+      // Marcar producto activo para el flotante cross-módulo. Si hay
+      // pickup, _intentarSumarAPickup ya seteó _pickupItemActivo; si es
+      // despacho rápido (cart), lo seteamos acá.
+      if (!_pickupActivo) _despItemActivo = cb;
+      _renderDespFlotante();
       const item = _cart.find(c => c.codigoBarra === cb);
       const stockD = item?.stockDisp || 0;
       if (!item || stockD === 0 || item.cantidad <= stockD) {
@@ -8809,6 +8929,9 @@ const DespachoView = (() => {
   // (+/- o input granel) en el checklist — los demás los ocultan, para que
   // el operador no edite por error un producto distinto al que tiene en mano.
   let _pickupItemActivo = null;
+  // codigoBarra del último producto escaneado al despacho rápido (cart).
+  // Lo usa el flotante cross-módulo para mostrar sus controles +/-.
+  let _despItemActivo = null;
 
   // Normalización de nombre de operador para comparar locks de pickup.
   // Tolera dobles espacios, mayúsculas y trims (causa real: el nombre
@@ -10036,7 +10159,9 @@ const DespachoView = (() => {
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
            soltarPickupActivo, pickupSetSearch, pickupSetSort,
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
-           hayDespachoActivo, procesarScanGlobal };
+           hayDespachoActivo, procesarScanGlobal,
+           flotMas, flotMenos, flotSetGranel,
+           renderFlotante: _renderDespFlotante };
 })();
 
 // ════════════════════════════════════════════════
