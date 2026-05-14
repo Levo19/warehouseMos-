@@ -7610,6 +7610,46 @@ const DespachoView = (() => {
     if (c.dur > 0) _despStatusTimer = setTimeout(() => _setDespStatus('ready'), c.dur);
   }
 
+  // ── Escáner GLOBAL (Parte B) ─────────────────────────────────
+  // ¿Hay un despacho/pickup en curso? Solo entonces el listener global
+  // de teclado enruta los escaneos hechos desde OTROS módulos (ej. el
+  // operador está en el catálogo de Productos viendo el "membrete
+  // digital" y apunta el escáner a la pantalla).
+  function hayDespachoActivo() {
+    return !!_pickupActivo || (Array.isArray(_cart) && _cart.length > 0);
+  }
+  // Procesa un código escaneado desde cualquier módulo. Reusa _onDespResult
+  // (busca candidato → suma a pickup o cart). Como el banner del pickup
+  // vive dentro de la vista despacho y no se ve desde otros módulos,
+  // damos feedback con un toast prominente + sonido.
+  function procesarScanGlobal(cod) {
+    if (!hayDespachoActivo()) return false;
+    const codStr = normCb(cod);
+    const candidatos = _buscarDespCandidatos(codStr);
+    if (!candidatos.length) {
+      try { SoundFX.warn(); vibrate([60, 30, 60]); } catch(_){}
+      toast('⚠ ' + codStr + ' · no existe en catálogo', 'warn', 3500);
+      return true;
+    }
+    // Reusa el flujo normal (maneja pickup, cart, sobrestock, picker prefijo)
+    _onDespResult(cod);
+    // Feedback visible cross-módulo: el operador está en Productos, no ve
+    // el banner del despacho. El toast le confirma qué entró.
+    if (candidatos[0]._exacto) {
+      const prod = candidatos[0];
+      const nombre = prod.descripcion || codStr;
+      let detalle = '';
+      try {
+        if (_pickupActivo) {
+          const it = _matchPickupItem(prod, String(prod._scannedCb || prod.codigoBarra || ''));
+          if (it) detalle = ' · ' + (parseFloat(it.despachado) || 0) + '/' + (parseFloat(it.solicitado) || 0);
+        }
+      } catch(_){}
+      toast('✓ ' + nombre + detalle + ' — sumado al despacho', 'ok', 3000);
+    }
+    return true;
+  }
+
   // ── Callback scanner ─────────────────────────────────────────
   function _onDespResult(cod) {
     const codStr = normCb(cod);
@@ -9995,7 +10035,66 @@ const DespachoView = (() => {
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
            soltarPickupActivo, pickupSetSearch, pickupSetSort,
-           pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel };
+           pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
+           hayDespachoActivo, procesarScanGlobal };
+})();
+
+// ════════════════════════════════════════════════
+// ESCÁNER GLOBAL — captura el lector HID en CUALQUIER módulo
+// ════════════════════════════════════════════════
+// Solo actúa si hay un despacho/pickup activo (DespachoView.hayDespachoActivo).
+// Permite que el operador esté en el catálogo de Productos viendo el
+// "membrete digital" y, al apuntar el escáner a la pantalla, el código
+// se enrute al despacho en curso. Ignora si el foco está en un input
+// (no roba lo que el usuario escribe) y distingue scanner de tecleo
+// humano por la velocidad entre pulsaciones.
+(function _initEscanerGlobal() {
+  let buf = '';
+  let lastTs = 0;
+  let timer = null;
+
+  function _esCampoEditable(el) {
+    if (!el) return false;
+    const tag = (el.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+  }
+
+  function _procesar() {
+    const code = buf.trim();
+    buf = '';
+    if (code.length < 3) return;
+    try {
+      if (window.DespachoView && DespachoView.hayDespachoActivo && DespachoView.hayDespachoActivo()) {
+        DespachoView.procesarScanGlobal(code);
+      }
+    } catch(_) { /* tolerar */ }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    // Solo cuando hay despacho activo — si no, ni escuchamos.
+    try {
+      if (!(window.DespachoView && DespachoView.hayDespachoActivo && DespachoView.hayDespachoActivo())) return;
+    } catch(_) { return; }
+    // No robar el teclado si el operador está escribiendo en un campo.
+    if (_esCampoEditable(document.activeElement)) return;
+    // Si el sheet de escaneo HID propio del despacho está abierto, ese
+    // tiene su propio listener — no duplicar.
+    const hidSheet = document.getElementById('sheetScanInput');
+    if (hidSheet && hidSheet.classList.contains('open')) return;
+
+    const now = Date.now();
+    if (e.key === 'Enter') {
+      if (buf) { clearTimeout(timer); _procesar(); }
+      return;
+    }
+    if (e.key.length !== 1) return; // ignorar teclas de control
+    // Velocidad: si pasó >80ms entre teclas, es tecleo humano → reiniciar
+    if (buf.length > 0 && (now - lastTs) > 80) buf = '';
+    lastTs = now;
+    buf += e.key;
+    clearTimeout(timer);
+    timer = setTimeout(_procesar, 120); // fallback si el scanner no manda Enter
+  });
 })();
 
 // ════════════════════════════════════════════════
@@ -11932,6 +12031,11 @@ const ProductosView = (() => {
                 title="Imprimir membrete (canónico + equivalentes)">
           🖨 Membrete
         </button>
+        <button onclick="event.stopPropagation();ProductosView.verCodigos('${escAttr(g.skuBase)}')"
+                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1 prod-btn-codigos"
+                title="Ver códigos de barra en pantalla para escanear directo">
+          📲 Códigos
+        </button>
         ${/* Botón ojo: solo barcode único en modo auditoría */
           isAudit && !hasChildren ? (() => {
             const c0   = g.children[0];
@@ -13435,10 +13539,63 @@ const ProductosView = (() => {
     });
   }
 
+  // ── MEMBRETE DIGITAL — overlay con códigos de barra escaneables ──
+  // El operador apunta el escáner físico a la PANTALLA para "leer" el
+  // producto sin que el membrete físico esté pegado en el andamio.
+  // Solo enruta el escaneo al despacho si hay un despacho/pickup activo
+  // (Parte B — listener global de DespachoView).
+  function verCodigos(skuBase) {
+    const g = (_grupos || []).find(gr => String(gr.skuBase) === String(skuBase));
+    if (!g) { toast('Producto no encontrado', 'warn'); return; }
+    const codigos = (g.children || [])
+      .map(c => String(c.codigoBarra || '').trim())
+      .filter(Boolean);
+    if (!codigos.length) { toast('Este producto no tiene códigos de barra', 'warn'); return; }
+
+    const cont = document.getElementById('codigosOverlayBody');
+    const titEl = document.getElementById('codigosOverlayTitulo');
+    if (titEl) titEl.textContent = g.base.descripcion || skuBase;
+    if (cont) {
+      // Un bloque por código: SVG del barcode + el número debajo. El
+      // primero es el canónico, el resto equivalentes.
+      cont.innerHTML = codigos.map((cb, idx) => `
+        <div class="cod-barcode-card">
+          <div class="cod-barcode-tag">${idx === 0 ? '★ CANÓNICO' : 'EQUIVALENTE ' + idx}</div>
+          <svg class="cod-barcode-svg" id="codbc-${idx}"></svg>
+          <div class="cod-barcode-num">${escHtml(cb)}</div>
+        </div>`).join('');
+    }
+    const ov = document.getElementById('codigosOverlay');
+    if (ov) { ov.style.display = 'flex'; requestAnimationFrame(() => ov.classList.add('is-open')); }
+    try { SoundFX.beep && SoundFX.beep(); } catch(_){}
+    try { vibrate && vibrate(12); } catch(_){}
+
+    // Renderizar los barcodes con JsBarcode (tras el reflow del overlay).
+    // Code128 codifica cualquier texto (sirve para EAN reales y códigos
+    // internos WH... por igual). Fondo blanco + quiet zone amplio para
+    // que el escáner lo lea bien desde la pantalla.
+    setTimeout(() => {
+      codigos.forEach((cb, idx) => {
+        const svg = document.getElementById('codbc-' + idx);
+        if (!svg || typeof JsBarcode === 'undefined') return;
+        try {
+          JsBarcode(svg, cb, {
+            format: 'CODE128', width: 2.4, height: 90,
+            displayValue: false, margin: 14, background: '#ffffff', lineColor: '#000000'
+          });
+        } catch(e) { svg.outerHTML = '<div class="cod-barcode-err">⚠ No se pudo generar el código</div>'; }
+      });
+    }, 60);
+  }
+  function cerrarCodigos() {
+    const ov = document.getElementById('codigosOverlay');
+    if (ov) { ov.classList.remove('is-open'); setTimeout(() => { ov.style.display = 'none'; }, 250); }
+  }
+
   return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
-           verHistorial, imprimirHistorial, imprimirMembrete,
+           verHistorial, imprimirHistorial, imprimirMembrete, verCodigos, cerrarCodigos,
            histFiltrarTipo, histAuditar,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,

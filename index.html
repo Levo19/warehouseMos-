@@ -1313,6 +1313,79 @@
       padding:10px 16px 14px;font-size:.66em;color:#64748b;text-align:center;
       border-top:1px solid rgba(51,65,85,.4);
     }
+
+    /* ── MEMBRETE DIGITAL — overlay de códigos de barra ─────────── */
+    .cod-overlay {
+      display:none;position:fixed;inset:0;z-index:9991;
+      background:rgba(2,6,23,.85);backdrop-filter:blur(7px);
+      align-items:center;justify-content:center;padding:14px;
+      opacity:0;transition:opacity .25s ease;
+    }
+    .cod-overlay.is-open { opacity:1; }
+    .cod-modal {
+      width:100%;max-width:520px;max-height:90vh;
+      background:linear-gradient(160deg,#1e293b,#0f172a);
+      border:1px solid rgba(99,102,241,.45);border-radius:20px;
+      box-shadow:0 20px 60px -10px rgba(0,0,0,.7);
+      display:flex;flex-direction:column;overflow:hidden;
+      transform:scale(.9) translateY(20px);
+      transition:transform .3s cubic-bezier(.34,1.56,.64,1);
+    }
+    .cod-overlay.is-open .cod-modal { transform:scale(1) translateY(0); }
+    .cod-header {
+      display:flex;align-items:center;gap:11px;padding:14px 16px;
+      border-bottom:1px solid rgba(51,65,85,.6);
+    }
+    .cod-header-ico {
+      font-size:24px;width:44px;height:44px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;border-radius:12px;
+      background:linear-gradient(135deg,rgba(99,102,241,.28),rgba(99,102,241,.1));
+      border:1px solid rgba(99,102,241,.5);
+    }
+    .cod-header-title { font-size:1.02em;font-weight:900;color:#f1f5f9;line-height:1.1; }
+    .cod-header-sub {
+      font-size:.74em;color:#94a3b8;margin-top:2px;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .cod-close {
+      width:34px;height:34px;flex-shrink:0;border-radius:10px;
+      background:rgba(71,85,105,.3);border:1px solid rgba(71,85,105,.5);
+      color:#cbd5e1;font-size:16px;font-weight:900;cursor:pointer;
+    }
+    .cod-close:active { transform:scale(.9); }
+    .cod-body {
+      padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;
+    }
+    /* Cada código: fondo BLANCO + quiet zone amplia → el escáner lo lee
+       bien desde la pantalla. */
+    .cod-barcode-card {
+      background:#ffffff;border-radius:14px;padding:12px 10px 8px;
+      display:flex;flex-direction:column;align-items:center;
+      box-shadow:0 4px 14px -2px rgba(0,0,0,.4);
+      animation:codCardIn .35s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    .cod-barcode-card:nth-child(2) { animation-delay:.06s; }
+    .cod-barcode-card:nth-child(3) { animation-delay:.12s; }
+    .cod-barcode-card:nth-child(4) { animation-delay:.18s; }
+    @keyframes codCardIn {
+      from { opacity:0;transform:translateY(14px) scale(.96); }
+      to   { opacity:1;transform:translateY(0) scale(1); }
+    }
+    .cod-barcode-tag {
+      align-self:flex-start;font-size:9px;font-weight:900;letter-spacing:.06em;
+      color:#7c3aed;background:rgba(124,58,237,.12);
+      padding:2px 7px;border-radius:6px;margin-bottom:4px;
+    }
+    .cod-barcode-svg { width:100%;max-width:440px;height:auto; }
+    .cod-barcode-num {
+      font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:800;
+      color:#0f172a;letter-spacing:.04em;margin-top:2px;
+    }
+    .cod-barcode-err { color:#dc2626;font-size:12px;font-weight:700;padding:20px; }
+    .cod-foot {
+      padding:10px 16px 14px;font-size:.66em;color:#64748b;text-align:center;
+      border-top:1px solid rgba(51,65,85,.4);
+    }
     .desp-pick-dot {
       position:absolute;top:-5px;right:-5px;
       width:10px;height:10px;border-radius:50%;
@@ -3388,6 +3461,24 @@
       <div class="selimp-loading">⏳ Cargando impresoras...</div>
     </div>
     <p class="selimp-foot">Eres admin · puedes mandar a cualquier impresora del ecosistema</p>
+  </div>
+</div>
+
+<!-- ── MEMBRETE DIGITAL — códigos de barra escaneables en pantalla ──
+     El operador apunta el escáner físico a la pantalla para "leer" el
+     producto sin que el membrete físico esté pegado en el andamio. -->
+<div id="codigosOverlay" class="cod-overlay">
+  <div class="cod-modal">
+    <div class="cod-header">
+      <span class="cod-header-ico">📲</span>
+      <div class="flex-1 min-w-0">
+        <p class="cod-header-title">Códigos de barra</p>
+        <p class="cod-header-sub" id="codigosOverlayTitulo">Producto</p>
+      </div>
+      <button class="cod-close" onclick="ProductosView.cerrarCodigos()">✕</button>
+    </div>
+    <div class="cod-body" id="codigosOverlayBody"></div>
+    <p class="cod-foot">Apunta tu escáner a la pantalla · si hay un despacho activo, el producto se suma solo</p>
   </div>
 </div>
 
@@ -7283,6 +7374,8 @@
 <!-- Firebase compat para Push Notifications -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
+<!-- JsBarcode — genera los códigos de barra del "membrete digital" -->
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script src="js/offline.js"></script>
 <script src="js/api.js"></script>
 <script src="js/scanner.js"></script>
