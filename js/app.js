@@ -8658,6 +8658,10 @@ const DespachoView = (() => {
   let _pickupActivo = null;
   let _pickupClosing = false; // lock anti-doble-click en cerrarDespachoPickup
   let _matchResults = []; // [{nombre, qty, producto, score, status, accepted}]
+  // skuBase del ÚLTIMO item escaneado. Solo ESE item muestra los controles
+  // (+/- o input granel) en el checklist — los demás los ocultan, para que
+  // el operador no edite por error un producto distinto al que tiene en mano.
+  let _pickupItemActivo = null;
 
   // Normalización de nombre de operador para comparar locks de pickup.
   // Tolera dobles espacios, mayúsculas y trims (causa real: el nombre
@@ -8734,10 +8738,31 @@ const DespachoView = (() => {
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
 
-    // ── Producto a granel (KGM): pedir peso decimal ───────────
+    // Marcar este item como el ACTIVO + recordar el código escaneado (los
+    // botones +/- y el input granel operan sobre item._ultimoCb).
+    item._ultimoCb = cb;
+    _pickupItemActivo = item.skuBase;
+
+    // ── Producto a granel (KGM): focus inline al input de cantidad ───
+    // Antes abría un modal. Ahora la card activa muestra un input decimal
+    // con focus automático — el operador pesa y escribe directo.
     if (_esProductoPeso(prod)) {
-      _abrirModalQtyGranel(prod, item, cb, prevDesp, sol);
-      return true; // absorbido (modal lo confirmará después)
+      _savePickup();
+      _renderPickupChecklistInSheet(item.skuBase);
+      _renderPickupChecklistInline();
+      _renderPickupActivoBanner();
+      _updateGenerarBtn();
+      badgeUpdate();
+      try { SoundFX.beep(); } catch(_){}
+      vibrate(10);
+      // Foco al input granel de la card activa
+      setTimeout(() => {
+        try {
+          const inp = document.querySelector('.pkck-card[data-sku="' + (window.CSS && CSS.escape ? CSS.escape(String(item.skuBase)) : String(item.skuBase)) + '"] .pkck-ctrl-granel');
+          if (inp) { inp.focus(); inp.select(); }
+        } catch(_){}
+      }, 70);
+      return true;
     }
 
     // ── Detectar sobrescaneado y advertir ─────────────────────
@@ -8785,6 +8810,92 @@ const DespachoView = (() => {
 
     _scheduleAutosavePickup();
     return true;
+  }
+
+  // ── Controles +/- e input granel del item ACTIVO del checklist ──────
+  // Operan sobre item._ultimoCb (el último código escaneado de ese item).
+  // Re-render + sonidos + autosave compartidos en _afterPickupChange.
+  function _pkckItemPorSku(skuBase) {
+    if (!_pickupActivo) return null;
+    return (_pickupActivo.items || []).find(it => String(it.skuBase) === String(skuBase)) || null;
+  }
+  function _pkckCodigoDe(item) {
+    return item._ultimoCb
+        || (item.despachadoPorCodigo && Object.keys(item.despachadoPorCodigo)[0])
+        || (item.codigosOriginales && item.codigosOriginales[0])
+        || item.skuBase;
+  }
+  function _afterPickupChange(item, prevDesp, sol) {
+    _savePickup();
+    _renderPickupChecklistInSheet(item.skuBase);
+    _renderPickupChecklistInline();
+    _renderPickupActivoBanner();
+    _renderExtrasSection();
+    _updateGenerarBtn();
+    badgeUpdate();
+    const desp = parseFloat(item.despachado) || 0;
+    const justCompletado = prevDesp < sol && desp >= sol && sol > 0;
+    try {
+      if (justCompletado) {
+        SoundFX.pickupItemOk(); _flashItemCompleto(item.skuBase);
+        if (_pickupTotalmenteCompleto()) {
+          setTimeout(() => {
+            try { SoundFX.pickupOk(); } catch(_){}
+            _confettiCelebracion();
+            _setDespStatus('ok', '🎉 ¡Pickup completo! Pulsa "Cerrar despacho"');
+          }, 280);
+        }
+      } else { SoundFX.beep(); }
+    } catch(_){}
+    vibrate(justCompletado ? [20, 30, 60] : 12);
+    _scheduleAutosavePickup();
+  }
+  function _pkckMas(skuBase) {
+    const item = _pkckItemPorSku(skuBase);
+    if (!item) return;
+    const sol      = parseFloat(item.solicitado) || 0;
+    const prevDesp = parseFloat(item.despachado) || 0;
+    if (prevDesp >= sol && sol > 0) {
+      if (!confirm(`Ya llevas ${prevDesp}/${sol} de "${item.nombre || skuBase}".\n¿Sumar 1 más (sobre-despacho)?`)) return;
+    }
+    const cb = _pkckCodigoDe(item);
+    item._ultimoCb = cb;
+    item.despachado = prevDesp + 1;
+    item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+    item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
+    _pickupItemActivo = item.skuBase;
+    _afterPickupChange(item, prevDesp, sol);
+  }
+  function _pkckMenos(skuBase) {
+    const item = _pkckItemPorSku(skuBase);
+    if (!item) return;
+    const prevDesp = parseFloat(item.despachado) || 0;
+    if (prevDesp <= 0) return;
+    const cb = _pkckCodigoDe(item);
+    item.despachado = Math.max(0, prevDesp - 1);
+    if (item.despachadoPorCodigo && item.despachadoPorCodigo[cb] != null) {
+      const nv = (parseFloat(item.despachadoPorCodigo[cb]) || 0) - 1;
+      if (nv > 0) item.despachadoPorCodigo[cb] = nv;
+      else delete item.despachadoPorCodigo[cb];
+    }
+    _pickupItemActivo = item.skuBase; // sigue activo aunque quede en 0
+    _afterPickupChange(item, prevDesp, parseFloat(item.solicitado) || 0);
+  }
+  function _pkckSetGranel(skuBase, valorRaw) {
+    const item = _pkckItemPorSku(skuBase);
+    if (!item) return;
+    const qty = parseFloat(String(valorRaw).replace(',', '.'));
+    if (isNaN(qty) || qty < 0) return;
+    const sol      = parseFloat(item.solicitado) || 0;
+    const prevDesp = parseFloat(item.despachado) || 0;
+    const cb = _pkckCodigoDe(item);
+    // Granel: el input SETEA el total pesado (no acumula). 1 código domina.
+    item._ultimoCb = cb;
+    item.despachado = qty;
+    item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+    item.despachadoPorCodigo[cb] = qty;
+    _pickupItemActivo = item.skuBase;
+    _afterPickupChange(item, prevDesp, sol);
   }
 
   // ¿Todos los items del pickup están al 100%?
@@ -8977,6 +9088,11 @@ const DespachoView = (() => {
     const cont = document.getElementById('despPickChecklist');
     if (!cont || !_pickupActivo) return;
     const items = _pickupActivo.items || [];
+    // Si el item activo ya no pertenece a este pickup (cambió de pickup,
+    // se cerró, etc.) → limpiar para que no queden controles huérfanos.
+    if (_pickupItemActivo && !items.some(it => String(it.skuBase) === String(_pickupItemActivo))) {
+      _pickupItemActivo = null;
+    }
     // Stock cache indexado por codigoProducto Y idProducto (un row puede
     // ser accedido por cualquiera de los dos).
     const stockMap = {};
@@ -9061,8 +9177,36 @@ const DespachoView = (() => {
       const kgBadge = esKg
         ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800;letter-spacing:.04em" title="Producto a granel · despacho por peso">⚖ GRANEL · ${unidadLbl}</span>`
         : '';
+      // ── Controles: SOLO el item activo (último escaneado) los muestra ──
+      // El resto los oculta para que el operador no edite por error otro
+      // producto. Granel → input decimal con focus. Normal → botones +/-.
+      const esActivo = _pickupItemActivo && String(_pickupItemActivo) === String(it.skuBase);
+      const skuAttr  = escAttr(it.skuBase);
+      let ctrlsHtml = '';
+      if (esActivo) {
+        if (esKg) {
+          ctrlsHtml = `
+          <div class="pkck-ctrls">
+            <span class="pkck-ctrl-lbl">Peso despachado:</span>
+            <input type="number" inputmode="decimal" step="0.001" min="0"
+                   class="pkck-ctrl-granel" value="${fmt(desp,3)}"
+                   onchange="DespachoView.pkckSetGranel('${skuAttr}', this.value)"
+                   onkeydown="if(event.key==='Enter'){this.blur();}">
+            <span class="pkck-ctrl-unit">${unidadLbl}</span>
+          </div>`;
+        } else {
+          ctrlsHtml = `
+          <div class="pkck-ctrls">
+            <button class="pkck-ctrl-btn pkck-ctrl-menos" ${desp <= 0 ? 'disabled' : ''}
+                    onclick="DespachoView.pkckMenos('${skuAttr}')">−</button>
+            <span class="pkck-ctrl-val">${desp}</span>
+            <button class="pkck-ctrl-btn pkck-ctrl-mas"
+                    onclick="DespachoView.pkckMas('${skuAttr}')">+</button>
+          </div>`;
+        }
+      }
       return `
-        <div class="pkck-card ${cls} ${flash}" data-sku="${escAttr(it.skuBase)}">
+        <div class="pkck-card ${cls} ${flash} ${esActivo ? 'is-activo' : ''}" data-sku="${skuAttr}">
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
@@ -9078,6 +9222,7 @@ const DespachoView = (() => {
             <div class="pkck-bar-fill" style="width:${pct}%"></div>
             ${enProg ? '<div class="pkck-bar-shimmer"></div>' : ''}
           </div>
+          ${ctrlsHtml}
           <div class="pkck-check-overlay">✓</div>
         </div>`;
     }).join('') || `<div class="text-center text-slate-500 text-sm py-6">Sin coincidencias para "${escHtml(q)}"</div>`;
@@ -9742,7 +9887,8 @@ const DespachoView = (() => {
            badgeUpdate, startPoll,
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
-           soltarPickupActivo, pickupSetSearch, pickupSetSort };
+           soltarPickupActivo, pickupSetSearch, pickupSetSort,
+           pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel };
 })();
 
 // ════════════════════════════════════════════════

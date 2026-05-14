@@ -111,6 +111,17 @@ function _clasificarDetallesPorPickup(g, dets) {
     // del pickup acepta cualquiera de los códigos del array codigosOriginales,
     // pero a veces el pickup contiene idProducto IDPRO… mezclado).
     if (it.skuBase) codToItem[String(it.skuBase).trim().toUpperCase()] = { item: it, idx: idx };
+    // ⚡ FIX: incluir los códigos FÍSICOS realmente escaneados, que viven en
+    // despachadoPorCodigo (ej. 'WHANEODO250GR': 6). codigosOriginales viene
+    // de MosExpress con códigos de catálogo MOS, pero el operador WH escanea
+    // códigos internos del almacén que NO están ahí → sin esto, los detalles
+    // de la guía no matcheaban y caían como "no despachado" (bug 2/17).
+    if (it.despachadoPorCodigo && typeof it.despachadoPorCodigo === 'object') {
+      Object.keys(it.despachadoPorCodigo).forEach(function(c) {
+        if (!c) return;
+        codToItem[String(c).trim().toUpperCase()] = { item: it, idx: idx };
+      });
+    }
   });
 
   // Acumular despachado por item del pickup (suma de cantidades de detalles

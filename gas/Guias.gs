@@ -1338,10 +1338,11 @@ function _cerrarPickupConDespachoImpl(params) {
   // Crear GUIA_SALIDA si hubo al menos un item despachado
   var idGuia = null;
   if (huboDespacho) {
-    // Observación estructurada — el frontend puede parsear "[pickup:PCK-X]" para
-    // mostrar "Origen: 📦 Pickup X" y linkear de vuelta. No despachados van legibles.
-    var nota = '[pickup:' + idPickup + '] Pickup ' + idPickup +
-               (noDespachados.length ? ' · sin despachar: ' + noDespachados.join('; ') : '');
+    // Observación: SOLO la marca [pickup:PCK-X]. El ticket detecta esa marca
+    // y reconstruye las 3 secciones (despachado / extras / no despachado)
+    // leyendo la hoja PICKUPS. Antes acá se concatenaba la lista completa de
+    // "sin despachar" — redundante con la sección NO DESPACHADO del ticket.
+    var nota = '[pickup:' + idPickup + ']';
     var guiaRes = crearDespachoRapido({
       tipo:     'SALIDA_ZONA',
       idZona:   pickup.idZona,
