@@ -202,9 +202,16 @@ function imprimirTicketGuia(params) {
   var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
   if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
 
+  // printerIdOverride: lo manda el modal de selección de impresora (admin/
+  // master eligió una impresora distinta a la del almacén). Sin override
+  // → impresora TICKET de ALMACEN como siempre.
   var printerId;
-  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
-  catch(e) { return { ok: false, error: e.message }; }
+  if (params.printerIdOverride) {
+    printerId = String(params.printerIdOverride).trim();
+  } else {
+    try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+    catch(e) { return { ok: false, error: e.message }; }
+  }
 
   // ── Datos ────────────────────────────────────────────────────
   var guias = _sheetToObjects(getSheet('GUIAS'));
@@ -510,14 +517,19 @@ function imprimirTicketGuia(params) {
                 'para ver el detalle al instante');
   }
 
-  // ── BLOQUE 2: PREINGRESO (solo si la guía proviene de uno) ─────────
+  // ── BLOQUE PREINGRESO (solo si la guía proviene de uno) ───────────
+  // Va ARRIBA de la guía: redirigimos las escrituras (b1/bStr/bLn/_imprimirQR
+  // pushean a la variable B del scope) a un buffer aparte `Bpre`, y al final
+  // lo anteponemos al ticket de la guía. Antes el preingreso se imprimía
+  // debajo de la guía; ahora va primero.
+  var Bpre = [];
+  var _Bmain = B;
+  B = Bpre;
   if (g.idPreingreso) {
     try {
       var preRows = _sheetToObjects(getSheet('PREINGRESOS'));
       var pi      = preRows.find(function(x) { return x.idPreingreso === g.idPreingreso; });
       if (pi) {
-        // Espacio entre bloques (~2cm para corte manual)
-        b1(0x1b); b1(0x4a); b1(80);   // ~1cm
 
         // Header: PREINGRESO
         b1(0x1b); b1(0x61); b1(0x01);
@@ -640,6 +652,12 @@ function imprimirTicketGuia(params) {
         }
       }
     } catch(e) {}
+  }
+  // Restaurar el buffer principal (la guía) y anteponer el preingreso si
+  // hubo. Separador de ~1cm entre el preingreso (arriba) y la guía (abajo).
+  B = _Bmain;
+  if (Bpre.length) {
+    B = Bpre.concat([0x1b, 0x4a, 60]).concat(_Bmain);
   }
 
   // Feed + corte
@@ -1271,8 +1289,12 @@ function imprimirCargadoresDia(params) {
   if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
 
   var printerId;
-  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
-  catch(e) { return { ok: false, error: e.message }; }
+  if (params.printerIdOverride) {
+    printerId = String(params.printerIdOverride).trim();
+  } else {
+    try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+    catch(e) { return { ok: false, error: e.message }; }
+  }
 
   // Etiqueta de fecha amigable
   var fechaLabel = d.fecha;

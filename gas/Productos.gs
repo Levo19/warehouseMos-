@@ -379,7 +379,9 @@ function registrarProductoNuevo(params) {
     var qty = parseFloat(params.cantidad) || 0;
     _notificarMOS(
       '🆕 Producto nuevo pendiente',
-      descCorta + ' · ' + qty + ' uds · ' + (params.usuario || 'Operador')
+      descCorta + ' · ' + qty + ' uds · ' + (params.usuario || 'Operador'),
+      params.usuario || null,
+      'WH_PRODUCTO_NUEVO'
     );
   } catch(eP) { Logger.log('Push PN nuevo: ' + eP.message); }
 
@@ -620,10 +622,15 @@ function imprimirHistorialStock(params) {
   var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
   if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
 
-  // Siempre resuelve la impresora TICKET de ALMACEN desde MOS — no depende del frontend
+  // printerIdOverride: el modal de selección (admin/master) puede mandar a
+  // otra impresora del ecosistema. Sin override → TICKET de ALMACEN.
   var printerId;
-  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
-  catch(e) { return { ok: false, error: e.message }; }
+  if (params.printerIdOverride) {
+    printerId = String(params.printerIdOverride).trim();
+  } else {
+    try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+    catch(e) { return { ok: false, error: e.message }; }
+  }
 
   var tz     = Session.getScriptTimeZone();
   var ahora  = Utilities.formatDate(new Date(), tz, 'dd/MM/yyyy HH:mm:ss');
@@ -734,7 +741,7 @@ function registrarMerma(params) {
     var sub    = (params.codigoProducto || '?') + ' · ' + cant + ' uds · ' +
                  (params.responsable || params.origen || 'ALMACEN') +
                  ' · por ' + (params.usuario || 'operador');
-    _notificarMOS(titulo, sub);
+    _notificarMOS(titulo, sub, params.usuario || null, 'WH_MERMA_REGISTRADA');
   } catch(eP) { Logger.log('Push merma: ' + eP.message); }
 
   return { ok: true, data: { idMerma: id, fotoUrl: fotoUrl } };
@@ -945,7 +952,8 @@ function _cerrarMermasDeGuia(idGuia, detalles) {
     }, 0);
     var nProds = (detalles || []).length;
     _notificarMOS('🗑 Desecho de mermas',
-      marcadas + ' merma(s) · ' + nProds + ' producto(s) · ' + totalUds + ' unid · guía ' + idGuia);
+      marcadas + ' merma(s) · ' + nProds + ' producto(s) · ' + totalUds + ' unid · guía ' + idGuia,
+      null, 'WH_MERMA_DESECHO');
   } catch(eP) { Logger.log('Push desecho: ' + eP.message); }
 }
 
@@ -1225,7 +1233,9 @@ function crearPreingreso(params) {
   try {
     _notificarMOS(
       '📦 Nuevo preingreso',
-      (params.usuario || 'Operador') + ' · S/ ' + (parseFloat(params.monto) || 0).toFixed(2)
+      (params.usuario || 'Operador') + ' · S/ ' + (parseFloat(params.monto) || 0).toFixed(2),
+      params.usuario || null,
+      'WH_PREINGRESO'
     );
   } catch(eP) { Logger.log('Push preingreso: ' + eP.message); }
 
@@ -1573,9 +1583,15 @@ function imprimirMembrete(params) {
   var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
   if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
 
+  // printerIdOverride: el modal de selección (admin/master) puede mandar a
+  // otra impresora del ecosistema. Sin override → TICKET de ALMACEN.
   var printerId;
-  try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
-  catch(e) { return { ok: false, error: e.message }; }
+  if (params.printerIdOverride) {
+    printerId = String(params.printerIdOverride).trim();
+  } else {
+    try { printerId = getPrinterNodeId('TICKET', 'ALMACEN'); }
+    catch(e) { return { ok: false, error: e.message }; }
+  }
 
   // ── Producto ────────────────────────────────────────────────
   var productos = _sheetToObjects(getProductosSheet());

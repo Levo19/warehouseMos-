@@ -1240,6 +1240,79 @@
     .pkck-modal-btn-ghost {
       background:rgba(71,85,105,.3);color:#cbd5e1;border:1px solid rgba(71,85,105,.5);
     }
+
+    /* ── SELECTOR DE IMPRESORA (admin/master) ───────────────────── */
+    .selimp-overlay {
+      display:none;position:fixed;inset:0;z-index:9990;
+      background:rgba(2,6,23,.78);backdrop-filter:blur(6px);
+      align-items:flex-end;justify-content:center;
+      opacity:0;transition:opacity .25s ease;
+    }
+    .selimp-overlay.is-open { opacity:1; }
+    .selimp-modal {
+      width:100%;max-width:480px;max-height:82vh;
+      background:linear-gradient(160deg,#1e293b,#0f172a);
+      border:1px solid rgba(99,102,241,.4);
+      border-radius:22px 22px 0 0;
+      box-shadow:0 -10px 40px -8px rgba(0,0,0,.6);
+      display:flex;flex-direction:column;overflow:hidden;
+      transform:translateY(40px);transition:transform .3s cubic-bezier(.4,0,.2,1);
+    }
+    .selimp-overlay.is-open .selimp-modal { transform:translateY(0); }
+    .selimp-header {
+      display:flex;align-items:center;gap:12px;padding:16px 16px 14px;
+      border-bottom:1px solid rgba(51,65,85,.6);
+    }
+    .selimp-header-ico {
+      font-size:26px;width:46px;height:46px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;border-radius:13px;
+      background:linear-gradient(135deg,rgba(99,102,241,.25),rgba(99,102,241,.1));
+      border:1px solid rgba(99,102,241,.45);
+    }
+    .selimp-header-title { font-size:1.05em;font-weight:900;color:#f1f5f9;line-height:1.1; }
+    .selimp-header-sub { font-size:.74em;color:#94a3b8;margin-top:2px; }
+    .selimp-close {
+      margin-left:auto;width:34px;height:34px;flex-shrink:0;border-radius:10px;
+      background:rgba(71,85,105,.3);border:1px solid rgba(71,85,105,.5);
+      color:#cbd5e1;font-size:16px;font-weight:900;cursor:pointer;
+    }
+    .selimp-close:active { transform:scale(.9); }
+    .selimp-lista {
+      padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
+    }
+    .selimp-card {
+      display:flex;align-items:center;gap:12px;width:100%;text-align:left;
+      padding:13px 14px;border-radius:14px;cursor:pointer;
+      background:rgba(15,23,42,.7);border:1.5px solid rgba(51,65,85,.6);
+      transition:transform .12s ease,border-color .2s ease,background .2s ease;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .selimp-card:active { transform:scale(.97); }
+    .selimp-card:hover { border-color:rgba(99,102,241,.6);background:rgba(30,27,75,.5); }
+    .selimp-default {
+      border-color:rgba(16,185,129,.5);
+      background:linear-gradient(135deg,rgba(6,78,59,.4),rgba(15,23,42,.7));
+    }
+    .selimp-card.is-enuso { border-color:rgba(16,185,129,.55); }
+    .selimp-ico {
+      font-size:22px;width:42px;height:42px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;border-radius:11px;
+      background:rgba(51,65,85,.4);
+    }
+    .selimp-info { flex:1;min-width:0; }
+    .selimp-nombre {
+      font-size:.92em;font-weight:800;color:#f1f5f9;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .selimp-meta { font-size:.7em;color:#94a3b8;margin-top:2px; }
+    .selimp-loading, .selimp-empty, .selimp-err {
+      text-align:center;padding:24px 12px;font-size:.82em;color:#64748b;
+    }
+    .selimp-err { color:#fca5a5; }
+    .selimp-foot {
+      padding:10px 16px 14px;font-size:.66em;color:#64748b;text-align:center;
+      border-top:1px solid rgba(51,65,85,.4);
+    }
     .desp-pick-dot {
       position:absolute;top:-5px;right:-5px;
       width:10px;height:10px;border-radius:50%;
@@ -3295,6 +3368,26 @@
       <button id="pkckModalSobreCancel" class="pkck-modal-btn pkck-modal-btn-ghost">↩ Deshacer</button>
       <button id="pkckModalSobreOk"     class="pkck-modal-btn pkck-modal-btn-warn">Está bien · sumar 1</button>
     </div>
+  </div>
+</div>
+
+<!-- ── SELECTOR DE IMPRESORA (admin/master) ──────────────────────
+     Solo aparece para admin/master en WH. Permite elegir cualquier
+     impresora activa del ecosistema antes de mandar a imprimir. -->
+<div id="modalSelImpresora" class="selimp-overlay">
+  <div class="selimp-modal">
+    <div class="selimp-header">
+      <span class="selimp-header-ico">🖨️</span>
+      <div>
+        <p class="selimp-header-title">Elegir impresora</p>
+        <p class="selimp-header-sub" id="selImpresoraTitulo">Imprimir</p>
+      </div>
+      <button class="selimp-close" onclick="PrintHub.cancelar()">✕</button>
+    </div>
+    <div class="selimp-lista" id="selImpresoraLista">
+      <div class="selimp-loading">⏳ Cargando impresoras...</div>
+    </div>
+    <p class="selimp-foot">Eres admin · puedes mandar a cualquier impresora del ecosistema</p>
   </div>
 </div>
 

@@ -197,6 +197,7 @@ function _route(method, e) {
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
+      case 'getImpresorasEcosistema': return getImpresorasEcosistema();
       case 'getAlertasStock':     return getAlertasStock(params);
       case 'marcarAlertaRevisada':return marcarAlertaRevisada(params);
       case 'aceptarTeoricoAlerta':return aceptarTeoricoAlerta(params);
@@ -411,6 +412,72 @@ function getPrinterNodeId(tipo, idZona) {
     'No hay impresora tipo ' + tipo + (idZona ? ' zona ' + idZona : '') + ' activa en MOS.'
   );
   return imp.printNodeId;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// getImpresorasEcosistema — lista TODAS las impresoras activas del
+// ecosistema (hoja IMPRESORAS de MOS) y marca cuáles están "en uso"
+// ahora mismo (tienen una caja ME abierta apuntando a ese printNodeId).
+// La usa el modal de selección de impresora para admin/master en WH.
+// ════════════════════════════════════════════════════════════════════
+function getImpresorasEcosistema() {
+  try {
+    var sheet = _getMosSS().getSheetByName('IMPRESORAS');
+    if (!sheet) return { ok: false, error: 'Hoja IMPRESORAS no encontrada en MOS.' };
+    var rows = _sheetToObjects(sheet).filter(function(r) {
+      return _esActivo(r.activo) && String(r.printNodeId || '').trim() !== '';
+    });
+
+    // Set de printNodeId que tienen una caja ME ABIERTA ahora mismo.
+    var enUsoSet = {};
+    try {
+      var cajasSh = _getMosExpressSS().getSheetByName('CAJAS');
+      if (cajasSh) {
+        _sheetToObjects(cajasSh).forEach(function(c) {
+          if (String(c.Estado || '').trim().toUpperCase() === 'ABIERTA' && c.PrintNode_ID) {
+            enUsoSet[String(c.PrintNode_ID).trim()] = String(c.Vendedor || c.Estacion || '').trim();
+          }
+        });
+      }
+    } catch(eC) { /* ME no conectado — todas quedan sin badge "en uso" */ }
+
+    var lista = rows.map(function(r) {
+      var pid = String(r.printNodeId).trim();
+      // Nombre legible: usa r.nombre si existe, sino arma uno con tipo+zona
+      var nombre = String(r.nombre || r.descripcion || '').trim();
+      if (!nombre) {
+        nombre = String(r.tipo || 'Impresora') +
+                 (r.idZona ? ' · ' + r.idZona : '') +
+                 (r.idEstacion ? ' · ' + r.idEstacion : '');
+      }
+      var app = String(r.appOrigen || '').toLowerCase();
+      var ubicacion = app.indexOf('warehouse') >= 0 ? 'Almacén'
+                    : app.indexOf('express') >= 0   ? 'MosExpress'
+                    : (r.idZona || r.appOrigen || '');
+      return {
+        printNodeId: pid,
+        nombre:      nombre,
+        tipo:        String(r.tipo || ''),
+        idZona:      String(r.idZona || ''),
+        idEstacion:  String(r.idEstacion || ''),
+        app:         app,
+        ubicacion:   ubicacion,
+        enUso:       !!enUsoSet[pid],
+        enUsoPor:    enUsoSet[pid] || ''
+      };
+    });
+
+    // Ordenar: en uso primero, luego almacén, luego el resto
+    lista.sort(function(a, b) {
+      if (a.enUso !== b.enUso) return a.enUso ? -1 : 1;
+      if (a.ubicacion !== b.ubicacion) return String(a.ubicacion).localeCompare(String(b.ubicacion));
+      return String(a.nombre).localeCompare(String(b.nombre));
+    });
+
+    return { ok: true, data: lista };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // ============================================================

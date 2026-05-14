@@ -6552,10 +6552,11 @@ const GuiasView = (() => {
     const base       = location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '');
     const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
     vibrate(10);
-    toast('Enviando a impresora...', 'ok', 2000);
-    API.imprimirTicketGuia({ idGuia, reporteUrl })
+    // PrintHub: admin/master ve el selector de impresora; usuario normal
+    // imprime directo en la del almacén.
+    PrintHub.imprimir('imprimirTicketGuia', { idGuia, reporteUrl }, 'Guía ' + idGuia)
       .then(res => {
-        if (!res.ok) toast('Error al imprimir: ' + (res.error || ''), 'warn', 4000);
+        if (res && res.ok === false) toast('Error al imprimir: ' + (res.error || ''), 'warn', 4000);
       })
       .catch(() => toast('Error al imprimir', 'warn', 3000));
   }
@@ -7070,6 +7071,112 @@ const EnvasadorView = (() => {
 
   return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh };
 })();
+
+// ════════════════════════════════════════════════
+// PRINT HUB — selector de impresora para admin/master
+// ════════════════════════════════════════════════
+// Envuelve TODA impresión de WH (guías, membretes, historial, cargadores).
+//  - Usuario normal → imprime directo en la impresora del almacén.
+//  - Admin/master   → modal moderno para elegir cualquier impresora activa
+//    del ecosistema (puede estar físicamente en WH pero mandar a una caja).
+const PrintHub = (() => {
+  let _pendiente = null; // { apiMethod, params, resolve }
+
+  function _esAdminMaster() {
+    const r = String(window.WH_CONFIG?.rol || '').toUpperCase();
+    return r === 'MASTER' || r === 'ADMINISTRADOR';
+  }
+
+  // Punto de entrada único. apiMethod = nombre del método en API
+  // (ej. 'imprimirTicketGuia'). titulo = texto descriptivo para el modal.
+  function imprimir(apiMethod, params, titulo) {
+    params = params || {};
+    if (!_esAdminMaster()) {
+      // Usuario operativo → directo, sin modal
+      return API[apiMethod](params);
+    }
+    return new Promise((resolve) => {
+      _pendiente = { apiMethod, params, resolve };
+      const ov  = document.getElementById('modalSelImpresora');
+      const lst = document.getElementById('selImpresoraLista');
+      const tit = document.getElementById('selImpresoraTitulo');
+      if (tit) tit.textContent = titulo || 'Imprimir';
+      if (lst) lst.innerHTML = '<div class="selimp-loading">⏳ Cargando impresoras...</div>';
+      if (ov) { ov.style.display = 'flex'; requestAnimationFrame(() => ov.classList.add('is-open')); }
+      API.getImpresorasEcosistema().then(r => {
+        const imps = (r && r.ok && r.data) || [];
+        _renderLista(imps);
+      }).catch(() => {
+        if (lst) lst.innerHTML = '<div class="selimp-err">No se pudieron cargar las impresoras. Toca "Almacén" para usar la de siempre.</div>' +
+          '<button class="selimp-card selimp-default" onclick="PrintHub.elegir(\'\')"><div class="selimp-ico">🏭</div><div class="selimp-info"><div class="selimp-nombre">Impresora del Almacén</div><div class="selimp-meta">Por defecto</div></div></button>';
+      });
+    });
+  }
+
+  function _renderLista(imps) {
+    const lst = document.getElementById('selImpresoraLista');
+    if (!lst) return;
+    let html = `
+      <button class="selimp-card selimp-default" onclick="PrintHub.elegir('')">
+        <div class="selimp-ico">🏭</div>
+        <div class="selimp-info">
+          <div class="selimp-nombre">Impresora del Almacén</div>
+          <div class="selimp-meta">Por defecto · donde estás ahora</div>
+        </div>
+      </button>`;
+    if (!imps.length) {
+      html += '<div class="selimp-empty">No hay otras impresoras activas registradas en el ecosistema</div>';
+    } else {
+      html += imps.map(i => {
+        const ico = String(i.app || '').indexOf('express') >= 0 ? '🛒' : '🏭';
+        const enUso = i.enUso
+          ? ` · 🟢 en uso${i.enUsoPor ? ' (' + escHtml(i.enUsoPor) + ')' : ''}`
+          : '';
+        return `
+        <button class="selimp-card ${i.enUso ? 'is-enuso' : ''}" onclick="PrintHub.elegir('${escAttr(i.printNodeId)}')">
+          <div class="selimp-ico">${ico}</div>
+          <div class="selimp-info">
+            <div class="selimp-nombre">${escHtml(i.nombre)}</div>
+            <div class="selimp-meta">${escHtml(i.ubicacion || '')}${enUso}</div>
+          </div>
+        </button>`;
+      }).join('');
+    }
+    lst.innerHTML = html;
+  }
+
+  function elegir(printerIdOverride) {
+    if (!_pendiente) return;
+    const { apiMethod, params, resolve } = _pendiente;
+    _cerrar();
+    const finalParams = printerIdOverride
+      ? Object.assign({}, params, { printerIdOverride: printerIdOverride })
+      : params;
+    if (typeof toast === 'function') toast('Enviando a impresora...', 'ok', 2000);
+    try {
+      const p = API[apiMethod](finalParams);
+      resolve(p);
+    } catch(e) { resolve(Promise.reject(e)); }
+  }
+
+  function cancelar() {
+    const pend = _pendiente;
+    _cerrar();
+    if (pend) pend.resolve(null);
+  }
+
+  function _cerrar() {
+    const ov = document.getElementById('modalSelImpresora');
+    if (ov) {
+      ov.classList.remove('is-open');
+      setTimeout(() => { ov.style.display = 'none'; }, 260);
+    }
+    _pendiente = null;
+  }
+
+  return { imprimir, elegir, cancelar };
+})();
+window.PrintHub = PrintHub;
 
 // ════════════════════════════════════════════════
 // DESPACHO RÁPIDO
@@ -11245,10 +11352,9 @@ const PreingresosView = (() => {
   async function imprimirCargadoresDia() {
     const fecha = _cargDiaState.fecha;
     if (!fecha) { toast('Abre primero el resumen del día', 'warn'); return; }
-    toast('Enviando a impresora…', 'info');
-    const res = await API.imprimirCargadoresDia({ fecha }).catch(() => null);
+    const res = await PrintHub.imprimir('imprimirCargadoresDia', { fecha }, 'Cargadores del día ' + fecha).catch(() => null);
     if (res && res.ok) toast('Ticket impreso', 'ok');
-    else                toast('Error: ' + (res?.error || 'No se pudo imprimir'), 'danger');
+    else if (res)      toast('Error: ' + (res?.error || 'No se pudo imprimir'), 'danger');
   }
 
   return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
@@ -12311,11 +12417,11 @@ const ProductosView = (() => {
     ];
     const texto = lines.join('\n');
 
-    const res = await API.imprimirHistorialStock({
+    const res = await PrintHub.imprimir('imprimirHistorialStock', {
       texto,
       codigoProducto: _histTarget.codigo
-    }).catch(() => ({ ok: false }));
-    toast(res.ok ? 'Impreso ✓' : 'No se pudo imprimir — revisa config GAS', res.ok ? 'ok' : 'warn');
+    }, 'Historial ' + (_histTarget.codigo || '')).catch(() => ({ ok: false }));
+    if (res) toast(res.ok ? 'Impreso ✓' : 'No se pudo imprimir — revisa config GAS', res.ok ? 'ok' : 'warn');
   }
 
   // ── Aplicar query activa ─────────────────────────
@@ -13303,19 +13409,18 @@ const ProductosView = (() => {
       }
     }, 2000);
 
-    // Toast optimista al instante
-    if (typeof toast === 'function') toast('🖨 Imprimiendo membrete…', 'info', 1500);
-
     // Mandar todos los codigoBarra al GAS (canónico + equivalentes) si están disponibles
     const grupo = _grupos.find(gr => gr.skuBase === skuBase);
     const barcodes = grupo
       ? grupo.children.map(c => String(c.codigoBarra || '')).filter(Boolean)
       : [];
 
-    API.imprimirMembrete({
+    // PrintHub: admin/master ve el selector de impresora; usuario normal directo.
+    PrintHub.imprimir('imprimirMembrete', {
       idProducto: idProducto || skuBase,
       barcodes: barcodes.length ? JSON.stringify(barcodes) : ''
-    }).then(res => {
+    }, 'Membrete ' + (skuBase || idProducto || '')).then(res => {
+      if (res === null) return; // admin canceló el modal
       if (res && res.ok) {
         if (typeof toast === 'function') toast('✓ Membrete enviado a impresora', 'ok', 1800);
         if (typeof SoundFX !== 'undefined' && SoundFX.savedTick) SoundFX.savedTick();

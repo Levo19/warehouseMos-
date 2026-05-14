@@ -228,6 +228,7 @@ const API = (() => {
     imprimirMembrete:   (p)      => post({ action: 'imprimirMembrete', ...p }),
     imprimirTicketGuia: (p)      => post({ action: 'imprimirTicketGuia', ...p }),
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
+    getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
     imprimirCargadoresDia:(p)    => post({ action: 'imprimirCargadoresDia', ...p }),
     getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),
