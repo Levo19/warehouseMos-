@@ -7334,173 +7334,237 @@ const EnvasadosView = (() => {
   }
 
   // ────────────────────────────────────────────────────────────
-  // AUTH ADMIN para editar/anular envasados
+  // AUTH ADMIN para editar/anular envasados — flow de 2 modales
   // ────────────────────────────────────────────────────────────
-  // Misma clave que para reabrir guías: ESTACIONES.ALMACEN.adminPin
-  // (8 dígitos). Se valida en backend con _requireAdmin. Si el operador
-  // marca "Recordar 30 min", se cachea localmente para que admin no
-  // tenga que retipear durante una tanda de correcciones.
-  const ENV_ADMIN_REMEMBER_KEY = 'wh_env_admin_until';
-  const ENV_ADMIN_CLAVE_KEY    = 'wh_env_admin_clave';
-  let _envAdminCtx = null;  // { modo: 'editar'|'anular', idEnvasado, descripcion, udsActuales }
+  // Patrón estilo ME (MosExpress):
+  //   1) Click "Editar" o "Anular" → abre modal "Llamar al admin"
+  //      (solo clave 8 dígitos). El operador NO conoce esta clave.
+  //   2) Admin viene, ingresa clave → valida contra MOS.
+  //   3) Si OK → abre modal de la operación (cantidad/motivo).
+  //   4) Operador (o admin) completa los datos → backend ejecuta
+  //      revalidando la clave (defensa en profundidad).
+  //
+  // Sin "recordar 30 min": cada operación pide autorización fresca,
+  // garantía de que el admin esté presente para cada edición/anulación.
+  let _envAuthCtx = null;   // { modo, idEnvasado, descripcion, udsActuales, cbDerivado, clave? }
 
-  function _adminClaveRecordada() {
-    const until = parseInt(localStorage.getItem(ENV_ADMIN_REMEMBER_KEY) || '0');
-    if (Date.now() > until) {
-      localStorage.removeItem(ENV_ADMIN_REMEMBER_KEY);
-      localStorage.removeItem(ENV_ADMIN_CLAVE_KEY);
-      return null;
-    }
-    return localStorage.getItem(ENV_ADMIN_CLAVE_KEY);
-  }
-
-  function _abrirModalAdmin(modo, idEnvasado) {
+  // PASO 1 — abrir modal de autorización admin
+  function _abrirModalAuth(modo, idEnvasado) {
     const cache = OfflineManager.getEnvasadosCache();
     const env = cache.find(e => e.idEnvasado === idEnvasado);
     if (!env) { toast('Envasado no encontrado en caché local', 'warn'); return; }
-    // Resolver descripción legible
-    const prods = App.getProductosMaestro();
-    const prod  = prods.find(p => String(p.codigoBarra) === String(env.codigoProductoEnvasado));
-    const descripcion = prod ? prod.descripcion : (env.codigoProductoEnvasado || idEnvasado);
-    _envAdminCtx = {
+    const descripcion = env.descripcionProductoEnvasado
+                     || env.codigoProductoEnvasado
+                     || idEnvasado;
+    _envAuthCtx = {
       modo,
       idEnvasado,
       descripcion,
       udsActuales: parseFloat(env.unidadesProducidas) || 0,
-      cbDerivado:  String(env.codigoProductoEnvasado || '')
+      cbDerivado:  String(env.codigoProductoEnvasado || ''),
+      clave:       null
     };
-    document.getElementById('envAdminTitulo').textContent =
-      modo === 'editar' ? '✏ Editar cantidad' : '🚫 Anular envasado';
-    document.getElementById('envAdminProd').textContent = descripcion;
-    document.getElementById('envAdminCantActual').textContent =
-      `Cantidad registrada: ${_envAdminCtx.udsActuales} uds`;
-    document.getElementById('envAdminCantRow').classList.toggle('hidden', modo !== 'editar');
-    document.getElementById('envAdminCant').value = modo === 'editar' ? _envAdminCtx.udsActuales : '';
-    document.getElementById('envAdminDelta').textContent = '';
-    document.getElementById('envAdminMotivo').value = '';
-    document.getElementById('envAdminClave').value = '';
-    document.getElementById('envAdminRecordar').checked = false;
-    document.getElementById('btnEnvAdminConfirmar').textContent =
-      modo === 'editar' ? 'Aplicar cambio' : 'Confirmar anulación';
-    document.getElementById('overlayEnvAdmin').style.display = 'block';
-    document.getElementById('sheetEnvAdmin').classList.add('open');
+    document.getElementById('envAuthSub').textContent =
+      modo === 'editar'
+        ? 'Para EDITAR la cantidad, el admin debe ingresar su clave.'
+        : 'Para ANULAR este envasado, el admin debe ingresar su clave.';
+    document.getElementById('envAuthProd').textContent = descripcion;
+    document.getElementById('envAuthCantActual').textContent =
+      `Cantidad registrada: ${_envAuthCtx.udsActuales} uds`;
+    document.getElementById('envAuthClave').value = '';
+    document.getElementById('envAuthErr').textContent = '';
+    document.getElementById('overlayEnvAuth').style.display = 'block';
+    document.getElementById('sheetEnvAuth').classList.add('open');
+    setTimeout(() => document.getElementById('envAuthClave').focus(), 200);
 
-    // Si hay clave recordada, prellenarla
-    const rec = _adminClaveRecordada();
-    if (rec) document.getElementById('envAdminClave').value = rec;
+    // Enter en el input dispara la validación
+    document.getElementById('envAuthClave').onkeydown = (ev) => {
+      if (ev.key === 'Enter') validarAuth();
+    };
+  }
 
-    // Listener live para mostrar delta al cambiar cantidad
-    if (modo === 'editar') {
-      const inp = document.getElementById('envAdminCant');
+  function cerrarAuth() {
+    document.getElementById('overlayEnvAuth').style.display = 'none';
+    document.getElementById('sheetEnvAuth').classList.remove('open');
+    _envAuthCtx = null;
+  }
+
+  function pedirAuthEditar(idEnvasado) { _abrirModalAuth('editar', idEnvasado); }
+  function pedirAuthAnular(idEnvasado) { _abrirModalAuth('anular', idEnvasado); }
+
+  // Helpers de overlay loading dentro de los bottom-sheets
+  function _toggleLoading(sheetId, loadingId, on, opts) {
+    const sheet = document.getElementById(sheetId);
+    const ovl   = document.getElementById(loadingId);
+    if (!sheet || !ovl) return;
+    if (on) {
+      if (opts && opts.title) {
+        const t = ovl.querySelector('.sheet-loading-title');
+        if (t) t.innerHTML = opts.title + '<span class="sheet-loading-dots"></span>';
+      }
+      if (opts && opts.sub) {
+        const s = ovl.querySelector('.sheet-loading-sub');
+        if (s) s.textContent = opts.sub;
+      }
+      ovl.classList.add('is-on');
+      sheet.classList.add('is-processing');
+    } else {
+      ovl.classList.remove('is-on');
+      sheet.classList.remove('is-processing');
+    }
+  }
+
+  // Valida la clave contra MOS (via WH backend). Si ok, pasa al PASO 2.
+  async function validarAuth() {
+    if (!_envAuthCtx) return;
+    const clave = document.getElementById('envAuthClave').value.trim();
+    const errEl = document.getElementById('envAuthErr');
+    if (clave.length !== 8 || !/^\d+$/.test(clave)) {
+      errEl.textContent = 'La clave debe ser 8 dígitos numéricos';
+      return;
+    }
+    errEl.textContent = '';
+    _toggleLoading('sheetEnvAuth', 'envAuthLoading', true);
+    try {
+      const res = await API.verificarClaveAdmin({
+        clave,
+        accion: _envAuthCtx.modo === 'editar' ? 'EDITAR_ENVASADO' : 'ANULAR_ENVASADO',
+        refDocumento: _envAuthCtx.idEnvasado
+      });
+      _toggleLoading('sheetEnvAuth', 'envAuthLoading', false);
+      if (!res || !res.ok) {
+        errEl.textContent = '✗ ' + (res?.error || 'Clave incorrecta');
+        return;
+      }
+      // OK: guardar clave para revalidación en backend final + abrir PASO 2
+      _envAuthCtx.clave        = clave;
+      _envAuthCtx.validadoPor  = (res.data && res.data.validadoPor) || 'admin';
+      // Cerrar PASO 1 y abrir PASO 2
+      cerrarAuth();
+      _abrirModalAccion();
+    } catch(e) {
+      _toggleLoading('sheetEnvAuth', 'envAuthLoading', false);
+      errEl.textContent = '✗ Error de conexión: ' + (e.message || e);
+    }
+  }
+
+  // PASO 2 — modal con los detalles de la operación (post-auth)
+  function _abrirModalAccion() {
+    if (!_envAuthCtx) return;
+    const ctx = _envAuthCtx;
+    document.getElementById('envAccionTitulo').textContent =
+      ctx.modo === 'editar' ? '✏ Editar cantidad' : '🚫 Anular envasado';
+    document.getElementById('envAccionProd').textContent = ctx.descripcion;
+    document.getElementById('envAccionCantActual').textContent =
+      `Cantidad actual: ${ctx.udsActuales} uds`;
+    document.getElementById('envAccionCantRow').classList.toggle('hidden', ctx.modo !== 'editar');
+    document.getElementById('envAccionCant').value = ctx.modo === 'editar' ? ctx.udsActuales : '';
+    document.getElementById('envAccionDelta').textContent = '';
+    document.getElementById('envAccionMotivo').value = '';
+    document.getElementById('btnEnvAccionOk').textContent =
+      ctx.modo === 'editar' ? 'Aplicar cambio' : 'Confirmar anulación';
+    document.getElementById('overlayEnvAccion').style.display = 'block';
+    document.getElementById('sheetEnvAccion').classList.add('open');
+
+    if (ctx.modo === 'editar') {
+      const inp = document.getElementById('envAccionCant');
       inp.oninput = () => {
         const n = parseFloat(inp.value) || 0;
-        const d = n - _envAdminCtx.udsActuales;
-        const el = document.getElementById('envAdminDelta');
+        const d = n - ctx.udsActuales;
+        const el = document.getElementById('envAccionDelta');
         if (d === 0) { el.textContent = ''; return; }
         const signo = d > 0 ? '+' : '';
         el.textContent = `Cambio: ${signo}${d} uds`;
         el.style.color = d > 0 ? '#34d399' : '#f87171';
       };
-      setTimeout(() => document.getElementById('envAdminCant').focus(), 200);
+      setTimeout(() => inp.focus(), 200);
     } else {
-      setTimeout(() => document.getElementById('envAdminMotivo').focus(), 200);
+      setTimeout(() => document.getElementById('envAccionMotivo').focus(), 200);
     }
   }
 
-  function cerrarAuthAdmin() {
-    document.getElementById('overlayEnvAdmin').style.display = 'none';
-    document.getElementById('sheetEnvAdmin').classList.remove('open');
-    _envAdminCtx = null;
+  function cerrarAccion() {
+    document.getElementById('overlayEnvAccion').style.display = 'none';
+    document.getElementById('sheetEnvAccion').classList.remove('open');
+    _envAuthCtx = null;
   }
 
-  function pedirAuthEditar(idEnvasado) { _abrirModalAdmin('editar', idEnvasado); }
-  function pedirAuthAnular(idEnvasado) { _abrirModalAdmin('anular', idEnvasado); }
-
-  async function confirmarAuthAdmin() {
-    if (!_envAdminCtx) return;
-    const ctx    = _envAdminCtx;
-    const clave  = document.getElementById('envAdminClave').value.trim();
-    const motivo = document.getElementById('envAdminMotivo').value.trim();
-    const recordar = document.getElementById('envAdminRecordar').checked;
-    if (clave.length !== 8 || !/^\d+$/.test(clave)) {
-      toast('Clave admin debe ser 8 dígitos', 'warn');
+  async function confirmarAccion() {
+    if (!_envAuthCtx || !_envAuthCtx.clave) {
+      toast('Autorización vencida, volvé a iniciar', 'warn');
+      cerrarAccion();
       return;
     }
-    if (!motivo) {
-      toast('El motivo es obligatorio', 'warn');
-      return;
+    const ctx    = _envAuthCtx;
+    const motivo = document.getElementById('envAccionMotivo').value.trim();
+    if (!motivo) { toast('El motivo es obligatorio', 'warn'); return; }
+
+    // Validaciones tempranas (antes del overlay)
+    let nuevasUds = null;
+    if (ctx.modo === 'editar') {
+      nuevasUds = parseFloat(document.getElementById('envAccionCant').value);
+      if (!isFinite(nuevasUds) || nuevasUds < 0) {
+        toast('Cantidad inválida', 'warn'); return;
+      }
+      if (nuevasUds === ctx.udsActuales) {
+        toast('No hay cambio en la cantidad', 'warn'); return;
+      }
     }
 
-    const btn = document.getElementById('btnEnvAdminConfirmar');
-    btn.disabled = true;
-    btn.textContent = 'Procesando...';
+    // Activar overlay con mensaje contextual según la operación
+    const loadingTitle = ctx.modo === 'editar' ? 'Corrigiendo cantidad' : 'Anulando envasado';
+    const loadingSub   = ctx.modo === 'editar'
+      ? 'Ajustando stock base, stock derivado y guías de ingreso/salida'
+      : 'Revirtiendo stock y anulando detalles de guías';
+    _toggleLoading('sheetEnvAccion', 'envAccionLoading', true, { title: loadingTitle, sub: loadingSub });
 
     try {
+      let res;
       if (ctx.modo === 'editar') {
-        const nuevasUds = parseFloat(document.getElementById('envAdminCant').value);
-        if (!isFinite(nuevasUds) || nuevasUds < 0) {
-          toast('Cantidad inválida', 'warn'); btn.disabled = false; btn.textContent = 'Aplicar cambio'; return;
-        }
-        if (nuevasUds === ctx.udsActuales) {
-          toast('No hay cambio en la cantidad', 'warn'); btn.disabled = false; btn.textContent = 'Aplicar cambio'; return;
-        }
-        const res = await API.corregirUnidadesEnvasado({
-          idEnvasado:    ctx.idEnvasado,
+        res = await API.corregirUnidadesEnvasado({
+          idEnvasado:     ctx.idEnvasado,
           nuevasUnidades: nuevasUds,
           motivo,
-          usuario:       window.WH_CONFIG.usuario,
-          claveAdmin:    clave
+          usuario:        window.WH_CONFIG.usuario,
+          claveAdmin:     ctx.clave
         });
-        if (!res || !res.ok) {
-          toast('✗ ' + (res?.error || 'Error desconocido'), 'danger', 5000);
-          btn.disabled = false; btn.textContent = 'Aplicar cambio';
-          return;
-        }
-        if (recordar) {
-          localStorage.setItem(ENV_ADMIN_REMEMBER_KEY, String(Date.now() + 30 * 60 * 1000));
-          localStorage.setItem(ENV_ADMIN_CLAVE_KEY, clave);
-        }
-        cerrarAuthAdmin();
-        const d = res.data || {};
-        toast(`✓ Corregido · ${d.udsViejas}→${d.udsNuevas} uds`, 'ok', 5000);
-        _decirEnVoz(`Corregido. ${d.udsViejas} cambiado a ${d.udsNuevas} unidades de ${d.descripcion || ctx.descripcion}. Motivo: ${motivo}`);
-        // Refrescar lista desde backend (los detalles + stock ya están actualizados)
-        cargar();
-        OfflineManager.precargarOperacional(true).catch(() => {});
-
-      } else { // anular
-        const res = await API.anularEnvasadoConClave({
+      } else {
+        res = await API.anularEnvasadoConClave({
           idEnvasado: ctx.idEnvasado,
           motivo,
           usuario:    window.WH_CONFIG.usuario,
-          claveAdmin: clave
+          claveAdmin: ctx.clave
         });
-        if (!res || !res.ok) {
-          toast('✗ ' + (res?.error || 'Error desconocido'), 'danger', 5000);
-          btn.disabled = false; btn.textContent = 'Confirmar anulación';
-          return;
-        }
-        if (recordar) {
-          localStorage.setItem(ENV_ADMIN_REMEMBER_KEY, String(Date.now() + 30 * 60 * 1000));
-          localStorage.setItem(ENV_ADMIN_CLAVE_KEY, clave);
-        }
-        cerrarAuthAdmin();
-        const d = res.data || {};
-        toast(`✓ Anulado · ${d.udsAnuladas} uds revertidas`, 'ok', 5000);
-        _decirEnVoz(`${d.udsAnuladas} unidades anuladas de ${d.descripcion || ctx.descripcion}. Motivo: ${motivo}`);
-        cargar();
-        OfflineManager.precargarOperacional(true).catch(() => {});
       }
+
+      _toggleLoading('sheetEnvAccion', 'envAccionLoading', false);
+
+      if (!res || !res.ok) {
+        toast('✗ ' + (res?.error || 'Error desconocido'), 'danger', 5000);
+        return;
+      }
+
+      cerrarAccion();
+      const d = res.data || {};
+      if (ctx.modo === 'editar') {
+        toast(`✓ Corregido · ${d.udsViejas}→${d.udsNuevas} uds`, 'ok', 5000);
+        _decirEnVoz(`Corregido. ${d.udsViejas} cambiado a ${d.udsNuevas} unidades de ${d.descripcion || ctx.descripcion}`);
+      } else {
+        toast(`✓ Anulado · ${d.udsAnuladas} uds revertidas`, 'ok', 5000);
+        _decirEnVoz(`${d.udsAnuladas} unidades anuladas de ${d.descripcion || ctx.descripcion}`);
+      }
+      cargar();
+      OfflineManager.precargarOperacional(true).catch(() => {});
+
     } catch(e) {
+      _toggleLoading('sheetEnvAccion', 'envAccionLoading', false);
       toast('✗ Error de conexión: ' + (e.message || e), 'danger', 5000);
-      btn.disabled = false;
-      btn.textContent = ctx.modo === 'editar' ? 'Aplicar cambio' : 'Confirmar anulación';
     }
   }
 
   return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar, anular,
            filtrarDerivados, seleccionarDerivado, cambiarDerivado,
-           pedirAuthEditar, pedirAuthAnular, cerrarAuthAdmin, confirmarAuthAdmin,
+           pedirAuthEditar, pedirAuthAnular, cerrarAuth, validarAuth, cerrarAccion, confirmarAccion,
            _dispararDeshacer };
 })();
 

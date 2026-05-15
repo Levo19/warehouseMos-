@@ -621,6 +621,32 @@
                     border-radius:20px 20px 0 0;z-index:50;padding:16px;
                     transform:translateY(100%);transition:transform .3s ease;max-height:92vh;overflow-y:auto; }
     .bottom-sheet.open { transform:none; }
+    /* Overlay de carga DENTRO de un bottom-sheet (para operaciones en
+       proceso que no deben interrumpirse). Cubre todo el contenido del
+       sheet con backdrop blur + spinner moderno + mensaje contextual. */
+    .sheet-loading { position:absolute;inset:0;z-index:5;
+                     background:rgba(15,23,42,.93);backdrop-filter:blur(10px);
+                     border-radius:inherit;display:none;
+                     flex-direction:column;align-items:center;justify-content:center;
+                     padding:24px;text-align:center; }
+    .sheet-loading.is-on { display:flex; animation: sloadIn .2s ease; }
+    @keyframes sloadIn { from { opacity:0; } to { opacity:1; } }
+    .sheet-loading-spinner { width:56px;height:56px;border-radius:50%;
+                             border:4px solid rgba(99,102,241,.2);
+                             border-top-color:#6366f1;border-right-color:#a78bfa;
+                             animation: sloadSpin .8s linear infinite;
+                             margin-bottom:18px;box-shadow:0 0 24px rgba(99,102,241,.3); }
+    @keyframes sloadSpin { to { transform: rotate(360deg); } }
+    .sheet-loading-title { font-size:1rem;font-weight:800;color:#f1f5f9;margin-bottom:6px; }
+    .sheet-loading-sub   { font-size:.78rem;color:#94a3b8; }
+    .sheet-loading-dots::after {
+      content:'';display:inline-block;width:1em;text-align:left;
+      animation: sloadDots 1.4s steps(4, end) infinite;
+    }
+    @keyframes sloadDots { 0%{content:''} 25%{content:'.'} 50%{content:'..'} 75%{content:'...'} 100%{content:''} }
+    /* Sheet en modo procesando: bloquea TODOS los inputs y botones */
+    .bottom-sheet.is-processing { pointer-events:none; }
+    .bottom-sheet.is-processing .sheet-loading { pointer-events:auto; }
     /* Modal */
     .modal-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:60;display:none;
                      align-items:center;justify-content:center; }
@@ -6536,53 +6562,91 @@
 </div>
 
 <!-- ════════════════════════════════════════════════
-     SHEET: AUTH ADMIN PARA EDITAR/ANULAR ENVASADO
-     Pide clave 8 dígitos + motivo. La acción (edit/anular)
-     se resuelve por _envAdminCtx.modo en EnvasadosView.
+     PASO 1 — AUTORIZACIÓN ADMIN
+     Modal corto: pide clave 8 dígitos. Sin "recordar".
+     Cada operación requiere autorización fresca del admin presente.
 ═══════════════════════════════════════════════════ -->
-<div class="sheet-overlay" id="overlayEnvAdmin" onclick="EnvasadosView.cerrarAuthAdmin()"></div>
-<div class="bottom-sheet" id="sheetEnvAdmin" style="max-height:90vh">
+<div class="sheet-overlay" id="overlayEnvAuth" onclick="EnvasadosView.cerrarAuth()"></div>
+<div class="bottom-sheet" id="sheetEnvAuth" style="max-height:80vh">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <div class="flex items-center gap-2 mb-3">
-    <span class="text-2xl">🔒</span>
-    <p id="envAdminTitulo" class="font-bold text-base">Autorización admin</p>
+  <div class="flex items-center gap-2 mb-2">
+    <span class="text-3xl">📞</span>
+    <p class="font-bold text-base text-slate-100">Llamar al administrador</p>
+  </div>
+  <p id="envAuthSub" class="text-xs text-slate-400 mb-3">
+    Esta operación requiere autorización. Pedile al admin/master que ingrese su clave para continuar.
+  </p>
+
+  <div class="mb-3 p-3 rounded-lg" style="background:#1e293b;border:1px solid #334155;">
+    <p id="envAuthProd" class="text-sm font-semibold text-slate-100">—</p>
+    <p id="envAuthCantActual" class="text-xs text-slate-300 mt-0.5">—</p>
   </div>
 
-  <div id="envAdminInfo" class="mb-3 p-3 rounded-lg" style="background:#1e293b;border:1px solid #334155;">
-    <p class="text-xs text-slate-400 mb-1">Envasado seleccionado</p>
-    <p id="envAdminProd" class="text-sm font-semibold text-slate-100">—</p>
-    <p id="envAdminCantActual" class="text-xs text-slate-300 mt-0.5">—</p>
+  <div class="mb-3">
+    <label class="text-xs text-slate-400">Clave admin · 8 dígitos (4 globales + 4 PIN personal)</label>
+    <input id="envAuthClave" class="input mt-1 text-center font-mono text-lg tracking-widest"
+           type="password" inputmode="numeric" maxlength="8" placeholder="••••••••"
+           autocomplete="off"/>
+    <p id="envAuthErr" class="text-xs text-red-400 mt-1 min-h-[16px] text-center"></p>
   </div>
 
-  <!-- Solo en modo EDITAR: input de nueva cantidad -->
-  <div id="envAdminCantRow" class="mb-3 hidden">
+  <div class="flex gap-2">
+    <button onclick="EnvasadosView.cerrarAuth()" class="btn btn-outline flex-1">Cancelar</button>
+    <button id="btnEnvAuthOk" onclick="EnvasadosView.validarAuth()"
+            class="btn btn-primary flex-1">Autorizar</button>
+  </div>
+
+  <!-- Overlay de carga durante validación de clave -->
+  <div id="envAuthLoading" class="sheet-loading">
+    <div class="sheet-loading-spinner"></div>
+    <p class="sheet-loading-title">Validando con el servidor<span class="sheet-loading-dots"></span></p>
+    <p class="sheet-loading-sub">Verificando clave admin contra MOS</p>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     PASO 2 — DETALLES DE LA OPERACIÓN
+     Solo se abre tras autorización exitosa del admin.
+     Acá el operador (o el admin) completa los datos del cambio.
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayEnvAccion" onclick="EnvasadosView.cerrarAccion()"></div>
+<div class="bottom-sheet" id="sheetEnvAccion" style="max-height:90vh">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <div class="flex items-center justify-between mb-3">
+    <p id="envAccionTitulo" class="font-bold text-base text-slate-100">Operación</p>
+    <span class="text-[10px] tag-emerald">✓ Autorizado por admin</span>
+  </div>
+
+  <div class="mb-3 p-3 rounded-lg" style="background:#1e293b;border:1px solid #334155;">
+    <p id="envAccionProd" class="text-sm font-semibold text-slate-100">—</p>
+    <p id="envAccionCantActual" class="text-xs text-slate-300 mt-0.5">—</p>
+  </div>
+
+  <!-- Solo en modo EDITAR -->
+  <div id="envAccionCantRow" class="mb-3 hidden">
     <label class="text-xs text-slate-400">Nueva cantidad (unidades)</label>
-    <input id="envAdminCant" class="input mt-1 text-center font-bold text-2xl"
+    <input id="envAccionCant" class="input mt-1 text-center font-bold text-2xl"
            type="number" min="0" placeholder="0"/>
-    <p id="envAdminDelta" class="text-xs text-amber-400 mt-1 text-center"></p>
+    <p id="envAccionDelta" class="text-xs text-amber-400 mt-1 text-center"></p>
   </div>
 
   <div class="mb-3">
     <label class="text-xs text-slate-400">Motivo (obligatorio)</label>
-    <input id="envAdminMotivo" class="input mt-1" type="text"
+    <input id="envAccionMotivo" class="input mt-1" type="text"
            placeholder="Ej: operador tipeó mal, cantidad real menor..." maxlength="160"/>
   </div>
 
-  <div class="mb-3">
-    <label class="text-xs text-slate-400">Clave admin (8 dígitos)</label>
-    <input id="envAdminClave" class="input mt-1 text-center font-mono text-lg tracking-widest"
-           type="password" inputmode="numeric" maxlength="8" placeholder="••••••••"
-           autocomplete="off"/>
-    <label class="flex items-center gap-2 text-xs text-slate-400 mt-2 cursor-pointer">
-      <input id="envAdminRecordar" type="checkbox" class="w-3.5 h-3.5"/>
-      Recordar 30 minutos en este dispositivo
-    </label>
+  <div class="flex gap-2">
+    <button onclick="EnvasadosView.cerrarAccion()" class="btn btn-outline flex-1">Cancelar</button>
+    <button id="btnEnvAccionOk" onclick="EnvasadosView.confirmarAccion()"
+            class="btn btn-primary flex-1">Aplicar</button>
   </div>
 
-  <div class="flex gap-2">
-    <button onclick="EnvasadosView.cerrarAuthAdmin()" class="btn btn-outline flex-1">Cancelar</button>
-    <button id="btnEnvAdminConfirmar" onclick="EnvasadosView.confirmarAuthAdmin()"
-            class="btn btn-primary flex-1">Aplicar</button>
+  <!-- Overlay de carga durante aplicación de la operación -->
+  <div id="envAccionLoading" class="sheet-loading">
+    <div class="sheet-loading-spinner"></div>
+    <p id="envAccionLoadingTitle" class="sheet-loading-title">Procesando<span class="sheet-loading-dots"></span></p>
+    <p id="envAccionLoadingSub" class="sheet-loading-sub">No cierres esta ventana · ajustando stock y guías</p>
   </div>
 </div>
 
