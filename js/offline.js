@@ -207,6 +207,16 @@ const OfflineManager = (() => {
   }
 
   // ── Precarga operacional (guías, preingresos, stock, ajustes, auditorías) ──
+  // [Fix #2 v2.11.1] Flag global "subiendo fotos en background".
+  // Mientras esté en true, precargarOperacional() salta el refresh de
+  // preingresos para que la respuesta del backend (que aún no tiene las
+  // fotos asociadas porque están subiéndose) no pise el cache local con
+  // fotos vacías. Lo activa/desactiva PreingresosView durante el subir
+  // las fotos al Drive.
+  let _subiendoFotos = false;
+  function setSubiendoFotos(on) { _subiendoFotos = !!on; }
+  function isSubiendoFotos() { return _subiendoFotos; }
+
   async function precargarOperacional(forzar = false) {
     if (!navigator.onLine) return;
     if (_opLoading) return;
@@ -226,9 +236,44 @@ const OfflineManager = (() => {
         return JSON.stringify(newArr) !== JSON.stringify(old);
       }
 
+      // [Fix #1 v2.11.1] Merge-on-refresh para preingresos.
+      // Antes el polling sobrescribía las fotos del cache local con un
+      // valor vacío si el backend aún no había sincronizado la subida
+      // background. Resultado: el operador subía 8 fotos, esperaba unos
+      // segundos y veía la lista vacía aunque las fotos sí estaban en
+      // Drive. Ahora preservamos el campo `fotos` del cache local si la
+      // versión del backend lo trae vacío pero el local ya tenía algo.
+      function _mergePreingresos(neuvos, viejos) {
+        const oldMap = {};
+        (viejos || []).forEach(v => { oldMap[String(v.idPreingreso)] = v; });
+        return neuvos.map(n => {
+          const old = oldMap[String(n.idPreingreso)];
+          if (!old) return n;
+          // Preservar fotos si llegan vacías y locales tienen contenido.
+          // Mismo principio para fotosFileIds si se usara en el futuro.
+          const merged = { ...n };
+          if ((!merged.fotos || merged.fotos === '') && old.fotos) {
+            merged.fotos = old.fotos;
+            if (window.__WH_DEBUG_FOTOS) console.log('[Offline merge] preservé fotos de', n.idPreingreso, '→', old.fotos.substring(0, 60));
+          }
+          return merged;
+        });
+      }
+
       if (d.guias       != null) { if (_hayDiff(d.guias,       KEYS.GUIAS))        { guardar(KEYS.GUIAS,        d.guias);       changed.push('guias'); }       else guardar(KEYS.GUIAS, d.guias); }
       if (d.detalles    != null) { if (_hayDiff(d.detalles,    KEYS.GUIA_DETALLE)) { guardar(KEYS.GUIA_DETALLE, d.detalles);    changed.push('detalles'); }   else guardar(KEYS.GUIA_DETALLE, d.detalles); }
-      if (d.preingresos != null) { if (_hayDiff(d.preingresos, KEYS.PREINGRESOS))  { guardar(KEYS.PREINGRESOS,  d.preingresos); changed.push('preingresos'); } else guardar(KEYS.PREINGRESOS, d.preingresos); }
+      if (d.preingresos != null) {
+        // Si hay subida de fotos en curso, omitir refresh de preingresos
+        // (Fix #2). Si no, aplicar merge defensivo (Fix #1) y guardar.
+        if (_subiendoFotos) {
+          if (window.__WH_DEBUG_FOTOS) console.log('[Offline] skip refresh preingresos: subida en curso');
+        } else {
+          const viejos  = cargar(KEYS.PREINGRESOS) || [];
+          const merged  = _mergePreingresos(d.preingresos, viejos);
+          if (_hayDiff(merged, KEYS.PREINGRESOS)) { guardar(KEYS.PREINGRESOS, merged); changed.push('preingresos'); }
+          else                                    { guardar(KEYS.PREINGRESOS, merged); }
+        }
+      }
       if (d.stock       != null) { if (_hayDiff(d.stock,       KEYS.STOCK))        { guardar(KEYS.STOCK,        d.stock);       changed.push('stock'); }       else guardar(KEYS.STOCK, d.stock); }
       if (d.ajustes     != null) { if (_hayDiff(d.ajustes,     KEYS.AJUSTES))      { guardar(KEYS.AJUSTES,      d.ajustes);     changed.push('ajustes'); }     else guardar(KEYS.AJUSTES, d.ajustes); }
       if (d.auditorias  != null) { if (_hayDiff(d.auditorias,  KEYS.AUDITORIAS_C)) { guardar(KEYS.AUDITORIAS_C, d.auditorias);  changed.push('auditorias'); }  else guardar(KEYS.AUDITORIAS_C, d.auditorias); }
@@ -384,6 +429,7 @@ const OfflineManager = (() => {
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
+    setSubiendoFotos, isSubiendoFotos,
     estaOnline: () => navigator.onLine
   };
 })();

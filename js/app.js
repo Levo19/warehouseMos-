@@ -11973,23 +11973,75 @@ const PreingresosView = (() => {
     }
   }
 
+  // [Fix #3+5 v2.11.1] Subida resiliente + telemetría.
+  // Cambios respecto al flow anterior:
+  //   - Activa flag global "subiendo fotos" → precargarOperacional() omite
+  //     el refresh de preingresos mientras dura la subida (Fix #2).
+  //   - Después de CADA foto subida exitosamente, persiste el array
+  //     parcial en backend Y en cache local. Si la red se corta a mitad
+  //     de 8 fotos, las 5 primeras ya están en la hoja, no se pierden.
+  //   - Logs detallados en consola (visible con __WH_DEBUG_FOTOS = true)
+  //     para diagnosticar problemas de subida en producción.
+  //   - Toast más claro al final con cantidad subida vs total.
   async function _subirFotosEnBackground(idPreingreso, fotos) {
     if (!fotos.length) return;
-    const urls = [];
+    console.log('[Fotos] inicio subida idPre=' + idPreingreso + ' total=' + fotos.length);
+    try { OfflineManager.setSubiendoFotos(true); } catch(_){}
+    const urls    = [];
+    const fallidas = [];
     for (let i = 0; i < fotos.length; i++) {
+      const indice = i + 1;
       try {
+        console.log('[Fotos] subiendo ' + indice + '/' + fotos.length + '...');
         const { b64, mime } = await _prepararFoto(fotos[i].file);
-        const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: i + 1 });
-        if (up.ok && !up.offline && up.data?.url) urls.push(up.data.url);
-        else console.warn('[Fotos] Error foto', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
-      } catch(e) { console.warn('[Fotos]', i, e); }
+        const up = await API.subirFotoPreingreso({
+          idPreingreso, fotoBase64: b64, mimeType: mime, indice
+        });
+        if (up.ok && !up.offline && up.data?.url) {
+          urls.push(up.data.url);
+          console.log('[Fotos] ✓ ' + indice + ' subida · url=' + up.data.url.substring(0, 60));
+          // Persistir incrementalmente: backend + cache local. Si el
+          // operador cierra la app o la red se cae después de esta foto,
+          // las URLs acumuladas ya están seguras.
+          try {
+            const updRes = await API.actualizarFotosPreingreso({
+              idPreingreso, fotos: urls.join(',')
+            });
+            if (updRes?.ok) {
+              try { OfflineManager.patchPreingresosCache(idPreingreso, { fotos: urls.join(',') }); } catch(_){}
+              console.log('[Fotos] ✓ ' + indice + ' persistida en hoja + cache (' + urls.length + ' total)');
+            } else {
+              console.warn('[Fotos] ✗ actualizarFotosPreingreso falló:', updRes?.error);
+            }
+          } catch(eUpd) {
+            console.warn('[Fotos] ✗ actualizarFotosPreingreso threw:', eUpd?.message || eUpd);
+          }
+        } else {
+          fallidas.push(indice);
+          console.warn('[Fotos] ✗ foto ' + indice + ' sin URL:', up.error || (up.offline ? 'sin conexión (encolada)' : 'desconocido'));
+        }
+      } catch(e) {
+        fallidas.push(indice);
+        console.warn('[Fotos] ✗ excepción foto ' + indice + ':', e?.message || e);
+      }
     }
-    if (urls.length) {
-      await API.actualizarFotosPreingreso({ idPreingreso, fotos: urls.join(',') }).catch(() => {});
-      fotos.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+    // Limpieza memoria
+    fotos.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+    try { OfflineManager.setSubiendoFotos(false); } catch(_){}
+
+    console.log('[Fotos] FIN · ok=' + urls.length + '/' + fotos.length + ' · fallidas=[' + fallidas.join(',') + ']');
+
+    // Toast final con feedback claro
+    if (urls.length === fotos.length) {
+      toast(`✓ ${urls.length} fotos guardadas`, 'ok', 3000);
+    } else if (urls.length > 0) {
+      toast(`⚠ ${urls.length}/${fotos.length} fotos guardadas. ${fallidas.length} fallaron — reintentá desde editar`, 'warn', 7000);
     } else {
-      toast('Fotos no pudieron subirse — reintenta desde edición', 'warn', 5000);
+      toast('✗ Ninguna foto se pudo subir — reintenta desde editar', 'danger', 7000);
     }
+
+    // Refrescar lista para que la UI muestre las fotos en cards
+    try { PreingresosView.silentRefresh(); } catch(_){}
   }
 
   async function aprobar(id) {

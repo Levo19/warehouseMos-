@@ -1325,6 +1325,16 @@ function eliminarFotoDrive(params) {
 }
 
 function actualizarPreingreso(params) {
+  // [Fix #4 v2.11.1] Lock atómico: si fotos + monto + comentario se actualizan
+  // a la vez y dos requests llegan en paralelo (operador edita mientras
+  // _subirFotosEnBackground hace su actualizarFotosPreingreso final), sin
+  // lock el último ganaba con potencialmente la mitad de los cambios.
+  return _conLock('actualizarPreingreso', function() {
+    return _actualizarPreingresoImpl(params);
+  });
+}
+
+function _actualizarPreingresoImpl(params) {
   var sheet        = getSheet('PREINGRESOS');
   var idPreingreso = String(params.idPreingreso || '');
   if (!idPreingreso) return { ok: false, error: 'idPreingreso requerido' };
@@ -1376,6 +1386,14 @@ function actualizarPreingreso(params) {
 }
 
 function actualizarFotosPreingreso(params) {
+  // [Fix #4 v2.11.1] Lock atómico — evita que se pisen con actualizarPreingreso
+  // u otra invocación concurrente del mismo endpoint.
+  return _conLock('actualizarFotosPreingreso', function() {
+    return _actualizarFotosPreingresoImpl(params);
+  });
+}
+
+function _actualizarFotosPreingresoImpl(params) {
   var sheet        = getSheet('PREINGRESOS');
   var idPreingreso = String(params.idPreingreso || '');
   var fotos        = String(params.fotos        || '');
@@ -1390,7 +1408,7 @@ function actualizarFotosPreingreso(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === idPreingreso) {
       sheet.getRange(i + 1, colFotos + 1).setValue(fotos);
-      return { ok: true };
+      return { ok: true, data: { fotos: fotos } };
     }
   }
   return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
