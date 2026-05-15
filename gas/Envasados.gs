@@ -32,15 +32,51 @@ function getPendientesEnvasado() {
 //   4. Imprime etiquetas adhesivas vía PrintNode
 // ============================================================
 function registrarEnvasado(params) {
+  return _conLock('registrarEnvasado', function() {
+    return _registrarEnvasadoImpl(params);
+  });
+}
+
+function _registrarEnvasadoImpl(params) {
   var codigoBarra      = String(params.codigoBarra || '').trim();
   var unidadesReales   = parseInt(params.unidadesProducidas) || 0;
   var fechaVencimiento = params.fechaVencimiento || '';
   var usuario          = params.usuario || 'sistema';
   var imprimirEtiq     = params.imprimirEtiquetas !== false;
+  var idempotencyKey   = String(params.idempotencyKey || '').trim();
 
   if (!codigoBarra || unidadesReales <= 0) {
     return { ok: false, error: 'Faltan datos: codigoBarra, unidadesProducidas' };
   }
+
+  // ── IDEMPOTENCIA ─────────────────────────────────────────
+  // Bug histórico: doble-click + reintento por timeout creaban registros
+  // duplicados en ENVASADOS (mismo usuario + producto + cantidad, separados
+  // por 3-16s) inflando stock derivado y duplicando consumo base.
+  //   - Si llega params.idempotencyKey y ya vimos esa key → retornar el
+  //     idEnvasado existente sin re-ejecutar.
+  //   - Si no llega, fingerprint = usuario + codigoBarra + unidades + minuto.
+  // TTL 120s — cubre reintentos por timeout y dobles clicks. Igual patrón
+  // que crearDespachoRapido (v2.3.0).
+  var cache = CacheService.getScriptCache();
+  var keyEfectiva = idempotencyKey;
+  if (!keyEfectiva) {
+    var minuto = Math.floor(Date.now() / 60000);
+    keyEfectiva = 'env_' + usuario + '_' + codigoBarra + '_' + unidadesReales + '_' + minuto;
+    if (keyEfectiva.length > 240) {
+      keyEfectiva = 'env_' + Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, keyEfectiva)
+        .map(function(b){ return (b < 0 ? b + 256 : b).toString(16); }).join('');
+    }
+  } else {
+    keyEfectiva = 'env_' + keyEfectiva;
+  }
+  try {
+    var prev = cache.get(keyEfectiva);
+    if (prev) {
+      Logger.log('registrarEnvasado idempotente: hit cache → ' + prev);
+      return { ok: true, data: { idEnvasado: prev, dedup: true }, dedup: true };
+    }
+  } catch(_) {}
 
   var productos = _sheetToObjects(getProductosSheet());
 
@@ -69,6 +105,11 @@ function registrarEnvasado(params) {
   var fecha      = new Date();
   var idEnvasado = _generateId('ENV');
   var idLote     = _generateId('LOT');
+
+  // Reservar la idempotency key INMEDIATAMENTE — cualquier retry concurrent
+  // que llegue antes de que terminen las 4 operaciones recibe este idEnvasado
+  // y no ejecuta nada. TTL 120s.
+  try { cache.put(keyEfectiva, idEnvasado, 120); } catch(_){}
 
   // 5. Guía SALIDA_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
   var gsRes = _getOCrearGuiaDia('SALIDA_ENVASADO', usuario);
@@ -261,4 +302,200 @@ function _getOCrearGuiaDia(tipo, usuario) {
   if (!res.ok) return res;
   _cerrarGuiaSinStock(res.data.idGuia);
   return res;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCRIPT ONE-SHOT — limpiar envasados duplicados desde una fecha
+// ════════════════════════════════════════════════════════════════════
+// Antes de v2.8.0 registrarEnvasado no tenía idempotencia → un click +
+// retry automático por timeout creaba 2-3 registros idénticos en ENVASADOS,
+// inflaba el stock derivado y duplicaba el consumo de stock base.
+//
+// Este script:
+//   1. Lee ENVASADOS desde fechaDesde (default 2026-05-01)
+//   2. Agrupa por (usuario + codigoProductoBase + cantidadBase +
+//      codigoProductoEnvasado + unidadesProducidas + idGuiaSalida)
+//   3. En cada grupo con >1 registro CERCANOS (< 120 s), el primero queda
+//      como bueno; los demás se anulan:
+//        - anularDetalle(idDetalleSalida)   ← reverte stock base
+//        - anularDetalle(idDetalleIngreso)  ← reverte stock derivado
+//        - ENVASADOS.estado = 'ANULADO_DUPLICADO'
+//        - ENVASADOS.observacion = 'duplicado de <idOriginal> · limpieza <ts>'
+//
+// Para encontrar el detalle correcto en GUIA_DETALLE (puede haber varios
+// del mismo producto en la guía del día), correlacionamos por idGuia +
+// codigoProducto + cantidad + timestamp del idDetalle (DET<timestamp>)
+// cercano a la fecha del envasado duplicado.
+//
+// Ejecutar UNA VEZ desde el editor de Apps Script:
+//   limpiarEnvasadosDuplicados()             → desde 2026-05-01
+//   limpiarEnvasadosDuplicados('2026-05-10') → desde otra fecha
+// Idempotente: si ya se anuló antes, no se anula otra vez (filtro
+// estado != 'ANULADO_DUPLICADO' y observacion != 'ANULADO').
+function limpiarEnvasadosDuplicados(fechaDesde) {
+  var FECHA_DESDE = fechaDesde || '2026-05-01';
+  var VENTANA_SEG = 120; // segundos para considerar duplicado del mismo grupo
+  var sheet = getSheet('ENVASADOS');
+  var data  = sheet.getDataRange().getValues();
+  if (data.length < 2) return { ok: true, data: { revisados: 0, anulados: 0, msg: 'ENVASADOS vacía' } };
+  var hdrs  = data[0].map(function(h){ return String(h); });
+  var iId    = hdrs.indexOf('idEnvasado');
+  var iBase  = hdrs.indexOf('codigoProductoBase');
+  var iCnt   = hdrs.indexOf('cantidadBase');
+  var iDer   = hdrs.indexOf('codigoProductoEnvasado');
+  var iUds   = hdrs.indexOf('unidadesProducidas');
+  var iFecha = hdrs.indexOf('fecha');
+  var iUsr   = hdrs.indexOf('usuario');
+  var iEst   = hdrs.indexOf('estado');
+  var iGs    = hdrs.indexOf('idGuiaSalida');
+  var iGi    = hdrs.indexOf('idGuiaIngreso');
+  var iObs   = hdrs.indexOf('observacion');
+  if (iId < 0 || iBase < 0) return { ok: false, error: 'Columnas requeridas faltantes en ENVASADOS' };
+
+  // 1. Recolectar candidatos (desde fechaDesde, estado COMPLETADO o vacío)
+  var registros = [];
+  for (var r = 1; r < data.length; r++) {
+    var f = data[r][iFecha];
+    var fStr = f instanceof Date
+      ? Utilities.formatDate(f, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(f || '').substring(0, 10);
+    if (fStr < FECHA_DESDE) continue;
+    var est = String(data[r][iEst] || '').toUpperCase();
+    if (est === 'ANULADO_DUPLICADO' || est === 'ANULADO') continue;
+    var fTs = f instanceof Date ? f.getTime() : new Date(f).getTime();
+    if (isNaN(fTs)) continue;
+    registros.push({
+      rowIdx: r + 1, // 1-indexado para setValue
+      idEnvasado:  String(data[r][iId] || ''),
+      base:        String(data[r][iBase] || ''),
+      cantBase:    parseFloat(data[r][iCnt]) || 0,
+      derivado:    String(data[r][iDer] || ''),
+      uds:         parseFloat(data[r][iUds]) || 0,
+      ts:          fTs,
+      usuario:     String(data[r][iUsr] || '').trim().toLowerCase(),
+      idGs:        String(data[r][iGs] || ''),
+      idGi:        String(data[r][iGi] || '')
+    });
+  }
+
+  // 2. Agrupar por clave
+  var grupos = {};
+  registros.forEach(function(reg) {
+    var key = [reg.usuario, reg.base, reg.cantBase, reg.derivado, reg.uds, reg.idGs].join('|');
+    if (!grupos[key]) grupos[key] = [];
+    grupos[key].push(reg);
+  });
+
+  // 3. Construir índice GUIA_DETALLE por (idGuia + codigoProducto) → lista de detalles
+  //    para encontrar rápido el detalle correcto sin anular dos veces.
+  var detSheet = getSheet('GUIA_DETALLE');
+  var detData  = detSheet.getDataRange().getValues();
+  var dHdrs    = detData[0].map(function(h){ return String(h); });
+  var dIdDet   = dHdrs.indexOf('idDetalle');
+  var dIdGuia  = dHdrs.indexOf('idGuia');
+  var dCod     = dHdrs.indexOf('codigoProducto');
+  var dCantE   = dHdrs.indexOf('cantidadEsperada');
+  var dObs     = dHdrs.indexOf('observacion');
+  var detIndex = {};
+  for (var dr = 1; dr < detData.length; dr++) {
+    var idGuia  = String(detData[dr][dIdGuia] || '');
+    var codProd = String(detData[dr][dCod] || '');
+    var cant    = parseFloat(detData[dr][dCantE]) || 0;
+    var obs     = String(detData[dr][dObs] || '').toUpperCase();
+    if (obs === 'ANULADO') continue; // ya anulado, no contemplar
+    var idDet   = String(detData[dr][dIdDet] || '');
+    // Extraer timestamp del idDetalle (formato 'DET<ts>')
+    var detTs   = 0;
+    var m = idDet.match(/(\d{10,})/);
+    if (m) detTs = parseInt(m[1], 10);
+    var k = idGuia + '|' + codProd + '|' + cant;
+    if (!detIndex[k]) detIndex[k] = [];
+    detIndex[k].push({ idDet: idDet, ts: detTs, _consumido: false });
+  }
+
+  // 4. Para cada grupo: ordenar por ts, marcar duplicados, anular detalles
+  var reporte = {
+    fechaDesde:     FECHA_DESDE,
+    gruposRevisados: 0,
+    duplicadosAnulados: 0,
+    detallesAnulados: 0,
+    erroresAnulacion: [],
+    detalle: []
+  };
+  var nowStr = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+
+  Object.keys(grupos).forEach(function(key) {
+    var arr = grupos[key];
+    if (arr.length < 2) return;
+    arr.sort(function(a, b){ return a.ts - b.ts; });
+    var primero = arr[0];
+    reporte.gruposRevisados++;
+    for (var i = 1; i < arr.length; i++) {
+      var dup = arr[i];
+      var deltaSeg = Math.abs(dup.ts - primero.ts) / 1000;
+      // Solo anular si está dentro de la ventana de duplicación
+      if (deltaSeg > VENTANA_SEG) continue;
+
+      // Resolver el codigoBarra real del base (puede que ENVASADOS guarde
+      // skuBase/idProducto en codigoProductoBase pero GUIA_DETALLE usa el
+      // codigoBarra). Buscamos el detalle por la cantidad y la guía.
+      // Probamos las claves posibles: tal como está en ENVASADOS, y si no
+      // matchea, recorremos los detalles de esa guía buscando por cantidad.
+      function _buscarDet(idGuia, cant, refTs, codigoIntento) {
+        // 1. Intento directo con el código guardado
+        var k1 = idGuia + '|' + codigoIntento + '|' + cant;
+        var bucket = detIndex[k1];
+        // 2. Si no, buscar todos los detalles de esa guía con esa cantidad
+        if (!bucket || !bucket.length) {
+          bucket = [];
+          Object.keys(detIndex).forEach(function(kk){
+            if (kk.indexOf(idGuia + '|') === 0 && kk.lastIndexOf('|' + cant) === kk.length - String('|' + cant).length) {
+              detIndex[kk].forEach(function(d){ bucket.push(d); });
+            }
+          });
+        }
+        // Filtrar no consumidos y elegir el más cercano por timestamp
+        var cands = bucket.filter(function(d){ return !d._consumido; });
+        if (!cands.length) return null;
+        cands.sort(function(a, b){ return Math.abs(a.ts - refTs) - Math.abs(b.ts - refTs); });
+        return cands[0];
+      }
+
+      var detSal = _buscarDet(dup.idGs, dup.cantBase, dup.ts, dup.base);
+      var detIng = _buscarDet(dup.idGi, dup.uds,      dup.ts, dup.derivado);
+
+      var resultSal = null, resultIng = null;
+      try { if (detSal) { resultSal = anularDetalle({ idDetalle: detSal.idDet, usuario: 'limpieza-duplicados' }); if (resultSal && resultSal.ok) { detSal._consumido = true; reporte.detallesAnulados++; } } } catch(e1) { reporte.erroresAnulacion.push({ idEnvasado: dup.idEnvasado, lado: 'salida', error: e1.message }); }
+      try { if (detIng) { resultIng = anularDetalle({ idDetalle: detIng.idDet, usuario: 'limpieza-duplicados' }); if (resultIng && resultIng.ok) { detIng._consumido = true; reporte.detallesAnulados++; } } } catch(e2) { reporte.erroresAnulacion.push({ idEnvasado: dup.idEnvasado, lado: 'ingreso', error: e2.message }); }
+
+      // Marcar ENVASADO como anulado por duplicado
+      try {
+        sheet.getRange(dup.rowIdx, iEst + 1).setValue('ANULADO_DUPLICADO');
+        var prevObs = sheet.getRange(dup.rowIdx, iObs + 1).getValue();
+        sheet.getRange(dup.rowIdx, iObs + 1).setValue(
+          String(prevObs || '') + ' | duplicado de ' + primero.idEnvasado + ' · limpieza ' + nowStr
+        );
+      } catch(eMark) { reporte.erroresAnulacion.push({ idEnvasado: dup.idEnvasado, lado: 'marcado', error: eMark.message }); }
+
+      reporte.duplicadosAnulados++;
+      reporte.detalle.push({
+        idEnvasado:    dup.idEnvasado,
+        duplicaA:      primero.idEnvasado,
+        deltaSeg:      Math.round(deltaSeg),
+        producto:      dup.derivado,
+        cantBase:      dup.cantBase,
+        uds:           dup.uds,
+        detSalAnulado: !!(resultSal && resultSal.ok),
+        detIngAnulado: !!(resultIng && resultIng.ok)
+      });
+    }
+  });
+
+  Logger.log('limpiarEnvasadosDuplicados ✓ ' + JSON.stringify({
+    desde: FECHA_DESDE, grupos: reporte.gruposRevisados,
+    duplicadosAnulados: reporte.duplicadosAnulados,
+    detallesAnulados: reporte.detallesAnulados,
+    errores: reporte.erroresAnulacion.length
+  }));
+  return { ok: true, data: reporte };
 }

@@ -6812,6 +6812,12 @@ const EnvasadosView = (() => {
     btn.disabled = true;
     btn.textContent = 'Registrando...';
 
+    // idempotencyKey único POR CLICK. Si el frontend hace retry por timeout
+    // (GAS tarda), el backend reconoce la key y retorna el envasado
+    // ya creado en vez de duplicarlo (bug histórico: stock inflado por
+    // registros separados ~14s, patrón clásico de retry).
+    const idempotencyKey = 'ENV-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+
     // Optimistic: inyectar en caché y cerrar modal de inmediato
     OfflineManager.inyectarEnvasadoCache({
       idEnvasado:             'ENV_OPT_' + Date.now(),
@@ -6841,7 +6847,8 @@ const EnvasadosView = (() => {
       unidadesProducidas: producidas,
       fechaVencimiento:   fechaVenc,
       imprimirEtiquetas:  imprimir,
-      usuario:            window.WH_CONFIG.usuario
+      usuario:            window.WH_CONFIG.usuario,
+      idempotencyKey:     idempotencyKey
     }).then(res => {
       if (!res.ok) {
         toast('Error al guardar envasado: ' + res.error, 'danger', 7000);
