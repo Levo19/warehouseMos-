@@ -6621,14 +6621,24 @@ function _renderEnvasadosPorDia(list, container) {
   //   - Operador normal: ve solo SUS envasados de HOY
   //   - Comparación tolerante (trim + toLowerCase) para evitar mismatches por
   //     mayúsculas o espacios entre el campo guardado y window.WH_CONFIG.usuario.
-  // Antes filtraba con e.usuario === usuario sin tolerancia y mostraba 7 días,
-  // lo cual causaba 2 bugs: admin no veía a otros operadores, y al registrar
-  // un envasado nuevo se mostraba un instante y desaparecía si había cualquier
-  // diferencia en el formato del nombre.
+  // [v2.10.2] Cards con descripción legible (no solo códigos): resuelvo
+  // descripcion del derivado y del base contra el maestro de productos para
+  // que el operador y el admin entiendan de un vistazo qué se envasó.
   const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
   const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
   const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
   const hoy           = new Date().toISOString().split('T')[0];
+
+  // Mapa codigoBarra → descripcion del maestro (para legibilidad)
+  const prodMap = {};
+  try {
+    const prods = (window.App && App.getProductosMaestro && App.getProductosMaestro()) || [];
+    prods.forEach(p => {
+      if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p.descripcion || p.idProducto || '';
+      if (p.skuBase)     prodMap[String(p.skuBase)]     = p.descripcion || p.idProducto || '';
+      if (p.idProducto)  prodMap[String(p.idProducto)]  = prodMap[String(p.idProducto)] || (p.descripcion || '');
+    });
+  } catch(_){}
 
   let visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
   if (!esAdminMaster && usuarioActual) {
@@ -6677,18 +6687,35 @@ function _renderEnvasadosPorDia(list, container) {
                    style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.35)"
                    title="Anular este envasado · requiere clave admin">🚫 Anular</button>`
         : '';
-      const btnAnular = acciones;
+      const cbDer  = String(e.codigoProductoEnvasado || '');
+      const cbBase = String(e.codigoProductoBase || '');
+      const descDer  = prodMap[cbDer]  || cbDer  || '—';
+      const descBase = prodMap[cbBase] || cbBase || '—';
+      const mermaReal = parseFloat(e.mermaReal) || 0;
+
       return `<div class="card-sm${cardCls}">
-        <div class="flex items-center justify-between mb-1 gap-2">
-          <span class="text-xs tag-blue truncate">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}${tagAnul}${tagOpt}</span>
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-bold text-slate-100 leading-tight">
+              ${escHtml(descDer)}
+              <span class="text-[10px] font-mono text-slate-500 ml-1 whitespace-nowrap" style="letter-spacing:-.05em">▌${escHtml(cbDer)}</span>
+              ${tagAnul}${tagOpt}
+            </p>
+            <p class="text-[11px] text-slate-400 mt-0.5">
+              <span class="text-slate-500">desde</span> ${escHtml(descBase)}
+              <span class="font-mono text-slate-600" style="letter-spacing:-.05em">▌${escHtml(cbBase)}</span>
+              <span class="text-slate-500"> · ${fmt(e.cantidadBase, 1)} ${escHtml(e.unidadBase || '')}</span>
+            </p>
+          </div>
           <span class="${efColor} font-bold text-sm shrink-0">${efPct}%</span>
         </div>
-        <p class="text-xs text-slate-400">${escHtml(e.usuario || '—')}</p>
-        <div class="flex gap-4 mt-1 text-xs text-slate-300 items-center">
-          <span>Base: ${fmt(e.cantidadBase, 1)} ${escHtml(e.unidadBase || '')}</span>
-          <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
-          <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
-          ${btnAnular}
+        <div class="flex items-center justify-between gap-2 mt-1.5">
+          <div class="text-xs text-slate-300 min-w-0 truncate">
+            <span class="font-bold text-slate-100">${fmt(e.unidadesProducidas)} uds</span>
+            ${mermaReal > 0 ? `<span class="text-amber-400 ml-2">· Merma: ${fmt(mermaReal)}</span>` : ''}
+            <span class="text-slate-400 ml-2">· 👤 ${escHtml(e.usuario || '—')}</span>
+          </div>
+          <div class="flex gap-1 shrink-0">${acciones}</div>
         </div>
       </div>`;
     }).join('');
