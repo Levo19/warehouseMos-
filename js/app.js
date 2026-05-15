@@ -6616,10 +6616,32 @@ const GuiasView = (() => {
 // ════════════════════════════════════════════════
 // Historial de envasados agrupado por día (últimos 7 días, desc), solo del usuario actual
 function _renderEnvasadosPorDia(list, container) {
-  const usuario = window.WH_CONFIG?.usuario || '';
-  const visible = usuario ? list.filter(e => e.usuario === usuario) : list;
+  // [v2.10.1] Reglas de visibilidad:
+  //   - Admin / Master: ven TODOS los envasados de HOY (cualquier operador)
+  //   - Operador normal: ve solo SUS envasados de HOY
+  //   - Comparación tolerante (trim + toLowerCase) para evitar mismatches por
+  //     mayúsculas o espacios entre el campo guardado y window.WH_CONFIG.usuario.
+  // Antes filtraba con e.usuario === usuario sin tolerancia y mostraba 7 días,
+  // lo cual causaba 2 bugs: admin no veía a otros operadores, y al registrar
+  // un envasado nuevo se mostraba un instante y desaparecía si había cualquier
+  // diferencia en el formato del nombre.
+  const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
+  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
+  const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
+  const hoy           = new Date().toISOString().split('T')[0];
+
+  let visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
+  if (!esAdminMaster && usuarioActual) {
+    visible = visible.filter(e =>
+      String(e.usuario || '').trim().toLowerCase() === usuarioActual
+    );
+  }
+
   if (!visible.length) {
-    container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin envasados en los últimos 7 días</p>';
+    const msg = esAdminMaster
+      ? 'Sin envasados registrados hoy'
+      : 'No registraste envasados hoy';
+    container.innerHTML = `<p class="text-slate-500 text-center py-8 text-sm">${msg}</p>`;
     return;
   }
   const grupos = {};
