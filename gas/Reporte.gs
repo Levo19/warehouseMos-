@@ -213,6 +213,33 @@ function imprimirTicketGuia(params) {
     catch(e) { return { ok: false, error: e.message }; }
   }
 
+  // [Fix #1+#3 v2.11.2] Garantizar lectura consistente antes de imprimir.
+  // Bug: ticket salía cortado con 2-3 items aunque la guía tenía 22 porque
+  // imprimirTicketGuia se ejecutaba antes de que Sheets confirmara todas
+  // las escrituras del forEach previo. Solución:
+  //   1. Flush para forzar persistencia
+  //   2. Si el caller pasa `esperadoDetalles`, validar que vemos todos.
+  //      Si vemos menos: esperar + flush + reintentar (hasta 3 veces).
+  try { SpreadsheetApp.flush(); } catch(_){}
+  var esperado = parseInt(params.esperadoDetalles) || 0;
+  if (esperado > 0) {
+    function _contarDetalles() {
+      return _sheetToObjects(getSheet('GUIA_DETALLE'))
+        .filter(function(d) { return d.idGuia === idGuia && d.observacion !== 'ANULADO'; })
+        .length;
+    }
+    var actual = _contarDetalles();
+    var intentos = 0;
+    while (actual < esperado && intentos < 3) {
+      Logger.log('[imprimirTicket] guía=' + idGuia + ' visibles=' + actual + '/' + esperado + ' · espero 1.5s (retry ' + (intentos+1) + ')');
+      Utilities.sleep(1500);
+      try { SpreadsheetApp.flush(); } catch(_){}
+      actual = _contarDetalles();
+      intentos++;
+    }
+    Logger.log('[imprimirTicket] guía=' + idGuia + ' final visibles=' + actual + '/' + esperado + ' tras ' + intentos + ' retries');
+  }
+
   // ── Datos ────────────────────────────────────────────────────
   var guias = _sheetToObjects(getSheet('GUIAS'));
   var g     = guias.find(function(x) { return x.idGuia === idGuia; });
@@ -687,9 +714,14 @@ function imprimirTicketGuia(params) {
       muteHttpExceptions: true
     });
     var code = resp.getResponseCode();
-    return code === 201
-      ? { ok: true }
-      : { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
+    if (code === 201) {
+      // [Fix #5 v2.11.2] Devolver conteo de detalles efectivamente impresos
+      // para que el caller (frontend / crearDespachoRapido) pueda validar
+      // que el ticket salió completo y disparar reimpresión si no.
+      Logger.log('[imprimirTicket] guía=' + idGuia + ' OK · detallesImpresos=' + dets.length);
+      return { ok: true, data: { detallesImpresos: dets.length, idGuia: idGuia } };
+    }
+    return { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
   } catch(e) {
     return { ok: false, error: e.message };
   }

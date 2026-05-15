@@ -270,6 +270,129 @@ function _agregarDetalleGuiaImpl(params) {
   };
 }
 
+// ============================================================
+// [v2.11.2 Fix #4] _agregarDetallesBatch — versión bulk para
+// guías recién creadas (despacho rápido, pickup→despacho).
+// ------------------------------------------------------------
+// Antes: items.forEach(agregarDetalleGuia) hacía N iteraciones
+// con 1 lock + 2 lecturas full-sheet + 1 setValues cada una.
+// Para 22 items y PRODUCTOS_MASTER con miles de rows, esto tarda
+// 30-60s y el cliente PWA tira timeout → imprimirTicketGuia
+// se ejecutaba con la hoja a medio escribir → ticket cortado a
+// solo 2-3 productos.
+//
+// Esta versión hace:
+//   1. UNA lectura de PRODUCTOS_MASTER (resuelve todos los códigos)
+//   2. UNA lectura de EQUIVALENCIAS (solo si hay códigos no encontrados)
+//   3. Consolida duplicados del mismo batch (auto-suma in-memory)
+//   4. UN solo setValues con todas las filas
+//   5. flush() para garantizar persistencia antes de seguir
+//
+// Pasa de O(N × lecturas) a O(1 × lecturas). Velocidad ×30 típica.
+// Auto-suma con detalles preexistentes NO se soporta (asume guía nueva).
+// ============================================================
+function _agregarDetallesBatchImpl(idGuia, items, usuario) {
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+  if (!items || !items.length) return { ok: true, data: { agregados: 0, errores: [], detalles: [] } };
+
+  var sheet = getSheet('GUIA_DETALLE');
+
+  // 1. Lectura ÚNICA de PRODUCTOS_MASTER → mapa por codigoBarra
+  var productos = _sheetToObjects(getProductosSheet());
+  var prodMap = {};
+  productos.forEach(function(p) {
+    var cb = String(p.codigoBarra || '').trim().toUpperCase();
+    if (cb) prodMap[cb] = p;
+  });
+
+  // 2. Detectar códigos no encontrados → cargar EQUIVALENCIAS solo si hace falta
+  var sinMatch = [];
+  items.forEach(function(it) {
+    var cb = String(it.codigoBarra || '').trim().toUpperCase();
+    if (cb && !prodMap[cb]) sinMatch.push(cb);
+  });
+  if (sinMatch.length) {
+    try {
+      var equivSheet = _getMosSS().getSheetByName('EQUIVALENCIAS');
+      if (equivSheet) {
+        var equivs = _sheetToObjects(equivSheet);
+        // Buscar primero equivalencias activas que matcheen
+        sinMatch.forEach(function(cb) {
+          var eq = equivs.find(function(e) {
+            return String(e.codigoBarra || '').trim().toUpperCase() === cb && _esActivo(e.activo);
+          });
+          if (!eq) return;
+          var skuB = String(eq.skuBase || '').trim().toUpperCase();
+          var pBase = productos.find(function(p) {
+            var esBase = parseFloat(p.factorConversion || 1) === 1 && String(p.estado || '') !== '0';
+            return esBase && (
+              String(p.idProducto  || '').trim().toUpperCase() === skuB ||
+              String(p.skuBase     || '').trim().toUpperCase() === skuB ||
+              String(p.codigoBarra || '').trim().toUpperCase() === skuB
+            );
+          });
+          if (pBase) prodMap[cb] = pBase;
+        });
+      }
+    } catch(_){}
+  }
+
+  // 3. Consolidar duplicados del batch (auto-suma in-memory)
+  var consolidado = {};   // cb → { codigoBarra, cantidad }
+  var orden       = [];   // mantener orden de aparición
+  items.forEach(function(it) {
+    var cb  = String(it.codigoBarra || '').trim().toUpperCase();
+    var qty = parseFloat(it.cantidad) || 0;
+    if (!cb || qty <= 0) return;
+    if (!consolidado[cb]) {
+      consolidado[cb] = { codigoBarra: cb, cantidad: 0 };
+      orden.push(cb);
+    }
+    consolidado[cb].cantidad += qty;
+  });
+
+  // 4. Construir filas en memoria
+  var filas    = [];
+  var detalles = [];
+  var errores  = [];
+  orden.forEach(function(cb) {
+    var c = consolidado[cb];
+    var prod = prodMap[cb];
+    if (!prod) {
+      errores.push(cb + ': producto no encontrado');
+      return;
+    }
+    var idDetalle = _generateId('DET');
+    filas.push([
+      idDetalle, idGuia, String(cb),
+      c.cantidad, c.cantidad,  // esperada = recibida (despacho rápido)
+      0, '', ''                  // precio=0, idLote='', observacion=''
+    ]);
+    detalles.push({
+      idDetalle: idDetalle, idGuia: idGuia,
+      codigoProducto: cb, descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
+      cantidadEsperada: c.cantidad, cantidadRecibida: c.cantidad
+    });
+  });
+
+  if (!filas.length) {
+    Logger.log('[batch] idGuia=' + idGuia + ' · sin filas válidas · errores=' + errores.length);
+    return { ok: true, data: { agregados: 0, errores: errores, detalles: [] } };
+  }
+
+  // 5. UN solo setValues + pre-formato col codigoBarra como texto
+  var startRow = sheet.getLastRow() + 1;
+  sheet.getRange(startRow, 3, filas.length, 1).setNumberFormat('@');
+  sheet.getRange(startRow, 1, filas.length, 8).setValues(filas);
+
+  // 6. FLUSH crítico: garantiza que las filas sean visibles a las siguientes
+  // lecturas (cerrarGuia + imprimirTicketGuia) ANTES de continuar.
+  try { SpreadsheetApp.flush(); } catch(_){}
+
+  Logger.log('[batch] idGuia=' + idGuia + ' · escribí ' + filas.length + ' detalles · errores=' + errores.length);
+  return { ok: true, data: { agregados: filas.length, errores: errores, detalles: detalles } };
+}
+
 // ── Actualizar cantidad recibida de un detalle existente ────────────
 function actualizarCantidadDetalle(params) {
   return _conLock('actualizarCantidadDetalle', function() {
@@ -1440,32 +1563,47 @@ function _crearDespachoRapidoImpl(params) {
   // idGuia. El lock externo previene la race, pero esto es defensa extra.
   try { cache.put(keyEfectiva, idGuia, 120); } catch(_) {}
 
-  // 2. Registrar cada ítem
-  var errores = [];
-  items.forEach(function(item) {
-    var qty = parseFloat(item.cantidad) || 0;
-    if (qty <= 0) return;
-    var det = agregarDetalleGuia({
-      idGuia:           idGuia,
-      codigoProducto:   String(item.codigoBarra || '').trim(),
-      cantidadEsperada: qty,
-      cantidadRecibida: qty,
-      usuario:          usuario
-    });
-    if (!det.ok) errores.push(String(item.codigoBarra) + ': ' + det.error);
-  });
+  // 2. Registrar TODOS los ítems en UN solo batch (Fix #4 v2.11.2).
+  // Antes: forEach con agregarDetalleGuia individual (cada uno re-lee productos
+  // + toma lock + appendRow). Para 22 items y sheet grande: 30-60s, el cliente
+  // tira timeout y la impresión sale con la hoja a medio escribir → ticket
+  // cortado a 2-3 items. Ahora es UNA operación atómica + flush garantizado.
+  Logger.log('[crearDespachoRapido] idGuia=' + idGuia + ' · solicita escribir ' + items.length + ' items');
+  var batchRes = _agregarDetallesBatchImpl(idGuia, items, usuario);
+  var errores  = batchRes.data?.errores || [];
+  var escritos = batchRes.data?.agregados || 0;
+  Logger.log('[crearDespachoRapido] idGuia=' + idGuia + ' · batch escribió ' + escritos + '/' + items.length + ' · errores=' + errores.length);
 
   // 3. Cerrar guía (descuenta stock)
   var cerrarRes = cerrarGuia(idGuia, usuario, null);
   if (!cerrarRes.ok) return { ok: false, error: 'Error al cerrar guía: ' + cerrarRes.error };
 
-  // 4. Imprimir ticket
+  // [Fix #1 v2.11.2] Flush ANTES de imprimir. cerrarGuia hace varios setValue
+  // (estado, stock, etc) y queremos garantizar que la lectura de imprimirTicketGuia
+  // vea el estado final de la hoja.
+  try { SpreadsheetApp.flush(); } catch(_){}
+
+  // 4. Imprimir ticket — pasamos `esperado` para que valide y reintente si lee menos
   var impresion = { ok: false, error: 'omitido' };
   if (imprimir) {
-    try { impresion = imprimirTicketGuia({ idGuia: idGuia }); } catch(e) { impresion = { ok: false, error: e.message }; }
+    try {
+      impresion = imprimirTicketGuia({ idGuia: idGuia, esperadoDetalles: escritos });
+    } catch(e) {
+      impresion = { ok: false, error: e.message };
+    }
   }
+  Logger.log('[crearDespachoRapido] idGuia=' + idGuia + ' · impresion.ok=' + (impresion && impresion.ok) + ' · vistos=' + (impresion && impresion.data && impresion.data.detallesImpresos));
 
-  return { ok: true, data: { idGuia: idGuia, errores: errores, impresion: impresion } };
+  return {
+    ok: true,
+    data: {
+      idGuia:    idGuia,
+      errores:   errores,
+      items:     escritos,
+      esperados: items.length,
+      impresion: impresion
+    }
+  };
 }
 
 function _validarTipoGuia(tipo) {

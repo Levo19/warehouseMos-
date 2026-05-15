@@ -9387,11 +9387,27 @@ const DespachoView = (() => {
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
         _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
-        // Disparar impresión en background con QR de reporte (no bloquea al usuario)
+        // [Fix #2+#5 v2.11.2] Re-impresión validada con QR + verificación
+        // de items. Pasamos `esperadoDetalles` para que el backend espere
+        // a que la hoja esté completa (retry interno con flush). Si el
+        // ticket sale con menos items de los esperados, mostramos warning
+        // claro al operador para que reimprima desde el historial.
+        const esperados = d.esperados || d.items || cartSnapshot.length;
         try {
           const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
           const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
-          API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl }).catch(() => {});
+          API.imprimirTicketGuia({
+            idGuia: d.idGuia,
+            reporteUrl,
+            esperadoDetalles: esperados
+          }).then(r2 => {
+            const impreso = r2?.data?.detallesImpresos || 0;
+            if (r2?.ok && impreso >= esperados) {
+              console.log('[Despacho] ticket OK · ' + impreso + '/' + esperados + ' items');
+            } else if (r2?.ok && impreso < esperados) {
+              toast(`⚠ Ticket con ${impreso}/${esperados} items — reimprimí desde el historial`, 'warn', 8000);
+            }
+          }).catch(() => {});
         } catch (e) { /* non-fatal */ }
         if (pickupSnapshot) {
           API.actualizarPickup({ idPickup: pickupSnapshot.idPickup, estado: 'COMPLETADO' }).catch(() => {});
