@@ -6705,8 +6705,10 @@ function _renderEnvasadosPorDia(list, container) {
         : '';
       const cbDer  = String(e.codigoProductoEnvasado || '');
       const cbBase = String(e.codigoProductoBase || '');
-      const descDer  = prodMap[cbDer]  || cbDer  || '—';
-      const descBase = prodMap[cbBase] || cbBase || '—';
+      // [v2.10.5] Prioridad: campo del backend (siempre resuelve) → prodMap
+      // local (fallback para items optimistic recién registrados) → código.
+      const descDer  = e.descripcionProductoEnvasado || prodMap[cbDer]  || cbDer  || '—';
+      const descBase = e.descripcionProductoBase     || prodMap[cbBase] || cbBase || '—';
       const mermaReal = parseFloat(e.mermaReal) || 0;
 
       return `<div class="card-sm${cardCls}">
@@ -7079,7 +7081,9 @@ const EnvasadosView = (() => {
     const cbDerivado = String(prod.codigoBarra || '');
     const cbBaseStr  = prodBase?.codigoBarra ? String(prodBase.codigoBarra) : '';
 
-    // Optimistic: inyectar en caché y cerrar modal de inmediato
+    // Optimistic: inyectar en caché y cerrar modal de inmediato.
+    // [v2.10.5] Incluir descripciones legibles para que la card del historial
+    // se vea bien aunque el cache local de productos no tenga los códigos.
     OfflineManager.inyectarEnvasadoCache({
       idEnvasado:             idEnvOptimista,
       codigoProductoBase:     cbBaseStr || prod.codigoProductoBase || '',
@@ -7091,7 +7095,9 @@ const EnvasadosView = (() => {
       eficienciaPct:          100,
       fecha:                  new Date().toISOString().split('T')[0],
       usuario:                window.WH_CONFIG.usuario,
-      estado:                 'COMPLETADO'
+      estado:                 'COMPLETADO',
+      descripcionProductoEnvasado: prod.descripcion || '',
+      descripcionProductoBase:     prodBase?.descripcion || ''
     });
     toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
     // [v2.10.4] TTS optimista: hablar AL TOCAR el botón (no al volver del
@@ -7147,6 +7153,8 @@ const EnvasadosView = (() => {
           cantidadBase:           cantBase,
           unidadBase:             prodBase?.unidad || '',
           codigoProductoEnvasado: cbDerivado,
+          descripcionProductoEnvasado: prod.descripcion || '',
+          descripcionProductoBase:     prodBase?.descripcion || '',
           unidadesProducidas:     producidas,
           mermaReal:              0,
           eficienciaPct:          100,

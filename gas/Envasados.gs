@@ -10,6 +10,37 @@ function getEnvasados(params) {
   if (params.fecha)      rows = rows.filter(function(r){ return r.fecha === params.fecha; });
   if (params.fechaDesde) rows = rows.filter(function(r){ return String(r.fecha) >= String(params.fechaDesde); });
   if (params.limit)      rows = rows.slice(0, parseInt(params.limit));
+
+  // [v2.10.5] Enriquecer con descripciones legibles del derivado y del base.
+  // El cache de productos del cliente no siempre tiene todos los códigos
+  // resueltos (especialmente granel/canónicos). Devolverlas desde acá
+  // evita que la UI muestre solo códigos como "WHACXOVO500GR".
+  try {
+    var prods = _sheetToObjects(getProductosSheet());
+    var mapPorCb = {};
+    var mapPorSku = {};
+    var mapPorId  = {};
+    prods.forEach(function(p) {
+      var desc = String(p.descripcion || p.nombre || p.idProducto || '');
+      if (!desc) return;
+      if (p.codigoBarra) mapPorCb[String(p.codigoBarra)]  = desc;
+      if (p.skuBase)     mapPorSku[String(p.skuBase)]    = desc;
+      if (p.idProducto)  mapPorId[String(p.idProducto)]  = desc;
+    });
+    function _resolverDesc(codigo) {
+      var k = String(codigo || '');
+      if (!k) return '';
+      return mapPorCb[k] || mapPorSku[k] || mapPorId[k] || '';
+    }
+    rows = rows.map(function(r) {
+      r.descripcionProductoEnvasado = _resolverDesc(r.codigoProductoEnvasado);
+      r.descripcionProductoBase     = _resolverDesc(r.codigoProductoBase);
+      return r;
+    });
+  } catch(e) {
+    Logger.log('getEnvasados enrich error: ' + e.message);
+  }
+
   return { ok: true, data: rows };
 }
 
