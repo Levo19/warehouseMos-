@@ -191,6 +191,7 @@ const API = (() => {
     getEnvasados:       (p={})   => call({ action: 'getEnvasados', ...p }),
     getPendientes:      ()       => call({ action: 'getPendientesEnvasado' }),
     registrarEnvasado:  (p)      => post({ action: 'registrarEnvasado', ...p }),
+    anularEnvasadoManual: (p)    => post({ action: 'anularEnvasadoManual', ...p }),
 
     // Mermas
     getMermas:          (p={})   => call({ action: 'getMermas', ...p }),

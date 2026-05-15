@@ -6630,16 +6630,34 @@ function _renderEnvasadosPorDia(list, container) {
     const items = grupos[dia].map(e => {
       const efPct   = parseFloat(e.eficienciaPct) || 0;
       const efColor = efPct >= 95 ? 'text-emerald-400' : efPct >= 85 ? 'text-amber-400' : 'text-red-400';
-      return `<div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs tag-blue">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}</span>
-          <span class="${efColor} font-bold text-sm">${efPct}%</span>
+      const est     = String(e.estado || '').toUpperCase();
+      const anulado = est === 'ANULADO' || est === 'ANULADO_DUPLICADO';
+      const optimista = String(e.idEnvasado || '').indexOf('ENV_OPT_') === 0;
+      const cardCls = anulado ? ' opacity-50' : '';
+      const tagAnul = anulado
+        ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded ml-1" style="background:rgba(239,68,68,.15);color:#fca5a5">✕ ${est === 'ANULADO_DUPLICADO' ? 'DUPLICADO' : 'ANULADO'}</span>`
+        : '';
+      const tagOpt = optimista
+        ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded ml-1" style="background:rgba(99,102,241,.15);color:#a5b4fc" title="Pendiente confirmación del servidor">⏳ sync</span>`
+        : '';
+      // Botón anular: solo si NO está anulado y NO es optimista (esperá que confirme)
+      const btnAnular = (!anulado && !optimista && e.idEnvasado)
+        ? `<button onclick="event.stopPropagation();EnvasadosView.anular('${escAttr(e.idEnvasado)}','${escAttr(e.codigoProductoEnvasado || '')}',${parseFloat(e.unidadesProducidas) || 0})"
+                   class="text-[10px] px-2 py-1 rounded ml-auto"
+                   style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.35)"
+                   title="Anular este envasado · revierte stock">↺ Anular</button>`
+        : '';
+      return `<div class="card-sm${cardCls}">
+        <div class="flex items-center justify-between mb-1 gap-2">
+          <span class="text-xs tag-blue truncate">${escHtml(e.codigoProductoBase)} → ${escHtml(e.codigoProductoEnvasado)}${tagAnul}${tagOpt}</span>
+          <span class="${efColor} font-bold text-sm shrink-0">${efPct}%</span>
         </div>
         <p class="text-xs text-slate-400">${escHtml(e.usuario || '—')}</p>
-        <div class="flex gap-4 mt-1 text-xs text-slate-300">
+        <div class="flex gap-4 mt-1 text-xs text-slate-300 items-center">
           <span>Base: ${fmt(e.cantidadBase, 1)} ${escHtml(e.unidadBase || '')}</span>
           <span>Prod: ${fmt(e.unidadesProducidas)} uds</span>
           <span class="text-amber-400">Merma: ${fmt(e.mermaReal)}</span>
+          ${btnAnular}
         </div>
       </div>`;
     }).join('');
@@ -6804,27 +6822,55 @@ const EnvasadosView = (() => {
       (p.skuBase && p.skuBase === prod.codigoProductoBase) ||
       p.idProducto === prod.codigoProductoBase
     );
-    // Calcular consumo de base ANTES de inyectar al caché (la inyección lo necesita)
     const factorBase = parseFloat(prod.factorConversionBase) || 0;
     const cantBase   = producidas * factorBase;
+
+    // ── Alertas NO bloqueantes (decisión del usuario) ──
+    // Stock base no se valida como bloqueo: el operador puede envasar
+    // aunque el stock base esté en 0 o quede negativo. Solo le avisamos.
+    // Igual con la cantidad: puede pasar el máximo calculado, solo aviso.
+    const cbBase     = prodBase ? String(prodBase.codigoBarra) : '';
+    const stockEntry = OfflineManager.getStockCache().find(s => String(s.codigoProducto) === cbBase);
+    const stockBase  = stockEntry ? (parseFloat(stockEntry.cantidadDisponible) || 0) : 0;
+    const maxProd    = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
+    const avisos = [];
+    if (stockBase <= 0)        avisos.push('⚠ Sin stock base registrado');
+    else if (cantBase > stockBase) avisos.push(`⚠ Faltan ${fmt(cantBase - stockBase, 1)} ${prodBase?.unidad || 'kg'} — stock quedará negativo`);
+    if (maxProd > 0 && producidas > maxProd) avisos.push(`⚠ Excedes el máximo (${maxProd} uds calculados)`);
+    if (producidas >= 500)     avisos.push(`⚠ Cantidad alta: ${producidas} uds`);
+
+    // Fecha venc suave: solo aviso si vacía o pasada (no bloquea)
+    const hoyStr = new Date().toISOString().split('T')[0];
+    if (!fechaVenc)              avisos.push('⚠ Sin fecha de vencimiento');
+    else if (fechaVenc < hoyStr) avisos.push('⚠ Fecha de vencimiento pasada');
+
+    if (avisos.length > 0) {
+      const ok = confirm(avisos.join('\n') + '\n\n¿Continuar de todas formas?');
+      if (!ok) return;
+    }
 
     const btn = document.getElementById('btnRegistrarEnvasado');
     btn.disabled = true;
     btn.textContent = 'Registrando...';
 
-    // idempotencyKey único POR CLICK. Si el frontend hace retry por timeout
-    // (GAS tarda), el backend reconoce la key y retorna el envasado
-    // ya creado en vez de duplicarlo (bug histórico: stock inflado por
-    // registros separados ~14s, patrón clásico de retry).
+    // idempotencyKey único POR CLICK — protege ante retries por timeout.
     const idempotencyKey = 'ENV-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+
+    // ID temporal del envasado optimista (para poder REMOVERLO si falla el backend)
+    const idEnvOptimista = 'ENV_OPT_' + Date.now();
+
+    // Snapshot de las cantidades aplicadas optimistamente — sirve para
+    // hacer rollback exacto si el backend falla.
+    const cbDerivado = String(prod.codigoBarra || '');
+    const cbBaseStr  = prodBase?.codigoBarra ? String(prodBase.codigoBarra) : '';
 
     // Optimistic: inyectar en caché y cerrar modal de inmediato
     OfflineManager.inyectarEnvasadoCache({
-      idEnvasado:             'ENV_OPT_' + Date.now(),
-      codigoProductoBase:     prodBase?.codigoBarra || prod.codigoProductoBase || '',
+      idEnvasado:             idEnvOptimista,
+      codigoProductoBase:     cbBaseStr || prod.codigoProductoBase || '',
       cantidadBase:           cantBase,
       unidadBase:             prodBase?.unidad || '',
-      codigoProductoEnvasado: prod.codigoBarra,
+      codigoProductoEnvasado: cbDerivado,
       unidadesProducidas:     producidas,
       mermaReal:              0,
       eficienciaPct:          100,
@@ -6834,12 +6880,30 @@ const EnvasadosView = (() => {
     });
     toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
     cerrarSheet('sheetEnvasado');
-    cargar();
+    // NOTA: NO llamar cargar() acá. cargar() hace API.getEnvasados() y
+    // sobrescribe el cache con la lista del backend, que aún no tiene
+    // este envasado (el POST va en background). Antes esto hacía
+    // "parpadear" la lista. Sólo re-renderizamos local desde cache.
+    _renderDesdeCache();
 
-    // Patch stock cache local para actualizar UI de inmediato
-    if (prodBase?.codigoBarra) OfflineManager.patchStockCache(String(prodBase.codigoBarra), -cantBase);
-    OfflineManager.patchStockCache(String(prod.codigoBarra), producidas);
+    // Patch stock cache local
+    if (cbBaseStr) OfflineManager.patchStockCache(cbBaseStr, -cantBase);
+    OfflineManager.patchStockCache(cbDerivado, producidas);
     window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+
+    // Helper de ROLLBACK — revierte TODO lo optimista cuando el backend falla.
+    // Antes no existía esto: el patch de stock quedaba aplicado aunque el
+    // envasado no se guardara, divergiendo el cache local del real.
+    function _rollbackOptimista(motivo) {
+      try {
+        if (cbBaseStr) OfflineManager.patchStockCache(cbBaseStr, +cantBase);
+        OfflineManager.patchStockCache(cbDerivado, -producidas);
+        OfflineManager.removerEnvasadoCache(idEnvOptimista);
+        _renderDesdeCache();
+        window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+      } catch(_) {}
+      toast('⚠ Envasado revertido · ' + motivo + ' · volvé a intentar', 'danger', 7000);
+    }
 
     // GAS en segundo plano
     API.registrarEnvasado({
@@ -6850,21 +6914,104 @@ const EnvasadosView = (() => {
       usuario:            window.WH_CONFIG.usuario,
       idempotencyKey:     idempotencyKey
     }).then(res => {
-      if (!res.ok) {
-        toast('Error al guardar envasado: ' + res.error, 'danger', 7000);
-      } else if (imprimir && res.data?.impresion && !res.data.impresion.ok) {
+      if (!res || res.ok === false) {
+        _rollbackOptimista(res?.error || 'Error desconocido');
+        return;
+      }
+      // Reemplazar el envasado optimista con el idEnvasado REAL del backend
+      if (res.data?.idEnvasado && res.data.idEnvasado !== idEnvOptimista) {
+        OfflineManager.removerEnvasadoCache(idEnvOptimista);
+        OfflineManager.inyectarEnvasadoCache({
+          idEnvasado:             res.data.idEnvasado,
+          codigoProductoBase:     cbBaseStr || prod.codigoProductoBase || '',
+          cantidadBase:           cantBase,
+          unidadBase:             prodBase?.unidad || '',
+          codigoProductoEnvasado: cbDerivado,
+          unidadesProducidas:     producidas,
+          mermaReal:              0,
+          eficienciaPct:          100,
+          fecha:                  new Date().toISOString().split('T')[0],
+          usuario:                window.WH_CONFIG.usuario,
+          estado:                 'COMPLETADO',
+          idGuiaSalida:           res.data.idGuiaSalida || '',
+          idGuiaIngreso:          res.data.idGuiaIngreso || ''
+        });
+        _renderDesdeCache();
+      }
+      if (imprimir && res.data?.impresion && !res.data.impresion.ok) {
         toast('Impresora: ' + res.data.impresion.error, 'warn', 5000);
       }
       OfflineManager.precargarOperacional(true).catch(() => {});
-    }).catch(() => {
-      toast('Sin conexion — reintenta en un momento', 'warn', 5000);
+    }).catch((e) => {
+      _rollbackOptimista('sin conexión');
     }).finally(() => {
       btn.disabled = false;
       btn.textContent = 'Registrar envasado';
     });
   }
 
-  return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar };
+  // Anular un envasado individual (error de captura, corrección manual).
+  // Optimista: revierte stock cache + marca como ANULADO en cache, llama
+  // backend, y hace rollback si el backend falla.
+  async function anular(idEnvasado, codigoDerivado, unidades) {
+    if (!idEnvasado) return;
+    if (!confirm('¿Anular este envasado?\n\nRevierte el stock consumido y producido. El registro queda como ANULADO en el historial.')) return;
+    // Buscar la entrada en cache para hacer rollback exacto si falla
+    const cache = OfflineManager.getEnvasadosCache();
+    const env = cache.find(e => e.idEnvasado === idEnvasado);
+    if (!env) { toast('Envasado no encontrado en cache local', 'warn'); return; }
+
+    const cbBase  = String(env.codigoProductoBase || '');
+    const cbDer   = String(env.codigoProductoEnvasado || codigoDerivado || '');
+    const cantB   = parseFloat(env.cantidadBase) || 0;
+    const uds     = parseFloat(env.unidadesProducidas || unidades) || 0;
+    const estadoPrev = env.estado;
+
+    // Optimista: revertir stock + marcar como ANULADO
+    if (cbBase) OfflineManager.patchStockCache(cbBase, +cantB);
+    if (cbDer)  OfflineManager.patchStockCache(cbDer,  -uds);
+    env.estado = 'ANULADO';
+    OfflineManager.guardarEnvasadosCache(cache);
+    _renderDesdeCache();
+    window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+    toast('↺ Envasado anulado · stock revertido', 'ok', 3000);
+
+    try {
+      const res = await API.anularEnvasadoManual({
+        idEnvasado: idEnvasado,
+        usuario:    window.WH_CONFIG?.usuario || 'manual',
+        motivo:     'anulación manual desde lista'
+      });
+      if (!res || res.ok === false) {
+        throw new Error(res?.error || 'Error backend');
+      }
+      OfflineManager.precargarOperacional(true).catch(() => {});
+    } catch(e) {
+      // Rollback: devolver el stock que revertimos y restaurar estado
+      if (cbBase) OfflineManager.patchStockCache(cbBase, -cantB);
+      if (cbDer)  OfflineManager.patchStockCache(cbDer,  +uds);
+      env.estado = estadoPrev || 'COMPLETADO';
+      OfflineManager.guardarEnvasadosCache(cache);
+      _renderDesdeCache();
+      window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+      toast('⚠ No se pudo anular: ' + (e.message || e) + ' — reintentá', 'danger', 6000);
+    }
+  }
+
+  // Re-render desde el cache local (sin llamar al backend). Usado tras
+  // inyección/rollback optimista para que la UI refleje el cache actual.
+  function _renderDesdeCache() {
+    try {
+      const fd  = _fechaDesde7Dias();
+      const cnt = document.getElementById('listEnvasados');
+      if (!cnt) return;
+      const cached = OfflineManager.getEnvasadosCache()
+        .filter(e => String(e.fecha || '').substring(0, 10) >= fd);
+      _renderEnvasadosPorDia(cached, cnt);
+    } catch(_) {}
+  }
+
+  return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar, anular };
 })();
 
 // ════════════════════════════════════════════════

@@ -295,6 +295,17 @@ const OfflineManager = (() => {
     }
   }
 
+  // Quita un envasado del cache (rollback optimista cuando el backend falla)
+  function removerEnvasadoCache(idEnvasado) {
+    const cache = getEnvasadosCache();
+    const filtrado = cache.filter(x => x.idEnvasado !== idEnvasado);
+    if (filtrado.length !== cache.length) {
+      guardar(KEYS.ENVASADOS, filtrado);
+      return true;
+    }
+    return false;
+  }
+
   // ── Patch de un preingreso existente en caché ───────────────
   function patchPreingresosCache(id, changes) {
     const cache = cargar(KEYS.PREINGRESOS) || [];
@@ -359,7 +370,7 @@ const OfflineManager = (() => {
     getAdminPin, getAdminCache, sincronizarAdminCache,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
     getPNCache, setPNCache,
-    getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache,
+    getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     estaOnline: () => navigator.onLine
   };

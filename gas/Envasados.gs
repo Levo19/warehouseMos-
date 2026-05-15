@@ -305,6 +305,112 @@ function _getOCrearGuiaDia(tipo, usuario) {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// ANULAR ENVASADO MANUAL — operador corrige un error de captura
+// ════════════════════════════════════════════════════════════════════
+// Anula un envasado individual. Reverte stock base (suma) y stock
+// derivado (resta) anulando los detalles de las guías correspondientes
+// con anularDetalle (que ya tiene _conLock y registra el movimiento).
+// Idempotente: si ya estaba anulado retorna yaAnulado:true.
+function anularEnvasadoManual(params) {
+  return _conLock('anularEnvasadoManual', function() {
+    var idEnv = String((params && params.idEnvasado) || '').trim();
+    var usuario = String((params && params.usuario) || 'manual');
+    var motivo = String((params && params.motivo) || 'corrección manual');
+    if (!idEnv) return { ok: false, error: 'Requiere idEnvasado' };
+
+    var sheet = getSheet('ENVASADOS');
+    var data = sheet.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h); });
+    var iId    = hdrs.indexOf('idEnvasado');
+    var iBase  = hdrs.indexOf('codigoProductoBase');
+    var iCnt   = hdrs.indexOf('cantidadBase');
+    var iDer   = hdrs.indexOf('codigoProductoEnvasado');
+    var iUds   = hdrs.indexOf('unidadesProducidas');
+    var iEst   = hdrs.indexOf('estado');
+    var iGs    = hdrs.indexOf('idGuiaSalida');
+    var iGi    = hdrs.indexOf('idGuiaIngreso');
+    var iObs   = hdrs.indexOf('observacion');
+    var iFecha = hdrs.indexOf('fecha');
+
+    var rowIdx = -1, env = null;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][iId]) === idEnv) {
+        rowIdx = r + 1;
+        env = {
+          base:    String(data[r][iBase] || ''),
+          cnt:     parseFloat(data[r][iCnt]) || 0,
+          der:     String(data[r][iDer] || ''),
+          uds:     parseFloat(data[r][iUds]) || 0,
+          estado:  String(data[r][iEst] || '').toUpperCase(),
+          idGs:    String(data[r][iGs] || ''),
+          idGi:    String(data[r][iGi] || ''),
+          fechaTs: data[r][iFecha] instanceof Date ? data[r][iFecha].getTime() : new Date(data[r][iFecha]).getTime()
+        };
+        break;
+      }
+    }
+    if (rowIdx < 2) return { ok: false, error: 'Envasado no encontrado: ' + idEnv };
+    if (env.estado === 'ANULADO' || env.estado === 'ANULADO_DUPLICADO') {
+      return { ok: true, data: { idEnvasado: idEnv, yaAnulado: true, estado: env.estado } };
+    }
+
+    // Buscar el detalle de SALIDA (idGuiaSalida, codigo base, cantidad)
+    // y de INGRESO (idGuiaIngreso, codigo derivado, unidades). Toleramos
+    // que codigoProductoBase pueda venir como skuBase o codigoBarra: si
+    // no encuentro por el código directo, busco cualquier detalle no
+    // anulado con esa cantidad en la guía.
+    function _buscarDet(idGuia, codigo, cantidad, refTs) {
+      try {
+        var dets = _sheetToObjects(getSheet('GUIA_DETALLE'));
+        var cand = dets.filter(function(d) {
+          if (String(d.idGuia) !== idGuia) return false;
+          if (String(d.observacion || '').toUpperCase() === 'ANULADO') return false;
+          if ((parseFloat(d.cantidadEsperada) || 0) !== cantidad) return false;
+          if (codigo && String(d.codigoProducto) !== codigo) {
+            // Si el código no coincide exacto, igual lo consideramos como
+            // candidato — la cantidad + idGuia ya filtran bastante.
+            return true;
+          }
+          return true;
+        });
+        // Ordenar por proximidad temporal al envasado (idDetalle = DET<ts>)
+        cand.sort(function(a, b) {
+          var ta = parseInt((String(a.idDetalle || '').match(/(\d{10,})/) || [])[1] || 0, 10);
+          var tb = parseInt((String(b.idDetalle || '').match(/(\d{10,})/) || [])[1] || 0, 10);
+          return Math.abs(ta - refTs) - Math.abs(tb - refTs);
+        });
+        return cand[0] || null;
+      } catch(_) { return null; }
+    }
+
+    var resSal = null, resIng = null;
+    var detSal = _buscarDet(env.idGs, env.base, env.cnt, env.fechaTs);
+    var detIng = _buscarDet(env.idGi, env.der, env.uds, env.fechaTs);
+    try { if (detSal) resSal = anularDetalle({ idDetalle: detSal.idDetalle, usuario: usuario }); } catch(e1) {}
+    try { if (detIng) resIng = anularDetalle({ idDetalle: detIng.idDetalle, usuario: usuario }); } catch(e2) {}
+
+    var nowStr = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
+    sheet.getRange(rowIdx, iEst + 1).setValue('ANULADO');
+    var prevObs = sheet.getRange(rowIdx, iObs + 1).getValue();
+    sheet.getRange(rowIdx, iObs + 1).setValue(
+      String(prevObs || '') + ' | ANULADO por ' + usuario + ' · ' + motivo + ' · ' + nowStr
+    );
+
+    return {
+      ok: true,
+      data: {
+        idEnvasado:    idEnv,
+        estado:        'ANULADO',
+        stockBaseRevertido:    !!(resSal && resSal.ok),
+        stockDerivRevertido:   !!(resIng && resIng.ok),
+        cantidadBaseRevertida: env.cnt,
+        unidadesRevertidas:    env.uds
+      }
+    };
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════
 // SCRIPT ONE-SHOT — limpiar envasados duplicados desde una fecha
 // ════════════════════════════════════════════════════════════════════
 // Antes de v2.8.0 registrarEnvasado no tenía idempotencia → un click +

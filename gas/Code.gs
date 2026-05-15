@@ -150,6 +150,7 @@ function _route(method, e) {
       case 'getEnvasados':       return getEnvasados(params);
       case 'getPendientesEnvasado': return getPendientesEnvasado();
       case 'registrarEnvasado':  return registrarEnvasado(params);
+      case 'anularEnvasadoManual': return anularEnvasadoManual(params);
 
       // ── Proveedores ────────────────────────────────────────
       case 'getProveedores':     return getProveedores(params);
