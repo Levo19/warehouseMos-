@@ -1394,6 +1394,48 @@
       font-family:'Courier New',monospace;
     }
 
+    /* ── Envasado: confetti + banner deshacer ────────────────────── */
+    @keyframes envConfettiFall {
+      0%   { transform:translateY(-30px) rotate(0deg);opacity:0; }
+      15%  { opacity:1; }
+      100% { transform:translateY(110vh) rotate(540deg);opacity:.9; }
+    }
+    .env-banner-deshacer {
+      position:fixed;left:50%;bottom:78px;transform:translateX(-50%) translateY(20px);
+      z-index:9985;opacity:0;pointer-events:none;
+      transition:transform .35s cubic-bezier(.34,1.56,.64,1), opacity .25s ease;
+      width:calc(100% - 28px);max-width:460px;
+    }
+    .env-banner-deshacer.is-open {
+      opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;
+    }
+    .env-banner-inner {
+      display:flex;align-items:center;gap:11px;padding:11px 12px;
+      background:linear-gradient(135deg,rgba(6,78,59,.95),rgba(15,23,42,.95));
+      border:1.5px solid rgba(52,211,153,.6);border-radius:16px;
+      box-shadow:0 8px 28px -6px rgba(0,0,0,.6);
+      backdrop-filter:blur(10px);
+    }
+    .env-banner-ico {
+      font-size:20px;width:38px;height:38px;flex-shrink:0;
+      display:flex;align-items:center;justify-content:center;border-radius:11px;
+      background:rgba(16,185,129,.22);border:1px solid rgba(16,185,129,.5);
+    }
+    .env-banner-text { flex:1;min-width:0; }
+    .env-banner-title {
+      font-size:.88em;font-weight:800;color:#f1f5f9;line-height:1.2;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    }
+    .env-banner-sub { font-size:.68em;color:#94a3b8;margin-top:2px; }
+    .env-banner-btn {
+      flex-shrink:0;padding:7px 13px;border-radius:11px;cursor:pointer;
+      font-size:.74em;font-weight:900;letter-spacing:.04em;
+      background:linear-gradient(135deg,rgba(239,68,68,.22),rgba(239,68,68,.08));
+      border:1.5px solid rgba(239,68,68,.55);color:#fca5a5;
+      transition:transform .1s ease;
+    }
+    .env-banner-btn:active { transform:scale(.9); }
+
     /* ── FLOTANTE DEL DESPACHO ACTIVO — control remoto cross-módulo ── */
     .despflot {
       position:fixed;left:10px;right:10px;bottom:74px;z-index:9995;
@@ -6410,10 +6452,38 @@
   <!-- Nombre del producto envasado -->
   <p id="envNombreProducto" class="text-lg font-bold text-center text-white mb-2 min-h-[1.75rem] leading-tight"></p>
 
-  <!-- Selector (oculto si viene pre-seleccionado) -->
-  <select id="envProductoDerivado" class="input mb-3" onchange="EnvasadosView.onDerivadoChange(this.value)">
-    <option value="">— Seleccionar producto a envasar —</option>
-  </select>
+  <!-- Hidden — guarda la selección. El select nativo fue reemplazado por un
+       buscador moderno con cards. -->
+  <input id="envProductoDerivado" type="hidden" value="">
+
+  <!-- PANEL 1: buscar y elegir derivado (visible cuando no hay selección) -->
+  <div id="envPanelBuscar" class="mb-3">
+    <div class="relative mb-2">
+      <input id="envBuscarDerivado" type="text" class="input pl-9"
+             placeholder="Buscar producto a envasar..."
+             oninput="EnvasadosView.filtrarDerivados(this.value)"
+             autocomplete="off">
+      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">🔍</span>
+    </div>
+    <div id="envListaDerivados" class="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+      <p class="text-xs text-slate-500 italic text-center py-3">Cargando...</p>
+    </div>
+  </div>
+
+  <!-- PANEL 2: tarjeta del derivado seleccionado (visible al elegir) -->
+  <div id="envPanelSeleccion" class="hidden mb-3">
+    <div class="bg-slate-800 rounded-xl p-3 border-2 border-emerald-500/40">
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="flex-1 min-w-0">
+          <p class="text-[10px] font-semibold text-emerald-400 uppercase tracking-wide">Producto seleccionado</p>
+          <p id="envSelNombre" class="text-sm font-bold text-white truncate"></p>
+          <p id="envSelMeta" class="text-[11px] text-slate-400 font-mono mt-0.5"></p>
+        </div>
+        <button onclick="EnvasadosView.cambiarDerivado()"
+                class="btn btn-outline text-xs px-3 py-1.5 flex-shrink-0">↺ Cambiar</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Info pills: stock base + máx producibles -->
   <div id="envasadoFactorInfo" class="hidden grid grid-cols-2 gap-2 mb-4">
@@ -6426,6 +6496,9 @@
       <p id="envInfoMax" class="text-sm font-bold text-white"></p>
     </div>
   </div>
+
+  <!-- Historial mini del derivado (últimos envasados — detecta repeticiones) -->
+  <div id="envHistorialMini" class="hidden mb-3"></div>
 
   <!-- Cantidad grande y centrada -->
   <p class="text-xs text-slate-400 text-center mb-2">Unidades a envasar</p>

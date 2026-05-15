@@ -6698,18 +6698,11 @@ const EnvasadosView = (() => {
     }
   }
 
+  let _selDerivadoId = '';   // id del derivado seleccionado actualmente
+
   function nuevo(preIdBase, preIdDerivado) {
     productosMaestro = App.getProductosMaestro();
     derivados = productosMaestro.filter(p => p.codigoProductoBase && p.codigoProductoBase !== '');
-
-    const sel = document.getElementById('envProductoDerivado');
-    sel.innerHTML = '<option value="">— Seleccionar producto a envasar —</option>';
-    derivados.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.idProducto;
-      opt.textContent = p.descripcion;
-      sel.appendChild(opt);
-    });
 
     // Auto-fill fecha vencimiento = hoy + 12 meses
     const fv = new Date();
@@ -6720,18 +6713,138 @@ const EnvasadosView = (() => {
     document.getElementById('envUnidades').value = 1;
     document.getElementById('envNombreProducto').textContent = '';
     document.getElementById('envasadoFactorInfo').classList.add('hidden');
+    document.getElementById('envHistorialMini').classList.add('hidden');
+    document.getElementById('envProductoDerivado').value = '';
+    document.getElementById('envBuscarDerivado').value = '';
+    // Reset checkbox imprimir — siempre arranca marcado (bug #9)
+    document.getElementById('envImprimirEtiq').checked = true;
+    _selDerivadoId = '';
 
     if (preIdDerivado) {
-      sel.value = preIdDerivado;
-      sel.disabled = true;
-      sel.classList.add('hidden');
-      onDerivadoChange(preIdDerivado);
+      // Pre-seleccionado desde EnvasadorView card → ir directo al panel 2
+      seleccionarDerivado(preIdDerivado, /*lock=*/true);
     } else {
-      sel.disabled = false;
-      sel.classList.remove('hidden');
+      // Mostrar panel de búsqueda
+      document.getElementById('envPanelBuscar').classList.remove('hidden');
+      document.getElementById('envPanelSeleccion').classList.add('hidden');
+      filtrarDerivados('');
     }
 
     abrirSheet('sheetEnvasado');
+    if (!preIdDerivado) {
+      setTimeout(() => document.getElementById('envBuscarDerivado')?.focus(), 250);
+    }
+  }
+
+  // Filtra la lista de derivados por nombre/codigo/marca y la renderiza
+  // como cards seleccionables. Muestra "máx producibles" en cada card
+  // para que el operador elija con contexto.
+  function filtrarDerivados(query) {
+    const cont = document.getElementById('envListaDerivados');
+    if (!cont) return;
+    const q = String(query || '').trim().toLowerCase();
+    const stockMap = {};
+    OfflineManager.getStockCache().forEach(s => {
+      stockMap[String(s.codigoProducto || s.idProducto)] = s;
+    });
+    let list = derivados;
+    if (q) {
+      list = list.filter(d => {
+        const txt = ((d.descripcion || '') + ' ' + (d.codigoBarra || '') + ' ' + (d.marca || '') + ' ' + (d.idProducto || '')).toLowerCase();
+        return txt.indexOf(q) >= 0;
+      });
+    }
+    if (!list.length) {
+      cont.innerHTML = `<p class="text-xs text-slate-500 italic text-center py-4">Sin coincidencias${q ? ' para "' + escHtml(q) + '"' : ''}</p>`;
+      return;
+    }
+    cont.innerHTML = list.slice(0, 60).map(d => {
+      const prodBase = productosMaestro.find(p =>
+        (p.skuBase && p.skuBase === d.codigoProductoBase) ||
+        p.idProducto === d.codigoProductoBase
+      );
+      const cbBase = prodBase ? String(prodBase.codigoBarra) : '';
+      const stockBase = parseFloat((stockMap[cbBase] || {}).cantidadDisponible || 0);
+      const fb = parseFloat(d.factorConversionBase) || 0;
+      const maxP = fb > 0 ? Math.floor(stockBase / fb) : 0;
+      const maxBadge = maxP > 0
+        ? `<span class="text-[10px] text-emerald-400 font-bold">${maxP} uds máx</span>`
+        : `<span class="text-[10px] text-amber-400 font-bold">⚠ sin stock</span>`;
+      const idAttr = escAttr(d.idProducto);
+      return `<button onclick="EnvasadosView.seleccionarDerivado('${idAttr}')"
+        class="w-full text-left px-3 py-2 rounded-lg border transition-all active:scale-[.98]"
+        style="background:rgba(15,23,42,.6);border-color:#1e293b;">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-semibold text-slate-100 truncate">${escHtml(d.descripcion || d.idProducto)}</p>
+            <p class="text-[10px] text-slate-500 font-mono truncate">${escHtml(d.codigoBarra || d.idProducto)}</p>
+          </div>
+          ${maxBadge}
+        </div>
+      </button>`;
+    }).join('') + (list.length > 60 ? `<p class="text-[10px] text-slate-600 italic text-center py-1">+ ${list.length - 60} más · refiná tu búsqueda</p>` : '');
+  }
+
+  // Selecciona un derivado: setea hidden input, llama onDerivadoChange,
+  // cambia al panel de selección (oculta el buscador), pinta historial mini.
+  function seleccionarDerivado(idDerivado, locked) {
+    if (!idDerivado) return;
+    const prod = derivados.find(d => d.idProducto === idDerivado);
+    if (!prod) return;
+    _selDerivadoId = idDerivado;
+    document.getElementById('envProductoDerivado').value = idDerivado;
+    document.getElementById('envSelNombre').textContent = prod.descripcion || idDerivado;
+    document.getElementById('envSelMeta').textContent  = (prod.codigoBarra || idDerivado) + (prod.marca ? ' · ' + prod.marca : '');
+    document.getElementById('envPanelBuscar').classList.add('hidden');
+    document.getElementById('envPanelSeleccion').classList.remove('hidden');
+    onDerivadoChange(idDerivado);
+    _pintarHistorialMini(idDerivado);
+    try { if (typeof SoundFX !== 'undefined' && SoundFX.beep) SoundFX.beep(); } catch(_){}
+  }
+
+  function cambiarDerivado() {
+    _selDerivadoId = '';
+    document.getElementById('envProductoDerivado').value = '';
+    document.getElementById('envPanelSeleccion').classList.add('hidden');
+    document.getElementById('envPanelBuscar').classList.remove('hidden');
+    document.getElementById('envasadoFactorInfo').classList.add('hidden');
+    document.getElementById('envHistorialMini').classList.add('hidden');
+    document.getElementById('envNombreProducto').textContent = '';
+    document.getElementById('envBuscarDerivado').value = '';
+    filtrarDerivados('');
+    setTimeout(() => document.getElementById('envBuscarDerivado')?.focus(), 100);
+  }
+
+  // Muestra los últimos 3 envasados de ESE derivado en el sheet — ayuda
+  // a detectar visualmente si el operador está a punto de duplicar.
+  function _pintarHistorialMini(idDerivado) {
+    const cont = document.getElementById('envHistorialMini');
+    if (!cont) return;
+    const prod = derivados.find(d => d.idProducto === idDerivado);
+    if (!prod) { cont.classList.add('hidden'); return; }
+    const cbDer = String(prod.codigoBarra || '');
+    const recientes = OfflineManager.getEnvasadosCache()
+      .filter(e => String(e.codigoProductoEnvasado) === cbDer &&
+                   String(e.estado || '').toUpperCase() !== 'ANULADO' &&
+                   String(e.estado || '').toUpperCase() !== 'ANULADO_DUPLICADO')
+      .sort((a, b) => String(b.fecha || '').localeCompare(String(a.fecha || '')))
+      .slice(0, 3);
+    if (!recientes.length) { cont.classList.add('hidden'); return; }
+    cont.classList.remove('hidden');
+    cont.innerHTML = `
+      <div class="bg-slate-800/60 rounded-xl p-2 border border-slate-700">
+        <p class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">📋 Últimos de este producto</p>
+        <div class="space-y-0.5">
+          ${recientes.map(e => {
+            const f = String(e.fecha || '').substring(0, 10);
+            const hora = (() => { try { return new Date(e.fecha).toLocaleTimeString('es-PE',{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; } })();
+            return `<div class="flex items-center justify-between text-[11px]">
+              <span class="text-slate-400">${escHtml(f)} ${escHtml(hora)} · ${escHtml(e.usuario || '—')}</span>
+              <span class="font-bold text-slate-200">${fmt(e.unidadesProducidas)} uds</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
   }
 
   function onDerivadoChange(idDerivado) {
@@ -6762,14 +6875,21 @@ const EnvasadosView = (() => {
     document.getElementById('envasadoFactorInfo').classList.remove('hidden');
   }
 
+  // [Bug #7 cleanup] calcularProyeccion era código muerto: leía envCantBase
+  // que NO existe en el HTML del sheet → siempre daba 0 unidades. Se deja
+  // como no-op para no romper si algo aún la llama. Las unidades se setean
+  // directo en el input grande del sheet o con los presets/+- buttons.
   function calcularProyeccion() {
-    const idDerivado = document.getElementById('envProductoDerivado').value;
+    const idDerivado = document.getElementById('envProductoDerivado')?.value || _selDerivadoId;
     const prod = derivados.find(p => p.idProducto === idDerivado);
     if (!prod) return;
-
-    const cantBase = parseFloat(document.getElementById('envCantBase').value) || 0;
     const factor   = parseFloat(prod.factorConversion)  || 1;
     const merma    = parseFloat(prod.mermaEsperadaPct)   || 0;
+    // No-op: dejado sin efecto. Los presets / +- arman la cantidad.
+    void factor; void merma;
+    return;
+    /* legacy */
+    const cantBase = 0;
     const esperadas = Math.floor(cantBase * factor * (1 - merma / 100));
 
     document.getElementById('envUnidades').value = esperadas;
@@ -6919,10 +7039,11 @@ const EnvasadosView = (() => {
         return;
       }
       // Reemplazar el envasado optimista con el idEnvasado REAL del backend
-      if (res.data?.idEnvasado && res.data.idEnvasado !== idEnvOptimista) {
+      const idReal = res.data?.idEnvasado || idEnvOptimista;
+      if (idReal !== idEnvOptimista) {
         OfflineManager.removerEnvasadoCache(idEnvOptimista);
         OfflineManager.inyectarEnvasadoCache({
-          idEnvasado:             res.data.idEnvasado,
+          idEnvasado:             idReal,
           codigoProductoBase:     cbBaseStr || prod.codigoProductoBase || '',
           cantidadBase:           cantBase,
           unidadBase:             prodBase?.unidad || '',
@@ -6942,6 +7063,9 @@ const EnvasadosView = (() => {
         toast('Impresora: ' + res.data.impresion.error, 'warn', 5000);
       }
       OfflineManager.precargarOperacional(true).catch(() => {});
+
+      // 🎉 Celebración + banner deshacer
+      _celebrarEnvasado(idReal, prod.descripcion || cbDerivado, producidas);
     }).catch((e) => {
       _rollbackOptimista('sin conexión');
     }).finally(() => {
@@ -6998,6 +7122,80 @@ const EnvasadosView = (() => {
     }
   }
 
+  // Celebración + banner deshacer rápido tras registrar exitosamente.
+  // El operador tiene 12s para deshacer si se equivocó — un click anula
+  // todo (revierte stock + marca ANULADO).
+  let _bannerDeshacerTimer = null;
+  function _celebrarEnvasado(idReal, descripcion, uds) {
+    try {
+      if (typeof SoundFX !== 'undefined') {
+        if (SoundFX.done) SoundFX.done();
+        else if (SoundFX.savedTick) SoundFX.savedTick();
+      }
+    } catch(_){}
+    try { vibrate([20, 30, 60]); } catch(_){}
+    // Confetti inline simple: emojis flotantes
+    _confettiEnvasado();
+    _mostrarBannerDeshacer(idReal, descripcion || '', uds || 0);
+  }
+
+  function _confettiEnvasado() {
+    const cap = document.createElement('div');
+    cap.className = 'env-confetti-layer';
+    cap.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9994;overflow:hidden';
+    const emojis = ['📦','✨','🎉','🟢','🟢','📦'];
+    for (let i = 0; i < 12; i++) {
+      const sp = document.createElement('span');
+      sp.textContent = emojis[i % emojis.length];
+      sp.style.cssText = `position:absolute;left:${10+Math.random()*80}%;top:-20px;font-size:${18+Math.random()*14}px;animation:envConfettiFall ${1.2+Math.random()*0.8}s cubic-bezier(.6,.04,.98,.34) forwards;animation-delay:${Math.random()*.2}s`;
+      cap.appendChild(sp);
+    }
+    document.body.appendChild(cap);
+    setTimeout(() => cap.remove(), 2200);
+  }
+
+  function _mostrarBannerDeshacer(idEnvasado, descripcion, uds) {
+    if (_bannerDeshacerTimer) { clearTimeout(_bannerDeshacerTimer); _bannerDeshacerTimer = null; }
+    let banner = document.getElementById('envBannerDeshacer');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'envBannerDeshacer';
+      banner.className = 'env-banner-deshacer';
+      document.body.appendChild(banner);
+    }
+    const idAttr = String(idEnvasado).replace(/'/g, '&#39;');
+    const desc = String(descripcion).substring(0, 32);
+    banner.innerHTML = `
+      <div class="env-banner-inner">
+        <span class="env-banner-ico">✅</span>
+        <div class="env-banner-text">
+          <p class="env-banner-title">${uds} uds · ${escHtml(desc)}</p>
+          <p class="env-banner-sub" id="envBannerCd">Deshacer disponible 12s</p>
+        </div>
+        <button class="env-banner-btn"
+                onclick="EnvasadosView._dispararDeshacer('${idAttr}')">↺ Deshacer</button>
+      </div>`;
+    banner.classList.add('is-open');
+    let secs = 12;
+    const cdEl = document.getElementById('envBannerCd');
+    const tick = () => {
+      secs--;
+      if (cdEl) cdEl.textContent = secs > 0 ? `Deshacer disponible ${secs}s` : 'Deshacer expiró';
+      if (secs <= 0) { _ocultarBannerDeshacer(); return; }
+      _bannerDeshacerTimer = setTimeout(tick, 1000);
+    };
+    _bannerDeshacerTimer = setTimeout(tick, 1000);
+  }
+  function _ocultarBannerDeshacer() {
+    if (_bannerDeshacerTimer) { clearTimeout(_bannerDeshacerTimer); _bannerDeshacerTimer = null; }
+    const b = document.getElementById('envBannerDeshacer');
+    if (b) b.classList.remove('is-open');
+  }
+  function _dispararDeshacer(idEnvasado) {
+    _ocultarBannerDeshacer();
+    anular(idEnvasado, '', 0);
+  }
+
   // Re-render desde el cache local (sin llamar al backend). Usado tras
   // inyección/rollback optimista para que la UI refleje el cache actual.
   function _renderDesdeCache() {
@@ -7011,7 +7209,9 @@ const EnvasadosView = (() => {
     } catch(_) {}
   }
 
-  return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar, anular };
+  return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar, anular,
+           filtrarDerivados, seleccionarDerivado, cambiarDerivado,
+           _dispararDeshacer };
 })();
 
 // ════════════════════════════════════════════════
