@@ -1,40 +1,55 @@
 // ============================================================
 // warehouseMos — Auth.gs
-// Verificación de clave admin para acciones sensibles
-// (reabrir guía cerrada, procesar eliminación de mermas, etc.)
-//
-// La clave admin vive en ESTACIONES.ALMACEN.adminPin de MOS.
-// Es la misma clave usada por admin+master en MOS para acciones
-// restringidas. 8 dígitos.
+// Verificación de clave admin/master mixta de 8 dígitos:
+//   - 4 dígitos globales (clave global compartida por todo admin/master)
+//   - 4 dígitos del PIN personal del admin/master que autoriza
+// La validación se hace contra MOS (única fuente de verdad).
+// Misma clave usada para: anular ventas/cambiar moneda (ME),
+// autorizar dispositivo in-situ (WH), reabrir guía, anular envasado.
 // ============================================================
 
 function verificarClaveAdmin(params) {
-  var clave = String(params.clave || '').trim();
+  var clave = String(params.clave || params.claveAdmin || '').trim();
   if (!clave) return { ok: false, error: 'clave requerida' };
-
-  var adminPin = _getAdminPinAlmacen();
-  if (!adminPin) return { ok: false, error: 'adminPin no configurado en MOS' };
-
-  if (clave !== adminPin) {
-    return { ok: false, error: 'clave incorrecta' };
-  }
-  return { ok: true, data: { verificado: true, ts: new Date().toISOString() } };
+  return _validarClaveAdminViaMOS(clave, params.accion || 'verificar', params.refDocumento || '');
 }
 
-// Internal: recupera adminPin de ESTACIONES.ALMACEN en MOS
-function _getAdminPinAlmacen() {
+// Helper: delega la validación de la clave mixta al MOS.
+// MOS conoce la globalPin actual y los PINs personales de los admin/master,
+// además registra la auditoría de cada validación.
+function _validarClaveAdminViaMOS(clave, accion, refDocumento) {
+  var mosUrl = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
+  if (!mosUrl) {
+    return { ok: false, error: 'MOS_WEB_APP_URL no configurada en Script Properties de WH' };
+  }
   try {
-    var estSheet = _getMosSS().getSheetByName('ESTACIONES');
-    if (!estSheet) return null;
-    var estaciones = _sheetToObjects(estSheet);
-    var almacen = estaciones.find(function(e) {
-      var key = String(e.idEstacion || e.nombre || '').toUpperCase();
-      return key === 'ALMACEN';
+    var resp = UrlFetchApp.fetch(mosUrl, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        action:        'verificarClaveAdmin',
+        clave:         clave,
+        accion:        accion || 'verificar',
+        refDocumento:  refDocumento || '',
+        origen:        'warehouseMos'
+      }),
+      muteHttpExceptions: true
     });
-    return almacen && almacen.adminPin ? String(almacen.adminPin) : null;
+    var code = resp.getResponseCode();
+    var body = resp.getContentText();
+    if (code < 200 || code >= 300) {
+      return { ok: false, error: 'MOS respondió HTTP ' + code };
+    }
+    var j;
+    try { j = JSON.parse(body); }
+    catch(e) { return { ok: false, error: 'MOS respondió payload no-JSON' }; }
+    if (!j || j.ok === false) {
+      return { ok: false, error: (j && j.error) || 'clave incorrecta' };
+    }
+    // MOS retorna { ok: true, data: { validadoPor, idPersonal, ... } }
+    return { ok: true, data: j.data || {} };
   } catch(e) {
-    Logger.log('_getAdminPinAlmacen error: ' + e.message);
-    return null;
+    return { ok: false, error: 'No se pudo conectar con MOS: ' + e.message };
   }
 }
 
@@ -43,8 +58,5 @@ function _getAdminPinAlmacen() {
 function _requireAdmin(params) {
   var clave = String(params.claveAdmin || params.clave || '').trim();
   if (!clave) return { ok: false, error: 'clave admin requerida' };
-  var adminPin = _getAdminPinAlmacen();
-  if (!adminPin) return { ok: false, error: 'adminPin no configurado' };
-  if (clave !== adminPin) return { ok: false, error: 'clave incorrecta' };
-  return { ok: true };
+  return _validarClaveAdminViaMOS(clave, params.accion || params.action || 'admin', params.refDocumento || '');
 }
