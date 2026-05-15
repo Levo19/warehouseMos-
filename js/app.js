@@ -6636,15 +6636,24 @@ function _renderEnvasadosPorDia(list, container) {
   const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
   const hoy           = new Date().toISOString().split('T')[0];
 
-  // Mapa codigoBarra → descripcion del maestro (para legibilidad)
+  // Mapa codigoBarra → descripcion del maestro (para legibilidad).
+  // Fallback en cascada: App.getProductosMaestro (memoria) → OfflineManager
+  // (cache local) → idProducto. Asegura que aunque la app esté arrancando
+  // y App no haya cargado todavía, igual mostremos algo descriptivo.
   const prodMap = {};
+  function _addProd(p) {
+    const desc = p.descripcion || p.nombre || p.idProducto || '';
+    if (!desc) return;
+    if (p.codigoBarra) prodMap[String(p.codigoBarra)] = desc;
+    if (p.skuBase)     prodMap[String(p.skuBase)]     = desc;
+    if (p.idProducto)  prodMap[String(p.idProducto)]  = prodMap[String(p.idProducto)] || desc;
+  }
   try {
-    const prods = (window.App && App.getProductosMaestro && App.getProductosMaestro()) || [];
-    prods.forEach(p => {
-      if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p.descripcion || p.idProducto || '';
-      if (p.skuBase)     prodMap[String(p.skuBase)]     = p.descripcion || p.idProducto || '';
-      if (p.idProducto)  prodMap[String(p.idProducto)]  = prodMap[String(p.idProducto)] || (p.descripcion || '');
-    });
+    const a = (window.App && App.getProductosMaestro && App.getProductosMaestro()) || [];
+    a.forEach(_addProd);
+    if (window.OfflineManager?.getProductosCache) {
+      OfflineManager.getProductosCache().forEach(_addProd);
+    }
   } catch(_){}
 
   let visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
@@ -6758,14 +6767,15 @@ const EnvasadosView = (() => {
     // Fondo: actualizar desde servidor
     const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
     if (res.ok) {
-      // [Fix v2.9.1] Antes hacíamos guardarEnvasadosCache(res.data) directo,
-      // lo cual BORRA los envasados optimistic (ENV_OPT_*) que aún no se
-      // sincronizaron al backend. Si la API call inicial cayó en cola offline,
-      // el envasado existe en cache local pero NO en el backend → desaparecía
-      // de la UI al refrescar. Ahora preservamos los optimistic pendientes.
+      // [v2.10.4] Merge robusto: preservar TODO lo del cache local que no
+      // venga en res.data (no solo ENV_OPT_*). Antes el optimistic se reemplazaba
+      // por el real con id ENV..., y si cargar() corría antes que getEnvasados
+      // reflejara el nuevo registro, el real se borraba y el usuario veía el
+      // envasado aparecer y desaparecer hasta navegar y volver.
       const cacheLocal = OfflineManager.getEnvasadosCache();
+      const idsBackend = new Set(res.data.map(e => String(e.idEnvasado || '')));
       const pendientes = cacheLocal.filter(e =>
-        String(e.idEnvasado || '').startsWith('ENV_OPT_')
+        e.idEnvasado && !idsBackend.has(String(e.idEnvasado))
       );
       const fusionado = pendientes.length
         ? [...pendientes, ...res.data]
@@ -7084,6 +7094,10 @@ const EnvasadosView = (() => {
       estado:                 'COMPLETADO'
     });
     toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
+    // [v2.10.4] TTS optimista: hablar AL TOCAR el botón (no al volver del
+    // backend). Antes el operador esperaba 5+ segundos hasta escuchar la voz,
+    // perdiendo el efecto anti-fraude. Ahora suena inmediato.
+    _decirEnVoz(`${producidas} unidades registradas de ${prod.descripcion || cbDerivado}`);
     cerrarSheet('sheetEnvasado');
     // NOTA: NO llamar cargar() acá. cargar() hace API.getEnvasados() y
     // sobrescribe el cache con la lista del backend, que aún no tiene
@@ -7222,8 +7236,8 @@ const EnvasadosView = (() => {
     // Confetti inline simple: emojis flotantes
     _confettiEnvasado();
     _mostrarBannerDeshacer(idReal, descripcion || '', uds || 0);
-    // TTS — anti-fraude: declara en voz alta lo que se registró
-    _decirEnVoz(`${uds} unidades registradas de ${descripcion}`);
+    // [v2.10.4] TTS movido a registrar() para hablar al instante del click,
+    // no después de la confirmación del backend (era ~5s tarde).
   }
 
   // TTS — usa SpeechSynthesis (nativo). Velocidad 0.95, español PE/ES.
@@ -7675,8 +7689,16 @@ const EnvasadorView = (() => {
     // Fondo: actualizar desde servidor
     const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
     if (res.ok) {
-      OfflineManager.guardarEnvasadosCache(res.data);
-      _renderEnvasadosPorDia(res.data, container);
+      // [v2.10.4] Mismo merge robusto que EnvasadosView.cargar — preservar
+      // los locales que aún no fueron a backend para evitar parpadeo.
+      const cacheLocal = OfflineManager.getEnvasadosCache();
+      const idsBackend = new Set(res.data.map(e => String(e.idEnvasado || '')));
+      const pendientes = cacheLocal.filter(e =>
+        e.idEnvasado && !idsBackend.has(String(e.idEnvasado))
+      );
+      const fusionado = pendientes.length ? [...pendientes, ...res.data] : res.data;
+      OfflineManager.guardarEnvasadosCache(fusionado);
+      _renderEnvasadosPorDia(fusionado, container);
     }
   }
 
