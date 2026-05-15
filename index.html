@@ -1386,6 +1386,13 @@
       padding:10px 16px 14px;font-size:.66em;color:#64748b;text-align:center;
       border-top:1px solid rgba(51,65,85,.4);
     }
+    /* Mini "código de barra" tipográfico — ícono reutilizable. Barras
+       pegadas con letter-spacing negativo → se lee como código escaneable.
+       Mismo símbolo que MOS para coherencia entre las dos apps. */
+    .wh-bar-ico {
+      letter-spacing:-.12em;font-weight:700;
+      font-family:'Courier New',monospace;
+    }
 
     /* ── FLOTANTE DEL DESPACHO ACTIVO — control remoto cross-módulo ── */
     .despflot {
@@ -3545,7 +3552,7 @@
 <div id="codigosOverlay" class="cod-overlay">
   <div class="cod-modal">
     <div class="cod-header">
-      <span class="cod-header-ico">📲</span>
+      <span class="cod-header-ico"><span class="wh-bar-ico">▐│▌║▏</span></span>
       <div class="flex-1 min-w-0">
         <p class="cod-header-title">Códigos de barra</p>
         <p class="cod-header-sub" id="codigosOverlayTitulo">Producto</p>

@@ -12159,7 +12159,7 @@ const ProductosView = (() => {
         <button onclick="event.stopPropagation();ProductosView.verCodigos('${escAttr(g.skuBase)}')"
                 class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1 prod-btn-codigos"
                 title="Ver códigos de barra en pantalla para escanear directo">
-          📲 Códigos
+          <span class="wh-bar-ico">▐│▌║▏</span> Códigos
         </button>
         ${/* Botón ojo: solo barcode único en modo auditoría */
           isAudit && !hasChildren ? (() => {
