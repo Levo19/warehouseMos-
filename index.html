@@ -6536,6 +6536,57 @@
 </div>
 
 <!-- ════════════════════════════════════════════════
+     SHEET: AUTH ADMIN PARA EDITAR/ANULAR ENVASADO
+     Pide clave 8 dígitos + motivo. La acción (edit/anular)
+     se resuelve por _envAdminCtx.modo en EnvasadosView.
+═══════════════════════════════════════════════════ -->
+<div class="sheet-overlay" id="overlayEnvAdmin" onclick="EnvasadosView.cerrarAuthAdmin()"></div>
+<div class="bottom-sheet" id="sheetEnvAdmin" style="max-height:90vh">
+  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
+  <div class="flex items-center gap-2 mb-3">
+    <span class="text-2xl">🔒</span>
+    <p id="envAdminTitulo" class="font-bold text-base">Autorización admin</p>
+  </div>
+
+  <div id="envAdminInfo" class="mb-3 p-3 rounded-lg" style="background:#1e293b;border:1px solid #334155;">
+    <p class="text-xs text-slate-400 mb-1">Envasado seleccionado</p>
+    <p id="envAdminProd" class="text-sm font-semibold text-slate-100">—</p>
+    <p id="envAdminCantActual" class="text-xs text-slate-300 mt-0.5">—</p>
+  </div>
+
+  <!-- Solo en modo EDITAR: input de nueva cantidad -->
+  <div id="envAdminCantRow" class="mb-3 hidden">
+    <label class="text-xs text-slate-400">Nueva cantidad (unidades)</label>
+    <input id="envAdminCant" class="input mt-1 text-center font-bold text-2xl"
+           type="number" min="0" placeholder="0"/>
+    <p id="envAdminDelta" class="text-xs text-amber-400 mt-1 text-center"></p>
+  </div>
+
+  <div class="mb-3">
+    <label class="text-xs text-slate-400">Motivo (obligatorio)</label>
+    <input id="envAdminMotivo" class="input mt-1" type="text"
+           placeholder="Ej: operador tipeó mal, cantidad real menor..." maxlength="160"/>
+  </div>
+
+  <div class="mb-3">
+    <label class="text-xs text-slate-400">Clave admin (8 dígitos)</label>
+    <input id="envAdminClave" class="input mt-1 text-center font-mono text-lg tracking-widest"
+           type="password" inputmode="numeric" maxlength="8" placeholder="••••••••"
+           autocomplete="off"/>
+    <label class="flex items-center gap-2 text-xs text-slate-400 mt-2 cursor-pointer">
+      <input id="envAdminRecordar" type="checkbox" class="w-3.5 h-3.5"/>
+      Recordar 30 minutos en este dispositivo
+    </label>
+  </div>
+
+  <div class="flex gap-2">
+    <button onclick="EnvasadosView.cerrarAuthAdmin()" class="btn btn-outline flex-1">Cancelar</button>
+    <button id="btnEnvAdminConfirmar" onclick="EnvasadosView.confirmarAuthAdmin()"
+            class="btn btn-primary flex-1">Aplicar</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
      SHEET: NUEVO PREINGRESO
 ═══════════════════════════════════════════════════ -->
 <div class="sheet-overlay" id="overlayPreingreso" onclick="cerrarSheet('sheetPreingreso')"></div>

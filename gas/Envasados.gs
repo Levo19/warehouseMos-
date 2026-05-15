@@ -804,3 +804,321 @@ function _ajustarDetalleEnvasado(idEnvasado, codigoBarra, nuevaCant, lado) {
     return; // solo el primero matcheante
   }
 }
+
+// ============================================================
+// corregirUnidadesEnvasado — admin-gated
+// ------------------------------------------------------------
+// Edita unidadesProducidas de un envasado EXISTENTE y propaga:
+//   - ENVASADOS (uds + cantidadBase + observacion)
+//   - STOCK derivado (delta uds, signo según suba/baje)
+//   - STOCK base (-deltaBase, restituye o consume kg adicionales)
+//   - GUIA_DETALLE ingreso + salida (ajusta cantidadEsperada/Recibida)
+// Idempotente: calcula delta contra el valor ACTUAL, no contra el
+// original. Editar el mismo envasado N veces solo aplica el delta
+// neto en cada paso, sin desbalancear stock.
+// ============================================================
+function corregirUnidadesEnvasado(params) {
+  return _conLock('corregirUnidadesEnvasado', function() {
+    return _corregirUnidadesEnvasadoImpl(params);
+  });
+}
+
+function _corregirUnidadesEnvasadoImpl(params) {
+  // 1. Validar admin
+  var auth = _requireAdmin(params);
+  if (!auth.ok) return auth;
+
+  var idEnvasado    = String(params.idEnvasado || '').trim();
+  var nuevasUds     = parseFloat(params.nuevasUnidades);
+  var motivo        = String(params.motivo || '').trim() || 'sin motivo';
+  var usuario       = String(params.usuario || 'admin').trim();
+  if (!idEnvasado || !isFinite(nuevasUds) || nuevasUds < 0) {
+    return { ok: false, error: 'Faltan datos: idEnvasado, nuevasUnidades' };
+  }
+
+  var sheet = getSheet('ENVASADOS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0].map(function(h){ return String(h); });
+  var iId   = hdrs.indexOf('idEnvasado');
+  var iBase = hdrs.indexOf('codigoProductoBase');
+  var iCnt  = hdrs.indexOf('cantidadBase');
+  var iDer  = hdrs.indexOf('codigoProductoEnvasado');
+  var iUds  = hdrs.indexOf('unidadesProducidas');
+  var iEst  = hdrs.indexOf('estado');
+  var iObs  = hdrs.indexOf('observacion');
+
+  // 2. Encontrar fila
+  var rowIdx = -1, fila = null;
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][iId]) === idEnvasado) { rowIdx = r + 1; fila = data[r]; break; }
+  }
+  if (rowIdx < 0) return { ok: false, error: 'Envasado no encontrado: ' + idEnvasado };
+
+  var estado = String(fila[iEst] || '').toUpperCase();
+  if (estado === 'ANULADO' || estado === 'ANULADO_DUPLICADO' || estado === 'ANULADO_MANUAL') {
+    return { ok: false, error: 'No se puede editar un envasado anulado' };
+  }
+
+  // 3. Resolver productos y factor
+  var productos = _sheetToObjects(getProductosSheet());
+  var cbDerivado = String(fila[iDer] || '');
+  var cbBase     = String(fila[iBase] || '');
+  var prodDer = productos.find(function(p){ return String(p.codigoBarra) === cbDerivado; });
+  if (!prodDer) return { ok: false, error: 'Producto derivado no encontrado: ' + cbDerivado };
+  var factorBase = parseFloat(prodDer.factorConversionBase) || 0;
+  if (factorBase <= 0) return { ok: false, error: 'factorConversionBase invalido' };
+  var prodBase = productos.find(function(p){
+    return String(p.codigoBarra) === cbBase
+        || String(p.skuBase) === cbBase
+        || String(p.idProducto) === cbBase;
+  });
+
+  // 4. Calcular deltas
+  var udsViejas    = parseFloat(fila[iUds]) || 0;
+  var cantBaseV    = parseFloat(fila[iCnt]) || udsViejas * factorBase;
+  var cantBaseN    = nuevasUds * factorBase;
+  var deltaUds     = nuevasUds - udsViejas;
+  var deltaBase    = cantBaseN - cantBaseV;
+  if (deltaUds === 0) return { ok: false, error: 'No hay cambio: las unidades nuevas son iguales a las actuales' };
+
+  var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+
+  // 5. Aplicar
+  try {
+    sheet.getRange(rowIdx, iUds + 1).setValue(nuevasUds);
+    sheet.getRange(rowIdx, iCnt + 1).setValue(cantBaseN);
+    var obsPrev = sheet.getRange(rowIdx, iObs + 1).getValue();
+    sheet.getRange(rowIdx, iObs + 1).setValue(
+      String(obsPrev || '') + ' | editado ' + nowStr + ' · ' + udsViejas + '→' + nuevasUds + ' uds · admin=' + usuario + ' · ' + motivo
+    );
+
+    _actualizarStock(cbDerivado, deltaUds, {
+      tipoOperacion: 'EDICION_ENVASADO',
+      origen:        idEnvasado,
+      usuario:       usuario,
+      observacion:   'edición derivado: ' + udsViejas + '→' + nuevasUds + ' · ' + motivo
+    });
+    if (prodBase) {
+      _actualizarStock(prodBase.codigoBarra, -deltaBase, {
+        tipoOperacion: 'EDICION_ENVASADO',
+        origen:        idEnvasado,
+        usuario:       usuario,
+        observacion:   'edición base: ' + cantBaseV + '→' + cantBaseN + ' · ' + motivo
+      });
+    }
+    _ajustarDetalleEnvasado(idEnvasado, cbDerivado, nuevasUds, 'ingreso');
+    if (prodBase) _ajustarDetalleEnvasado(idEnvasado, prodBase.codigoBarra, cantBaseN, 'salida');
+
+    return {
+      ok: true,
+      data: {
+        idEnvasado:     idEnvasado,
+        udsViejas:      udsViejas,
+        udsNuevas:      nuevasUds,
+        deltaUds:       deltaUds,
+        deltaBase:      deltaBase,
+        descripcion:    prodDer.descripcion || cbDerivado,
+        descripcionBase: prodBase ? prodBase.descripcion : ''
+      }
+    };
+  } catch(e) {
+    return { ok: false, error: 'Error aplicando edición: ' + e.message };
+  }
+}
+
+// ============================================================
+// anularEnvasadoConClave — admin-gated
+// ------------------------------------------------------------
+// Anula un envasado COMPLETADO: revierte stock derivado y base,
+// anula los detalles de guía ingreso + salida, y marca el envasado
+// como ANULADO_MANUAL con trazabilidad de admin + motivo.
+// ============================================================
+function anularEnvasadoConClave(params) {
+  return _conLock('anularEnvasadoConClave', function() {
+    return _anularEnvasadoConClaveImpl(params);
+  });
+}
+
+function _anularEnvasadoConClaveImpl(params) {
+  var auth = _requireAdmin(params);
+  if (!auth.ok) return auth;
+
+  var idEnvasado = String(params.idEnvasado || '').trim();
+  var motivo     = String(params.motivo || '').trim() || 'sin motivo';
+  var usuario    = String(params.usuario || 'admin').trim();
+  if (!idEnvasado) return { ok: false, error: 'idEnvasado requerido' };
+
+  var sheet = getSheet('ENVASADOS');
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0].map(function(h){ return String(h); });
+  var iId   = hdrs.indexOf('idEnvasado');
+  var iBase = hdrs.indexOf('codigoProductoBase');
+  var iCnt  = hdrs.indexOf('cantidadBase');
+  var iDer  = hdrs.indexOf('codigoProductoEnvasado');
+  var iUds  = hdrs.indexOf('unidadesProducidas');
+  var iEst  = hdrs.indexOf('estado');
+  var iObs  = hdrs.indexOf('observacion');
+  var iGs   = hdrs.indexOf('idGuiaSalida');
+  var iGi   = hdrs.indexOf('idGuiaIngreso');
+
+  var rowIdx = -1, fila = null;
+  for (var r = 1; r < data.length; r++) {
+    if (String(data[r][iId]) === idEnvasado) { rowIdx = r + 1; fila = data[r]; break; }
+  }
+  if (rowIdx < 0) return { ok: false, error: 'Envasado no encontrado' };
+  var estado = String(fila[iEst] || '').toUpperCase();
+  if (estado.indexOf('ANULADO') === 0) return { ok: false, error: 'Ya está anulado' };
+
+  var productos = _sheetToObjects(getProductosSheet());
+  var cbDerivado = String(fila[iDer] || '');
+  var cbBase     = String(fila[iBase] || '');
+  var prodDer = productos.find(function(p){ return String(p.codigoBarra) === cbDerivado; });
+  var prodBase = productos.find(function(p){
+    return String(p.codigoBarra) === cbBase
+        || String(p.skuBase) === cbBase
+        || String(p.idProducto) === cbBase;
+  });
+  var udsViejas = parseFloat(fila[iUds]) || 0;
+  var cantBaseV = parseFloat(fila[iCnt]) || 0;
+
+  var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+
+  try {
+    // Revertir stock derivado (-uds) y base (+kg)
+    _actualizarStock(cbDerivado, -udsViejas, {
+      tipoOperacion: 'ANULACION_ENVASADO',
+      origen:        idEnvasado,
+      usuario:       usuario,
+      observacion:   'anulación derivado · ' + motivo
+    });
+    if (prodBase) {
+      _actualizarStock(prodBase.codigoBarra, +cantBaseV, {
+        tipoOperacion: 'ANULACION_ENVASADO',
+        origen:        idEnvasado,
+        usuario:       usuario,
+        observacion:   'anulación base · ' + motivo
+      });
+    }
+
+    // Anular los detalles de las guías
+    var idGs = String(fila[iGs] || '');
+    var idGi = String(fila[iGi] || '');
+    if (idGi) _anularDetallesDeGuiaPorProducto(idGi, cbDerivado, 'anulación envasado ' + idEnvasado);
+    if (idGs && prodBase) _anularDetallesDeGuiaPorProducto(idGs, prodBase.codigoBarra, 'anulación envasado ' + idEnvasado);
+
+    // Marcar envasado
+    sheet.getRange(rowIdx, iEst + 1).setValue('ANULADO_MANUAL');
+    var obsPrev = sheet.getRange(rowIdx, iObs + 1).getValue();
+    sheet.getRange(rowIdx, iObs + 1).setValue(
+      String(obsPrev || '') + ' | anulado ' + nowStr + ' · ' + udsViejas + ' uds revertidas · admin=' + usuario + ' · ' + motivo
+    );
+
+    return {
+      ok: true,
+      data: {
+        idEnvasado:     idEnvasado,
+        udsAnuladas:    udsViejas,
+        cantBaseRestit: cantBaseV,
+        descripcion:    prodDer ? prodDer.descripcion : cbDerivado
+      }
+    };
+  } catch(e) {
+    return { ok: false, error: 'Error anulando: ' + e.message };
+  }
+}
+
+// Helper: anula TODOS los detalles activos de una guía que matcheen
+// el codigoProducto. Usado al anular un envasado.
+function _anularDetallesDeGuiaPorProducto(idGuia, codigoBarra, motivo) {
+  var detSheet = getSheet('GUIA_DETALLE');
+  var detData  = detSheet.getDataRange().getValues();
+  var dHdrs    = detData[0].map(function(h){ return String(h); });
+  var dIdGuia  = dHdrs.indexOf('idGuia');
+  var dCod     = dHdrs.indexOf('codigoProducto');
+  var dObs     = dHdrs.indexOf('observacion');
+  for (var dr = 1; dr < detData.length; dr++) {
+    if (String(detData[dr][dIdGuia]) !== String(idGuia)) continue;
+    if (String(detData[dr][dCod])    !== String(codigoBarra)) continue;
+    var obs = String(detData[dr][dObs] || '').toUpperCase();
+    if (obs === 'ANULADO') continue;
+    detSheet.getRange(dr + 1, dObs + 1).setValue('ANULADO · ' + motivo);
+    return; // solo el primero matcheante
+  }
+}
+
+// ============================================================
+// enviarResumenEnvasadosDia — cron 20:00 diario
+// ------------------------------------------------------------
+// Arma resumen por operador de TODOS los envasados COMPLETADOS del
+// día y manda push al MOS (rol admin/master) con idNotif=WH_RESUMEN_ENVASADOS_DIA
+// para que el dueño vea de un vistazo cuánto envasó cada uno.
+// Si no hubo envasados, no manda nada.
+// ============================================================
+function enviarResumenEnvasadosDia() {
+  var tz = Session.getScriptTimeZone();
+  var hoy = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var rows = _sheetToObjects(getSheet('ENVASADOS'));
+  var productos = _sheetToObjects(getProductosSheet());
+  var prodMap = {};
+  productos.forEach(function(p){ prodMap[String(p.codigoBarra)] = p.descripcion || p.codigoBarra; });
+
+  // Filtrar a hoy + COMPLETADO
+  var delDia = rows.filter(function(r){
+    var f = r.fecha;
+    var fStr = f instanceof Date
+      ? Utilities.formatDate(f, tz, 'yyyy-MM-dd')
+      : String(f || '').substring(0, 10);
+    return fStr === hoy && String(r.estado || '').toUpperCase() === 'COMPLETADO';
+  });
+  if (!delDia.length) {
+    Logger.log('[ResumenEnvasados] sin envasados COMPLETADOS hoy ' + hoy);
+    return { ok: true, data: { hoy: hoy, operadores: 0, total: 0 } };
+  }
+
+  // Agrupar por usuario, luego por codigoProductoEnvasado
+  var porUsr = {};
+  delDia.forEach(function(e){
+    var u = String(e.usuario || 'desconocido');
+    var cb = String(e.codigoProductoEnvasado || '');
+    var uds = parseFloat(e.unidadesProducidas) || 0;
+    if (!porUsr[u]) porUsr[u] = { total: 0, productos: {} };
+    porUsr[u].total += uds;
+    porUsr[u].productos[cb] = (porUsr[u].productos[cb] || 0) + uds;
+  });
+
+  // Armar cuerpo: "jorgenis 500u · 200 ajinomoto 1kg · 300 pimienta 1kg"
+  var lineas = [];
+  Object.keys(porUsr).forEach(function(u){
+    var p = porUsr[u];
+    var partes = [u + ' ' + Math.round(p.total) + 'u'];
+    Object.keys(p.productos).forEach(function(cb){
+      var nombre = prodMap[cb] || cb;
+      partes.push(Math.round(p.productos[cb]) + ' ' + nombre);
+    });
+    lineas.push(partes.join(' · '));
+  });
+
+  var titulo = '📦 Resumen envasados ' + hoy;
+  var cuerpo = lineas.join('\n');
+
+  try {
+    _notificarMOS(titulo, cuerpo, null, 'WH_RESUMEN_ENVASADOS_DIA');
+    Logger.log('[ResumenEnvasados] push enviado · ' + Object.keys(porUsr).length + ' operadores');
+  } catch(e) {
+    Logger.log('[ResumenEnvasados] error push: ' + e.message);
+  }
+
+  return { ok: true, data: { hoy: hoy, operadores: Object.keys(porUsr).length, lineas: lineas } };
+}
+
+// Configura el trigger diario para enviarResumenEnvasadosDia
+// (ejecutar UNA VEZ desde editor GAS). Mata triggers previos del mismo handler.
+function configurarTriggerResumenEnvasados() {
+  var TRG = 'enviarResumenEnvasadosDia';
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    if (t.getHandlerFunction() === TRG) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(TRG).timeBased().atHour(20).everyDays(1).create();
+  Logger.log('[Trigger] ' + TRG + ' configurado · diario 20:00');
+  return { ok: true };
+}

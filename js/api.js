@@ -63,7 +63,8 @@ const API = (() => {
   const _IDEMPOTENT_ACTIONS = new Set([
     'agregarDetalleGuia', 'actualizarCantidadDetalle', 'actualizarFechaVencimiento',
     'anularDetalle', 'cerrarGuia', 'reabrirGuia', 'crearGuia', 'crearDespachoRapido',
-    'registrarEnvasado', 'registrarMerma', 'resolverMerma',
+    'registrarEnvasado', 'corregirUnidadesEnvasado', 'anularEnvasadoConClave',
+    'registrarMerma', 'resolverMerma',
     'registrarProductoNuevo', 'aprobarProductoNuevo',
     'crearPreingreso', 'aprobarPreingreso', 'actualizarPreingreso',
     'crearProducto', 'actualizarProducto',
@@ -192,6 +193,8 @@ const API = (() => {
     getPendientes:      ()       => call({ action: 'getPendientesEnvasado' }),
     registrarEnvasado:  (p)      => post({ action: 'registrarEnvasado', ...p }),
     anularEnvasadoManual: (p)    => post({ action: 'anularEnvasadoManual', ...p }),
+    corregirUnidadesEnvasado: (p) => post({ action: 'corregirUnidadesEnvasado', ...p }),
+    anularEnvasadoConClave:   (p) => post({ action: 'anularEnvasadoConClave',   ...p }),
 
     // Mermas
     getMermas:          (p={})   => call({ action: 'getMermas', ...p }),
