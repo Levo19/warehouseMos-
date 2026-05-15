@@ -2568,6 +2568,9 @@ const App = (() => {
       if (currentView === 'preingresos' && preingresosChanged) PreingresosView.silentRefresh();
       if (currentView === 'productos'   && productosChanged)   ProductosView.silentRefresh();
       if (currentView === 'envasador'   && stockChanged)       EnvasadorView.silentRefresh();
+      // [Fix v2.9.1] Cuando un envasado offline-encolado se sincroniza,
+      // recargar la lista para reemplazar el ENV_OPT_* por el id real.
+      if (currentView === 'envasados' && changed.includes('envasados'))   EnvasadosView.cargar();
     });
 
     // Pull-to-refresh en la vista principal — también dispara OpLog.flush()
@@ -6693,8 +6696,20 @@ const EnvasadosView = (() => {
     // Fondo: actualizar desde servidor
     const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
     if (res.ok) {
-      OfflineManager.guardarEnvasadosCache(res.data);
-      _renderEnvasadosPorDia(res.data, container);
+      // [Fix v2.9.1] Antes hacíamos guardarEnvasadosCache(res.data) directo,
+      // lo cual BORRA los envasados optimistic (ENV_OPT_*) que aún no se
+      // sincronizaron al backend. Si la API call inicial cayó en cola offline,
+      // el envasado existe en cache local pero NO en el backend → desaparecía
+      // de la UI al refrescar. Ahora preservamos los optimistic pendientes.
+      const cacheLocal = OfflineManager.getEnvasadosCache();
+      const pendientes = cacheLocal.filter(e =>
+        String(e.idEnvasado || '').startsWith('ENV_OPT_')
+      );
+      const fusionado = pendientes.length
+        ? [...pendientes, ...res.data]
+        : res.data;
+      OfflineManager.guardarEnvasadosCache(fusionado);
+      _renderEnvasadosPorDia(fusionado, container);
     }
   }
 
@@ -6718,6 +6733,14 @@ const EnvasadosView = (() => {
     document.getElementById('envBuscarDerivado').value = '';
     // Reset checkbox imprimir — siempre arranca marcado (bug #9)
     document.getElementById('envImprimirEtiq').checked = true;
+    // [Fix v2.9.1] Resetear el botón "Registrar". Si un envasado previo está
+    // colgado en background (timeout largo) y el operador abre otro, el botón
+    // conservaba "Registrando..." + disabled del flujo anterior.
+    const _btnReg = document.getElementById('btnRegistrarEnvasado');
+    if (_btnReg) {
+      _btnReg.disabled = false;
+      _btnReg.textContent = 'Registrar envasado';
+    }
     _selDerivadoId = '';
 
     if (preIdDerivado) {

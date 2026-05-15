@@ -605,3 +605,202 @@ function limpiarEnvasadosDuplicados(fechaDesde) {
   }));
   return { ok: true, data: reporte };
 }
+
+// ============================================================
+// SCRIPT ONE-SHOT: corregirEnvasadosManuales
+// ------------------------------------------------------------
+// Ajusta unidadesProducidas de envasados activos cuando el valor
+// registrado difiere del real físicamente envasado. Propaga el
+// ajuste a stock derivado, stock base y los GUIA_DETALLE asociados.
+//
+// Se ejecuta MANUALMENTE desde el editor GAS. Lista hardcodeada de
+// los 4 casos reportados el 2026-05-15. Idempotente: si ya se corrigió
+// un registro, lo detecta y no vuelve a aplicar el ajuste.
+// ============================================================
+function corregirEnvasadosManuales() {
+  var FECHA_DESDE = '2026-05-01';
+  // Casos a corregir: el envasado COMPLETADO más reciente de cada
+  // codigoDerivado en el período se ajusta a `unidadesCorrectas`.
+  var casos = [
+    { codigoDerivado: 'WHPACLDO001KG', valorRegistradoEsperado: 250, unidadesCorrectas: 210, descripcion: 'PAN BLANCO MOLIDO 1KG' },
+    { codigoDerivado: 'WHPADCRO001KG', valorRegistradoEsperado: 75,  unidadesCorrectas: 80,  descripcion: 'PAN MOLIDO OSCURO 1KG' },
+    { codigoDerivado: 'WHAJLGRO250GR', valorRegistradoEsperado: 90,  unidadesCorrectas: 80,  descripcion: 'AJONJOLI NEGRO 250GR' },
+    { codigoDerivado: 'WHAJLGRO100GR', valorRegistradoEsperado: 60,  unidadesCorrectas: 50,  descripcion: 'AJONJOLI NEGRO 100GR' }
+  ];
+
+  var sheet = getSheet('ENVASADOS');
+  var data  = sheet.getDataRange().getValues();
+  if (data.length < 2) return { ok: false, error: 'ENVASADOS vacía' };
+  var hdrs  = data[0].map(function(h){ return String(h); });
+  var iId    = hdrs.indexOf('idEnvasado');
+  var iBase  = hdrs.indexOf('codigoProductoBase');
+  var iCnt   = hdrs.indexOf('cantidadBase');
+  var iDer   = hdrs.indexOf('codigoProductoEnvasado');
+  var iUds   = hdrs.indexOf('unidadesProducidas');
+  var iFecha = hdrs.indexOf('fecha');
+  var iEst   = hdrs.indexOf('estado');
+  var iGs    = hdrs.indexOf('idGuiaSalida');
+  var iGi    = hdrs.indexOf('idGuiaIngreso');
+  var iObs   = hdrs.indexOf('observacion');
+
+  var productos = _sheetToObjects(getProductosSheet());
+  var reporte = { fechaDesde: FECHA_DESDE, procesados: [], saltados: [], errores: [] };
+  var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+
+  casos.forEach(function(caso) {
+    // 1. Encontrar producto derivado
+    var prodDerivado = productos.find(function(p) {
+      return String(p.codigoBarra).trim() === caso.codigoDerivado;
+    });
+    if (!prodDerivado) {
+      reporte.errores.push({ caso: caso.codigoDerivado, error: 'derivado no encontrado en PRODUCTOS' });
+      return;
+    }
+    var factorBase = parseFloat(prodDerivado.factorConversionBase) || 0;
+    if (factorBase <= 0) {
+      reporte.errores.push({ caso: caso.codigoDerivado, error: 'factorConversionBase invalido' });
+      return;
+    }
+    var prodBase = productos.find(function(p) {
+      return String(p.skuBase).trim() === String(prodDerivado.codigoProductoBase).trim()
+          || String(p.idProducto).trim() === String(prodDerivado.codigoProductoBase).trim();
+    });
+
+    // 2. Buscar el envasado COMPLETADO más reciente desde FECHA_DESDE
+    //    para este codigoDerivado con el valor original esperado.
+    var candidatos = [];
+    for (var r = 1; r < data.length; r++) {
+      var f = data[r][iFecha];
+      var fStr = f instanceof Date
+        ? Utilities.formatDate(f, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(f || '').substring(0, 10);
+      if (fStr < FECHA_DESDE) continue;
+      var est = String(data[r][iEst] || '').toUpperCase();
+      if (est !== 'COMPLETADO') continue;
+      var der = String(data[r][iDer] || '');
+      if (der !== caso.codigoDerivado) continue;
+      var uds = parseFloat(data[r][iUds]) || 0;
+      var obs = String(data[r][iObs] || '');
+      // Si ya tiene marca de corrección manual previa → saltarlo
+      if (obs.indexOf('corregido-manual') >= 0) {
+        reporte.saltados.push({ caso: caso.codigoDerivado, motivo: 'ya corregido previamente · row=' + (r + 1) });
+        return;
+      }
+      // Tolerancia: aceptar match exacto del valor esperado (250, 75, 90, 60)
+      if (uds === caso.valorRegistradoEsperado) {
+        var fTs = f instanceof Date ? f.getTime() : new Date(f).getTime();
+        candidatos.push({ rowIdx: r + 1, ts: fTs, uds: uds, idEnv: String(data[r][iId] || '') });
+      }
+    }
+    if (!candidatos.length) {
+      reporte.saltados.push({ caso: caso.codigoDerivado, motivo: 'no se encontró envasado COMPLETADO con valor=' + caso.valorRegistradoEsperado });
+      return;
+    }
+    // Si hay varios COMPLETADOS con el mismo valor (no debería pasar tras
+    // limpiarEnvasadosDuplicados), corregir el más reciente.
+    candidatos.sort(function(a, b){ return b.ts - a.ts; });
+    var target = candidatos[0];
+
+    // 3. Calcular diferencias
+    var udsViejas    = target.uds;
+    var udsNuevas    = caso.unidadesCorrectas;
+    var cantBaseVieja= udsViejas * factorBase;
+    var cantBaseNueva= udsNuevas * factorBase;
+    var deltaUds     = udsNuevas - udsViejas;            // + significa producir más; - significa producir menos
+    var deltaBase    = cantBaseNueva - cantBaseVieja;    // + significa consumir más base; - consumir menos
+
+    try {
+      // 4. Actualizar ENVASADOS: unidadesProducidas + cantidadBase + observacion
+      sheet.getRange(target.rowIdx, iUds + 1).setValue(udsNuevas);
+      sheet.getRange(target.rowIdx, iCnt + 1).setValue(cantBaseNueva);
+      var obsPrev = sheet.getRange(target.rowIdx, iObs + 1).getValue();
+      sheet.getRange(target.rowIdx, iObs + 1).setValue(
+        String(obsPrev || '') + ' | corregido-manual ' + nowStr + ' · ' + udsViejas + '→' + udsNuevas + ' uds'
+      );
+
+      // 5. Ajustar stock derivado: si udsNuevas < udsViejas, restar diferencia (revertir sobra producida)
+      _actualizarStock(prodDerivado.codigoBarra, deltaUds, {
+        tipoOperacion: 'CORRECCION_MANUAL_ENVASADO',
+        origen:        target.idEnv,
+        usuario:       'correccion-manual',
+        observacion:   'derivado: ' + udsViejas + '→' + udsNuevas + ' uds'
+      });
+
+      // 6. Ajustar stock base: deltaBase > 0 si ahora consume más; < 0 si consume menos
+      //    El consumo base original fue -cantBaseVieja. El nuevo debería ser -cantBaseNueva.
+      //    Para llegar de stock actual al correcto: ajustar por -deltaBase
+      //    (si delta positivo: necesitamos consumir más → restar al stock; viceversa)
+      if (prodBase) {
+        _actualizarStock(prodBase.codigoBarra, -deltaBase, {
+          tipoOperacion: 'CORRECCION_MANUAL_ENVASADO',
+          origen:        target.idEnv,
+          usuario:       'correccion-manual',
+          observacion:   'base: ' + cantBaseVieja + '→' + cantBaseNueva
+        });
+      }
+
+      // 7. Ajustar GUIA_DETALLE: ingreso (derivado) y salida (base)
+      _ajustarDetalleEnvasado(target.idEnv, prodDerivado.codigoBarra, udsNuevas, 'ingreso');
+      if (prodBase) {
+        _ajustarDetalleEnvasado(target.idEnv, prodBase.codigoBarra, cantBaseNueva, 'salida');
+      }
+
+      reporte.procesados.push({
+        codigoDerivado: caso.codigoDerivado,
+        descripcion:    caso.descripcion,
+        idEnvasado:     target.idEnv,
+        udsViejas:      udsViejas,
+        udsNuevas:      udsNuevas,
+        cantBaseVieja:  cantBaseVieja,
+        cantBaseNueva:  cantBaseNueva
+      });
+    } catch(e) {
+      reporte.errores.push({ caso: caso.codigoDerivado, error: e.message });
+    }
+  });
+
+  Logger.log('corregirEnvasadosManuales ✓ ' + JSON.stringify(reporte));
+  return { ok: true, data: reporte };
+}
+
+// Helper interno: ajusta cantidadRecibida + cantidadEsperada en el detalle
+// asociado a un envasado. Busca el detalle por idGuia+codigoProducto y por
+// proximidad temporal al idEnvasado (cuando hay múltiples).
+function _ajustarDetalleEnvasado(idEnvasado, codigoBarra, nuevaCant, lado) {
+  var envSheet = getSheet('ENVASADOS');
+  var envData  = envSheet.getDataRange().getValues();
+  var hdrs = envData[0].map(function(h){ return String(h); });
+  var iId  = hdrs.indexOf('idEnvasado');
+  var iGs  = hdrs.indexOf('idGuiaSalida');
+  var iGi  = hdrs.indexOf('idGuiaIngreso');
+  var idGuia = '';
+  for (var r = 1; r < envData.length; r++) {
+    if (String(envData[r][iId]) === idEnvasado) {
+      idGuia = String(envData[r][lado === 'salida' ? iGs : iGi] || '');
+      break;
+    }
+  }
+  if (!idGuia) return;
+
+  var detSheet = getSheet('GUIA_DETALLE');
+  var detData  = detSheet.getDataRange().getValues();
+  var dHdrs    = detData[0].map(function(h){ return String(h); });
+  var dIdGuia  = dHdrs.indexOf('idGuia');
+  var dCod     = dHdrs.indexOf('codigoProducto');
+  var dCantE   = dHdrs.indexOf('cantidadEsperada');
+  var dCantR   = dHdrs.indexOf('cantidadRecibida');
+  var dObs     = dHdrs.indexOf('observacion');
+  for (var dr = 1; dr < detData.length; dr++) {
+    if (String(detData[dr][dIdGuia]) !== idGuia) continue;
+    if (String(detData[dr][dCod])    !== String(codigoBarra)) continue;
+    var obs = String(detData[dr][dObs] || '').toUpperCase();
+    if (obs === 'ANULADO') continue;
+    detSheet.getRange(dr + 1, dCantE + 1).setValue(nuevaCant);
+    detSheet.getRange(dr + 1, dCantR + 1).setValue(nuevaCant);
+    var obsPrev = detSheet.getRange(dr + 1, dObs + 1).getValue();
+    detSheet.getRange(dr + 1, dObs + 1).setValue(
+      String(obsPrev || '') + ' | corregido-manual ' + (new Date()).toISOString()
+    );
+    return; // solo el primero matcheante
+  }
+}

@@ -168,12 +168,17 @@ const OfflineManager = (() => {
   // ── Sincronización ────────────────────────────────────────
   async function sincronizar() {
     if (!navigator.onLine || _syncing) return;
-    const queue = getQueue().filter(i => i.status === 'pending');
+    // [Fix v2.9.1] Antes solo procesábamos status='pending'. Pero
+    // limpiarSincronizados() preservaba items con status='error' y nunca
+    // los reintentábamos → quedaban infinitamente en la cola disparando
+    // "X operaciones por sincronizar". Ahora reintentamos también los error.
+    const queue = getQueue().filter(i => i.status === 'pending' || i.status === 'error');
     if (!queue.length) return;
 
     _syncing = true;
     _notificar();
 
+    var huboEnvasado = false;
     for (const item of queue) {
       try {
         const res = await fetch(window.WH_CONFIG.gasUrl, {
@@ -183,6 +188,7 @@ const OfflineManager = (() => {
         }).then(r => r.json());
 
         _actualizarItemQueue(item.localId, res.ok ? 'synced' : 'error');
+        if (res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
       } catch {
         _actualizarItemQueue(item.localId, 'error');
       }
@@ -192,6 +198,12 @@ const OfflineManager = (() => {
     _syncing = false;
     localStorage.setItem(KEYS.LAST_SYNC, new Date().toLocaleTimeString('es-PE'));
     _notificar();
+
+    // [Fix v2.9.1] Si se sincronizó un envasado optimistic, avisar a la UI
+    // para que recargue desde el backend y reemplace los ENV_OPT_* por reales.
+    if (huboEnvasado) {
+      try { window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['envasados'] } })); } catch(_){}
+    }
   }
 
   // ── Precarga operacional (guías, preingresos, stock, ajustes, auditorías) ──
