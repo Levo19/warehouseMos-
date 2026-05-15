@@ -11612,16 +11612,27 @@ const PreingresosView = (() => {
 
     // Subir fotos nuevas + actualizar en segundo plano
     (async () => {
+      try { OfflineManager.setSubiendoFotos(true); } catch(_){}
       const todasFotos = [...fotosExistentes];
       for (let i = 0; i < fotosNuevasCaptura.length; i++) {
         try {
           const { b64, mime } = await _prepararFoto(fotosNuevasCaptura[i].file);
           const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: fotosExistentes.length + i + 1 });
-          if (up.ok && !up.offline && up.data?.url) todasFotos.push({ url: up.data.url });
-          else console.warn('[FotosEdit] Error', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
+          if (up.ok && !up.offline && up.data?.url) {
+            todasFotos.push({ url: up.data.url });
+            // [v2.11.3] Registrar preview local como fallback ante Drive lento
+            try {
+              if (window.Photos && up.data.fileId && fotosNuevasCaptura[i].objectUrl) {
+                Photos.registrarPreviewLocal(up.data.fileId, fotosNuevasCaptura[i].objectUrl);
+              }
+            } catch(_){}
+          } else {
+            console.warn('[FotosEdit] Error', i + 1, up.error || (up.offline ? 'sin conexión' : 'sin URL'));
+          }
         } catch(e) { console.warn('[FotosEdit]', e); }
       }
-      fotosNuevasCaptura.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+      // [v2.11.3] NO revocar blob URLs — usados como fallback por photos.js
+      try { OfflineManager.setSubiendoFotos(false); } catch(_){}
       const fotos = todasFotos.map(f => f.url).join(',');
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => console.warn('[EditPreingreso]', e));
@@ -12015,6 +12026,16 @@ const PreingresosView = (() => {
         });
         if (up.ok && !up.offline && up.data?.url) {
           urls.push(up.data.url);
+          // [v2.11.3] Registrar preview local como fallback. Si Drive aún no
+          // generó el thumbnail (toma 30s-5min) o algún navegador no carga
+          // la URL, el sistema de retry global de photos.js usa este blob
+          // como reemplazo. Bypaseamos la dependencia de Drive para el
+          // operador en su propio dispositivo.
+          try {
+            if (window.Photos && up.data.fileId && fotos[i].objectUrl) {
+              Photos.registrarPreviewLocal(up.data.fileId, fotos[i].objectUrl);
+            }
+          } catch(_){}
           console.log('[Fotos] ✓ ' + indice + ' subida · url=' + up.data.url.substring(0, 60));
           // Persistir incrementalmente: backend + cache local. Si el
           // operador cierra la app o la red se cae después de esta foto,
@@ -12041,8 +12062,11 @@ const PreingresosView = (() => {
         console.warn('[Fotos] ✗ excepción foto ' + indice + ':', e?.message || e);
       }
     }
-    // Limpieza memoria
-    fotos.forEach(f => f.objectUrl && URL.revokeObjectURL(f.objectUrl));
+    // [v2.11.3] NO revocamos los blob URLs inmediatamente: los mantenemos
+    // vivos como fallback para el sistema de retry de photos.js cuando Drive
+    // aún no generó el thumbnail. Se liberarán al recargar la página.
+    // (Antes: fotos.forEach revocaba → si el operador veía la foto y Drive
+    // estaba lento, le aparecía negra hasta que Drive procesara.)
     try { OfflineManager.setSubiendoFotos(false); } catch(_){}
 
     console.log('[Fotos] FIN · ok=' + urls.length + '/' + fotos.length + ' · fallidas=[' + fallidas.join(',') + ']');

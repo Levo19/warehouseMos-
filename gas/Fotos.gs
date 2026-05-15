@@ -32,7 +32,14 @@ function subirFotoEntidad(params) {
     var nombre = idEntidad + '_' + new Date().getTime() + '.jpg';
     var blob   = Utilities.newBlob(Utilities.base64Decode(base64), mime, nombre);
     var file   = folder.createFile(blob);
-    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(_){}
+    // [v2.11.3] Triple-set robusto en file + folder para evitar fotos negras
+    // por permiso parcial.
+    if (typeof _setSharingPublicoRobusto === 'function') {
+      _setSharingPublicoRobusto(file);
+      _setSharingPublicoRobusto(folder);
+    } else {
+      try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(_){}
+    }
 
     var fileId   = file.getId();
     var fullUrl  = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w1600';

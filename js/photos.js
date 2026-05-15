@@ -10,6 +10,98 @@
   const MAX_DIM = 1600;
   const JPEG_Q  = 0.85;
 
+  // ════════════════════════════════════════════════════════════════
+  // [v2.11.3] Sistema robusto de carga de imágenes de Drive
+  // ----------------------------------------------------------------
+  // Problemas que resuelve:
+  //   1. Thumbnail aún no generado por Drive (toma 30s-5min tras subir)
+  //   2. Sesión Google logueada en navegador interfiriendo con permisos
+  //   3. Caché HTTP del navegador cacheando respuesta negra
+  //   4. Foto en negro en un dispositivo pero OK en otro
+  // Estrategia:
+  //   A. Listener GLOBAL de error en <img>. Detecta Drive automáticamente.
+  //      Reintenta 3 veces con backoff (2s, 5s, 10s) + cache-bust.
+  //   B. Fallback a preview local si el operador la subió en esta sesión.
+  //   C. Placeholder visual si después de 3 retries sigue mal.
+  // No requiere cambiar el HTML existente — solo importar este módulo.
+  // ════════════════════════════════════════════════════════════════
+
+  const _DRIVE_PATTERN = /(drive\.google\.com|googleusercontent\.com)/;
+  const _RETRY_DELAYS  = [2000, 5000, 10000];
+  const _localPreviews = new Map(); // fileId → blobURL para fallback rápido
+
+  function _esDrive(src) {
+    return !!src && _DRIVE_PATTERN.test(src);
+  }
+
+  function _fileIdDe(src) {
+    if (!src) return '';
+    const m = String(src).match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    return m ? m[1] : '';
+  }
+
+  // Permite que el caller registre un preview LOCAL para un fileId.
+  // Cuando el thumbnail de Drive falla, usamos esto como fallback.
+  // El caller llama esto al subir: registrarPreviewLocal(fileId, blobURL).
+  function registrarPreviewLocal(fileId, blobUrl) {
+    if (!fileId || !blobUrl) return;
+    _localPreviews.set(fileId, blobUrl);
+  }
+  function obtenerPreviewLocal(fileId) {
+    return _localPreviews.get(fileId) || '';
+  }
+
+  // Listener GLOBAL: captura cualquier <img> de Drive que falle al cargar
+  // y aplica retry con backoff + cache-bust. Si después de N intentos
+  // sigue fallando, usa fallback local o muestra placeholder.
+  document.addEventListener('error', function(e) {
+    const el = e.target;
+    if (!(el instanceof HTMLImageElement)) return;
+    if (!_esDrive(el.src)) return;
+    if (el.dataset.driveFailed === 'final') return;
+
+    const intento = parseInt(el.dataset.driveRetry || '0', 10);
+    if (intento >= _RETRY_DELAYS.length) {
+      // Fallback local si hay
+      const fid = _fileIdDe(el.src);
+      const local = obtenerPreviewLocal(fid);
+      if (local) {
+        el.dataset.driveFailed = 'final';
+        el.src = local;
+        return;
+      }
+      // Placeholder visual
+      el.dataset.driveFailed = 'final';
+      el.style.background = 'linear-gradient(135deg,#1e293b,#0f172a)';
+      el.style.minHeight = '120px';
+      el.style.minWidth = '120px';
+      el.alt = '🖼 Foto no disponible';
+      el.title = 'Drive aún procesando o sin permisos · recarga en unos minutos';
+      return;
+    }
+
+    const delay = _RETRY_DELAYS[intento];
+    el.dataset.driveRetry = String(intento + 1);
+    setTimeout(function() {
+      if (!el.isConnected) return;
+      const base = (el.dataset.driveSrc || el.src).split('?')[0];
+      const id   = _fileIdDe(el.dataset.driveSrc || el.src);
+      el.dataset.driveSrc = el.dataset.driveSrc || el.src;
+      // Cache-bust: timestamp único para forzar nueva petición.
+      // sz=w1600 más confiable que w800 (Drive falla menos con mayor tamaño).
+      el.src = id
+        ? 'https://drive.google.com/thumbnail?id=' + id + '&sz=w1600&v=' + Date.now()
+        : (base + '?v=' + Date.now());
+    }, delay);
+  }, true); // capture=true para interceptar antes del bubble
+
+  // Helper opcional: convertir URL vieja (sz=w800) a la nueva (sz=w1600).
+  // Útil al renderizar listas viejas — pero el listener global ya cubre el caso.
+  function normalizarUrlDrive(url) {
+    if (!url || !_esDrive(url)) return url;
+    return String(url).replace(/[?&]sz=w\d+/, '&sz=w1600').replace('?&', '?');
+  }
+
   // ── Lightbox fullscreen ──
   function lightbox(urls, idx) {
     if (typeof urls === 'string') urls = [urls];
@@ -193,9 +285,28 @@
     if (modal) modal.classList.remove('open');
   }
 
+  // ── Preview local: blob URL inmediato sin esperar a Drive ──
+  // El operador ve su foto al instante después de seleccionarla, no
+  // depende del thumbnail de Drive. Devolver { blobUrl, revocar() }
+  // para que el caller libere memoria cuando ya no la necesite.
+  function previewLocal(file) {
+    if (!file) return { blobUrl: '', revocar: function(){} };
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      return {
+        blobUrl,
+        revocar: function() { try { URL.revokeObjectURL(blobUrl); } catch(_){} }
+      };
+    } catch(_) {
+      return { blobUrl: '', revocar: function(){} };
+    }
+  }
+
   window.Photos = {
     lightbox, carouselHTML, initCarousels,
     comprimir, subir,
-    abrirPickerFuente, cerrarPickerFuente
+    abrirPickerFuente, cerrarPickerFuente,
+    // v2.11.3 — robustez Drive
+    normalizarUrlDrive, registrarPreviewLocal, obtenerPreviewLocal, previewLocal
   };
 })();

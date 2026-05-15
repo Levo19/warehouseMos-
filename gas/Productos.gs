@@ -219,8 +219,14 @@ function _subirFotoProductoNuevo(codigoBarra, fotoBase64, mimeType) {
   while (existing.hasNext()) { existing.next().setTrashed(true); }
   var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, fileName);
   var file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+  // [v2.11.3] Triple-set robusto + sz=w1600
+  if (typeof _setSharingPublicoRobusto === 'function') {
+    _setSharingPublicoRobusto(file);
+    _setSharingPublicoRobusto(folder);
+  } else {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  }
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600';
 }
 
 function getProductosNuevos(params) {
@@ -781,8 +787,14 @@ function _subirFotoMerma(idMerma, base64Data, mimeType) {
   }
   var blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, idMerma + '.jpg');
   var file = folder.createFile(blob);
-  try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
-  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+  // [v2.11.3] Triple-set robusto + sz=w1600
+  if (typeof _setSharingPublicoRobusto === 'function') {
+    _setSharingPublicoRobusto(file);
+    _setSharingPublicoRobusto(folder);
+  } else {
+    try { file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch(e) {}
+  }
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600';
 }
 
 // ============================================================
@@ -1304,9 +1316,13 @@ function subirFotoPreingreso(params) {
     var fileName = idPreingreso + '_' + indice + '.' + ext;
     var blob     = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, fileName);
     var file     = piFolder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // [v2.11.3] Permisos endurecidos: triple-set para evitar que Drive
+    // los aplique parcial. Reintenta cada uno si falla.
+    _setSharingPublicoRobusto(file);
+    _setSharingPublicoRobusto(piFolder);
 
-    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+    // sz=w1600 (antes w800) — Drive falla menos generando thumbnails grandes
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600';
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
     return { ok: false, error: e.message };
@@ -1498,8 +1514,9 @@ function subirFotoGuia(params) {
     while (existing.hasNext()) { existing.next().setTrashed(true); }
     var blob = Utilities.newBlob(Utilities.base64Decode(fotoBase64), mimeType, name);
     var file = folder.createFile(blob);
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
+    _setSharingPublicoRobusto(file);
+    _setSharingPublicoRobusto(folder);
+    var url = 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w1600';
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: file.getId() } };
   } catch(e) {
@@ -1538,13 +1555,32 @@ function copiarFotoDePreingreso(params) {
     var existentes = guiaFolder.getFilesByName(copyName);
     while (existentes.hasNext()) { existentes.next().setTrashed(true); }
     var copy = srcFile.makeCopy(copyName, guiaFolder);
-    copy.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-    var url = 'https://drive.google.com/thumbnail?id=' + copy.getId() + '&sz=w800';
+    _setSharingPublicoRobusto(copy);
+    _setSharingPublicoRobusto(guiaFolder);
+    var url = 'https://drive.google.com/thumbnail?id=' + copy.getId() + '&sz=w1600';
     _actualizarColumnaGuia(idGuia, 'foto', url);
     return { ok: true, data: { url: url, fileId: copy.getId() } };
   } catch(e) {
     return { ok: false, error: e.message };
   }
+}
+
+// [v2.11.3] Aplica setSharing(ANYONE_WITH_LINK, VIEW) con triple-reintento.
+// Bug histórico: a veces Drive aplica el permiso parcial (folder OK, file no)
+// → la foto se ve negra para usuarios sin acceso a la cuenta. Reintentamos
+// hasta 3 veces con espera mínima.
+function _setSharingPublicoRobusto(driveObj) {
+  if (!driveObj) return false;
+  for (var i = 0; i < 3; i++) {
+    try {
+      driveObj.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      return true;
+    } catch(e) {
+      Logger.log('[setSharing] intento ' + (i+1) + ' falló: ' + e.message);
+      if (i < 2) Utilities.sleep(300);
+    }
+  }
+  return false;
 }
 
 function actualizarGuia(params) {
