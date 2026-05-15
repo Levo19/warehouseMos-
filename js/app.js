@@ -1556,13 +1556,20 @@ const Session = (() => {
           <p style="font-size:11px;color:#64748b;margin-top:24px;font-family:'SF Mono',Menlo,monospace;">UUID: ${(typeof window._getDeviceIdWH==='function'?window._getDeviceIdWH():'').substring(0,12)}...</p>
         </div>`;
     } else if (tipo === 'pendiente') {
+      // [v2.10.3] Agregar también la opción in-situ acá. Antes solo aparecía
+      // en el estado 'no_registrado', pero registrarSesionDispositivo crea el
+      // row como PENDIENTE en la 1era llamada → el usuario nunca veía la
+      // pantalla 'no_registrado' y no tenía cómo activar in-situ.
       html = `
         <div style="text-align:center;max-width:400px;">
           <div style="font-size:64px;margin-bottom:16px;animation:wpulse 1.6s ease-in-out infinite;">⌛</div>
           <h2 style="font-size:22px;font-weight:800;margin-bottom:8px;color:#fbbf24;">Esperando aprobación</h2>
           <p style="font-size:14px;color:#94a3b8;margin-bottom:8px;">${nombre || 'Tu dispositivo'} está pendiente de aprobación por el administrador.</p>
           <p style="font-size:12px;color:#64748b;margin-bottom:16px;">Reintenta automáticamente cada 15s.</p>
-          <div style="font-size:11px;color:#475569;background:rgba(255,255,255,0.05);padding:8px 12px;border-radius:8px;display:inline-block;">🔄 Verificando estado...</div>
+          <div style="font-size:11px;color:#475569;background:rgba(255,255,255,0.05);padding:8px 12px;border-radius:8px;display:inline-block;margin-bottom:18px;">🔄 Verificando estado...</div>
+          <div style="font-size:11px;color:#64748b;margin:6px 0 10px;letter-spacing:.05em">─ o si está un admin contigo ─</div>
+          <button id="btnActivarInSitu" style="display:block;width:100%;background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 8px 24px rgba(16,185,129,.5);">🔑 Activar in-situ (admin presente)</button>
+          <p style="font-size:11px;color:#64748b;margin-top:18px;font-family:'SF Mono',Menlo,monospace;">UUID: ${(typeof window._getDeviceIdWH==='function'?window._getDeviceIdWH():'').substring(0,12)}...</p>
         </div>
         <style>@keyframes wpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.1);opacity:0.7}}</style>`;
     } else if (tipo === 'inactivo') {
