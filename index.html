@@ -4827,6 +4827,108 @@
       border-top: 1px solid #1e293b;
     }
     .modal-cargadores.open { transform: translateY(0); }
+
+    /* [v2.13] Estilo de chips por carreta (3 estados: LLENA/MEDIA/VACIA) */
+    .cargador-block {
+      background: #1a1505;
+      border: 1px solid #854d0e;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .cargador-head {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 8px;
+    }
+    .cargador-ico { font-size: 14px; }
+    .cargador-nombre {
+      font-size: 12px; font-weight: 700; color: #fcd34d;
+      flex: 1; min-width: 0;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .cargador-resumen {
+      font-size: 10.5px; color: #fbbf24; font-weight: 700;
+      background: rgba(245,158,11,.12);
+      padding: 2px 8px; border-radius: 999px;
+      border: 1px solid rgba(245,158,11,.3);
+      white-space: nowrap;
+    }
+    .cargador-quitar {
+      color: #94a3b8; font-size: 18px; line-height: 1;
+      width: 24px; height: 24px;
+      background: transparent; border: none;
+      cursor: pointer;
+    }
+    .cargador-quitar:hover { color: #f87171; }
+    .carretas-grid {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .carreta-chip {
+      width: 56px; height: 56px;
+      border-radius: 12px;
+      border: 2px solid;
+      background: rgba(15,23,42,.5);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 2px;
+      cursor: pointer;
+      transition: all .2s;
+      padding: 0;
+      position: relative;
+    }
+    .carreta-chip:active { transform: scale(.92); }
+    .carreta-chip:hover { transform: translateY(-2px); }
+    .carreta-chip .cc-emoji {
+      font-size: 20px; line-height: 1;
+    }
+    .carreta-chip .cc-num {
+      font-size: 10px; font-weight: 800; color: #94a3b8;
+      font-variant-numeric: tabular-nums;
+    }
+    .carreta-chip-llena {
+      border-color: #10b981;
+      background: linear-gradient(135deg, rgba(16,185,129,.20), rgba(16,185,129,.05));
+      box-shadow: 0 2px 6px -2px rgba(16,185,129,.4);
+    }
+    .carreta-chip-llena .cc-num { color: #6ee7b7; }
+    .carreta-chip-media {
+      border-color: #f59e0b;
+      background: linear-gradient(135deg, rgba(245,158,11,.22), rgba(245,158,11,.05));
+      box-shadow: 0 2px 6px -2px rgba(245,158,11,.4);
+    }
+    .carreta-chip-media .cc-num { color: #fcd34d; }
+    .carreta-chip-vacia {
+      border-color: #ef4444;
+      background: linear-gradient(135deg, rgba(239,68,68,.22), rgba(239,68,68,.05));
+      box-shadow: 0 2px 6px -2px rgba(239,68,68,.4);
+    }
+    .carreta-chip-vacia .cc-num { color: #fca5a5; }
+    .carreta-add {
+      width: 56px; height: 56px;
+      border-radius: 12px;
+      border: 2px dashed rgba(148,163,184,.4);
+      background: transparent;
+      color: #94a3b8;
+      font-size: 28px; font-weight: 300; line-height: 1;
+      cursor: pointer;
+      transition: all .2s;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .carreta-add:hover {
+      border-color: rgba(252,211,77,.6);
+      color: #fcd34d;
+      background: rgba(245,158,11,.08);
+    }
+    /* Badges en el modal cargadores del día */
+    .cd-badge {
+      display: inline-block;
+      font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 999px;
+      margin-right: 4px;
+    }
+    .cd-badge-llena { background: rgba(16,185,129,.15);  color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); }
+    .cd-badge-media { background: rgba(245,158,11,.15); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
+    .cd-badge-vacia { background: rgba(239,68,68,.15);  color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
     .carg-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 0 12px;
@@ -7353,16 +7455,8 @@
     </div>
     <button onclick="cerrarSheet('sheetCargadoresDia')" class="text-slate-500 text-2xl leading-none w-8 h-8">×</button>
   </div>
-  <div class="px-3 py-2 mb-3 rounded-lg flex items-center gap-2" style="background:#0f172a;border:1px solid #1e293b">
-    <span class="text-xs text-slate-400 flex-1">Tarifa por carreta:</span>
-    <span class="text-xs text-slate-500">S/</span>
-    <input id="cargDiaTarifaInput" type="number" min="0" step="0.5"
-           class="w-20 px-2 py-1 rounded text-right text-xs text-amber-300 font-bold"
-           style="background:#1e293b;border:1px solid #334155">
-    <button onclick="PreingresosView.guardarTarifaCarreta()"
-            class="text-xs px-3 py-1 rounded font-semibold"
-            style="background:#854d0e;color:#fde68a">Guardar</button>
-  </div>
+  <!-- [v2.13] Tarifa eliminada — el cargador pone su precio en caja.
+       El sistema solo informa cantidad de carretas y estado de carga. -->
   <div id="cargDiaContenido" class="space-y-3 mb-4">
     <div class="text-xs text-slate-500 italic text-center py-6">Cargando…</div>
   </div>
