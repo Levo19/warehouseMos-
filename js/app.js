@@ -11639,11 +11639,21 @@ const PreingresosView = (() => {
     _autoguardarCargadores();
   }
 
-  // [v2.13.3] Toggle estado de UNA carreta en modo edición (autoguarda)
+  // [v2.13.4] Toggle estado en edición — ciclo de 4 con eliminación + autoguarda
   function toggleEstadoCarretaEdit(idx, carretaIdx) {
     const c = _cargadoresEdit[idx];
     if (!c || !Array.isArray(c.estados)) return;
     const actual = c.estados[carretaIdx] || 'LLENA';
+    if (actual === 'VACIA') {
+      _desintegrarCarreta(idx, carretaIdx, true, () => {
+        c.estados.splice(carretaIdx, 1);
+        c.carretas = c.estados.length;
+        if (c.carretas === 0) _cargadoresEdit.splice(idx, 1);
+        _renderCargadoresEdit();
+        _autoguardarCargadores();
+      });
+      return;
+    }
     const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
     c.estados[carretaIdx] = next;
     _carretaSfx(next);
@@ -11666,7 +11676,9 @@ const PreingresosView = (() => {
 
   // [v2.13.3] Visual feedback al togglear/agregar — busca el chip por DOM
   function _flashCarretaChip(cargIdx, carretaIdx, estado, esNueva) {
-    const blocks = document.querySelectorAll('#preCargadoresList .cargador-block, #piCargadoresList .cargador-block');
+    const blocks = document.querySelectorAll(
+      '#preCargadoresList .cargador-block, #piCargadoresList .cargador-block, #cargDiaList .cargador-block'
+    );
     if (!blocks[cargIdx]) return;
     const chips = blocks[cargIdx].querySelectorAll('.carreta-chip');
     const chip = chips[carretaIdx];
@@ -11674,6 +11686,39 @@ const PreingresosView = (() => {
     chip.classList.remove('cc-flash', 'cc-flash-nueva');
     void chip.offsetWidth; // force reflow
     chip.classList.add(esNueva ? 'cc-flash-nueva' : 'cc-flash');
+  }
+
+  // [v2.13.4] Desintegración: aplica animación + SFX, luego ejecuta callback
+  // que mutará el array y re-renderizará. Si no encuentra el chip (caso edge)
+  // ejecuta el callback inmediatamente para no dejar la carreta zombie.
+  function _desintegrarCarreta(cargIdx, carretaIdx, esEdit, onDone) {
+    const selector = esEdit
+      ? '#piCargadoresList .cargador-block, #cargDiaList .cargador-block'
+      : '#preCargadoresList .cargador-block, #cargDiaList .cargador-block';
+    const blocks = document.querySelectorAll(selector);
+    const chip = blocks[cargIdx]?.querySelectorAll('.carreta-chip')?.[carretaIdx];
+    _desintegrarSfx();
+    try { if (navigator.vibrate) navigator.vibrate([15, 30, 10]); } catch(_) {}
+    if (!chip) { onDone(); return; }
+    chip.classList.add('cc-desintegrar');
+    setTimeout(onDone, 380);
+  }
+
+  // [v2.13.4] SFX descendente para la desintegración (whoosh corto)
+  function _desintegrarSfx() {
+    try {
+      const ctx = window.AudioContext ? new AudioContext() : null;
+      if (!ctx) return;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(420, ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(60, ctx.currentTime + 0.32);
+      g.gain.setValueAtTime(0.08, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.34);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(); o.stop(ctx.currentTime + 0.35);
+    } catch(_) {}
   }
 
   function quitarCargadorEdit(idx) {
@@ -12069,11 +12114,22 @@ const PreingresosView = (() => {
     _renderCargadores();
   }
 
-  // [v2.13.3] Toggle del estado de UNA carreta (cicla LLENA → MEDIA → VACIA → LLENA)
+  // [v2.13.4] Ciclo de 4 estados: LLENA → MEDIA → VACIA → [eliminar]
+  // El cuarto click reproduce animación de desintegración y borra la carreta.
+  // Si era la última carreta del cargador, el cargador entero se elimina.
   function toggleEstadoCarreta(idx, carretaIdx) {
     const c = _cargadores[idx];
     if (!c || !Array.isArray(c.estados)) return;
     const actual = c.estados[carretaIdx] || 'LLENA';
+    if (actual === 'VACIA') {
+      _desintegrarCarreta(idx, carretaIdx, false, () => {
+        c.estados.splice(carretaIdx, 1);
+        c.carretas = c.estados.length;
+        if (c.carretas === 0) _cargadores.splice(idx, 1);
+        _renderCargadores();
+      });
+      return;
+    }
     const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
     c.estados[carretaIdx] = next;
     _carretaSfx(next);
@@ -12444,15 +12500,18 @@ const PreingresosView = (() => {
     const provNombre = prov?.nombre || pi.idProveedor || '—';
     let cargadores = [];
     try { cargadores = JSON.parse(pi.cargadores || '[]'); } catch {}
-    // [v2.13.3] Sin tarifa. Mostrar conteo de carretas + estados.
+    // [v2.13.4] Sin tarifa. Desglose explícito por estado: 🟢llenas · 🟡medias · 🔴vacías
     const cargLines = cargadores.map(c => {
       const cn = _normalizarCargador(c);
       const nombre = cn.nombre || cn.id || String(cn);
-      const txtEst = _textoEstadosCarretas(cn.estados);
-      const sufijo = txtEst ? ` ${txtEst} ⚠` : ' ✅';
-      return cn.carretas > 0
-        ? `   • *${nombre}* — ${cn.carretas} carreta${cn.carretas === 1 ? '' : 's'}${sufijo}`
-        : `   • ${nombre}`;
+      if (!cn.carretas) return `   • ${nombre}`;
+      const r = _resumenEstadosCarretas(cn.estados);
+      const dets = [];
+      if (r.llenas > 0) dets.push(`🟢 ${r.llenas} llena${r.llenas === 1 ? '' : 's'}`);
+      if (r.medias > 0) dets.push(`🟡 ${r.medias} media${r.medias === 1 ? '' : 's'}`);
+      if (r.vacias > 0) dets.push(`🔴 ${r.vacias} casi vacía${r.vacias === 1 ? '' : 's'}`);
+      const det = dets.join(' · ');
+      return `   • *${nombre}* — ${cn.carretas} carreta${cn.carretas === 1 ? '' : 's'} (${det})`;
     });
     const url      = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
     const lineas   = [
@@ -12512,7 +12571,9 @@ const PreingresosView = (() => {
     abrirSheet('sheetCargadoresDia');
   }
 
-  // [v2.13.3] Sin tarifa. Conteo de carretas + badges de estado de carga.
+  // [v2.13.4] Modal del día editable. Chips clickeables por carreta (ciclo
+  // LLENA→MEDIA→VACIA→eliminar), mismo SFX/animaciones del preingreso.
+  // Edición persiste al backend usando el idPreingreso real.
   function _renderCargDiaContent() {
     const c = document.getElementById('cargDiaContenido');
     const d = _cargDiaState.data;
@@ -12528,27 +12589,43 @@ const PreingresosView = (() => {
       if (v > 0) p.push(`<span class="cd-badge cd-badge-vacia">🔴 ${v}</span>`);
       return p.join(' ');
     };
-    const cards = d.cargadores.map(cg => `
-      <div class="rounded-lg p-3" style="background:#0f172a;border:1px solid #1e293b">
-        <div class="flex items-center justify-between mb-1">
-          <div class="text-sm font-bold text-amber-300">🛺 ${escHtml(cg.nombre)}</div>
-          <div class="text-base font-bold text-amber-200">${cg.carretasTotal} <span class="text-[10px] text-slate-500">carretas</span></div>
+    const chipsHtml = (pi) => {
+      const idPre = escAttr(pi.idPreingreso);
+      const chips = (pi.estados || []).map((est, j) => {
+        const emoji = EMOJI_CARGA[est] || '🟢';
+        const clase = 'carreta-chip carreta-chip-' + String(est || 'LLENA').toLowerCase();
+        return `<button onclick="PreingresosView.toggleEstadoCarretaDia('${idPre}', ${j})"
+                        class="${clase}" title="${LABEL_CARGA[est] || 'Llena'}">
+          <span class="cc-emoji">${emoji}</span>
+          <span class="cc-num">${j + 1}</span>
+        </button>`;
+      }).join('');
+      return `<div class="carretas-grid mt-1">
+        ${chips}
+        <button onclick="PreingresosView.agregarCarretaDia('${idPre}')" class="carreta-add" title="Agregar carreta">+</button>
+      </div>`;
+    };
+    const cards = d.cargadores.map((cg, cgIdx) => `
+      <div class="cargador-block" data-cg-idx="${cgIdx}">
+        <div class="cargador-head">
+          <span class="cargador-ico">🛺</span>
+          <span class="cargador-nombre">${escHtml(cg.nombre)}</span>
+          <span class="cargador-resumen">${cg.carretasTotal} carreta${cg.carretasTotal === 1 ? '' : 's'}</span>
         </div>
         <div class="text-[11px] mb-2">${badges(cg.llenasTotal||0, cg.mediasTotal||0, cg.vaciasTotal||0)}</div>
-        <div class="space-y-0.5">
-          ${cg.preingresos.map(pi => {
-            const txt = _textoEstadosCarretas(pi.estados);
-            const suf = txt ? `<span class="text-amber-400">${txt}</span>` : '<span class="text-emerald-400">✅</span>';
-            return `<div class="text-[11px] text-slate-400 flex items-center gap-2">
-              <span class="font-mono text-slate-500">${escHtml(pi.idPreingreso)}</span>
-              <span class="flex-1 truncate">${escHtml(pi.proveedor || '—')}</span>
-              <span class="text-amber-300">${pi.carretas} cart</span>
-              ${suf}
-            </div>`;
-          }).join('')}
+        <div class="space-y-2">
+          ${cg.preingresos.map(pi => `
+            <div data-id-pre="${escAttr(pi.idPreingreso)}" data-cg-id="${escAttr(cg.id)}">
+              <div class="text-[11px] text-slate-400 flex items-center gap-2">
+                <span class="font-mono text-slate-500">${escHtml(pi.idPreingreso)}</span>
+                <span class="flex-1 truncate">${escHtml(pi.proveedor || '—')}</span>
+                <span class="text-amber-300">${pi.carretas} cart</span>
+              </div>
+              ${chipsHtml(pi)}
+            </div>`).join('')}
         </div>
       </div>`).join('');
-    c.innerHTML = cards + `
+    c.innerHTML = `<div id="cargDiaList">${cards}</div>
       <div class="rounded-lg px-3 py-3 mt-3"
            style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3)">
         <div class="flex items-center justify-between">
@@ -12559,7 +12636,95 @@ const PreingresosView = (() => {
           <div class="text-3xl font-bold text-amber-300">${d.totalCarretas} <span class="text-xs text-slate-400">carretas</span></div>
         </div>
         <div class="mt-2 text-[11px]">${badges(d.totalLlenas||0, d.totalMedias||0, d.totalVacias||0)}</div>
+        <div class="mt-1 text-[10px] text-slate-500 italic">Toca una carreta para cambiar su estado · 4to click la elimina</div>
       </div>`;
+  }
+
+  // [v2.13.4] Edición desde el modal del día — encuentra el preingreso real,
+  // muta el cargador correspondiente, persiste y refresca. La carreta vacía
+  // se desintegra con animación; si quedan 0 carretas el cargador desaparece.
+  function _mutarCargadorDelPreingreso(idPreingreso, cargId, fnMutar) {
+    const cache = OfflineManager.getPreingresosCache() || [];
+    const pi = cache.find(p => p.idPreingreso === idPreingreso);
+    if (!pi) { toast('Preingreso no encontrado en caché', 'warn'); return null; }
+    let arr = [];
+    try { arr = JSON.parse(pi.cargadores || '[]'); } catch { arr = []; }
+    if (!Array.isArray(arr)) arr = [];
+    const idx = arr.findIndex(c => String(c.id || c.idPersonal || c.nombre || '') === String(cargId));
+    if (idx < 0) { toast('Cargador no encontrado en el preingreso', 'warn'); return null; }
+    arr[idx] = _normalizarCargador(arr[idx]);
+    const res = fnMutar(arr[idx], arr, idx);
+    if (res === false) return null;
+    // Si el cargador quedó sin carretas → eliminarlo del array
+    if (arr[idx] && arr[idx].carretas === 0) arr.splice(idx, 1);
+    const cargadoresStr = JSON.stringify(arr);
+    OfflineManager.patchPreingresosCache(idPreingreso, { cargadores: cargadoresStr });
+    API.actualizarPreingreso({ idPreingreso, cargadores: cargadoresStr }).catch(() => {});
+    return arr;
+  }
+
+  function toggleEstadoCarretaDia(idPreingreso, carretaIdx) {
+    // Necesito el cargId desde el DOM (data-cg-id en el contenedor)
+    const cont = document.querySelector(`#cargDiaList [data-id-pre="${idPreingreso}"]`);
+    if (!cont) return;
+    const cargId = cont.getAttribute('data-cg-id');
+    // Para la animación de desintegrar, necesito el cargIdx en el bloque visible
+    const block = cont.closest('.cargador-block');
+    const cargIdxDom = block ? parseInt(block.getAttribute('data-cg-idx')) : 0;
+    // Tomar estado actual desde cache (no del DOM, por seguridad)
+    const cache = OfflineManager.getPreingresosCache() || [];
+    const pi = cache.find(p => p.idPreingreso === idPreingreso);
+    if (!pi) return;
+    let arr = []; try { arr = JSON.parse(pi.cargadores || '[]'); } catch {}
+    const c0 = arr.find(c => String(c.id || c.idPersonal || c.nombre || '') === String(cargId));
+    if (!c0 || !Array.isArray(c0.estados)) return;
+    const actual = c0.estados[carretaIdx] || 'LLENA';
+
+    if (actual === 'VACIA') {
+      // Animación de desintegrar antes de mutar
+      const chips = cont.querySelectorAll('.carreta-chip');
+      const chip = chips[carretaIdx];
+      _desintegrarSfx();
+      try { if (navigator.vibrate) navigator.vibrate([15, 30, 10]); } catch(_) {}
+      const doMutate = () => {
+        _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
+          c.estados.splice(carretaIdx, 1);
+          c.carretas = c.estados.length;
+        });
+        _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
+        _renderCargDiaContent();
+      };
+      if (chip) { chip.classList.add('cc-desintegrar'); setTimeout(doMutate, 380); }
+      else doMutate();
+      return;
+    }
+    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
+    _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
+      c.estados[carretaIdx] = next;
+    });
+    _carretaSfx(next);
+    _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
+    _renderCargDiaContent();
+    requestAnimationFrame(() => _flashCarretaChip(cargIdxDom, carretaIdx, next, false));
+  }
+
+  function agregarCarretaDia(idPreingreso) {
+    const cont = document.querySelector(`#cargDiaList [data-id-pre="${idPreingreso}"]`);
+    if (!cont) return;
+    const cargId = cont.getAttribute('data-cg-id');
+    const block = cont.closest('.cargador-block');
+    const cargIdxDom = block ? parseInt(block.getAttribute('data-cg-idx')) : 0;
+    let nuevoIdx = 0;
+    _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
+      if (!Array.isArray(c.estados)) c.estados = [];
+      c.estados.push('LLENA');
+      c.carretas = c.estados.length;
+      nuevoIdx = c.estados.length - 1;
+    });
+    _carretaAddSfx();
+    _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
+    _renderCargDiaContent();
+    requestAnimationFrame(() => _flashCarretaChip(cargIdxDom, nuevoIdx, 'LLENA', true));
   }
 
   // [v2.13.3] LEGACY compat — guardarTarifaCarreta queda como no-op si el
@@ -12581,37 +12746,38 @@ const PreingresosView = (() => {
     if (_cargDiaState.fecha) abrirCargadoresDia(_cargDiaState.fecha);
   }
 
-  // [v2.13.3] Sin tarifa. WhatsApp consolidado con estados de carga.
+  // [v2.13.4] WhatsApp consolidado — desglose explícito 🟢/🟡/🔴 por cargador y preingreso
   function compartirCargadoresDiaWA() {
     const d = _cargDiaState.data;
     if (!d || !d.cargadores || !d.cargadores.length) {
       toast('Sin datos para compartir', 'warn'); return;
     }
+    const fmtDets = (l, m, v) => {
+      const dets = [];
+      if (l > 0) dets.push(`🟢 ${l}`);
+      if (m > 0) dets.push(`🟡 ${m}`);
+      if (v > 0) dets.push(`🔴 ${v}`);
+      return dets.join(' · ');
+    };
     const lineas = [
       `*🛺 CARGADORES — ${_fmtFechaLabel(d.fecha)}*`,
       `─────────────────────`,
     ];
     d.cargadores.forEach(cg => {
-      const estTxt = _textoEstadosCarretas(
-        cg.preingresos.reduce((acc, p) => acc.concat(p.estados || []), [])
-      );
-      const sufijo = estTxt ? ` ${estTxt} ⚠` : ' ✅';
-      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} carreta${cg.carretasTotal === 1 ? '' : 's'}${sufijo}`);
+      const det = fmtDets(cg.llenasTotal||0, cg.mediasTotal||0, cg.vaciasTotal||0);
+      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} carreta${cg.carretasTotal === 1 ? '' : 's'}   ${det}`);
       cg.preingresos.forEach(pi => {
-        const t = _textoEstadosCarretas(pi.estados);
-        const s = t ? ` ${t}` : '';
-        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} cart${s}`);
+        const detPi = fmtDets(pi.llenas||0, pi.medias||0, pi.vacias||0);
+        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} cart  (${detPi})`);
       });
     });
     lineas.push(``, `━━━━━━━━━━━━━━━━━━━━━━━━`);
     lineas.push(`*TOTAL:* ${d.totalCarretas} carreta${d.totalCarretas === 1 ? '' : 's'}`);
-    if ((d.totalMedias || 0) + (d.totalVacias || 0) > 0) {
-      const dets = [];
-      if (d.totalLlenas > 0) dets.push(d.totalLlenas + ' 🟢 llenas');
-      if (d.totalMedias > 0) dets.push(d.totalMedias + ' 🟡 medias');
-      if (d.totalVacias > 0) dets.push(d.totalVacias + ' 🔴 casi vacías');
-      lineas.push(`(${dets.join(' · ')})`);
-    }
+    const dets = [];
+    if ((d.totalLlenas||0) > 0) dets.push((d.totalLlenas) + ' 🟢 llenas');
+    if ((d.totalMedias||0) > 0) dets.push((d.totalMedias) + ' 🟡 medias');
+    if ((d.totalVacias||0) > 0) dets.push((d.totalVacias) + ' 🔴 casi vacías');
+    if (dets.length) lineas.push(dets.join(' · '));
     lineas.push(`_InversionMos Warehouse_`);
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
@@ -12631,6 +12797,7 @@ const PreingresosView = (() => {
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido, reimprimirAviso,
            abrirCargadoresDia, guardarTarifaCarreta, compartirCargadoresDiaWA, imprimirCargadoresDia,
+           toggleEstadoCarretaDia, agregarCarretaDia,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
            toggleEstadoCarreta, agregarCarreta, toggleEstadoCarretaEdit, agregarCarretaEdit,
