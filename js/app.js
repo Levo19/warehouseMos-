@@ -465,48 +465,6 @@ const ESTADOS_CARGA = ['LLENA', 'MEDIA', 'VACIA'];
 const EMOJI_CARGA = { LLENA: '🟢', MEDIA: '🟡', VACIA: '🔴' };
 const LABEL_CARGA = { LLENA: 'Llena', MEDIA: 'Media', VACIA: 'Casi vacía' };
 
-// [v2.13.1] Feedback sonoro + háptico al togglear chip de carreta.
-// Frecuencia distinta por estado: alta (LLENA OK) → media (alerta) → baja (riesgo).
-let _ccAudio = null;
-function _carretaSfx(estado) {
-  try {
-    if (!_ccAudio) _ccAudio = new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = _ccAudio, now = ctx.currentTime;
-    const freq = estado === 'LLENA' ? 880 : estado === 'MEDIA' ? 600 : 380;
-    const o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(freq, now);
-    g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(0.10, now + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
-    o.connect(g).connect(ctx.destination);
-    o.start(now); o.stop(now + 0.20);
-  } catch(_){}
-  // Háptico mobile
-  try {
-    if (navigator.vibrate) {
-      navigator.vibrate(estado === 'VACIA' ? [20, 30, 20] : 15);
-    }
-  } catch(_){}
-}
-// Sonido al agregar carreta nueva (pop ascendente)
-function _carretaAddSfx() {
-  try {
-    if (!_ccAudio) _ccAudio = new (window.AudioContext || window.webkitAudioContext)();
-    const ctx = _ccAudio, now = ctx.currentTime;
-    [600, 900].forEach((f, i) => {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      const t0 = now + i * 0.05;
-      o.type = 'triangle'; o.frequency.setValueAtTime(f, t0);
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
-      o.connect(g).connect(ctx.destination);
-      o.start(t0); o.stop(t0 + 0.23);
-    });
-    if (navigator.vibrate) navigator.vibrate(10);
-  } catch(_){}
-}
-
 // Normaliza el cargador asegurando que tenga array `estados` con length === carretas.
 // Si vienen datos viejos sin estados, asume todas LLENAS.
 function _normalizarCargador(c) {
@@ -11598,10 +11556,8 @@ const PreingresosView = (() => {
     const actual = c.estados[carretaIdx] || 'LLENA';
     const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
     c.estados[carretaIdx] = next;
-    _carretaSfx(next);
     _renderCargadoresEdit();
     _autoguardarCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next));
   }
 
   function agregarCarretaEdit(idx) {
@@ -11610,10 +11566,8 @@ const PreingresosView = (() => {
     c.carretas = (c.carretas || 0) + 1;
     if (!Array.isArray(c.estados)) c.estados = [];
     c.estados.push('LLENA');
-    _carretaAddSfx();
     _renderCargadoresEdit();
     _autoguardarCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
   }
 
   // Versión legacy mantenida solo para retrocompat de llamadas antiguas
@@ -12046,10 +12000,7 @@ const PreingresosView = (() => {
     const actual = c.estados[carretaIdx] || 'LLENA';
     const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
     c.estados[carretaIdx] = next;
-    _carretaSfx(next);
     _renderCargadores();
-    // Animación bounce + flash en el chip recién cambiado
-    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next));
   }
 
   // [v2.13] Agregar UNA carreta nueva al cargador (default LLENA)
@@ -12059,22 +12010,7 @@ const PreingresosView = (() => {
     c.carretas = (c.carretas || 0) + 1;
     if (!Array.isArray(c.estados)) c.estados = [];
     c.estados.push('LLENA');
-    _carretaAddSfx();
     _renderCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
-  }
-
-  // [v2.13.1] Helper visual: encuentra el chip por idx y le aplica animación
-  function _flashCarretaChip(cargIdx, carretaIdx, estado, esNueva) {
-    // Buscar el chip recién renderizado (por orden DOM)
-    const blocks = document.querySelectorAll('#preCargadoresList .cargador-block, #piCargadoresList .cargador-block');
-    if (!blocks[cargIdx]) return;
-    const chips = blocks[cargIdx].querySelectorAll('.carreta-chip');
-    const chip = chips[carretaIdx];
-    if (!chip) return;
-    chip.classList.remove('cc-flash', 'cc-flash-nueva');
-    void chip.offsetWidth; // force reflow
-    chip.classList.add(esNueva ? 'cc-flash-nueva' : 'cc-flash');
   }
 
   function quitarCargador(idx) {
