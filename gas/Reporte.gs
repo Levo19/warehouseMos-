@@ -927,32 +927,59 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
     bLn(SEP);
   }
 
-  // ── Cargadores con detalle: nombre · N x tarifa = subtotal ──
+  // ── Cargadores [v2.13.5]: nombre · N carretas + desglose L/M/V ──
+  // Sin tarifa (eliminada en v2.13.3 — el cargador cobra en caja).
+  // Imprime conteos de estados con palabras ASCII (impresoras 80mm no
+  // garantizan render de emojis).
   var cargs = [];
   try { cargs = JSON.parse(pi.cargadores || '[]'); } catch(e) {}
   if (cargs.length) {
     bLn('');
+    b1(0x1b); b1(0x45); b1(0x01);
     bLn('Cargadores:');
-    var totalCarg = 0;
-    var tarifaGlobal = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
+    b1(0x1b); b1(0x45); b1(0x00);
+    var totLlenas = 0, totMedias = 0, totVacias = 0, totCarretas = 0;
     cargs.forEach(function(c) {
       var nombre = (typeof c === 'object') ? (c.nombre || c.idPersonal || '') : String(c);
       if (!nombre) return;
       var carretas = (typeof c === 'object' && c.carretas) ? parseInt(c.carretas) || 0 : 0;
-      var tarifa   = (typeof c === 'object' && c.tarifa !== undefined && c.tarifa !== '')
-                     ? (parseFloat(c.tarifa) || 0) : tarifaGlobal;
-      var sub      = carretas * tarifa;
-      totalCarg   += sub;
-      if (carretas > 0 && tarifa > 0) {
-        bLn(_padLine48('  - ' + nombre, carretas + ' x S/' + _fmtMoney(tarifa) + ' = S/ ' + _fmtMoney(sub)));
+      var estadosArr = [];
+      if (typeof c === 'object' && Array.isArray(c.estados)) {
+        estadosArr = c.estados.slice(0, carretas).map(function(e) {
+          return (e === 'MEDIA' || e === 'VACIA') ? e : 'LLENA';
+        });
+      }
+      while (estadosArr.length < carretas) estadosArr.push('LLENA');
+      var ll = 0, md = 0, vc = 0;
+      estadosArr.forEach(function(e) {
+        if (e === 'LLENA') ll++; else if (e === 'MEDIA') md++; else if (e === 'VACIA') vc++;
+      });
+      totLlenas += ll; totMedias += md; totVacias += vc; totCarretas += carretas;
+      // Línea 1: nombre cargador + total carretas (negrita)
+      if (carretas > 0) {
+        b1(0x1b); b1(0x45); b1(0x01);
+        bLn(_padLine48('  - ' + nombre, carretas + ' carreta' + (carretas === 1 ? '' : 's')));
+        b1(0x1b); b1(0x45); b1(0x00);
+        // Línea 2: desglose por estado (solo si hay alguna media o vacia, o si carretas > 1)
+        var dets = [];
+        if (ll > 0) dets.push(ll + ' LLENA' + (ll === 1 ? '' : 'S'));
+        if (md > 0) dets.push(md + ' MEDIA' + (md === 1 ? '' : 'S'));
+        if (vc > 0) dets.push(vc + ' VACIA' + (vc === 1 ? '' : 'S'));
+        if (dets.length) bLn('      ' + dets.join(' / '));
       } else {
         bLn('  - ' + nombre);
       }
     });
-    if (totalCarg > 0) {
-      bLn('                                                ');
+    // Total general — solo si hay >1 cargador y mezcla de estados
+    if (cargs.length > 1 && (totMedias + totVacias > 0)) {
+      bLn(SEP2);
       b1(0x1b); b1(0x45); b1(0x01);
-      bLn(_padLine48('  TOTAL CARRETAS', 'S/ ' + _fmtMoney(totalCarg)));
+      bLn(_padLine48('  TOTAL', totCarretas + ' carreta' + (totCarretas === 1 ? '' : 's')));
+      var tdets = [];
+      if (totLlenas > 0) tdets.push(totLlenas + ' L');
+      if (totMedias > 0) tdets.push(totMedias + ' M');
+      if (totVacias > 0) tdets.push(totVacias + ' V');
+      if (tdets.length) bLn('      ' + tdets.join(' / '));
       b1(0x1b); b1(0x45); b1(0x00);
     }
   }
