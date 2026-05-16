@@ -1,1 +1,1 @@
-{ "version": "2.11.3", "build": "20260515-fotos-drive-robustez-retry-permisos-w1600-fallback-local" }
+{ "version": "2.12.0", "build": "20260515-fix-editar-anular-envasado-validador-preserva-ctx" }

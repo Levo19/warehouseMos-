@@ -7383,10 +7383,13 @@ const EnvasadosView = (() => {
     };
   }
 
-  function cerrarAuth() {
+  // [v2.12] Cierra el sheet de auth. Por default LIMPIA el ctx (cancelación
+  // del usuario). Pasar preservarCtx=true cuando el ctx debe sobrevivir para
+  // el siguiente paso (ej. al transicionar al modal de acción tras validar).
+  function cerrarAuth(preservarCtx) {
     document.getElementById('overlayEnvAuth').style.display = 'none';
     document.getElementById('sheetEnvAuth').classList.remove('open');
-    _envAuthCtx = null;
+    if (!preservarCtx) _envAuthCtx = null;
   }
 
   function pedirAuthEditar(idEnvasado) { _abrirModalAuth('editar', idEnvasado); }
@@ -7439,13 +7442,38 @@ const EnvasadosView = (() => {
       // OK: guardar clave para revalidación en backend final + abrir PASO 2
       _envAuthCtx.clave        = clave;
       _envAuthCtx.validadoPor  = (res.data && res.data.validadoPor) || 'admin';
-      // Cerrar PASO 1 y abrir PASO 2
-      cerrarAuth();
+      _envAuthCtx.idPersonal   = (res.data && res.data.idPersonal)  || '';
+      // [v2.12 FIX] Cerrar PASO 1 PRESERVANDO el ctx + abrir PASO 2
+      // Antes: cerrarAuth() borraba _envAuthCtx → _abrirModalAccion salía
+      // silencio (chequea if !_envAuthCtx return) → modal nunca se mostraba.
+      cerrarAuth(true);
+      // Pequeño feedback visual de éxito antes del siguiente modal
+      try { _envBeep && _envBeep('ok'); } catch(_){}
       _abrirModalAccion();
     } catch(e) {
       _toggleLoading('sheetEnvAuth', 'envAuthLoading', false);
       errEl.textContent = '✗ Error de conexión: ' + (e.message || e);
     }
+  }
+
+  // [v2.12] WebAudio simple para feedback (ok = 2 tonos asc, success = arpegio)
+  let _envAudioCtx = null;
+  function _envBeep(tipo) {
+    try {
+      if (!_envAudioCtx) _envAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = _envAudioCtx; const now = ctx.currentTime;
+      const notas = tipo === 'ok' ? [880, 1320] : tipo === 'success' ? [659, 880, 1320] : [400];
+      notas.forEach((f, i) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        const t0 = now + i * 0.08;
+        o.type = 'sine'; o.frequency.setValueAtTime(f, t0);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.12, t0 + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.25);
+        o.connect(g).connect(ctx.destination);
+        o.start(t0); o.stop(t0 + 0.27);
+      });
+    } catch(_){}
   }
 
   // PASO 2 — modal con los detalles de la operación (post-auth)
@@ -7457,6 +7485,12 @@ const EnvasadosView = (() => {
     document.getElementById('envAccionProd').textContent = ctx.descripcion;
     document.getElementById('envAccionCantActual').textContent =
       `Cantidad actual: ${ctx.udsActuales} uds`;
+    // [v2.12] Mostrar quién autorizó (banner verde sutil arriba del modal)
+    const autorizadorEl = document.getElementById('envAccionAutorizador');
+    if (autorizadorEl) {
+      autorizadorEl.innerHTML = `🔓 Autorizado por <b>${(ctx.validadoPor || 'admin').replace(/[<>&"]/g, '')}</b>`;
+      autorizadorEl.classList.remove('hidden');
+    }
     document.getElementById('envAccionCantRow').classList.toggle('hidden', ctx.modo !== 'editar');
     document.getElementById('envAccionCant').value = ctx.modo === 'editar' ? ctx.udsActuales : '';
     document.getElementById('envAccionDelta').textContent = '';
@@ -7546,11 +7580,16 @@ const EnvasadosView = (() => {
 
       cerrarAccion();
       const d = res.data || {};
+      // [v2.12] Sonido de éxito + toast con resumen detallado del cambio
+      try { _envBeep && _envBeep('success'); } catch(_){}
       if (ctx.modo === 'editar') {
-        toast(`✓ Corregido · ${d.udsViejas}→${d.udsNuevas} uds`, 'ok', 5000);
+        const delta = d.udsNuevas - d.udsViejas;
+        const signo = delta > 0 ? '+' : '';
+        toast(`✓ Corregido · ${d.udsViejas}→${d.udsNuevas} uds (${signo}${delta}) · por ${ctx.validadoPor}`, 'ok', 6000);
         _decirEnVoz(`Corregido. ${d.udsViejas} cambiado a ${d.udsNuevas} unidades de ${d.descripcion || ctx.descripcion}`);
       } else {
-        toast(`✓ Anulado · ${d.udsAnuladas} uds revertidas`, 'ok', 5000);
+        const baseRev = d.cantBaseRestit ? ` · ${d.cantBaseRestit} ${ctx.unidadBase || 'KGM'} restituidos al base` : '';
+        toast(`✓ Anulado · ${d.udsAnuladas} uds revertidas${baseRev} · por ${ctx.validadoPor}`, 'ok', 6000);
         _decirEnVoz(`${d.udsAnuladas} unidades anuladas de ${d.descripcion || ctx.descripcion}`);
       }
       cargar();
