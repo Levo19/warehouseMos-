@@ -964,7 +964,7 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
         var dets = [];
         if (ll > 0) dets.push(ll + ' LLENA' + (ll === 1 ? '' : 'S'));
         if (md > 0) dets.push(md + ' MEDIA' + (md === 1 ? '' : 'S'));
-        if (vc > 0) dets.push(vc + ' VACIA' + (vc === 1 ? '' : 'S'));
+        if (vc > 0) dets.push(vc + ' CASI VACIA' + (vc === 1 ? '' : 'S'));
         if (dets.length) bLn('      ' + dets.join(' / '));
       } else {
         bLn('  - ' + nombre);
@@ -978,7 +978,7 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
       var tdets = [];
       if (totLlenas > 0) tdets.push(totLlenas + ' L');
       if (totMedias > 0) tdets.push(totMedias + ' M');
-      if (totVacias > 0) tdets.push(totVacias + ' V');
+      if (totVacias > 0) tdets.push(totVacias + ' CV');
       if (tdets.length) bLn('      ' + tdets.join(' / '));
       b1(0x1b); b1(0x45); b1(0x00);
     }
@@ -1408,7 +1408,7 @@ function imprimirCargadoresDia(params) {
   bLn(_padLine48('Carretas totales:',    String(d.totalCarretas)));
   bLn(_padLine48('  Llenas:',  String(d.totalLlenas)));
   bLn(_padLine48('  Medias:',  String(d.totalMedias)));
-  bLn(_padLine48('  Vacias:',  String(d.totalVacias)));
+  bLn(_padLine48('  Casi vacias:', String(d.totalVacias)));
   bLn(SEP2);
 
   // Por cargador: nombre + total carretas + detalle de estados por preingreso
@@ -1417,11 +1417,11 @@ function imprimirCargadoresDia(params) {
     bLn(c.nombre.toUpperCase());
     b1(0x1b); b1(0x45); b1(0x00);
     var resCarg = c.carretasTotal + ' carretas';
-    var estCarg = 'L' + c.llenasTotal + ' M' + c.mediasTotal + ' V' + c.vaciasTotal;
+    var estCarg = 'L' + c.llenasTotal + ' M' + c.mediasTotal + ' CV' + c.vaciasTotal;
     bLn(_padLine48('  ' + resCarg, estCarg));
     c.preingresos.forEach(function(pi) {
       var lbl = '  - ' + pi.idPreingreso + ' ' + (pi.proveedor || '').substring(0, 22);
-      var det = pi.carretas + 'c (L' + pi.llenas + ' M' + pi.medias + ' V' + pi.vacias + ')';
+      var det = pi.carretas + 'c (L' + pi.llenas + ' M' + pi.medias + ' CV' + pi.vacias + ')';
       bLn(_padLine48(lbl, det));
     });
     bLn('');
@@ -1436,7 +1436,7 @@ function imprimirCargadoresDia(params) {
   b1(0x1b); b1(0x21); b1(0x38); b1(0x1b); b1(0x45); b1(0x01);
   bLn(d.totalCarretas + ' CARRETAS');
   b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
-  bLn('Llenas ' + d.totalLlenas + ' · Medias ' + d.totalMedias + ' · Vacias ' + d.totalVacias);
+  bLn('Llenas ' + d.totalLlenas + ' · Medias ' + d.totalMedias + ' · Casi vacias ' + d.totalVacias);
   b1(0x1b); b1(0x61); b1(0x00);
   bLn(SEP);
 

@@ -12584,9 +12584,9 @@ const PreingresosView = (() => {
     }
     const badges = (l, m, v) => {
       const p = [];
-      if (l > 0) p.push(`<span class="cd-badge cd-badge-llena">🟢 ${l}</span>`);
-      if (m > 0) p.push(`<span class="cd-badge cd-badge-media">🟡 ${m}</span>`);
-      if (v > 0) p.push(`<span class="cd-badge cd-badge-vacia">🔴 ${v}</span>`);
+      if (l > 0) p.push(`<span class="cd-badge cd-badge-llena" title="Llenas">🟢 ${l}</span>`);
+      if (m > 0) p.push(`<span class="cd-badge cd-badge-media" title="Medias">🟡 ${m}</span>`);
+      if (v > 0) p.push(`<span class="cd-badge cd-badge-vacia" title="Casi vacías">🔴 ${v} c.vacía${v === 1 ? '' : 's'}</span>`);
       return p.join(' ');
     };
     const chipsHtml = (pi) => {
@@ -12752,11 +12752,13 @@ const PreingresosView = (() => {
     if (!d || !d.cargadores || !d.cargadores.length) {
       toast('Sin datos para compartir', 'warn'); return;
     }
+    // [v2.13.6] '🔴 N' siempre con texto 'casi vacía' explícito — el emoji solo
+    // confunde al cajero si no acompaña la palabra completa.
     const fmtDets = (l, m, v) => {
       const dets = [];
       if (l > 0) dets.push(`🟢 ${l}`);
       if (m > 0) dets.push(`🟡 ${m}`);
-      if (v > 0) dets.push(`🔴 ${v}`);
+      if (v > 0) dets.push(`🔴 ${v} casi vacía${v === 1 ? '' : 's'}`);
       return dets.join(' · ');
     };
     const lineas = [
