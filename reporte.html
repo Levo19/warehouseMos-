@@ -32,6 +32,10 @@
     .field-changed{animation:fieldPulse 2.5s ease forwards}
     /* Cargadores */
     .carg-pill{display:inline-block;padding:4px 11px;background:rgba(59,130,246,.12);color:#93c5fd;border-radius:99px;font-size:12px;font-weight:600;margin:3px}
+    .cd-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;margin-right:4px}
+    .cd-badge-llena{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.3)}
+    .cd-badge-media{background:rgba(245,158,11,.15);color:#fcd34d;border:1px solid rgba(245,158,11,.3)}
+    .cd-badge-vacia{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
     /* Fotos */
     .foto-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px}
     .foto-thumb{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;cursor:pointer;transition:opacity .2s;border:1px solid #334155}
@@ -251,28 +255,40 @@ function linkCard(href, title, sub) {
 function renderPreingreso(d) {
   const border = d.estado === 'PROCESADO' ? '#22c55e' : '#f59e0b';
 
-  // Cargadores: pill con N carretas + subtotal · total al final
+  // [v2.13.3] Cargadores: pill con N carretas + breakdown por estado (LLENA/MEDIA/VACIA)
   let cargHtml = '<span style="color:#64748b">Sin cargadores</span>';
   let cargTotalHtml = '';
   if (d.cargadores && d.cargadores.length) {
-    const tarifaG = parseFloat(d.tarifaCarreta) || 0;
-    let sumMonto = 0, sumCart = 0;
+    let sumCart = 0, sumLlenas = 0, sumMedias = 0, sumVacias = 0;
     cargHtml = d.cargadores.map(function(c) {
       const nombre   = c.nombre || c.id || String(c);
       const carretas = parseInt(c.carretas) || 0;
-      const tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
-                        ? parseFloat(c.tarifa) : tarifaG;
-      const sub      = carretas * tarifa;
-      sumMonto += sub; sumCart += carretas;
-      const detalle = carretas > 0 && tarifa > 0
-        ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' × S/' + tarifa.toFixed(2) + ' = S/' + sub.toFixed(2) + ')</span>'
-        : (carretas ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' cart.)</span>' : '');
+      const estados  = Array.isArray(c.estados) ? c.estados : [];
+      let llenas = 0, medias = 0, vacias = 0;
+      for (let i = 0; i < carretas; i++) {
+        const e = estados[i];
+        if (e === 'MEDIA') medias++;
+        else if (e === 'VACIA') vacias++;
+        else llenas++;
+      }
+      sumCart += carretas; sumLlenas += llenas; sumMedias += medias; sumVacias += vacias;
+      let badges = '';
+      if (llenas) badges += '<span class="cd-badge cd-badge-llena">🟢 ' + llenas + '</span>';
+      if (medias) badges += '<span class="cd-badge cd-badge-media">🟡 ' + medias + '</span>';
+      if (vacias) badges += '<span class="cd-badge cd-badge-vacia">🔴 ' + vacias + '</span>';
+      const detalle = carretas
+        ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' cart.)</span> ' + badges
+        : '';
       return '<span class="carg-pill">' + esc(nombre) + detalle + '</span>';
     }).join('');
-    if (sumMonto > 0) {
-      cargTotalHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:baseline">' +
+    if (sumCart > 0) {
+      cargTotalHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px">' +
         '<span style="font-size:11px;color:#64748b">Total ' + sumCart + ' carretas</span>' +
-        '<span style="font-size:16px;font-weight:700;color:#fbbf24">S/ ' + sumMonto.toFixed(2) + '</span>' +
+        '<span style="font-size:11px">' +
+          (sumLlenas ? '<span class="cd-badge cd-badge-llena">🟢 ' + sumLlenas + '</span>' : '') +
+          (sumMedias ? '<span class="cd-badge cd-badge-media">🟡 ' + sumMedias + '</span>' : '') +
+          (sumVacias ? '<span class="cd-badge cd-badge-vacia">🔴 ' + sumVacias + '</span>' : '') +
+        '</span>' +
         '</div>';
     }
   }

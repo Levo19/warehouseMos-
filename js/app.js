@@ -465,26 +465,102 @@ function _getTarifaCarreta() {
   } catch { return 0; }
 }
 
-// Calcula resumen {carretas, monto} agregando todos los cargadores de los
-// preingresos pasados. Usa la tarifa snapshoteada por cargador si existe;
-// si no, usa la global vigente como fallback.
+// ════════════════════════════════════════════════
+// [v2.13.3] Estados por carreta (LLENA/MEDIA/VACIA)
+// Modelo extendido del cargador: agregar array `estados` con length === carretas.
+// Mantiene retrocompatibilidad: si no hay `estados`, se asume todas LLENAS.
+// La tarifa sigue existiendo en el modelo legacy pero se ignora en UI/WA/print.
+// ════════════════════════════════════════════════
+const ESTADOS_CARGA = ['LLENA', 'MEDIA', 'VACIA'];
+const EMOJI_CARGA   = { LLENA: '🟢', MEDIA: '🟡', VACIA: '🔴' };
+const LABEL_CARGA   = { LLENA: 'Llena', MEDIA: 'Media', VACIA: 'Casi vacía' };
+
+function _normalizarCargador(c) {
+  if (!c || typeof c !== 'object') return c;
+  const carretas = Math.max(1, parseInt(c.carretas) || 1);
+  let estados = Array.isArray(c.estados) ? c.estados.slice(0, carretas) : [];
+  while (estados.length < carretas) estados.push('LLENA');
+  estados = estados.map(e => ESTADOS_CARGA.indexOf(e) >= 0 ? e : 'LLENA');
+  return Object.assign({}, c, { carretas, estados });
+}
+
+function _resumenEstadosCarretas(estados) {
+  const r = { llenas: 0, medias: 0, vacias: 0, total: 0 };
+  (estados || []).forEach(e => {
+    if (e === 'LLENA') r.llenas++;
+    else if (e === 'MEDIA') r.medias++;
+    else if (e === 'VACIA') r.vacias++;
+    r.total++;
+  });
+  return r;
+}
+
+function _textoEstadosCarretas(estados) {
+  const r = _resumenEstadosCarretas(estados);
+  if (r.medias === 0 && r.vacias === 0) return '';
+  const parts = [];
+  if (r.medias > 0) parts.push(r.medias + ' 🟡 ' + (r.medias === 1 ? 'media' : 'medias'));
+  if (r.vacias > 0) parts.push(r.vacias + ' 🔴 ' + (r.vacias === 1 ? 'casi vacía' : 'casi vacías'));
+  return '(' + parts.join(', ') + ')';
+}
+
+// [v2.13.3] Sonidos + vibración háptica al togglear/agregar chip
+let _ccAudio = null;
+function _carretaSfx(estado) {
+  try {
+    if (!_ccAudio) _ccAudio = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _ccAudio, now = ctx.currentTime;
+    const freq = estado === 'LLENA' ? 880 : estado === 'MEDIA' ? 600 : 380;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(freq, now);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.10, now + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+    o.connect(g).connect(ctx.destination);
+    o.start(now); o.stop(now + 0.20);
+  } catch(_){}
+  try {
+    if (navigator.vibrate) navigator.vibrate(estado === 'VACIA' ? [20, 30, 20] : 15);
+  } catch(_){}
+}
+function _carretaAddSfx() {
+  try {
+    if (!_ccAudio) _ccAudio = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _ccAudio, now = ctx.currentTime;
+    [600, 900].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      const t0 = now + i * 0.05;
+      o.type = 'triangle'; o.frequency.setValueAtTime(f, t0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.10, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.22);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0); o.stop(t0 + 0.23);
+    });
+    if (navigator.vibrate) navigator.vibrate(10);
+  } catch(_){}
+}
+
+// [v2.13.3] Resumen agregado de cargadores. Sin tarifa: el cargador
+// pone su precio en caja. Devuelve estados de carga agregados.
 function _resumenCargadoresDia(items) {
-  let carretas = 0, monto = 0;
-  const tarifaGlobal = _getTarifaCarreta();
+  let carretas = 0, llenas = 0, medias = 0, vacias = 0;
   (items || []).forEach(p => {
     let arr = [];
     try { arr = JSON.parse(p.cargadores || '[]'); } catch {}
     if (!Array.isArray(arr)) return;
     arr.forEach(c => {
       if (!c || typeof c !== 'object') return;
-      const n = parseInt(c.carretas) || 0;
-      const t = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
-                 ? parseFloat(c.tarifa) : tarifaGlobal;
-      carretas += n;
-      monto    += n * t;
+      const cn = _normalizarCargador(c);
+      const r = _resumenEstadosCarretas(cn.estados);
+      carretas += r.total;
+      llenas   += r.llenas;
+      medias   += r.medias;
+      vacias   += r.vacias;
     });
   });
-  return { carretas, monto };
+  // monto: 0 mantenido por retrocompat con código viejo que lee r.monto
+  return { carretas, llenas, medias, vacias, monto: 0 };
 }
 
 // Filtra preingresos de un día (key=YYYY-MM-DD) usando la fecha LOCAL del
@@ -506,7 +582,7 @@ function _resumenCargadoresDiaPorFecha(key) {
   try {
     const all = OfflineManager.getPreingresosCache() || [];
     return _resumenCargadoresDia(_preingresosDeFecha(all, key));
-  } catch { return { carretas: 0, monto: 0 }; }
+  } catch { return { carretas: 0, llenas: 0, medias: 0, vacias: 0, monto: 0 }; }
 }
 
 // Construye el detalle agrupado por cargador (mismo shape que devolvía
@@ -528,31 +604,43 @@ function _calcularCargadoresDelDia(key) {
     if (!Array.isArray(arr)) return;
     arr.forEach(c => {
       if (!c || typeof c !== 'object') return;
-      const id     = String(c.id || c.idPersonal || c.nombre || '');
-      const nombre = String(c.nombre || c.idPersonal || id || '');
+      const cn = _normalizarCargador(c);
+      const id     = String(cn.id || cn.idPersonal || cn.nombre || '');
+      const nombre = String(cn.nombre || cn.idPersonal || id || '');
       if (!id || !nombre) return;
-      const carretas = parseInt(c.carretas) || 0;
-      const tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
-                        ? parseFloat(c.tarifa) : tarifaGlobal;
-      const sub      = carretas * tarifa;
-      if (!byId[id]) byId[id] = { id, nombre, carretasTotal: 0, montoTotal: 0, preingresos: [] };
+      const carretas = cn.carretas;
+      const r = _resumenEstadosCarretas(cn.estados);
+      if (!byId[id]) byId[id] = {
+        id, nombre,
+        carretasTotal: 0, llenasTotal: 0, mediasTotal: 0, vaciasTotal: 0,
+        montoTotal: 0,  // compat: queda en 0 siempre (tarifa eliminada)
+        preingresos: []
+      };
       byId[id].carretasTotal += carretas;
-      byId[id].montoTotal    += sub;
+      byId[id].llenasTotal   += r.llenas;
+      byId[id].mediasTotal   += r.medias;
+      byId[id].vaciasTotal   += r.vacias;
       byId[id].preingresos.push({
         idPreingreso: pi.idPreingreso,
         proveedor:    provMap[String(pi.idProveedor)] || pi.idProveedor || '',
-        carretas, tarifa, subtotal: sub,
+        carretas,
+        estados:      cn.estados,
+        llenas: r.llenas, medias: r.medias, vacias: r.vacias,
+        tarifa: 0, subtotal: 0,  // compat
         estado: String(pi.estado || '')
       });
     });
   });
 
-  const cargadores = Object.values(byId).sort((a, b) => b.montoTotal - a.montoTotal);
+  const cargadores = Object.values(byId).sort((a, b) => b.carretasTotal - a.carretasTotal);
   return {
     fecha:         key,
     cargadores,
     totalCarretas: cargadores.reduce((s, c) => s + c.carretasTotal, 0),
-    totalMonto:    cargadores.reduce((s, c) => s + c.montoTotal, 0),
+    totalLlenas:   cargadores.reduce((s, c) => s + c.llenasTotal,   0),
+    totalMedias:   cargadores.reduce((s, c) => s + c.mediasTotal,   0),
+    totalVacias:   cargadores.reduce((s, c) => s + c.vaciasTotal,   0),
+    totalMonto:    0,  // compat
     tarifaGlobal,
     preingresos:   items.length
   };
@@ -3884,14 +3972,15 @@ const GuiasView = (() => {
     container.innerHTML = Object.entries(groupMap)
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([key, items]) => {
-        // Resumen de cargadores del día (de los preingresos vinculados a guías de ingreso de ese día)
+        // [v2.13.3] Pill de cargadores: carretas + advertencia si alguna no llena
         const r = _resumenCargadoresDiaPorFecha(key);
         const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
         const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
+        const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
         const pill = r.carretas > 0
           ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
                      class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-                <span>🛺</span><span>${r.carretas} cart</span><span>·</span><span>S/ ${r.monto.toFixed(2)}</span>
+                <span>🛺</span><span>${r.carretas} cart</span>${alerta}
               </button>`
           : '';
         const addBtn = `<button class="day-header-add" onclick="App.abrirActionDia()" title="Crear (guía/preingreso/cargador)">+</button>`;
@@ -11204,10 +11293,11 @@ const PreingresosView = (() => {
         const r = _resumenCargadoresDia(items);
         const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
         const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
+        const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
         const pill = r.carretas > 0
           ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
                      class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-                <span>🛺</span><span>${r.carretas} cart</span><span>·</span><span>S/ ${r.monto.toFixed(2)}</span>
+                <span>🛺</span><span>${r.carretas} cart</span>${alerta}
               </button>`
           : '';
         return `<div class="${hdrCls}"><span>${_dateLabel(key)}</span>${mid}${pill}</div>
@@ -11493,22 +11583,39 @@ const PreingresosView = (() => {
       list.innerHTML = '<p class="text-xs text-slate-600 italic">Sin cargadores asignados</p>';
       return;
     }
-    list.innerHTML = _cargadoresEdit.map((c, i) => `
-      <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
-        <span class="text-amber-400 text-xs">🛺</span>
-        <span class="text-amber-200 text-xs flex-1">${escHtml(c.nombre)}</span>
-        <div class="flex items-center gap-1">
-          <button onclick="PreingresosView.cambiarCarretasEdit(${i},-1)"
-                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
-                  style="background:#334155">−</button>
-          <span class="text-amber-300 text-xs font-bold min-w-[1.2rem] text-center">${c.carretas}</span>
-          <button onclick="PreingresosView.cambiarCarretasEdit(${i},1)"
-                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
-                  style="background:#334155">+</button>
-        </div>
-        <button onclick="PreingresosView.quitarCargadorEdit(${i})"
-                class="text-slate-500 hover:text-red-400 text-sm leading-none ml-1">×</button>
-      </div>`).join('');
+    list.innerHTML = _cargadoresEdit.map((c, i) => {
+      const cn = _normalizarCargador(c);
+      _cargadoresEdit[i] = cn;
+      return _renderCargadorBlock(cn, i, true);
+    }).join('');
+  }
+
+  // [v2.13.3] Helper compartido — render del bloque de cargador con grid
+  // de chips por carreta. isEdit=true para versión edición (autoguardado),
+  // false para creación. Funciones del onclick siempre en PreingresosView.
+  function _renderCargadorBlock(cn, i, isEdit) {
+    const sufijo = isEdit ? 'Edit' : '';
+    const chips = (cn.estados || []).map((est, j) => {
+      const emoji = EMOJI_CARGA[est] || '🟢';
+      const clase = 'carreta-chip carreta-chip-' + String(est || 'LLENA').toLowerCase();
+      return `<button onclick="PreingresosView.toggleEstadoCarreta${sufijo}(${i}, ${j})"
+                      class="${clase}" title="${LABEL_CARGA[est] || 'Llena'}">
+        <span class="cc-emoji">${emoji}</span>
+        <span class="cc-num">${j + 1}</span>
+      </button>`;
+    }).join('');
+    return `<div class="cargador-block">
+      <div class="cargador-head">
+        <span class="cargador-ico">🛺</span>
+        <span class="cargador-nombre">${escHtml(cn.nombre)}</span>
+        <span class="cargador-resumen">${cn.carretas} carreta${cn.carretas === 1 ? '' : 's'}</span>
+        <button onclick="PreingresosView.quitarCargador${sufijo}(${i})" class="cargador-quitar" title="Quitar cargador">×</button>
+      </div>
+      <div class="carretas-grid">
+        ${chips}
+        <button onclick="PreingresosView.agregarCarreta${sufijo}(${i})" class="carreta-add" title="Agregar carreta">+</button>
+      </div>
+    </div>`;
   }
 
   async function _autoguardarCargadores() {
@@ -11521,11 +11628,52 @@ const PreingresosView = (() => {
     OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { cargadores });
   }
 
+  // [v2.13.3] LEGACY compat — alias para HTML cacheado viejo
   function cambiarCarretasEdit(idx, delta) {
     if (!_cargadoresEdit[idx]) return;
-    _cargadoresEdit[idx].carretas = Math.max(1, _cargadoresEdit[idx].carretas + delta);
+    if (delta > 0) { agregarCarretaEdit(idx); return; }
+    const c = _cargadoresEdit[idx];
+    c.carretas = Math.max(1, (c.carretas || 1) - 1);
+    if (Array.isArray(c.estados)) c.estados = c.estados.slice(0, c.carretas);
     _renderCargadoresEdit();
     _autoguardarCargadores();
+  }
+
+  // [v2.13.3] Toggle estado de UNA carreta en modo edición (autoguarda)
+  function toggleEstadoCarretaEdit(idx, carretaIdx) {
+    const c = _cargadoresEdit[idx];
+    if (!c || !Array.isArray(c.estados)) return;
+    const actual = c.estados[carretaIdx] || 'LLENA';
+    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
+    c.estados[carretaIdx] = next;
+    _carretaSfx(next);
+    _renderCargadoresEdit();
+    _autoguardarCargadores();
+    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next, false));
+  }
+
+  function agregarCarretaEdit(idx) {
+    const c = _cargadoresEdit[idx];
+    if (!c) return;
+    c.carretas = (c.carretas || 0) + 1;
+    if (!Array.isArray(c.estados)) c.estados = [];
+    c.estados.push('LLENA');
+    _carretaAddSfx();
+    _renderCargadoresEdit();
+    _autoguardarCargadores();
+    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
+  }
+
+  // [v2.13.3] Visual feedback al togglear/agregar — busca el chip por DOM
+  function _flashCarretaChip(cargIdx, carretaIdx, estado, esNueva) {
+    const blocks = document.querySelectorAll('#preCargadoresList .cargador-block, #piCargadoresList .cargador-block');
+    if (!blocks[cargIdx]) return;
+    const chips = blocks[cargIdx].querySelectorAll('.carreta-chip');
+    const chip = chips[carretaIdx];
+    if (!chip) return;
+    chip.classList.remove('cc-flash', 'cc-flash-nueva');
+    void chip.offsetWidth; // force reflow
+    chip.classList.add(esNueva ? 'cc-flash-nueva' : 'cc-flash');
   }
 
   function quitarCargadorEdit(idx) {
@@ -11564,7 +11712,8 @@ const PreingresosView = (() => {
 
   function agregarCargadorEdit(id, nombre) {
     if (_cargadoresEdit.find(c => c.id === id)) return;
-    _cargadoresEdit.push({ id, nombre, carretas: 1 });
+    // [v2.13.3] Default: 1 carreta LLENA
+    _cargadoresEdit.push({ id, nombre, carretas: 1, estados: ['LLENA'] });
     _renderCargadoresEdit();
     _autoguardarCargadores();
     document.getElementById('sheetCargadoresEdit')?.remove();
@@ -11864,22 +12013,11 @@ const PreingresosView = (() => {
     const list = document.getElementById('preCargadoresList');
     if (!list) return;
     if (!_cargadores.length) { list.innerHTML = ''; return; }
-    list.innerHTML = _cargadores.map((c, i) => `
-      <div class="flex items-center gap-2 px-2 py-1.5 rounded-lg" style="background:#1a1505;border:1px solid #854d0e">
-        <span class="text-amber-400 text-xs">🛺</span>
-        <span class="text-amber-200 text-xs flex-1">${escHtml(c.nombre)}</span>
-        <div class="flex items-center gap-1">
-          <button onclick="PreingresosView.cambiarCarretas(${i},-1)"
-                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
-                  style="background:#334155">−</button>
-          <span class="text-amber-300 text-xs font-bold min-w-[1.2rem] text-center">${c.carretas}</span>
-          <button onclick="PreingresosView.cambiarCarretas(${i},1)"
-                  class="w-5 h-5 rounded text-center text-slate-300 hover:text-white text-sm leading-none"
-                  style="background:#334155">+</button>
-        </div>
-        <button onclick="PreingresosView.quitarCargador(${i})"
-                class="text-slate-500 hover:text-red-400 text-sm leading-none ml-1">×</button>
-      </div>`).join('');
+    list.innerHTML = _cargadores.map((c, i) => {
+      const cn = _normalizarCargador(c);
+      _cargadores[i] = cn;
+      return _renderCargadorBlock(cn, i, false);
+    }).join('');
   }
 
   function abrirPickerCargador() {
@@ -11913,15 +12051,45 @@ const PreingresosView = (() => {
 
   function agregarCargador(id, nombre) {
     if (_cargadores.find(c => c.id === id)) return; // evitar duplicado
-    _cargadores.push({ id, nombre, carretas: 1 });
+    // [v2.13.3] Default: 1 carreta LLENA
+    _cargadores.push({ id, nombre, carretas: 1, estados: ['LLENA'] });
     _renderCargadores();
     document.getElementById('sheetCargadores')?.remove();
   }
 
+  // [v2.13.3] LEGACY compat — alias de agregarCarreta/quitarCarreta.
+  // Si delta > 0: agrega 1 carreta LLENA. Si delta < 0: quita la última.
+  // El export sigue exponiendo `cambiarCarretas` por compat con HTML cacheado.
   function cambiarCarretas(idx, delta) {
     if (!_cargadores[idx]) return;
-    _cargadores[idx].carretas = Math.max(1, _cargadores[idx].carretas + delta);
+    if (delta > 0) { agregarCarreta(idx); return; }
+    const c = _cargadores[idx];
+    c.carretas = Math.max(1, (c.carretas || 1) - 1);
+    if (Array.isArray(c.estados)) c.estados = c.estados.slice(0, c.carretas);
     _renderCargadores();
+  }
+
+  // [v2.13.3] Toggle del estado de UNA carreta (cicla LLENA → MEDIA → VACIA → LLENA)
+  function toggleEstadoCarreta(idx, carretaIdx) {
+    const c = _cargadores[idx];
+    if (!c || !Array.isArray(c.estados)) return;
+    const actual = c.estados[carretaIdx] || 'LLENA';
+    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
+    c.estados[carretaIdx] = next;
+    _carretaSfx(next);
+    _renderCargadores();
+    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next, false));
+  }
+
+  function agregarCarreta(idx) {
+    const c = _cargadores[idx];
+    if (!c) return;
+    c.carretas = (c.carretas || 0) + 1;
+    if (!Array.isArray(c.estados)) c.estados = [];
+    c.estados.push('LLENA');
+    _carretaAddSfx();
+    _renderCargadores();
+    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
   }
 
   function quitarCargador(idx) {
@@ -12276,17 +12444,14 @@ const PreingresosView = (() => {
     const provNombre = prov?.nombre || pi.idProveedor || '—';
     let cargadores = [];
     try { cargadores = JSON.parse(pi.cargadores || '[]'); } catch {}
-    const tarifaG = _getTarifaCarreta();
-    let totalCarg = 0;
+    // [v2.13.3] Sin tarifa. Mostrar conteo de carretas + estados.
     const cargLines = cargadores.map(c => {
-      const nombre   = c.nombre || c.id || String(c);
-      const carretas = parseInt(c.carretas) || 0;
-      const t        = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
-                        ? parseFloat(c.tarifa) : tarifaG;
-      const sub      = carretas * t;
-      totalCarg     += sub;
-      return carretas > 0 && t > 0
-        ? `   • ${nombre} — ${carretas} × S/${fmt(t,2)} = *S/ ${fmt(sub,2)}*`
+      const cn = _normalizarCargador(c);
+      const nombre = cn.nombre || cn.id || String(cn);
+      const txtEst = _textoEstadosCarretas(cn.estados);
+      const sufijo = txtEst ? ` ${txtEst} ⚠` : ' ✅';
+      return cn.carretas > 0
+        ? `   • *${nombre}* — ${cn.carretas} carreta${cn.carretas === 1 ? '' : 's'}${sufijo}`
         : `   • ${nombre}`;
     });
     const url      = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
@@ -12301,7 +12466,6 @@ const PreingresosView = (() => {
     if (cargadores.length) {
       lineas.push(`👥 *Cargadores:*`);
       lineas.push(...cargLines);
-      if (totalCarg > 0) lineas.push(`   *TOTAL CARRETAS:* S/ ${fmt(totalCarg, 2)}`);
     } else {
       lineas.push(`👥 *Cargadores:* —`);
     }
@@ -12340,13 +12504,15 @@ const PreingresosView = (() => {
   function abrirCargadoresDia(fechaKey) {
     _cargDiaState.fecha = fechaKey;
     document.getElementById('cargDiaFechaLbl').textContent = _fmtFechaLabel(fechaKey);
-    document.getElementById('cargDiaTarifaInput').value = String(_getTarifaCarreta() || '');
-    // Cálculo client-side instantáneo (mismo data que ya alimenta al pill del header).
+    // [v2.13.3] cargDiaTarifaInput puede no existir (HTML actualizado lo elimina)
+    const tarifaInp = document.getElementById('cargDiaTarifaInput');
+    if (tarifaInp) tarifaInp.value = String(_getTarifaCarreta() || '');
     _cargDiaState.data = _calcularCargadoresDelDia(fechaKey);
     _renderCargDiaContent();
     abrirSheet('sheetCargadoresDia');
   }
 
+  // [v2.13.3] Sin tarifa. Conteo de carretas + badges de estado de carga.
   function _renderCargDiaContent() {
     const c = document.getElementById('cargDiaContenido');
     const d = _cargDiaState.data;
@@ -12355,50 +12521,67 @@ const PreingresosView = (() => {
       c.innerHTML = '<div class="text-xs text-slate-500 italic text-center py-6">Sin cargadores este día</div>';
       return;
     }
+    const badges = (l, m, v) => {
+      const p = [];
+      if (l > 0) p.push(`<span class="cd-badge cd-badge-llena">🟢 ${l}</span>`);
+      if (m > 0) p.push(`<span class="cd-badge cd-badge-media">🟡 ${m}</span>`);
+      if (v > 0) p.push(`<span class="cd-badge cd-badge-vacia">🔴 ${v}</span>`);
+      return p.join(' ');
+    };
     const cards = d.cargadores.map(cg => `
       <div class="rounded-lg p-3" style="background:#0f172a;border:1px solid #1e293b">
         <div class="flex items-center justify-between mb-1">
           <div class="text-sm font-bold text-amber-300">🛺 ${escHtml(cg.nombre)}</div>
-          <div class="text-sm font-bold text-emerald-400">S/ ${cg.montoTotal.toFixed(2)}</div>
+          <div class="text-base font-bold text-amber-200">${cg.carretasTotal} <span class="text-[10px] text-slate-500">carretas</span></div>
         </div>
-        <div class="text-[11px] text-slate-500 mb-2">${cg.carretasTotal} carretas</div>
+        <div class="text-[11px] mb-2">${badges(cg.llenasTotal||0, cg.mediasTotal||0, cg.vaciasTotal||0)}</div>
         <div class="space-y-0.5">
-          ${cg.preingresos.map(pi => `
-            <div class="text-[11px] text-slate-400 flex items-center gap-2">
+          ${cg.preingresos.map(pi => {
+            const txt = _textoEstadosCarretas(pi.estados);
+            const suf = txt ? `<span class="text-amber-400">${txt}</span>` : '<span class="text-emerald-400">✅</span>';
+            return `<div class="text-[11px] text-slate-400 flex items-center gap-2">
               <span class="font-mono text-slate-500">${escHtml(pi.idPreingreso)}</span>
               <span class="flex-1 truncate">${escHtml(pi.proveedor || '—')}</span>
-              <span class="text-amber-300">${pi.carretas} × S/${pi.tarifa.toFixed(2)}</span>
-            </div>`).join('')}
+              <span class="text-amber-300">${pi.carretas} cart</span>
+              ${suf}
+            </div>`;
+          }).join('')}
         </div>
       </div>`).join('');
     c.innerHTML = cards + `
-      <div class="rounded-lg px-3 py-3 mt-3 flex items-center justify-between"
+      <div class="rounded-lg px-3 py-3 mt-3"
            style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3)">
-        <div>
-          <div class="text-xs text-slate-400">TOTAL DEL DÍA</div>
-          <div class="text-[11px] text-slate-500">${d.totalCarretas} carretas · ${d.preingresos} preingreso${d.preingresos !== 1 ? 's' : ''}</div>
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-xs text-slate-400">TOTAL DEL DÍA</div>
+            <div class="text-[11px] text-slate-500">${d.preingresos} preingreso${d.preingresos !== 1 ? 's' : ''}</div>
+          </div>
+          <div class="text-3xl font-bold text-amber-300">${d.totalCarretas} <span class="text-xs text-slate-400">carretas</span></div>
         </div>
-        <div class="text-2xl font-bold text-amber-300">S/ ${d.totalMonto.toFixed(2)}</div>
+        <div class="mt-2 text-[11px]">${badges(d.totalLlenas||0, d.totalMedias||0, d.totalVacias||0)}</div>
       </div>`;
   }
 
+  // [v2.13.3] LEGACY compat — guardarTarifaCarreta queda como no-op si el
+  // input no existe. Si el admin instala una versión vieja del HTML, sigue
+  // funcionando (no era prioridad). Exportada para no romper el return {}.
   async function guardarTarifaCarreta() {
-    const v = parseFloat(document.getElementById('cargDiaTarifaInput').value);
+    const inp = document.getElementById('cargDiaTarifaInput');
+    if (!inp) { toast('Tarifa eliminada — los cargadores cobran en caja', 'info'); return; }
+    const v = parseFloat(inp.value);
     if (isNaN(v) || v < 0) { toast('Tarifa inválida', 'warn'); return; }
-    toast('Guardando tarifa…', 'info');
     const res = await API.setConfig('TARIFA_CARRETA', String(v)).catch(() => null);
-    if (!res || !res.ok) { toast('Error guardando tarifa', 'danger'); return; }
-    // Actualizar cache local de CONFIG para que la UI lo refleje sin recarga
+    if (!res || !res.ok) { toast('Error guardando', 'danger'); return; }
     try {
       const cfg = OfflineManager.getConfigCache() || {};
       cfg.TARIFA_CARRETA = String(v);
       localStorage.setItem('wh_config', JSON.stringify({ data: cfg, ts: Date.now() }));
     } catch {}
     toast('Tarifa actualizada', 'ok');
-    // Refrescar el agregado del día (puede haber preingresos legacy sin snapshot)
     if (_cargDiaState.fecha) abrirCargadoresDia(_cargDiaState.fecha);
   }
 
+  // [v2.13.3] Sin tarifa. WhatsApp consolidado con estados de carga.
   function compartirCargadoresDiaWA() {
     const d = _cargDiaState.data;
     if (!d || !d.cargadores || !d.cargadores.length) {
@@ -12409,13 +12592,26 @@ const PreingresosView = (() => {
       `─────────────────────`,
     ];
     d.cargadores.forEach(cg => {
-      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} cart · *S/ ${cg.montoTotal.toFixed(2)}*`);
+      const estTxt = _textoEstadosCarretas(
+        cg.preingresos.reduce((acc, p) => acc.concat(p.estados || []), [])
+      );
+      const sufijo = estTxt ? ` ${estTxt} ⚠` : ' ✅';
+      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} carreta${cg.carretasTotal === 1 ? '' : 's'}${sufijo}`);
       cg.preingresos.forEach(pi => {
-        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} × S/${pi.tarifa.toFixed(2)}`);
+        const t = _textoEstadosCarretas(pi.estados);
+        const s = t ? ` ${t}` : '';
+        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} cart${s}`);
       });
     });
     lineas.push(``, `━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lineas.push(`*TOTAL:* ${d.totalCarretas} carretas · *S/ ${d.totalMonto.toFixed(2)}*`);
+    lineas.push(`*TOTAL:* ${d.totalCarretas} carreta${d.totalCarretas === 1 ? '' : 's'}`);
+    if ((d.totalMedias || 0) + (d.totalVacias || 0) > 0) {
+      const dets = [];
+      if (d.totalLlenas > 0) dets.push(d.totalLlenas + ' 🟢 llenas');
+      if (d.totalMedias > 0) dets.push(d.totalMedias + ' 🟡 medias');
+      if (d.totalVacias > 0) dets.push(d.totalVacias + ' 🔴 casi vacías');
+      lineas.push(`(${dets.join(' · ')})`);
+    }
     lineas.push(`_InversionMos Warehouse_`);
     window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
   }
@@ -12437,6 +12633,7 @@ const PreingresosView = (() => {
            abrirCargadoresDia, guardarTarifaCarreta, compartirCargadoresDiaWA, imprimirCargadoresDia,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
+           toggleEstadoCarreta, agregarCarreta, toggleEstadoCarretaEdit, agregarCarretaEdit,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
            renderTppList, buscarEnPanel, limpiarBuscarPanel,
            toggleTppFiltro, filtrarTpp, _searchFocusTpp, compartirWA };
