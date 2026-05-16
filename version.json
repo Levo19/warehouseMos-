@@ -1,1 +1,1 @@
-{ "version": "2.12.0", "build": "20260515-fix-editar-anular-envasado-validador-preserva-ctx" }
+{ "version": "2.13.2", "build": "20260516-rollback-v213-cargadores-rompia-bootstrap" }
