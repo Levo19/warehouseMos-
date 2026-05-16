@@ -251,46 +251,29 @@ function linkCard(href, title, sub) {
 function renderPreingreso(d) {
   const border = d.estado === 'PROCESADO' ? '#22c55e' : '#f59e0b';
 
-  // [v2.13] Cargadores SIN tarifa. Mostrar conteo + estados de carga.
+  // Cargadores: pill con N carretas + subtotal · total al final
   let cargHtml = '<span style="color:#64748b">Sin cargadores</span>';
   let cargTotalHtml = '';
   if (d.cargadores && d.cargadores.length) {
-    let sumCart = 0, sumMedias = 0, sumVacias = 0;
+    const tarifaG = parseFloat(d.tarifaCarreta) || 0;
+    let sumMonto = 0, sumCart = 0;
     cargHtml = d.cargadores.map(function(c) {
       const nombre   = c.nombre || c.id || String(c);
       const carretas = parseInt(c.carretas) || 0;
-      // Normalizar estados (legacy: si no hay, asume todas LLENAS)
-      let estados = Array.isArray(c.estados) ? c.estados.slice(0, carretas) : [];
-      while (estados.length < carretas) estados.push('LLENA');
-      let llenas = 0, medias = 0, vacias = 0;
-      estados.forEach(function(e) {
-        if (e === 'MEDIA') medias++;
-        else if (e === 'VACIA') vacias++;
-        else llenas++;
-      });
-      sumCart += carretas; sumMedias += medias; sumVacias += vacias;
-      // Texto: "(2 🟡 medias, 1 🔴 casi vacía)" o "✅"
-      let estadoTxt = '';
-      if (medias === 0 && vacias === 0) {
-        estadoTxt = ' <span style="color:#10b981;font-size:11px">✅</span>';
-      } else {
-        const parts = [];
-        if (medias > 0) parts.push(medias + ' 🟡 ' + (medias === 1 ? 'media' : 'medias'));
-        if (vacias > 0) parts.push(vacias + ' 🔴 ' + (vacias === 1 ? 'casi vacía' : 'casi vacías'));
-        estadoTxt = ' <span style="color:#fbbf24;font-size:10px">(' + parts.join(', ') + ') ⚠</span>';
-      }
-      const detalle = carretas
-        ? ' <span style="color:#94a3b8;font-size:10px">' + carretas + ' carreta' + (carretas === 1 ? '' : 's') + '</span>'
-        : '';
-      return '<span class="carg-pill">' + esc(nombre) + detalle + estadoTxt + '</span>';
+      const tarifa   = (c.tarifa !== undefined && c.tarifa !== '' && !isNaN(parseFloat(c.tarifa)))
+                        ? parseFloat(c.tarifa) : tarifaG;
+      const sub      = carretas * tarifa;
+      sumMonto += sub; sumCart += carretas;
+      const detalle = carretas > 0 && tarifa > 0
+        ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' × S/' + tarifa.toFixed(2) + ' = S/' + sub.toFixed(2) + ')</span>'
+        : (carretas ? ' <span style="color:#94a3b8;font-size:10px">(' + carretas + ' cart.)</span>' : '');
+      return '<span class="carg-pill">' + esc(nombre) + detalle + '</span>';
     }).join('');
-    cargTotalHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:baseline">' +
-      '<span style="font-size:11px;color:#64748b">Total carretas</span>' +
-      '<span style="font-size:16px;font-weight:700;color:#fbbf24">' + sumCart + '</span>' +
-      '</div>';
-    if (sumMedias > 0 || sumVacias > 0) {
-      cargTotalHtml += '<div style="font-size:10px;color:#fbbf24;text-align:right;margin-top:2px">' +
-        '⚠ ' + (sumMedias ? sumMedias + ' 🟡 ' : '') + (sumVacias ? sumVacias + ' 🔴 ' : '') + 'no llenas</div>';
+    if (sumMonto > 0) {
+      cargTotalHtml = '<div style="margin-top:10px;padding-top:8px;border-top:1px solid #334155;display:flex;justify-content:space-between;align-items:baseline">' +
+        '<span style="font-size:11px;color:#64748b">Total ' + sumCart + ' carretas</span>' +
+        '<span style="font-size:16px;font-weight:700;color:#fbbf24">S/ ' + sumMonto.toFixed(2) + '</span>' +
+        '</div>';
     }
   }
 
