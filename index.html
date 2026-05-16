@@ -4929,6 +4929,53 @@
     .cd-badge-llena { background: rgba(16,185,129,.15);  color: #6ee7b7; border: 1px solid rgba(16,185,129,.3); }
     .cd-badge-media { background: rgba(245,158,11,.15); color: #fcd34d; border: 1px solid rgba(245,158,11,.3); }
     .cd-badge-vacia { background: rgba(239,68,68,.15);  color: #fca5a5; border: 1px solid rgba(239,68,68,.3); }
+
+    /* [v2.13.1] Animaciones modernas en chips de carreta */
+    .carreta-chip { will-change: transform; }
+    /* Toggle estado: bounce + halo flash del color del nuevo estado */
+    .carreta-chip.cc-flash {
+      animation: ccFlashBounce .45s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes ccFlashBounce {
+      0%   { transform: scale(1); }
+      35%  { transform: scale(.88); }
+      70%  { transform: scale(1.12); }
+      100% { transform: scale(1); }
+    }
+    .carreta-chip-llena.cc-flash { box-shadow: 0 0 0 6px rgba(16,185,129,.0), 0 2px 6px -2px rgba(16,185,129,.4); animation: ccFlashBounce .45s cubic-bezier(.34,1.56,.64,1), ccGlowVerde .6s ease-out; }
+    .carreta-chip-media.cc-flash { animation: ccFlashBounce .45s cubic-bezier(.34,1.56,.64,1), ccGlowAmber .6s ease-out; }
+    .carreta-chip-vacia.cc-flash { animation: ccFlashBounce .45s cubic-bezier(.34,1.56,.64,1), ccShakeRojo .55s ease-out; }
+    @keyframes ccGlowVerde { 0% { box-shadow: 0 0 0 0 rgba(16,185,129,.7); } 100% { box-shadow: 0 0 0 14px rgba(16,185,129,0); } }
+    @keyframes ccGlowAmber { 0% { box-shadow: 0 0 0 0 rgba(245,158,11,.7); } 100% { box-shadow: 0 0 0 14px rgba(245,158,11,0); } }
+    @keyframes ccShakeRojo {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,.0); transform: translateX(0); }
+      15% { box-shadow: 0 0 0 8px rgba(239,68,68,.45); transform: translateX(-3px); }
+      35% { transform: translateX(3px); }
+      55% { transform: translateX(-2px); box-shadow: 0 0 0 14px rgba(239,68,68,.0); }
+      75% { transform: translateX(2px); }
+    }
+    /* Carreta nueva: drop desde arriba con bounce + ring dorado */
+    .carreta-chip.cc-flash-nueva {
+      animation: ccDropIn .55s cubic-bezier(.34,1.56,.64,1), ccGlowDorado .8s ease-out;
+    }
+    @keyframes ccDropIn {
+      0%   { opacity: 0; transform: translateY(-20px) scale(.5) rotate(-15deg); }
+      60%  { opacity: 1; transform: translateY(4px) scale(1.1) rotate(2deg); }
+      100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+    }
+    @keyframes ccGlowDorado {
+      0% { box-shadow: 0 0 0 0 rgba(252,211,77,.85); }
+      100% { box-shadow: 0 0 0 18px rgba(252,211,77,0); }
+    }
+    /* Botón + agregar: pulso sutil en idle para invitar a clickear */
+    .carreta-add {
+      animation: ccAddPulse 2.4s ease-in-out infinite;
+    }
+    @keyframes ccAddPulse {
+      0%, 100% { border-color: rgba(148,163,184,.4); }
+      50% { border-color: rgba(252,211,77,.55); }
+    }
+    .carreta-add:active { transform: scale(.92); }
     .carg-header {
       display: flex; align-items: center; justify-content: space-between;
       padding: 0 0 12px;
