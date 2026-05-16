@@ -11817,6 +11817,26 @@ const PreingresosView = (() => {
     _renderFotosEdit();
   }
 
+  // [v2.13.7] Snapshot de los 5 campos críticos espejo del backend (_snapshotAvisoFromPI)
+  function _snapshotAvisoLocal(idProveedor, monto, tagsObj, textoLibre) {
+    return {
+      idProveedor:     String(idProveedor || ''),
+      monto:           parseFloat(monto) || 0,
+      tagComp:         tagsObj.comp  || null,
+      tagCompl:        tagsObj.compl || null,
+      comentarioLibre: String(textoLibre || '').trim()
+    };
+  }
+  function _diffSnapAvisoLocal(a, b) {
+    if (!a || !b) return [];
+    const keys = ['idProveedor','monto','tagComp','tagCompl','comentarioLibre'];
+    return keys.filter(k => {
+      const va = a[k], vb = b[k];
+      if (k === 'monto') return (parseFloat(va) || 0) !== (parseFloat(vb) || 0);
+      return String(va == null ? '' : va) !== String(vb == null ? '' : vb);
+    });
+  }
+
   // ── Guardar edición (optimista) ──────────────────────────
   async function guardarEdicion() {
     if (!_editItem) return;
@@ -11833,6 +11853,24 @@ const PreingresosView = (() => {
     const monto         = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto').value) || 0) : 0;
     const fotosExistentes = [..._fotosEdit];
     const fotosNuevasCaptura = [..._fotosNuevas];
+
+    // [v2.13.7] Calcular snapshot anterior (de lo que se imprimió la última vez) vs actual
+    let snapAnterior = null;
+    try {
+      if (_editItem.snapshotAviso) {
+        snapAnterior = typeof _editItem.snapshotAviso === 'string'
+          ? JSON.parse(_editItem.snapshotAviso)
+          : _editItem.snapshotAviso;
+      }
+    } catch(_) { snapAnterior = null; }
+    // Fallback: si no hay snapshot (preingreso pre-v2.13.7), reconstruir desde el estado original al abrir
+    if (!snapAnterior) {
+      const tagsOrig = _tagsFromComentario(_editItem.comentario);
+      const libreOrig = _textoLibreFromComentario(_editItem.comentario);
+      snapAnterior = _snapshotAvisoLocal(_editItem.idProveedor, _editItem.monto, tagsOrig, libreOrig);
+    }
+    const snapActual = _snapshotAvisoLocal(idProveedor, monto, _tagsEdit, textoExtra);
+    const cambios   = _diffSnapAvisoLocal(snapAnterior, snapActual);
 
     // Cerrar sheet y mostrar toast inmediatamente — sin esperar red
     cerrarSheet('sheetDetallePI');
@@ -11869,8 +11907,16 @@ const PreingresosView = (() => {
       const fotos = todasFotos.map(f => f.url).join(',');
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => console.warn('[EditPreingreso]', e));
-      // Re-disparar aviso a cajeros con datos actualizados
-      _dispararAvisoCajeros(idPreingreso, { silent: true });
+      // [v2.13.7] Solo reimprimir si cambió al menos uno de los 5 campos críticos
+      if (cambios.length > 0) {
+        _dispararAvisoCajeros(idPreingreso, {
+          silent: false,
+          modoComparativo: true,
+          snapshotAnterior: snapAnterior
+        });
+      } else {
+        console.log('[EditPreingreso] sin cambios en campos críticos — no se reimprime aviso');
+      }
     })();
   }
 
@@ -12233,14 +12279,22 @@ const PreingresosView = (() => {
   }
 
   // Aviso a cajas abiertas de MosExpress — no bloquea, muestra toast con resultado.
-  // Reutilizable: se llama al crear, editar y desde botón "Reimprimir aviso".
+  // [v2.13.7] Soporta opts.modoComparativo + opts.snapshotAnterior para imprimir
+  // un ticket diff (solo campos que cambiaron) en lugar del aviso completo.
   async function _dispararAvisoCajeros(idPreingreso, opts) {
     opts = opts || {};
     const base       = location.origin + location.pathname.replace(/\/[^/]*$/, '');
     const reporteUrl = `${base}/reporte.html?tipo=preingreso&id=${encodeURIComponent(idPreingreso)}`;
-    if (!opts.silent) toast('📤 Avisando a cajas...', 'info', 3000);
+    if (!opts.silent) {
+      toast(opts.modoComparativo ? '📤 Reimprimiendo cambios...' : '📤 Avisando a cajas...', 'info', 3000);
+    }
     try {
-      const res = await API.imprimirAvisoCajeros({ idPreingreso, reporteUrl });
+      const payload = { idPreingreso, reporteUrl };
+      if (opts.modoComparativo) {
+        payload.modoComparativo  = true;
+        payload.snapshotAnterior = JSON.stringify(opts.snapshotAnterior || {});
+      }
+      const res = await API.imprimirAvisoCajeros(payload);
       if (res.ok) {
         const okList = (res.data?.impresiones || []).filter(r => r.ok);
         if (okList.length) {
@@ -12251,6 +12305,9 @@ const PreingresosView = (() => {
         if (errList.length) {
           toast(`⚠ ${errList.length} impresora(s) fallaron`, 'warn', 5000);
         }
+      } else if (res.error === 'NO_CHANGES') {
+        // Modo comparativo y no hay cambios reales — no toast molesto
+        console.log('[Aviso] sin cambios para reimprimir');
       } else if (res.error === 'NO_HAY_CAJEROS_ACTIVOS') {
         toast('⚠ No hay cajas abiertas — no se imprimió aviso', 'warn', 5000);
       } else {

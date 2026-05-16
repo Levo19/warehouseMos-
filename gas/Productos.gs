@@ -1210,8 +1210,23 @@ function _snapshotTarifaCargadores(cargadoresStr) {
   } catch(e) { return cargadoresStr; }
 }
 
+// [v2.13.7] Auto-create columnas faltantes en PREINGRESOS — patrón _ensureColumnasMerma.
+// Se llama desde crearPreingreso y actualizarPreingreso para garantizar que
+// 'snapshotAviso' (y otras nuevas) existan sin migración manual.
+function _ensureColumnasPreingresos(sheet) {
+  var lastCol  = sheet.getLastColumn();
+  var existing = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h){ return String(h).trim(); });
+  var faltantes = [];
+  ['cargadores','snapshotAviso'].forEach(function(c) {
+    if (existing.indexOf(c) < 0) faltantes.push(c);
+  });
+  if (!faltantes.length) return;
+  sheet.getRange(1, lastCol + 1, 1, faltantes.length).setValues([faltantes]);
+}
+
 function crearPreingreso(params) {
   var sheet = getSheet('PREINGRESOS');
+  _ensureColumnasPreingresos(sheet);
   // Usar ID del cliente si viene (previene duplicados por retry)
   var id = params.idPreingreso || _generateId('PI');
 
@@ -1352,6 +1367,7 @@ function actualizarPreingreso(params) {
 
 function _actualizarPreingresoImpl(params) {
   var sheet        = getSheet('PREINGRESOS');
+  _ensureColumnasPreingresos(sheet);
   var idPreingreso = String(params.idPreingreso || '');
   if (!idPreingreso) return { ok: false, error: 'idPreingreso requerido' };
 
@@ -1361,8 +1377,10 @@ function _actualizarPreingresoImpl(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] !== idPreingreso) continue;
 
-    // Campos editables (cargadores se snapshotea con tarifa antes de escribir)
-    var editable = { idProveedor: true, monto: true, comentario: true, fotos: true, cargadores: true };
+    // [v2.13.7] snapshotAviso es editable solo desde imprimirAvisoCajeros tras éxito.
+    // El frontend nunca lo manda directamente — protegido por whitelist.
+    var editable = { idProveedor: true, monto: true, comentario: true, fotos: true,
+                     cargadores: true, snapshotAviso: true };
     Object.keys(editable).forEach(function(key) {
       if (params[key] === undefined) return;
       var col = hdrs.indexOf(key);

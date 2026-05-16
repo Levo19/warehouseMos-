@@ -775,8 +775,45 @@ function imprimirAvisoCajeros(params) {
   // 4. URL del reporte público para QR
   var reporteUrl = String(params.reporteUrl || '');
 
+  // [v2.13.7] Modo comparativo: si el cliente manda snapshotAnterior + modoComparativo,
+  // se construye un ticket diff solo con los campos que cambiaron. Si no, ticket normal.
+  // Resolver el proveedor "ANTES" desde el snapshot (puede ser distinto al actual).
+  var modoComparativo = !!params.modoComparativo;
+  var snapAnt = null;
+  if (modoComparativo) {
+    try {
+      snapAnt = (typeof params.snapshotAnterior === 'string')
+        ? JSON.parse(params.snapshotAnterior || '{}')
+        : (params.snapshotAnterior || {});
+    } catch(e) { snapAnt = null; }
+    if (!snapAnt || !Object.keys(snapAnt).length) modoComparativo = false;
+  }
+  // Snapshot actual derivado del preingreso recién guardado
+  var snapAct = _snapshotAvisoFromPI(pi);
+  // Si el "antes" y el "ahora" no difieren en los 5 campos críticos, no imprime nada
+  if (modoComparativo) {
+    var difs = _diffSnapshotsAviso(snapAnt, snapAct);
+    if (!difs.length) {
+      return { ok: false, error: 'NO_CHANGES', mensaje: 'No hay cambios en campos críticos' };
+    }
+  }
+
   // 5. Construir ESC/POS UNA VEZ (mismo ticket para todas las cajas)
-  var bytes = _construirAvisoIngresoBytes(pi, provName, reporteUrl);
+  var bytes;
+  if (modoComparativo) {
+    // Resolver provName anterior para mostrar bien la sección Proveedor del diff
+    var provNameAnt = '';
+    if (snapAnt && snapAnt.idProveedor && snapAnt.idProveedor !== pi.idProveedor) {
+      try {
+        var pAnt = (provs || _sheetToObjects(getProveedoresSheet()))
+                    .find(function(p) { return p.idProveedor === snapAnt.idProveedor; });
+        if (pAnt) provNameAnt = String(pAnt.nombre || '');
+      } catch(e) {}
+    }
+    bytes = _construirAvisoComparativoBytes(pi, provName, provNameAnt, reporteUrl, snapAnt, snapAct);
+  } else {
+    bytes = _construirAvisoIngresoBytes(pi, provName, reporteUrl);
+  }
   var blob  = Utilities.newBlob(bytes, 'application/octet-stream');
   var b64   = Utilities.base64Encode(blob.getBytes());
 
@@ -843,7 +880,202 @@ function imprimirAvisoCajeros(params) {
   });
 
   var algunOk = resultados.some(function(r) { return r.ok; });
-  return { ok: algunOk, data: { idPreingreso: idPreingreso, impresiones: resultados } };
+
+  // [v2.13.7] Persistir snapshot actual en hoja PREINGRESOS tras impresión exitosa
+  // para que la próxima edición compare contra este estado, no contra el inicial.
+  if (algunOk) {
+    try {
+      var sh   = getSheet('PREINGRESOS');
+      _ensureColumnasPreingresos(sh);
+      var dRng = sh.getDataRange().getValues();
+      var hRng = dRng[0];
+      var colSnap = hRng.indexOf('snapshotAviso');
+      if (colSnap >= 0) {
+        for (var k = 1; k < dRng.length; k++) {
+          if (dRng[k][0] === idPreingreso) {
+            sh.getRange(k + 1, colSnap + 1).setValue(JSON.stringify(snapAct));
+            break;
+          }
+        }
+      }
+    } catch(eS) { Logger.log('[snapshotAviso] ' + eS.message); }
+  }
+
+  return { ok: algunOk, data: { idPreingreso: idPreingreso, impresiones: resultados, modoComparativo: modoComparativo } };
+}
+
+// [v2.13.7] Helpers de snapshot/comparativa ──────────────────────────────────
+
+// Parser de comentario espejo del frontend (_tagsFromComentario + _textoLibreFromComentario)
+function _parseComentarioPI(c) {
+  var s = String(c || '');
+  var tags = { comp: null, compl: null };
+  if (/comprobante:\s*sí/i.test(s))      tags.comp  = 'si';
+  else if (/comprobante:\s*no/i.test(s)) tags.comp  = 'no';
+  if (/completo:\s*sí/i.test(s))         tags.compl = 'si';
+  else if (/completo:\s*no/i.test(s))    tags.compl = 'no';
+  var libre = s
+    .replace(/Comprobante:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/Completo:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '')
+    .trim();
+  return { tagComp: tags.comp, tagCompl: tags.compl, comentarioLibre: libre };
+}
+
+// Snapshot de los 5 campos críticos desde un objeto preingreso (row de hoja)
+function _snapshotAvisoFromPI(pi) {
+  var p = _parseComentarioPI(pi.comentario);
+  return {
+    idProveedor:     String(pi.idProveedor || ''),
+    monto:           parseFloat(pi.monto) || 0,
+    tagComp:         p.tagComp,
+    tagCompl:        p.tagCompl,
+    comentarioLibre: p.comentarioLibre
+  };
+}
+
+// Devuelve array de claves que difieren entre dos snapshots
+function _diffSnapshotsAviso(a, b) {
+  if (!a || !b) return [];
+  var keys = ['idProveedor','monto','tagComp','tagCompl','comentarioLibre'];
+  return keys.filter(function(k) {
+    var va = a[k]; var vb = b[k];
+    if (k === 'monto') return (parseFloat(va) || 0) !== (parseFloat(vb) || 0);
+    return String(va == null ? '' : va) !== String(vb == null ? '' : vb);
+  });
+}
+
+// Etiquetas legibles para tags (LLENA/SIN COMPROBANTE etc.)
+function _lblTag(g, v) {
+  if (!v) return '(no marcado)';
+  if (g === 'comp')  return v === 'si' ? 'Con comprobante' : 'Sin comprobante';
+  if (g === 'compl') return v === 'si' ? 'Pedido completo' : 'Pedido INCOMPLETO';
+  return String(v);
+}
+
+// Construye ticket COMPARATIVO ESC/POS — solo imprime secciones que difieren
+function _construirAvisoComparativoBytes(pi, provNameActual, provNameAnterior, reporteUrl, snapAnt, snapAct) {
+  var B = [];
+  function b1(v)   { B.push(v & 0xff); }
+  function bStr(s) { for (var k = 0; k < s.length; k++) B.push(s.charCodeAt(k) & 0xff); }
+  function bLn(s)  { bStr(s); b1(0x0a); }
+
+  var SEP  = '================================================';
+  var SEP2 = '------------------------------------------------';
+
+  b1(0x1b); b1(0x40);
+
+  // Header destacado
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x21); b1(0x38);
+  bLn('WAREHOUSE');
+  bLn('MOS');
+  b1(0x1b); b1(0x21); b1(0x00);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('*** AVISO ACTUALIZADO ***');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // Empresa actual + idPreingreso
+  if (provNameActual) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);
+    var nL = _wrapPalabras(String(provNameActual).toUpperCase(), 24);
+    for (var nl = 0; nl < nL.length && nl < 2; nl++) bLn(nL[nl]);
+    b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x00);
+  }
+  b1(0x1b); b1(0x61); b1(0x01);
+  bLn('Preingreso ' + (pi.idPreingreso || ''));
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // Aviso del operador
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('-- DATOS CORREGIDOS --');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  var difs = _diffSnapshotsAviso(snapAnt, snapAct);
+
+  function _seccion(titulo, antes, ahora) {
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn(' ' + titulo);
+    b1(0x1b); b1(0x45); b1(0x00);
+    bLn('   ANTES:  ' + (antes == null || antes === '' ? '(vacio)' : String(antes)));
+    bLn('   AHORA:  ' + (ahora == null || ahora === '' ? '(vacio)' : String(ahora)));
+    bLn(SEP2);
+  }
+
+  difs.forEach(function(k) {
+    if (k === 'idProveedor') {
+      _seccion('PROVEEDOR',
+        provNameAnterior || snapAnt.idProveedor || '(sin proveedor)',
+        provNameActual   || snapAct.idProveedor || '(sin proveedor)');
+    } else if (k === 'monto') {
+      _seccion('MONTO',
+        'S/. ' + (parseFloat(snapAnt.monto) || 0).toFixed(2),
+        'S/. ' + (parseFloat(snapAct.monto) || 0).toFixed(2));
+    } else if (k === 'tagComp') {
+      _seccion('COMPROBANTE', _lblTag('comp', snapAnt.tagComp), _lblTag('comp', snapAct.tagComp));
+    } else if (k === 'tagCompl') {
+      _seccion('COMPLETO', _lblTag('compl', snapAnt.tagCompl), _lblTag('compl', snapAct.tagCompl));
+    } else if (k === 'comentarioLibre') {
+      // Comentario multi-línea para que no se corte el texto
+      b1(0x1b); b1(0x45); b1(0x01);
+      bLn(' COMENTARIO');
+      b1(0x1b); b1(0x45); b1(0x00);
+      var antL = _wrapPalabras(snapAnt.comentarioLibre || '(vacio)', 40);
+      var actL = _wrapPalabras(snapAct.comentarioLibre || '(vacio)', 40);
+      bLn('   ANTES:');
+      antL.forEach(function(l) { bLn('     ' + l); });
+      bLn('   AHORA:');
+      actL.forEach(function(l) { bLn('     ' + l); });
+      bLn(SEP2);
+    }
+  });
+
+  bLn(SEP);
+
+  // Si monto cambió, recordar el monto NUEVO bien grande al final (es lo que va a cobrar)
+  if (difs.indexOf('monto') >= 0 && (parseFloat(snapAct.monto) || 0) > 0) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('PREPARAR PARA PAGAR');
+    b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x21); b1(0x38); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('S/. ' + (parseFloat(snapAct.monto) || 0).toFixed(2));
+    b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // QR del reporte público
+  if (reporteUrl) {
+    b1(0x1b); b1(0x61); b1(0x01);
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn('VER PREINGRESO COMPLETO');
+    b1(0x1b); b1(0x45); b1(0x00);
+    var qrLen = reporteUrl.length + 3;
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x04); b1(0x00); b1(0x31); b1(0x41); b1(0x32); b1(0x00);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x43); b1(0x05);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x45); b1(0x31);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(qrLen & 0xff); b1((qrLen >> 8) & 0xff); b1(0x31); b1(0x50); b1(0x30);
+    bStr(reporteUrl);
+    b1(0x1d); b1(0x28); b1(0x6b); b1(0x03); b1(0x00); b1(0x31); b1(0x51); b1(0x30);
+    bLn('Escanea para ver fotos y detalles');
+    b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  }
+
+  // Feed + corte
+  b1(0x1b); b1(0x4a); b1(160);
+  b1(0x1d); b1(0x56); b1(0x00);
+
+  return B;
 }
 
 // Construye los bytes ESC/POS del ticket de aviso de ingreso (sin la palabra "PREINGRESO").
@@ -1475,4 +1707,205 @@ function imprimirCargadoresDia(params) {
   } catch(e) {
     return { ok: false, error: e.message };
   }
+}
+
+// ============================================================
+// [v2.13.7] CRON MEDIODIA — Resumen de cargadores del día
+// ------------------------------------------------------------
+// A las 12:00 todos los días imprime el consolidado a TODAS las cajas
+// abiertas en MosExpress (mismo patrón dedup-por-printer de imprimirAvisoCajeros)
+// y manda push al MOS rol admin/master. Si no hay carretas, no hace nada.
+// ============================================================
+function enviarResumenCargadores12() {
+  var tz = Session.getScriptTimeZone();
+  var hoyStr = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  var d = getCargadoresDelDia({ fecha: hoyStr });
+  if (!d || !d.ok) return { ok: false, error: 'getCargadoresDelDia falló' };
+  d = d.data;
+  if (!d.totalCarretas) {
+    Logger.log('[ResumenCargadores12] sin carretas hoy ' + hoyStr);
+    return { ok: true, data: { hoy: hoyStr, sinData: true } };
+  }
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  // Leer cajas abiertas (igual que imprimirAvisoCajeros)
+  var cajasAbiertas = [];
+  try {
+    var sheetCajas = _getMosExpressSS().getSheetByName('CAJAS');
+    if (!sheetCajas) return { ok: false, error: 'Hoja CAJAS no existe en MosExpress' };
+    var rows = _sheetToObjects(sheetCajas);
+    cajasAbiertas = rows.filter(function(c) {
+      return String(c.Estado || '').trim().toUpperCase() === 'ABIERTA' && c.PrintNode_ID;
+    });
+  } catch(e) { return { ok: false, error: 'No se pudo leer CAJAS: ' + e.message }; }
+
+  // Construir bytes ESC/POS UNA vez
+  var bytes = _construirResumenCargadoresBytes(d, hoyStr);
+  var blob  = Utilities.newBlob(bytes, 'application/octet-stream');
+  var b64   = Utilities.base64Encode(blob.getBytes());
+
+  var resultados = [];
+  if (cajasAbiertas.length) {
+    // Dedup por PrintNode_ID
+    var porPrinter = {};
+    cajasAbiertas.forEach(function(c) {
+      var pid = String(c.PrintNode_ID || '').trim();
+      if (!pid) return;
+      if (!porPrinter[pid]) porPrinter[pid] = { printerId: pid, cajas: [] };
+      porPrinter[pid].cajas.push(c);
+    });
+    Object.keys(porPrinter).forEach(function(pid) {
+      var printerId = parseInt(porPrinter[pid].printerId);
+      var okJob = false, errMsg = '';
+      try {
+        var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+          method:  'post',
+          headers: {
+            'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
+            'Content-Type':  'application/json'
+          },
+          payload: JSON.stringify({
+            printerId:   printerId,
+            title:       'Resumen cargadores mediodia ' + hoyStr,
+            contentType: 'raw_base64',
+            content:     b64,
+            source:      'warehouseMos'
+          }),
+          muteHttpExceptions: true
+        });
+        okJob = (resp.getResponseCode() === 201);
+        if (!okJob) errMsg = 'PrintNode ' + resp.getResponseCode();
+      } catch(e) { errMsg = e.message; }
+      porPrinter[pid].cajas.forEach(function(c) {
+        resultados.push({ vendedor: c.Vendedor, zona: c.Zona_ID, ok: okJob, error: errMsg });
+      });
+    });
+  }
+
+  // Push al MOS rol admin/master con resumen breve
+  try {
+    var titulo = '🛺 Cargadores mediodía';
+    var lineas = [];
+    d.cargadores.slice(0, 6).forEach(function(c) {
+      var marc = (c.mediasTotal + c.vaciasTotal) > 0 ? '*' : '';
+      lineas.push(c.nombre + ' ' + c.carretasTotal + marc);
+    });
+    var detT = [];
+    if (d.totalLlenas) detT.push(d.totalLlenas + 'L');
+    if (d.totalMedias) detT.push(d.totalMedias + 'M');
+    if (d.totalVacias) detT.push(d.totalVacias + ' c.vacías');
+    var cuerpo = d.totalCarretas + ' carretas (' + detT.join(' · ') + ') · ' + lineas.join(' · ');
+    _notificarMOS(titulo, cuerpo, null, 'WH_RESUMEN_CARGADORES_12');
+  } catch(eP) { Logger.log('[ResumenCargadores12] push: ' + eP.message); }
+
+  return {
+    ok: true,
+    data: {
+      hoy: hoyStr,
+      totalCarretas: d.totalCarretas,
+      cajasNotificadas: resultados.filter(function(r) { return r.ok; }).length,
+      sinCajas: cajasAbiertas.length === 0
+    }
+  };
+}
+
+// Construye ESC/POS del ticket resumen cargadores mediodía
+function _construirResumenCargadoresBytes(d, hoyStr) {
+  var B = [];
+  function b1(v)   { B.push(v & 0xff); }
+  function bStr(s) { for (var k = 0; k < s.length; k++) B.push(s.charCodeAt(k) & 0xff); }
+  function bLn(s)  { bStr(s); b1(0x0a); }
+  var SEP  = '================================================';
+  var SEP2 = '------------------------------------------------';
+
+  // Etiqueta de fecha legible
+  var fechaLabel = hoyStr;
+  try {
+    var fp = new Date(hoyStr + 'T12:00:00');
+    var meses = ['enero','febrero','marzo','abril','mayo','junio',
+                 'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    var dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+    fechaLabel = dias[fp.getDay()] + ' ' + fp.getDate() + ' ' + meses[fp.getMonth()];
+  } catch(e) {}
+
+  b1(0x1b); b1(0x40);
+
+  // Header
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x21); b1(0x38);
+  bLn('WAREHOUSE');
+  bLn('MOS');
+  b1(0x1b); b1(0x21); b1(0x00);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('RESUMEN CARGADORES');
+  bLn('MEDIODIA');
+  b1(0x1b); b1(0x45); b1(0x00);
+  bLn(fechaLabel.toUpperCase());
+  bLn('12:00 PM');
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // KPIs del día
+  bLn(_padLine48('  Cargadores activos:', String(d.cargadores.length)));
+  bLn(_padLine48('  Preingresos del dia:', String(d.preingresos)));
+  bLn(_padLine48('  Carretas totales:', String(d.totalCarretas)));
+  bLn(SEP);
+
+  // Por cargador
+  d.cargadores.forEach(function(c) {
+    b1(0x1b); b1(0x45); b1(0x01);
+    bLn(_padLine48(c.nombre.toUpperCase(), c.carretasTotal + ' carretas'));
+    b1(0x1b); b1(0x45); b1(0x00);
+    c.preingresos.forEach(function(pi) {
+      var lbl = '  - ' + pi.idPreingreso + ' ' + (pi.proveedor || '').substring(0, 18);
+      bLn(lbl);
+      var dets = [];
+      if (pi.llenas) dets.push(pi.llenas + ' LLENA' + (pi.llenas === 1 ? '' : 'S'));
+      if (pi.medias) dets.push(pi.medias + ' MEDIA' + (pi.medias === 1 ? '' : 'S'));
+      if (pi.vacias) dets.push(pi.vacias + ' CASI VACIA' + (pi.vacias === 1 ? '' : 'S'));
+      if (dets.length) bLn('        ' + dets.join(' / '));
+    });
+    bLn('');
+  });
+
+  bLn(SEP);
+
+  // Total grande
+  b1(0x1b); b1(0x61); b1(0x01);
+  b1(0x1b); b1(0x45); b1(0x01);
+  bLn('TOTAL DEL DIA');
+  b1(0x1b); b1(0x45); b1(0x00);
+  b1(0x1b); b1(0x21); b1(0x38); b1(0x1b); b1(0x45); b1(0x01);
+  bLn(d.totalCarretas + ' CARRETAS');
+  b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
+  var tdets = [];
+  if (d.totalLlenas) tdets.push(d.totalLlenas + ' llenas');
+  if (d.totalMedias) tdets.push(d.totalMedias + ' medias');
+  if (d.totalVacias) tdets.push(d.totalVacias + ' casi vacias');
+  bLn(tdets.join(' / '));
+  b1(0x1b); b1(0x61); b1(0x00);
+  bLn(SEP);
+
+  // Footer
+  b1(0x1b); b1(0x61); b1(0x01);
+  bLn('InversionMos Warehouse');
+  b1(0x1b); b1(0x61); b1(0x00);
+
+  b1(0x1b); b1(0x4a); b1(160);
+  b1(0x1d); b1(0x56); b1(0x00);
+
+  return B;
+}
+
+// Configura trigger diario 12:00 — ejecutar UNA vez desde editor GAS
+function configurarTriggerResumenCargadores12() {
+  var TRG = 'enviarResumenCargadores12';
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === TRG) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(TRG).timeBased().atHour(12).everyDays(1).create();
+  Logger.log('[Trigger] ' + TRG + ' configurado · diario 12:00');
+  return { ok: true, mensaje: 'Trigger 12:00 configurado' };
 }

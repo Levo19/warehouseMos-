@@ -153,7 +153,9 @@ function _route(method, e) {
       case 'anularEnvasadoManual': return anularEnvasadoManual(params);
       case 'corregirUnidadesEnvasado': return corregirUnidadesEnvasado(params);
       case 'anularEnvasadoConClave':   return anularEnvasadoConClave(params);
-      case 'enviarResumenEnvasadosDia': return enviarResumenEnvasadosDia();
+      case 'enviarResumenEnvasadosDia':    return enviarResumenEnvasadosDia();
+      case 'enviarResumenCargadores12':    return enviarResumenCargadores12();
+      case 'configurarTriggerResumenCargadores12': return configurarTriggerResumenCargadores12();
 
       // ── Proveedores ────────────────────────────────────────
       case 'getProveedores':     return getProveedores(params);
