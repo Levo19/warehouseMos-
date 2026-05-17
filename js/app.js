@@ -8993,6 +8993,16 @@ const DespachoView = (() => {
     badgeUpdate();
   }
 
+  // [v2.13.29] Limpiar input scan para volver a escanear (sin cerrar panel)
+  function limpiarScanInput() {
+    const inp = document.getElementById('despScanInlineInput');
+    if (inp) { inp.value = ''; try { inp.focus(); } catch(_){} }
+    const st = document.getElementById('despScanInlineStatus');
+    if (st) st.textContent = '';
+    _cerrarInlinePicker();
+    try { SoundFX.click && SoundFX.click(); } catch(_){}
+  }
+
   function _cerrarInlinePicker() {
     const pk = document.getElementById('despScanInlinePicker');
     if (pk) { pk.style.display = 'none'; pk.innerHTML = ''; }
@@ -9371,12 +9381,17 @@ const DespachoView = (() => {
         </div>`;
       return;
     }
-    el.innerHTML = _cart.map((item, i) => {
+    // [v2.13.29] Si hay sombra activa, mostrar items en orden INVERSO
+    // (último escaneado primero) para feedback visual inmediato. Sin sombra,
+    // orden natural como siempre.
+    const itemsView = _listaSombra ? _cart.slice().reverse() : _cart;
+    el.innerHTML = itemsView.map((item, i) => {
       const over     = item.stockDisp > 0 && item.cantidad > item.stockDisp;
       const safeId   = escAttr(item.codigoBarra);
       const overWarn = over ? `<span class="text-xs text-red-400">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
+      const esUltimo = _listaSombra && i === 0;
       return `
-      <div class="card-sm desp-cart-item flex items-center gap-3"
+      <div class="card-sm desp-cart-item flex items-center gap-3${esUltimo ? ' desp-cart-recien' : ''}"
            id="despRow-${safeId}" style="animation-delay:${i*.03}s">
         <div class="flex-1 min-w-0">
           <p class="font-semibold text-sm truncate">${escHtml(item.descripcion)}</p>
@@ -11260,6 +11275,8 @@ const DespachoView = (() => {
   // morado debajo. Refresca también el feed para que la card de la sombra activa
   // desaparezca de ahí (igual que pickup activo se quita del feed pendientes).
   function _lsRender() {
+    // [v2.13.29] Marca body para que CSS pueda compactar el cart si hay sombra
+    try { document.body.classList.toggle('has-sombra', !!_listaSombra); } catch(_){}
     const banner = document.getElementById('despSombraActivaBanner');
     if (banner) {
       if (!_listaSombra || !_listaSombra.items || !_listaSombra.items.length) {
@@ -11292,18 +11309,13 @@ const DespachoView = (() => {
     }
     const productos = OfflineManager.getProductosCache() || [];
     // [v2.13.19] Separar items: identificados (con skuBase) vs libres (sin skuBase)
+    // [v2.13.29] Mantener ORDEN ORIGINAL — no reordenar al marcar. La sombra
+    // es referencia visual fija; el operador localiza por posición no por estado.
     const identificados = [];
     const libres = [];
     _listaSombra.items.forEach((it, idx) => {
       if (it.skuBase) identificados.push({ it, idx });
       else libres.push({ it, idx });
-    });
-    // Orden: pendientes primero, completados al final
-    identificados.sort((a, b) => {
-      const aP = (parseFloat(a.it.cantidadEscaneada)||0) < (parseFloat(a.it.cantidad)||0) ? 0 : 1;
-      const bP = (parseFloat(b.it.cantidadEscaneada)||0) < (parseFloat(b.it.cantidad)||0) ? 0 : 1;
-      if (aP !== bP) return aP - bP;
-      return String(a.it.nombre || '').localeCompare(String(b.it.nombre || ''));
     });
     cont.style.display = 'block';
     let html = '';
@@ -11373,13 +11385,11 @@ const DespachoView = (() => {
     }
 
     cont.innerHTML = html;
-    // Auto-scroll al recién marcado
+    // [v2.13.29] NO auto-scroll. La sombra es ayuda visual fija — solo el
+    // operador la mueve. El flash y la rotación de "pendientes primero" ya
+    // ayudan a notar qué está marcado sin necesidad de mover la vista.
     if (_lsUltimoMarcadoIdx >= 0) {
-      requestAnimationFrame(() => {
-        const el = cont.querySelector(`[data-idx="${_lsUltimoMarcadoIdx}"]`);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        setTimeout(() => { _lsUltimoMarcadoIdx = -1; }, 3000);
-      });
+      setTimeout(() => { _lsUltimoMarcadoIdx = -1; }, 3000);
     }
   }
 
@@ -12027,7 +12037,7 @@ const DespachoView = (() => {
            despIncQty, despDecQty, despEditQty,
            despUndoLast, despLimpiarTodo,
            toggleDespScanInline, cerrarDespScan,
-           submitDespScanInline, seleccionarItemDespInline,
+           submitDespScanInline, seleccionarItemDespInline, limpiarScanInput,
            verHistDetalle,
            abrirDespBusqueda, cerrarDespBusqueda, despBuscarInput, seleccionarDespBusqueda,
            selTipo,
