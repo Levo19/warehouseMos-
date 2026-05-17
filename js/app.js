@@ -8158,6 +8158,12 @@ const DespachoView = (() => {
     if (pSaved) _pickupActivo = pSaved;
     // [v2.13.8] Rehidratar lista sombra si la había
     try { _lsRehidratar(); } catch(_){}
+    // [v2.13.12] Forzar ocultar flotante al entrar a despacho —
+    // el usuario reportó que persistía aunque estuviera en la vista despacho
+    try {
+      const flot = document.getElementById('despFlotante');
+      if (flot) { flot.style.display = 'none'; flot.onclick = null; }
+    } catch(_){}
     _renderCart();
     _updateFooter();
     _renderHist();
@@ -11210,21 +11216,23 @@ const DespachoView = (() => {
         detalleAmbiguos.push(it.nombre);
         return;
       }
-      // Agregar al cart con la cantidad faltante
-      const faltante = it.cantidad - (it.cantidadEscaneada || 0);
+      // [v2.13.12] Pre-cargar producto al cart con cantidad 0 — el operador
+      // escanea físicamente para sumar y confirmar lo que tiene en mano.
+      // La sombra es solo sugerencia, no auto-completa cantidades.
       const cb = String(ganador.p.codigoBarra || ganador.p.idProducto || '');
       if (!cb) { sinMatch++; return; }
       const yaEnCart = _cart.find(c => c.codigoBarra === cb);
       if (yaEnCart) {
-        yaEnCart.cantidad = (parseFloat(yaEnCart.cantidad) || 0) + faltante;
+        // Si ya estaba, no toco la cantidad existente (operador puede haber empezado)
       } else {
         _cart.push({
           codigoBarra: cb,
           descripcion: ganador.p.descripcion || it.nombre,
           unidad: ganador.p.unidad || '',
-          cantidad: faltante,
+          cantidad: 0,           // ← pendiente de escaneo
           stockDisp: 0,
-          _extraPickup: false
+          _extraPickup: false,
+          _jaladoSombra: true    // marca informativa
         });
       }
       agregados++;
@@ -11237,14 +11245,13 @@ const DespachoView = (() => {
       try { SoundFX.rocket(); } catch(_){}
       vibrate([30, 25, 50]);
     }
-    // Resumen al usuario
+    // [v2.13.12] Resumen claro: jalados = pre-cargados con cantidad 0, hay que escanear
     const partes = [];
-    if (agregados > 0) partes.push(`✅ ${agregados} jalados`);
+    if (agregados > 0) partes.push(`📥 ${agregados} pre-cargados (cantidad 0 — escanea para confirmar)`);
     if (ambiguos > 0)  partes.push(`⚠ ${ambiguos} ambiguos`);
     if (sinMatch > 0)  partes.push(`❌ ${sinMatch} sin match`);
     const resumen = partes.join(' · ') || 'Sin cambios';
-    toast(resumen + (ambiguos > 0 ? ' — los ambiguos requieren confirmación manual' : ''),
-          agregados > 0 ? 'ok' : 'warn', 6000);
+    toast(resumen, agregados > 0 ? 'ok' : 'warn', 7000);
   }
 
   // [v2.13.9] Tap en item de sombra → abre buscador con el nombre pre-llenado
