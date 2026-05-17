@@ -8553,7 +8553,13 @@ const DespachoView = (() => {
   function _renderDespFlotante() {
     const flot = document.getElementById('despFlotante');
     if (!flot) return;
-    const enDespacho = !!(window.App && App.getView && App.getView() === 'despacho');
+    // [v2.13.22] Chequeo robusto: tanto currentView como visibilidad real del DOM.
+    // Al refrescar la página dentro de despacho, currentView sigue en 'dashboard'
+    // (default) hasta que se navegue, y el flotante aparecía encima del banner.
+    const viewByApp = !!(window.App && App.getView && App.getView() === 'despacho');
+    const viewDom   = document.getElementById('view-despacho');
+    const viewByDom = !!(viewDom && viewDom.offsetParent !== null);
+    const enDespacho = viewByApp || viewByDom;
     const activo = _despProductoActivo();
     // [v2.13.10] Mostrar flotante también si hay lista sombra (aunque cart vacío)
     if (!hayDespachoActivo() || enDespacho) {
