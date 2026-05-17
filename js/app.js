@@ -9691,17 +9691,22 @@ const DespachoView = (() => {
     if (dot)     { dot.style.display = hay ? 'block' : 'none'; }
     if (fab)     { fab.classList.toggle('has-pickups', hay); }
 
-    // Lista de pickups pendientes en view-despacho.
+    // Lista de pickups pendientes + [v2.13.16] listas sombra del equipo
+    // en el MISMO container, ordenadas: pickups primero, listas sombra después.
     // Si hay un pickup activo, ESCONDER toda la lista — el operador atiende
     // uno a la vez. Al soltar el activo, los pendientes vuelven a aparecer.
     const listaEl = document.getElementById('despPickupsLista');
     if (listaEl) {
+      // Filtrar listas sombra visibles (no la que ya estoy trabajando localmente)
+      const sombras = (_lsPanelData || []).filter(l =>
+        !_listaSombra || l.idLista !== _listaSombra.id
+      );
       if (_pickupActivo) {
         listaEl.style.display = 'none';
         listaEl.innerHTML = '';
-      } else if (_pickupsPendientes.length > 0) {
+      } else if (_pickupsPendientes.length > 0 || sombras.length > 0) {
         listaEl.style.display = 'block';
-        listaEl.innerHTML = _pickupsPendientes.slice(0, 8).map(p => {
+        const pickupsHtml = _pickupsPendientes.slice(0, 8).map(p => {
           const items = Array.isArray(p.items) ? p.items : [];
           const totalUds = items.reduce((s, it) => s + (parseFloat(it.solicitado) || 0), 0);
           const totalDesp = items.reduce((s, it) => s + (parseFloat(it.despachado) || 0), 0);
@@ -9767,6 +9772,64 @@ const DespachoView = (() => {
               ${btnHtml}
             </div>`;
         }).join('');
+        // [v2.13.16] Cards de listas sombra del equipo — mismo estilo card,
+        // color morado para diferenciar visualmente de pickups.
+        const miUsuarioLs = window.WH_CONFIG?.usuario || '';
+        const sombrasHtml = sombras.slice(0, 8).map(l => {
+          const esEnUso = l.estado === 'EN_USO';
+          const esMia   = esEnUso && _sameUser(l.usuarioTomada, miUsuarioLs);
+          const progreso = l.total ? `${l.completos}/${l.total}` : '0/0';
+          let hace = '';
+          try {
+            const t = new Date(l.fechaCreacion).getTime();
+            const min = Math.floor((Date.now() - t) / 60000);
+            hace = min < 1 ? 'recién' : min < 60 ? ('hace ' + min + 'm') : ('hace ' + Math.floor(min/60) + 'h');
+          } catch(_){}
+          const atp = String(l.usuarioTomada || '').trim();
+          let btnH;
+          if (esMia) {
+            btnH = `<button onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')"
+                     class="btn btn-sm flex-shrink-0"
+                     style="background:rgba(168,85,247,.25);color:#d8b4fe;border-color:rgba(168,85,247,.4)">
+                     ↩ Retomar
+                   </button>`;
+          } else if (esEnUso) {
+            btnH = `<button disabled class="btn btn-sm flex-shrink-0"
+                     style="background:rgba(71,85,105,.3);color:#94a3b8;border-color:rgba(71,85,105,.5);cursor:not-allowed"
+                     title="Tomada por ${escAttr(atp)}">
+                     🔒 ${escHtml(atp)}
+                   </button>`;
+          } else {
+            btnH = `<button onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')"
+                     class="btn btn-sm flex-shrink-0"
+                     style="background:rgba(168,85,247,.25);color:#d8b4fe;border-color:rgba(168,85,247,.4)">
+                     ▶ Tomar
+                   </button>`;
+          }
+          const cardBorder = esMia ? 'rgba(168,85,247,.55)' : (esEnUso ? 'rgba(71,85,105,.5)' : 'rgba(168,85,247,.5)');
+          const cardBg     = esMia ? 'rgba(168,85,247,.12)' : (esEnUso ? 'rgba(71,85,105,.08)' : 'rgba(168,85,247,.08)');
+          const anim       = esEnUso ? 'none' : 'despPickListPulse 2.4s ease-in-out infinite';
+          return `
+            <div class="card flex items-center gap-3"
+                 style="border:1.5px solid ${cardBorder};background:${cardBg};animation:${anim}">
+              <div class="flex-shrink-0" style="font-size:24px">📋</div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="font-bold text-sm" style="color:#d8b4fe">Lista sombra</span>
+                  <span class="text-xs text-slate-400">·</span>
+                  <span class="text-xs text-slate-400">${escHtml(l.usuarioCreador)}</span>
+                  <span class="text-xs text-slate-500">· ${hace}</span>
+                  ${atp ? `<span class="text-[10px]" style="color:${esMia?'#d8b4fe':'#94a3b8'};background:rgba(15,23,42,.6);padding:1px 6px;border-radius:6px;font-weight:700">🔒 ${escHtml(atp)}${esMia?' (yo)':''}</span>` : ''}
+                </div>
+                <p class="text-xs text-slate-300 mt-0.5">
+                  ${l.total} producto${l.total !== 1 ? 's' : ''}
+                  ${esEnUso ? ` · <span style="color:#d8b4fe;font-weight:700">${progreso}</span>` : ''}
+                </p>
+              </div>
+              ${btnH}
+            </div>`;
+        }).join('');
+        listaEl.innerHTML = pickupsHtml + sombrasHtml;
       } else {
         listaEl.style.display = 'none';
       }
@@ -11232,39 +11295,9 @@ const DespachoView = (() => {
     }).catch(() => {});
   }
   function _lsRenderPanel() {
-    const cont = document.getElementById('despListasCompartidas');
-    if (!cont) return;
-    const miUsuario = window.WH_CONFIG?.usuario || '';
-    const otras = _lsPanelData.filter(l =>
-      // No mostrar la lista actualmente activa en mi UI
-      (!_listaSombra || l.idLista !== _listaSombra.id)
-    );
-    if (!otras.length) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
-    cont.style.display = 'block';
-    cont.innerHTML = '<div class="lsc-titulo">📥 Listas del equipo</div>' +
-      otras.map(l => {
-        const esEnUso = l.estado === 'EN_USO';
-        const esMia   = esEnUso && l.usuarioTomada === miUsuario;
-        const progreso = l.total ? `${l.completos}/${l.total}` : '0/0';
-        const subtitulo = esEnUso
-          ? (esMia ? `🟢 Tomada por TI · ${progreso}` : `🔒 Tomada por ${l.usuarioTomada || '—'} · ${progreso}`)
-          : `Subida por ${l.usuarioCreador} · ${l.total} items pendientes`;
-        let btn;
-        if (esMia) {
-          btn = `<button class="lsc-btn-tomar" onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')">↩ RETOMAR</button>`;
-        } else if (esEnUso) {
-          btn = '<span class="lsc-tag-bloqueada">EN USO</span>';
-        } else {
-          btn = `<button class="lsc-btn-tomar" onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')">🙋 TOMAR</button>`;
-        }
-        return `<div class="lsc-item ${esEnUso ? (esMia ? 'is-mia' : 'is-enuso') : 'is-disponible'}">
-          <div class="lsc-item-info">
-            <div class="lsc-item-titulo">📋 ${l.total} productos</div>
-            <div class="lsc-item-sub">${escHtml(subtitulo)}</div>
-          </div>
-          ${btn}
-        </div>`;
-      }).join('');
+    // [v2.13.16] Las listas sombra ahora se renderizan dentro del feed de
+    // pickups (despPickupsLista) en badgeUpdate. Solo disparamos el refresh.
+    try { badgeUpdate(); } catch(_){}
   }
 
   function tomarListaSombraDelPanel(idLista) {
