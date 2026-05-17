@@ -6664,6 +6664,129 @@ const GuiasView = (() => {
       .catch(() => toast('Error al imprimir', 'warn', 3000));
   }
 
+  // [v2.13.31] Cola persistente de impresiones pendientes (localStorage).
+  // Se drenan al volver online o al volver a abrir la app.
+  const _PRINT_QUEUE_KEY = 'wh_print_queue_v1';
+
+  function _getPrintQueue() {
+    try { return JSON.parse(localStorage.getItem(_PRINT_QUEUE_KEY) || '[]'); } catch(_) { return []; }
+  }
+  function _setPrintQueue(q) {
+    try { localStorage.setItem(_PRINT_QUEUE_KEY, JSON.stringify(q || [])); } catch(_){}
+  }
+  function _encolarImpresionPendiente(idGuia, titulo) {
+    if (!idGuia) return;
+    const q = _getPrintQueue();
+    if (q.some(x => x.idGuia === idGuia)) return; // ya en cola
+    q.push({ idGuia, titulo: titulo || ('Guía ' + idGuia), ts: Date.now(), intentos: 0 });
+    _setPrintQueue(q);
+    try { _renderPrintQueueBadge && _renderPrintQueueBadge(); } catch(_){}
+  }
+  function _removerImpresionPendiente(idGuia) {
+    _setPrintQueue(_getPrintQueue().filter(x => x.idGuia !== idGuia));
+    try { _renderPrintQueueBadge && _renderPrintQueueBadge(); } catch(_){}
+  }
+
+  // Reintento con backoff 1s/3s/8s. Si los 3 fallan, encola.
+  async function _imprimirConReintento(idGuia, reporteUrl, titulo) {
+    const delays = [1000, 3000, 8000];
+    let lastErr = null;
+    for (let i = 0; i < delays.length + 1; i++) {
+      try {
+        const r = await API.imprimirTicketGuia({ idGuia, reporteUrl });
+        if (r && r.ok !== false) {
+          // Éxito — si estaba en cola, sacarlo
+          _removerImpresionPendiente(idGuia);
+          if (i > 0) toast(`🖨 Impresión OK tras ${i} reintento${i === 1 ? '' : 's'}`, 'ok', 3000);
+          return r;
+        }
+        lastErr = (r && r.error) || 'error PrintNode';
+      } catch(e) {
+        lastErr = (e && e.message) || 'sin red';
+      }
+      if (i < delays.length) {
+        toast(`🖨 Reintentando impresión (${i+1}/3) en ${Math.round(delays[i]/1000)}s…`, 'info', delays[i] + 500);
+        await new Promise(r => setTimeout(r, delays[i]));
+      }
+    }
+    // 3 intentos fallidos — encolar + toast persistente con CTA
+    _encolarImpresionPendiente(idGuia, titulo);
+    _toastImpresionFallida(idGuia, titulo, lastErr);
+    return { ok: false, error: lastErr };
+  }
+
+  // Toast persistente (sin auto-cierre) con botón Reintentar.
+  function _toastImpresionFallida(idGuia, titulo, error) {
+    try {
+      const cont = document.getElementById('toastContainer') || document.body;
+      const id = 't_imp_' + idGuia;
+      // Si ya hay un toast persistente para esta guía, no duplicar
+      if (document.getElementById(id)) return;
+      const el = document.createElement('div');
+      el.id = id;
+      el.className = 'toast toast-warn toast-persistente';
+      el.style.cssText = 'background:#7c2d12;color:#fed7aa;border:2px solid #ea580c;padding:12px 14px;border-radius:10px;display:flex;flex-direction:column;gap:8px;max-width:340px;box-shadow:0 8px 24px rgba(0,0,0,.5);margin-bottom:8px;font-size:13px;animation:cjFlyIn .3s';
+      el.innerHTML = `
+        <div style="display:flex;align-items:start;gap:8px">
+          <span style="font-size:18px">🖨</span>
+          <div style="flex:1">
+            <div style="font-weight:800">No se imprimió el ticket</div>
+            <div style="font-size:11px;opacity:.85;margin-top:2px">${titulo || idGuia} · ${String(error||'error').substring(0,60)}</div>
+          </div>
+          <button onclick="this.closest('.toast-persistente').remove()" style="background:none;border:none;color:#fed7aa;font-size:18px;font-weight:900;cursor:pointer;line-height:1">×</button>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onclick="window._whReintentarImpresion('${idGuia.replace(/'/g,'')}')"
+                  style="flex:1;padding:8px;background:#ea580c;color:#fff;border:none;border-radius:6px;font-weight:800;cursor:pointer;font-size:12px">
+            🖨 Reintentar ahora
+          </button>
+        </div>`;
+      cont.appendChild(el);
+    } catch(_){
+      toast('🖨 Ticket NO impreso: ' + (error||'') + ' · usa botón 🖨 en historial', 'warn', 10000);
+    }
+  }
+
+  // Expuesto global para el onclick del toast persistente
+  window._whReintentarImpresion = async function(idGuia) {
+    const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+    const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
+    // Cerrar toast persistente
+    const t = document.getElementById('t_imp_' + idGuia);
+    if (t) t.remove();
+    toast('🖨 Reintentando impresión…', 'info', 3000);
+    const r = await _imprimirConReintento(idGuia, reporteUrl, 'Guía ' + idGuia);
+    if (r && r.ok !== false) toast('🖨 Impresión OK', 'ok', 3000);
+  };
+
+  // Drenado de cola al cargar / volver online
+  async function _drenarColaImpresion() {
+    const q = _getPrintQueue();
+    if (!q.length) return;
+    for (const item of q) {
+      const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+      const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(item.idGuia)}`;
+      try {
+        const r = await API.imprimirTicketGuia({ idGuia: item.idGuia, reporteUrl });
+        if (r && r.ok !== false) {
+          _removerImpresionPendiente(item.idGuia);
+          toast(`🖨 ${item.titulo || item.idGuia} · impresión pendiente OK`, 'ok', 4000);
+        }
+      } catch(_){}
+    }
+  }
+  // Reintentar cola al volver online (red recuperada)
+  window.addEventListener('online', () => { setTimeout(_drenarColaImpresion, 2000); });
+  // Reintentar al cargar la app si hay pendientes (3s después para no pisar carga inicial)
+  setTimeout(_drenarColaImpresion, 3000);
+
+  function _renderPrintQueueBadge() {
+    // Placeholder por si querés agregar un badge en el header con la cola
+    // pendiente. Por ahora solo log. El user ve el toast persistente.
+    const q = _getPrintQueue();
+    if (q.length) console.log('[print-queue] pendientes:', q.length);
+  }
+
   function compartirWA(idGuia) {
     const g = (OfflineManager.getGuiasCache() || []).find(x => x.idGuia === idGuia);
     if (!g) return;
@@ -10873,22 +10996,21 @@ const DespachoView = (() => {
         _confettiCelebracion();
         toast(`✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
 
-        // Imprimir en background si hay guía — toast warning si falla (antes era silencioso)
+        // [v2.13.31] PRINT con reintento auto + cola persistente offline.
+        // Antes: 1 solo intento fire-and-forget → si PrintNode/red fallaba,
+        // user perdía el toast warn y el ticket nunca salía. Ahora:
+        //   - Hasta 3 intentos con backoff 1s/3s/8s
+        //   - Si TODOS fallan, encola en localStorage para reintento posterior
+        //     (drenado al volver online o al abrir la app)
+        //   - Toast permanente con botón "🖨 Reintentar ahora" si falla
         if (d.idGuia) {
           try {
             const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
             const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
-            API.imprimirTicketGuia({ idGuia: d.idGuia, reporteUrl })
-              .then(r => {
-                if (r && r.ok === false) {
-                  toast('🖨 Guía generada pero ticket NO se imprimió: ' + (r.error || 'error PrintNode'), 'warn', 8000);
-                }
-              })
-              .catch(err => {
-                toast('🖨 Guía generada pero ticket NO se imprimió: ' + (err?.message || 'sin red'), 'warn', 8000);
-              });
+            _imprimirConReintento(d.idGuia, reporteUrl, 'Guía ' + d.idGuia);
           } catch(eImp){
-            toast('🖨 Guía generada pero ticket NO se imprimió: ' + (eImp.message || eImp), 'warn', 8000);
+            _encolarImpresionPendiente(d.idGuia, 'Guía ' + d.idGuia);
+            toast('🖨 No se pudo imprimir: ' + (eImp.message || eImp) + ' · encolado para reintento', 'warn', 9000);
           }
         }
         // Historial local
