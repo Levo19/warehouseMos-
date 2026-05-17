@@ -114,6 +114,8 @@ function _route(method, e) {
       case 'getGuia':            return getGuia(params.idGuia);
       case 'crearGuia':          return crearGuia(params);
       case 'crearDespachoRapido': return crearDespachoRapido(params);
+      // ── IA (Claude API) ─────────────────────────────────
+      case 'analizarListaSombra': return analizarListaSombra(params);
       case 'getPickups':          return getPickups(params);
       case 'actualizarPickup':    return actualizarPickup(params);
       case 'recibirPickupDeME':   return recibirPickupDeME(params);

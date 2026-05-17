@@ -163,6 +163,8 @@ const API = (() => {
     getGuia:            (id)     => call({ action: 'getGuia', idGuia: id }),
     crearGuia:          (p)      => post({ action: 'crearGuia', ...p }),
     crearDespachoRapido:(p)     => post({ action: 'crearDespachoRapido', ...p }),
+    // [v2.13.8] IA — parser de listas pegadas para Despacho Rápido (lista sombra)
+    analizarListaSombra:(p)     => post({ action: 'analizarListaSombra', ...p }),
     getPickups:         (p={})  => call({ action: 'getPickups', ...p }),
     actualizarPickup:   (p)     => post({ action: 'actualizarPickup', ...p }),
     guardarProgresoPickup:    (p) => post({ action: 'guardarProgresoPickup',    ...p }),

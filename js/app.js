@@ -8156,6 +8156,8 @@ const DespachoView = (() => {
     // sin perder el progreso del despacho).
     const pSaved = _loadPickup();
     if (pSaved) _pickupActivo = pSaved;
+    // [v2.13.8] Rehidratar lista sombra si la había
+    try { _lsRehidratar(); } catch(_){}
     _renderCart();
     _updateFooter();
     _renderHist();
@@ -9303,6 +9305,8 @@ const DespachoView = (() => {
 
   // ── Render carrito en vista principal ────────────────────────
   function _renderCart() {
+    // [v2.13.8] Hook lista sombra: cualquier cambio del cart actualiza la sombra
+    try { _lsOnCartChange(); } catch(_){}
     const el = document.getElementById('despCartList');
     if (!el) return;
     // Si hay pickup activo, el carrito legacy se esconde (los extras tienen
@@ -9541,6 +9545,12 @@ const DespachoView = (() => {
           API.actualizarPickup({ idPickup: pickupSnapshot.idPickup, estado: 'COMPLETADO' }).catch(() => {});
           _pickupsPendientes = _pickupsPendientes.filter(p => p.idPickup !== pickupSnapshot.idPickup);
           _pickupActivo = null;
+        }
+        // [v2.13.8] Si había lista sombra, limpiarla al cerrar despacho con éxito
+        if (_listaSombra) {
+          _listaSombra = null;
+          _lsSave();
+          _lsRender();
         }
       } else {
         SoundFX.error(); vibrate([80, 40, 80]);
@@ -11000,6 +11010,292 @@ const DespachoView = (() => {
     toast(`📥 ${n} producto${n !== 1 ? 's' : ''} cargados del pedido`, 'ok', 3000);
   }
 
+  // ═══ [v2.13.8] LISTA SOMBRA — IA-powered shadow checklist ═══
+  // Persistencia local (efímera por sesión). Items: [{nombre, cantidad, atendida, productos:[]}]
+  const LS_KEY = 'wh_lista_sombra';
+  let _listaSombra = null;
+
+  function _lsSave() {
+    if (_listaSombra) localStorage.setItem(LS_KEY, JSON.stringify(_listaSombra));
+    else              localStorage.removeItem(LS_KEY);
+  }
+  function _lsLoad() {
+    try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch { return null; }
+  }
+  function _lsRehidratar() {
+    _listaSombra = _lsLoad();
+    if (_listaSombra) {
+      _lsRecalcular();
+      _lsRender();
+    }
+  }
+
+  // Normaliza string para fuzzy match: minúsculas, sin tildes, sin extras
+  function _lsNorm(s) {
+    return String(s || '')
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9 ]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+  // Tokens significativos (≥3 chars), excluyendo stopwords cortas
+  function _lsTokens(s) {
+    return _lsNorm(s).split(' ').filter(t => t.length >= 3);
+  }
+  // Score Jaccard sobre tokens — entre 0 y 1
+  function _lsScore(a, b) {
+    const ta = new Set(_lsTokens(a));
+    const tb = new Set(_lsTokens(b));
+    if (!ta.size || !tb.size) return 0;
+    let inter = 0;
+    ta.forEach(t => { if (tb.has(t)) inter++; });
+    return inter / Math.max(ta.size, tb.size);
+  }
+
+  // Recorre cart y actualiza cantidadEscaneada de cada item de la sombra
+  function _lsRecalcular() {
+    if (!_listaSombra || !_listaSombra.items) return;
+    _listaSombra.items.forEach(item => {
+      let cantAcum = 0;
+      const matcheados = [];
+      _cart.forEach(c => {
+        const sc = _lsScore(item.nombre, c.descripcion || '');
+        if (sc >= 0.6) {
+          cantAcum += parseFloat(c.cantidad) || 0;
+          matcheados.push(c.codigoBarra);
+        }
+      });
+      item.cantidadEscaneada = Math.round(cantAcum * 10) / 10;
+      item.productos = matcheados;
+    });
+  }
+
+  function _lsRender() {
+    const banner = document.getElementById('despListaSombraBanner');
+    if (!banner) return;
+    if (!_listaSombra || !_listaSombra.items || !_listaSombra.items.length) {
+      banner.style.display = 'none';
+      return;
+    }
+    banner.style.display = 'block';
+    const total      = _listaSombra.items.length;
+    const completos  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
+    const parciales  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) > 0 && (i.cantidadEscaneada || 0) < i.cantidad).length;
+    const restantes  = total - completos;
+    document.getElementById('lsProgresoLbl').textContent = `${completos} / ${total}`;
+    document.getElementById('lsRestantesLbl').textContent =
+      restantes === 0 ? '✅ todo completo' :
+      restantes + ' restante' + (restantes === 1 ? '' : 's') +
+      (parciales ? ' · ' + parciales + ' parcial' + (parciales === 1 ? '' : 'es') : '');
+    document.getElementById('lsBarra').style.width = (completos / total * 100).toFixed(1) + '%';
+    const cont = document.getElementById('lsItems');
+    if (cont && cont.style.display !== 'none') {
+      cont.innerHTML = _listaSombra.items.map((it, i) => {
+        const esc = it.cantidadEscaneada || 0;
+        let cls = 'is-pendiente', check = '○';
+        if (esc >= it.cantidad) { cls = 'is-completo'; check = '✓'; }
+        else if (esc > 0)       { cls = 'is-parcial';  check = '½'; }
+        const flashCls = it._flash ? ' is-flash' : '';
+        if (it._flash) it._flash = false;
+        return `<div class="ls-item ${cls}${flashCls}">
+          <span class="ls-item-check">${check}</span>
+          <span class="ls-item-nombre">${escHtml(it.nombre)}</span>
+          <span class="ls-item-cant">${esc.toFixed(1)}/${it.cantidad.toFixed(1)}</span>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // Llamado tras cada cambio del carrito — actualiza sombra y dispara sfx si hay nuevo match
+  function _lsOnCartChange() {
+    if (!_listaSombra || !_listaSombra.items) return;
+    // snapshot del estado antes (para detectar transiciones)
+    const antes = _listaSombra.items.map(i => ({
+      esc: i.cantidadEscaneada || 0,
+      completo: (i.cantidadEscaneada || 0) >= i.cantidad
+    }));
+    _lsRecalcular();
+    let nuevosCompletos = 0;
+    let nuevosParciales = 0;
+    _listaSombra.items.forEach((it, i) => {
+      const escAhora = it.cantidadEscaneada || 0;
+      const escAntes = antes[i].esc;
+      const completoAhora = escAhora >= it.cantidad;
+      if (completoAhora && !antes[i].completo) {
+        it._flash = true;
+        nuevosCompletos++;
+      } else if (escAhora > escAntes && !completoAhora) {
+        it._flash = true;
+        nuevosParciales++;
+      }
+    });
+    _lsSave();
+    _lsRender();
+    // SFX según resultado
+    if (nuevosCompletos > 0) {
+      try { SoundFX.pickupItemOk(); } catch(_){}
+      vibrate([15, 25, 35]);
+      // Si TODO está completo, chime grande
+      const restantes = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) < i.cantidad).length;
+      if (restantes === 0) {
+        setTimeout(() => { try { SoundFX.pickupOk(); } catch(_){} }, 250);
+      }
+    } else if (nuevosParciales > 0) {
+      try { SoundFX.savedTick && SoundFX.savedTick(); } catch(_){}
+    }
+  }
+
+  function toggleListaSombra() {
+    const cont = document.getElementById('lsItems');
+    const btn  = document.getElementById('lsBtnToggle');
+    if (!cont) return;
+    const abierto = cont.style.display !== 'none';
+    cont.style.display = abierto ? 'none' : 'flex';
+    btn?.classList.toggle('is-open', !abierto);
+    if (!abierto) _lsRender();
+    try { SoundFX.click(); } catch(_){}
+  }
+
+  function cerrarListaSombra() {
+    if (!_listaSombra) return;
+    if (!confirm('¿Quitar la lista sombra? El carrito de despacho se mantiene.')) return;
+    _listaSombra = null;
+    _lsSave();
+    _lsRender();
+    try { SoundFX.click(); } catch(_){}
+    toast('Lista sombra removida', 'info', 2500);
+  }
+
+  // ── Modal IA — pegado y análisis ──────────────────────────
+  let _lsPreviewBuffer = [];
+
+  function abrirModalLista() {
+    document.getElementById('modalSubirLista').style.display = 'flex';
+    _lsMostrarPaso(1);
+    setTimeout(() => document.getElementById('lsTextoCrudo')?.focus(), 250);
+    try { SoundFX.click(); } catch(_){}
+  }
+
+  function cerrarModalLista() {
+    document.getElementById('modalSubirLista').style.display = 'none';
+    document.getElementById('lsTextoCrudo').value = '';
+    _lsPreviewBuffer = [];
+    try { SoundFX.click(); } catch(_){}
+  }
+
+  function _lsMostrarPaso(n) {
+    [1, 2, 3, 4].forEach(i => {
+      const el = document.getElementById('lsModalPaso' + i);
+      if (el) el.style.display = (i === n) ? 'block' : 'none';
+    });
+  }
+
+  function volverPaso1() {
+    _lsMostrarPaso(1);
+  }
+
+  async function analizarListaConIA() {
+    const texto = document.getElementById('lsTextoCrudo').value.trim();
+    if (!texto) { toast('Pega una lista primero', 'warn'); return; }
+    if (texto.length < 10) { toast('La lista parece muy corta', 'warn'); return; }
+    _lsMostrarPaso(2);
+    try { SoundFX.beep(); } catch(_){}
+    // Sub-mensajes rotativos para que se sienta vivo
+    const subs = [
+      'Limpiando cabeceras y normalizando cantidades',
+      'Detectando códigos y descripciones',
+      'Casi listo…'
+    ];
+    let subIdx = 0;
+    const subInterval = setInterval(() => {
+      subIdx = (subIdx + 1) % subs.length;
+      const el = document.getElementById('lsLoadingSub');
+      if (el) el.textContent = subs[subIdx];
+    }, 1800);
+
+    try {
+      const res = await API.analizarListaSombra({ texto });
+      clearInterval(subInterval);
+      if (!res || !res.ok) {
+        const err = res?.error || 'Error desconocido';
+        const msg = err === 'KEY_NOT_SET'
+          ? 'La API key de Claude no está configurada. Avisa al administrador.'
+          : (res?.mensaje || 'Inténtalo de nuevo o pega la lista en formato más limpio');
+        document.getElementById('lsErrorTitulo').textContent = err === 'KEY_NOT_SET' ? 'IA no configurada' : 'No pude analizar';
+        document.getElementById('lsErrorMsg').textContent = msg;
+        _lsMostrarPaso(4);
+        try { SoundFX.warn(); } catch(_){}
+        return;
+      }
+      _lsPreviewBuffer = (res.data?.items || []).slice();
+      if (!_lsPreviewBuffer.length) {
+        document.getElementById('lsErrorTitulo').textContent = 'Sin productos detectados';
+        document.getElementById('lsErrorMsg').textContent = 'La IA no encontró líneas con productos válidos. Revisa el texto pegado.';
+        _lsMostrarPaso(4);
+        try { SoundFX.warn(); } catch(_){}
+        return;
+      }
+      _renderPreview();
+      _lsMostrarPaso(3);
+      try { SoundFX.done(); } catch(_){}
+      vibrate([20, 30, 40]);
+    } catch(e) {
+      clearInterval(subInterval);
+      document.getElementById('lsErrorTitulo').textContent = 'Sin conexión';
+      document.getElementById('lsErrorMsg').textContent = e?.message || 'Verifica tu internet';
+      _lsMostrarPaso(4);
+      try { SoundFX.error(); } catch(_){}
+    }
+  }
+
+  function _renderPreview() {
+    const cont = document.getElementById('lsPreviewList');
+    document.getElementById('lsPreviewTotal').textContent = _lsPreviewBuffer.length;
+    cont.innerHTML = _lsPreviewBuffer.map((it, i) => `
+      <div class="ls-prev-item" style="animation-delay:${Math.min(i, 12) * 35}ms">
+        <span class="ls-prev-num">${i + 1}.</span>
+        <span class="ls-prev-nombre">${escHtml(it.nombre)}</span>
+        <input type="number" step="0.1" min="0" value="${it.cantidad}"
+               class="ls-prev-cant-input"
+               oninput="DespachoView._lsPrevSetCant(${i}, this.value)">
+        <button onclick="DespachoView._lsPrevDel(${i})" class="ls-prev-del" title="Quitar">✕</button>
+      </div>`).join('');
+  }
+
+  function _lsPrevSetCant(idx, v) {
+    if (!_lsPreviewBuffer[idx]) return;
+    _lsPreviewBuffer[idx].cantidad = Math.round((parseFloat(v) || 0) * 10) / 10;
+  }
+  function _lsPrevDel(idx) {
+    _lsPreviewBuffer.splice(idx, 1);
+    _renderPreview();
+    try { SoundFX.click(); } catch(_){}
+  }
+
+  function activarListaSombra() {
+    const validos = _lsPreviewBuffer.filter(i => i.nombre && i.cantidad > 0);
+    if (!validos.length) { toast('No hay productos válidos en la lista', 'warn'); return; }
+    _listaSombra = {
+      id: 'LS' + Date.now(),
+      creada: new Date().toISOString(),
+      items: validos.map(it => ({
+        nombre: it.nombre,
+        cantidad: it.cantidad,
+        codigoVisto: it.codigoVisto || '',
+        cantidadEscaneada: 0,
+        productos: []
+      }))
+    };
+    _lsRecalcular();
+    _lsSave();
+    _lsRender();
+    cerrarModalLista();
+    try { SoundFX.rocket(); } catch(_){}
+    vibrate([30, 25, 50]);
+    toast(`📋 Lista sombra activada · ${validos.length} productos`, 'ok', 4000);
+  }
+
   return { cargar, pauseCamera,
            abrirDespCamara, cerrarDespCamara, cerrarDespYFinalizar,
            toggleDespTorch, despSetZoom,
@@ -11021,7 +11317,13 @@ const DespachoView = (() => {
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
            hayDespachoActivo, procesarScanGlobal,
            flotMas, flotMenos, flotSetGranel,
-           renderFlotante: _renderDespFlotante };
+           renderFlotante: _renderDespFlotante,
+           // [v2.13.8] Lista sombra
+           abrirModalLista, cerrarModalLista, analizarListaConIA,
+           volverPaso1, activarListaSombra, toggleListaSombra, cerrarListaSombra,
+           _lsPrevSetCant, _lsPrevDel,
+           // Hook expuesto para llamar desde puntos de mutación del cart
+           _lsOnCartChange, _lsRehidratar };
 })();
 
 // ════════════════════════════════════════════════
