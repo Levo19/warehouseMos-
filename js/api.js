@@ -165,6 +165,13 @@ const API = (() => {
     crearDespachoRapido:(p)     => post({ action: 'crearDespachoRapido', ...p }),
     // [v2.13.8] IA — parser de listas pegadas para Despacho Rápido (lista sombra)
     analizarListaSombra:(p)     => post({ action: 'analizarListaSombra', ...p }),
+    // [v2.13.15] Listas sombra compartidas
+    crearListaSombra:             (p) => post({ action: 'crearListaSombra', ...p }),
+    getListasSombra:              (p={}) => call({ action: 'getListasSombra', ...p }),
+    tomarListaSombra:             (p) => post({ action: 'tomarListaSombra', ...p }),
+    liberarListaSombra:           (p) => post({ action: 'liberarListaSombra', ...p }),
+    actualizarProgresoListaSombra:(p) => post({ action: 'actualizarProgresoListaSombra', ...p }),
+    cerrarListaSombra:            (p) => post({ action: 'cerrarListaSombra', ...p }),
     getPickups:         (p={})  => call({ action: 'getPickups', ...p }),
     actualizarPickup:   (p)     => post({ action: 'actualizarPickup', ...p }),
     guardarProgresoPickup:    (p) => post({ action: 'guardarProgresoPickup',    ...p }),

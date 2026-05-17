@@ -1350,6 +1350,94 @@
     .ls-item:hover .ls-item-go { opacity:1; transform:scale(1.15); }
     .ls-item[onclick]:active { transform:scale(.98); }
 
+    /* [v2.13.15] Panel de listas sombra COMPARTIDAS del equipo */
+    .lsc-panel {
+      margin-top:10px;
+      padding:8px 10px; border-radius:12px;
+      background: linear-gradient(135deg, rgba(14,165,233,.10), rgba(56,189,248,.06));
+      border:1px solid rgba(56,189,248,.3);
+      animation: lsBannerIn .3s ease-out;
+    }
+    .lsc-titulo {
+      font-size:.72em; font-weight:900; color:#7dd3fc;
+      letter-spacing:.06em; text-transform:uppercase;
+      margin-bottom:6px;
+    }
+    .lsc-item {
+      display:flex; align-items:center; gap:8px;
+      padding:8px 10px; margin-bottom:4px;
+      border-radius:9px;
+      background:rgba(15,23,42,.55);
+      border:1px solid rgba(56,189,248,.2);
+      transition: all .15s;
+    }
+    .lsc-item:last-child { margin-bottom:0; }
+    .lsc-item.is-disponible {
+      border-color:rgba(34,197,94,.45);
+      background:linear-gradient(90deg, rgba(34,197,94,.10), rgba(15,23,42,.55));
+    }
+    .lsc-item.is-enuso {
+      border-color:rgba(245,158,11,.4);
+      background:linear-gradient(90deg, rgba(245,158,11,.08), rgba(15,23,42,.55));
+      opacity:.85;
+    }
+    .lsc-item.is-mia {
+      border-color:rgba(168,85,247,.55);
+      background:linear-gradient(90deg, rgba(168,85,247,.15), rgba(15,23,42,.55));
+    }
+    .lsc-item-info { flex:1; min-width:0; }
+    .lsc-item-titulo {
+      font-size:.78em; font-weight:800; color:#e2e8f0;
+    }
+    .lsc-item-sub {
+      font-size:.65em; color:#94a3b8; margin-top:1px;
+    }
+    .lsc-btn-tomar {
+      flex-shrink:0;
+      padding:7px 12px; border-radius:8px; border:none; cursor:pointer;
+      background:linear-gradient(135deg, #22c55e, #16a34a);
+      color:#fff; font-weight:900; font-size:.7em; letter-spacing:.04em;
+      box-shadow: 0 3px 10px -2px rgba(34,197,94,.5);
+      transition: all .15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .lsc-btn-tomar:active { transform: scale(.94); }
+    .lsc-item.is-mia .lsc-btn-tomar {
+      background:linear-gradient(135deg, #a855f7, #7c3aed);
+      box-shadow: 0 3px 10px -2px rgba(168,85,247,.5);
+    }
+    .lsc-tag-bloqueada {
+      flex-shrink:0;
+      padding:5px 10px; border-radius:99px;
+      background:rgba(245,158,11,.15);
+      border:1px solid rgba(245,158,11,.4);
+      color:#fbbf24; font-size:.65em; font-weight:800;
+      letter-spacing:.05em;
+    }
+
+    /* Checkbox compartir en paso 3 */
+    .ls-compartir-row {
+      display:flex; align-items:flex-start; gap:10px;
+      margin-top:10px; padding:10px 12px;
+      background:rgba(15,23,42,.5);
+      border:1px solid rgba(168,85,247,.25);
+      border-radius:10px;
+      cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .ls-compartir-row input[type=checkbox] {
+      flex-shrink:0; width:18px; height:18px; margin-top:1px;
+      accent-color:#a855f7;
+      cursor:pointer;
+    }
+    .ls-compartir-info { flex:1; line-height:1.3; }
+    .ls-compartir-titulo {
+      display:block; font-size:.78em; font-weight:800; color:#e2e8f0;
+    }
+    .ls-compartir-sub {
+      display:block; font-size:.65em; color:#94a3b8; margin-top:2px;
+    }
+
     /* [v2.13.13] Badge SKU identificado */
     .ls-item-sku {
       font-size:11px; flex-shrink:0;
@@ -4779,6 +4867,9 @@
         </button>
       </div>
 
+      <!-- [v2.13.15] Panel de listas sombra COMPARTIDAS del equipo -->
+      <div id="despListasCompartidas" class="lsc-panel" style="display:none"></div>
+
       <!-- [v2.13.8] Botón Subir lista — abre modal de pegado con IA -->
       <button id="despBtnSubirLista" onclick="DespachoView.abrirModalLista()"
               class="desp-subir-lista-btn">
@@ -4945,6 +5036,14 @@
           <span class="ls-preview-sub">edita o quita antes de activar</span>
         </div>
         <div id="lsPreviewList" class="ls-preview-list"></div>
+        <!-- [v2.13.15] Checkbox de compartir con el equipo -->
+        <label class="ls-compartir-row">
+          <input type="checkbox" id="lsChkCompartir" onchange="DespachoView.lsToggleCompartir()">
+          <span class="ls-compartir-info">
+            <span class="ls-compartir-titulo">🤝 Compartir con el equipo</span>
+            <span class="ls-compartir-sub">otros operadores podrán tomarla. Sin marcar: solo tú la trabajas.</span>
+          </span>
+        </label>
         <div class="ls-modal-actions">
           <button onclick="DespachoView.volverPaso1()" class="ls-btn-sec">← Volver</button>
           <button onclick="DespachoView.activarListaSombra()" class="ls-btn-pri" id="lsBtnActivar">

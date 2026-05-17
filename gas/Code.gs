@@ -116,6 +116,13 @@ function _route(method, e) {
       case 'crearDespachoRapido': return crearDespachoRapido(params);
       // ── IA (Claude API) ─────────────────────────────────
       case 'analizarListaSombra': return analizarListaSombra(params);
+      // ── Listas Sombra compartidas ────────────────────────
+      case 'crearListaSombra':              return crearListaSombra(params);
+      case 'getListasSombra':               return getListasSombra(params);
+      case 'tomarListaSombra':              return tomarListaSombra(params);
+      case 'liberarListaSombra':            return liberarListaSombra(params);
+      case 'actualizarProgresoListaSombra': return actualizarProgresoListaSombra(params);
+      case 'cerrarListaSombra':             return cerrarListaSombra(params);
       case 'getPickups':          return getPickups(params);
       case 'actualizarPickup':    return actualizarPickup(params);
       case 'recibirPickupDeME':   return recibirPickupDeME(params);

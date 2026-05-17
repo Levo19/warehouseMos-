@@ -8158,6 +8158,9 @@ const DespachoView = (() => {
     if (pSaved) _pickupActivo = pSaved;
     // [v2.13.8] Rehidratar lista sombra si la había
     try { _lsRehidratar(); } catch(_){}
+    // [v2.13.15] Sync con panel compartido — refresca y arranca polling
+    try { _lsStartPanelSync(); } catch(_){}
+    try { _lsStartProgresoSync(); } catch(_){}
     // [v2.13.12] Forzar ocultar flotante al entrar a despacho —
     // el usuario reportó que persistía aunque estuviera en la vista despacho
     try {
@@ -9597,9 +9600,18 @@ const DespachoView = (() => {
         }
         // [v2.13.8] Si había lista sombra, limpiarla al cerrar despacho con éxito
         if (_listaSombra) {
+          // [v2.13.15] Marcar como COMPLETADA en backend antes de limpiar local
+          if (_listaSombra.idBackend) {
+            API.cerrarListaSombra({
+              idLista: _listaSombra.idBackend,
+              items: JSON.stringify(_listaSombra.items),
+              localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
+            }).catch(() => {});
+          }
           _listaSombra = null;
           _lsSave();
           _lsRender();
+          try { _lsRefrescarPanel(); } catch(_){}
         }
       } else {
         SoundFX.error(); vibrate([80, 40, 80]);
@@ -11200,6 +11212,126 @@ const DespachoView = (() => {
     }
   }
 
+  // [v2.13.15] Panel de listas sombra compartidas — DISPONIBLES + EN_USO
+  let _lsPanelData = [];
+  let _lsPanelTimer = null;
+
+  function _lsStartPanelSync() {
+    if (_lsPanelTimer) return;
+    _lsRefrescarPanel();
+    _lsPanelTimer = setInterval(() => _lsRefrescarPanel(), 15000);
+  }
+  function _lsStopPanelSync() {
+    if (_lsPanelTimer) { clearInterval(_lsPanelTimer); _lsPanelTimer = null; }
+  }
+  function _lsRefrescarPanel() {
+    API.getListasSombra({}).then(r => {
+      if (!r || !r.ok) return;
+      _lsPanelData = (r.data?.listas) || [];
+      _lsRenderPanel();
+    }).catch(() => {});
+  }
+  function _lsRenderPanel() {
+    const cont = document.getElementById('despListasCompartidas');
+    if (!cont) return;
+    const miUsuario = window.WH_CONFIG?.usuario || '';
+    const otras = _lsPanelData.filter(l =>
+      // No mostrar la lista actualmente activa en mi UI
+      (!_listaSombra || l.idLista !== _listaSombra.id)
+    );
+    if (!otras.length) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+    cont.style.display = 'block';
+    cont.innerHTML = '<div class="lsc-titulo">📥 Listas del equipo</div>' +
+      otras.map(l => {
+        const esEnUso = l.estado === 'EN_USO';
+        const esMia   = esEnUso && l.usuarioTomada === miUsuario;
+        const progreso = l.total ? `${l.completos}/${l.total}` : '0/0';
+        const subtitulo = esEnUso
+          ? (esMia ? `🟢 Tomada por TI · ${progreso}` : `🔒 Tomada por ${l.usuarioTomada || '—'} · ${progreso}`)
+          : `Subida por ${l.usuarioCreador} · ${l.total} items pendientes`;
+        let btn;
+        if (esMia) {
+          btn = `<button class="lsc-btn-tomar" onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')">↩ RETOMAR</button>`;
+        } else if (esEnUso) {
+          btn = '<span class="lsc-tag-bloqueada">EN USO</span>';
+        } else {
+          btn = `<button class="lsc-btn-tomar" onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')">🙋 TOMAR</button>`;
+        }
+        return `<div class="lsc-item ${esEnUso ? (esMia ? 'is-mia' : 'is-enuso') : 'is-disponible'}">
+          <div class="lsc-item-info">
+            <div class="lsc-item-titulo">📋 ${l.total} productos</div>
+            <div class="lsc-item-sub">${escHtml(subtitulo)}</div>
+          </div>
+          ${btn}
+        </div>`;
+      }).join('');
+  }
+
+  function tomarListaSombraDelPanel(idLista) {
+    if (_listaSombra && _listaSombra.id !== idLista) {
+      if (!confirm('Ya tienes una lista sombra activa. ¿Reemplazarla por la que vas a tomar?')) return;
+    }
+    const usuario = window.WH_CONFIG?.usuario || '';
+    if (!usuario) { toast('Sin sesión activa', 'warn'); return; }
+    try { SoundFX.click(); } catch(_){}
+    toast('Tomando lista...', 'info', 2500);
+    API.tomarListaSombra({ idLista, usuario,
+      localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
+    }).then(r => {
+      if (!r?.ok) {
+        if (r?.error === 'EN_USO_POR_OTRO') {
+          toast('⚠ ' + (r.mensaje || 'Otro operador la tomó primero'), 'warn', 5000);
+        } else if (r?.error === 'YA_COMPLETADA') {
+          toast('⚠ Esta lista ya fue completada', 'warn', 4000);
+        } else {
+          toast('No se pudo tomar: ' + (r?.error || 'error'), 'danger');
+        }
+        _lsRefrescarPanel();
+        return;
+      }
+      _listaSombra = {
+        id: idLista,
+        idBackend: idLista,
+        creada: new Date().toISOString(),
+        creador: r.data?.usuarioCreador || '',
+        tomadaPor: usuario,
+        estado: 'EN_USO',
+        items: (r.data?.items || []).map(it => ({
+          nombre: it.nombre || '',
+          cantidad: parseFloat(it.cantidad) || 0,
+          codigoBarraSugerido: it.codigoBarraSugerido || '',
+          codigoVisto: it.codigoVisto || '',
+          cantidadEscaneada: parseFloat(it.cantidadEscaneada) || 0,
+          productos: it.productos || []
+        }))
+      };
+      _lsItemsAbiertos = true;
+      _lsRecalcular();
+      _lsSave();
+      _lsRender();
+      _lsRefrescarPanel();
+      try { SoundFX.pickupOk(); } catch(_){}
+      vibrate([20, 30, 40]);
+      toast(`✓ Lista tomada · ${_listaSombra.items.length} productos`, 'ok', 4000);
+    }).catch(() => {
+      toast('Sin conexión — no se pudo tomar', 'warn');
+    });
+  }
+
+  // [v2.13.15] Sync periódico de progreso al backend (cada 20s)
+  let _lsProgresoTimer = null;
+  function _lsStartProgresoSync() {
+    if (_lsProgresoTimer) return;
+    _lsProgresoTimer = setInterval(() => {
+      if (_listaSombra && _listaSombra.idBackend) {
+        API.actualizarProgresoListaSombra({
+          idLista: _listaSombra.idBackend,
+          items: JSON.stringify(_listaSombra.items)
+        }).catch(() => {});
+      }
+    }, 20000);
+  }
+
   // [v2.13.13] Identificar SKUs — NO toca el cart. Solo resuelve qué producto
   // del catálogo corresponde a cada item de la sombra (igual que pickup pre-resolved).
   // Cuando el operador escanea físicamente ese código, el producto entra al cart
@@ -11345,13 +11477,29 @@ const DespachoView = (() => {
 
   function cerrarListaSombra() {
     if (!_listaSombra) return;
-    if (!confirm('¿Quitar la lista sombra? El carrito de despacho se mantiene.')) return;
+    // [v2.13.15] 3 opciones: liberar (vuelve a DISPONIBLE) · cancelar · ocultar local
+    const tieneBackend = !!_listaSombra.idBackend;
+    let ok;
+    if (tieneBackend) {
+      ok = confirm('¿Liberar la lista sombra? Volverá a estar DISPONIBLE para que otro operador la tome. El carrito de despacho se mantiene.');
+    } else {
+      ok = confirm('¿Quitar la lista sombra local? El carrito de despacho se mantiene.');
+    }
+    if (!ok) return;
+    if (tieneBackend) {
+      API.liberarListaSombra({
+        idLista: _listaSombra.idBackend,
+        usuario: window.WH_CONFIG?.usuario || '',
+        localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
+      }).catch(() => {});
+    }
     _listaSombra = null;
     _lsSave();
     _lsRender();
     try { _renderDespFlotante(); } catch(_){}
+    try { _lsRefrescarPanel(); } catch(_){}
     try { SoundFX.click(); } catch(_){}
-    toast('Lista sombra removida', 'info', 2500);
+    toast(tieneBackend ? 'Lista liberada — otro operador la puede tomar' : 'Lista sombra removida', 'info', 3000);
   }
 
   // ── Modal IA — pegado y análisis ──────────────────────────
@@ -11460,6 +11608,16 @@ const DespachoView = (() => {
     try { SoundFX.click(); } catch(_){}
   }
 
+  // [v2.13.15] Configuración compartida: si compartir=true al activar,
+  // la lista queda DISPONIBLE en backend para que cualquier operador la tome.
+  // Si false (default), el creador se la queda directo (EN_USO).
+  let _lsCompartir = false;
+  function lsToggleCompartir() {
+    _lsCompartir = !_lsCompartir;
+    const chk = document.getElementById('lsChkCompartir');
+    if (chk) chk.checked = _lsCompartir;
+  }
+
   function activarListaSombra() {
     console.log('[ListaSombra] activarListaSombra() called · buffer:', _lsPreviewBuffer);
     try {
@@ -11489,9 +11647,15 @@ const DespachoView = (() => {
         try { SoundFX.warn(); } catch(_){}
         return;
       }
+      const idLista = 'LS' + Date.now();
+      const compartirAlActivar = !!_lsCompartir;
       _listaSombra = {
-        id: 'LS' + Date.now(),
+        id: idLista,
+        idBackend: idLista,  // [v2.13.15] mismo ID; backend usa este
         creada: new Date().toISOString(),
+        creador: window.WH_CONFIG?.usuario || '',
+        tomadaPor: compartirAlActivar ? '' : (window.WH_CONFIG?.usuario || ''),
+        estado: compartirAlActivar ? 'DISPONIBLE' : 'EN_USO',
         items: validos.map(it => ({
           nombre: it.nombre,
           cantidad: it.cantidad,
@@ -11509,6 +11673,25 @@ const DespachoView = (() => {
       vibrate([30, 25, 50]);
       toast(`📋 Lista sombra activada · ${validos.length} productos`, 'ok', 4000);
       console.log('[ListaSombra] activada con', validos.length, 'items');
+      // [v2.13.15] Crear en backend (no bloquea — UI ya funciona local)
+      API.crearListaSombra({
+        idLista: idLista,
+        usuario: window.WH_CONFIG?.usuario || '',
+        items: JSON.stringify(_listaSombra.items),
+        compartir: compartirAlActivar,
+        localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
+      }).then(r => {
+        if (r?.ok) {
+          console.log('[ListaSombra] backend creado:', r.data);
+        } else {
+          console.warn('[ListaSombra] backend NO creado:', r);
+          toast('⚠ Lista activa solo local — sin sync al backend', 'warn', 4000);
+        }
+      }).catch(e => {
+        console.warn('[ListaSombra] crear backend falló:', e?.message);
+      });
+      // Refrescar el panel de listas disponibles (puede haber cambiado)
+      setTimeout(() => _lsRefrescarPanel(), 1500);
     } catch(err) {
       console.error('[ListaSombra] error en activar:', err);
       document.getElementById('lsErrorTitulo').textContent = 'Error al activar';
@@ -11548,6 +11731,9 @@ const DespachoView = (() => {
            buscarItemSombra,
            // [v2.13.10] Jalar todo posible con fuzzy match
            jalarTodoPosible,
+           // [v2.13.15] Listas compartidas
+           lsToggleCompartir, tomarListaSombraDelPanel,
+           _lsRefrescarPanel,
            // Hook expuesto para llamar desde puntos de mutación del cart
            _lsOnCartChange, _lsRehidratar };
 })();
