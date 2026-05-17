@@ -222,6 +222,26 @@ function actualizarProgresoListaSombra(params) {
   });
 }
 
+// ── anularListaSombra: marca como ANULADA (el creador o admin la quitó del feed)
+function anularListaSombra(params) {
+  return _conLock('anularListaSombra', function() {
+    var sh = _ensureListasSombraSheet();
+    var idLista = String(params.idLista || '').trim();
+    if (!idLista) return { ok: false, error: 'idLista requerido' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0];
+    var idx = {};
+    hdrs.forEach(function(h, k) { idx[String(h).trim()] = k; });
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] !== idLista) continue;
+      sh.getRange(i + 1, idx.estado + 1).setValue('ANULADA');
+      sh.getRange(i + 1, idx.fechaCompletada + 1).setValue(new Date());
+      return { ok: true };
+    }
+    return { ok: false, error: 'NO_ENCONTRADA' };
+  });
+}
+
 // ── cerrarListaSombra: marca COMPLETADA (se llamó al confirmar el despacho)
 function cerrarListaSombra(params) {
   return _conLock('cerrarListaSombra', function() {

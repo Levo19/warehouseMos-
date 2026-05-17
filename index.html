@@ -1468,6 +1468,39 @@
       margin-left:4px;
     }
 
+    /* [v2.13.19] Botón X anular lista del feed */
+    .lsc-btn-x {
+      flex-shrink:0;
+      padding:6px 9px; border-radius:7px; border:none; cursor:pointer;
+      background:rgba(239,68,68,.15);
+      color:#fca5a5; font-size:.85em; font-weight:800;
+      transition: all .15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .lsc-btn-x:hover { background:rgba(239,68,68,.3); transform:scale(1.08); }
+    .lsc-btn-x:active { transform:scale(.92); }
+
+    /* [v2.13.19] Sección de items LIBRES (sin SKU) */
+    .lsck-libres-titulo {
+      display:flex; align-items:center; gap:6px;
+      margin:10px 0 4px;
+      padding: 6px 10px;
+      border-radius:7px;
+      background: rgba(148,163,184,.08);
+      color:#94a3b8; font-size:.68em; font-weight:800;
+      letter-spacing:.04em; text-transform:uppercase;
+    }
+    .lsck-libres-ico { font-size:14px; }
+    .pkck-card.lsck-libre {
+      border-color: rgba(148,163,184,.25) !important;
+      background: linear-gradient(135deg, rgba(30,41,59,.6), rgba(15,23,42,.7)) !important;
+      opacity: .85;
+    }
+    .pkck-card.lsck-libre:hover {
+      opacity: 1; border-color: rgba(168,85,247,.4) !important;
+    }
+    .pkck-card.lsck-libre .pkck-bar-wrap { display:none; }
+
     /* [v2.13.13] Badge SKU identificado */
     .ls-item-sku {
       font-size:11px; flex-shrink:0;

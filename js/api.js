@@ -172,6 +172,7 @@ const API = (() => {
     liberarListaSombra:           (p) => post({ action: 'liberarListaSombra', ...p }),
     actualizarProgresoListaSombra:(p) => post({ action: 'actualizarProgresoListaSombra', ...p }),
     cerrarListaSombra:            (p) => post({ action: 'cerrarListaSombra', ...p }),
+    anularListaSombra:            (p) => post({ action: 'anularListaSombra', ...p }),
     getPickups:         (p={})  => call({ action: 'getPickups', ...p }),
     actualizarPickup:   (p)     => post({ action: 'actualizarPickup', ...p }),
     guardarProgresoPickup:    (p) => post({ action: 'guardarProgresoPickup',    ...p }),

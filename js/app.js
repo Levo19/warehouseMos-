@@ -9806,6 +9806,13 @@ const DespachoView = (() => {
                      ▶ Jalar sombra
                    </button>`;
           }
+          // [v2.13.19] Botón X para anular la lista del feed. Solo visible si NO
+          // está EN_USO por otro (no le quitamos a alguien que está trabajando).
+          const puedeAnular = !esEnUso || esMia;
+          const btnX = puedeAnular
+            ? `<button onclick="event.stopPropagation();DespachoView.anularListaSombraDelFeed('${escAttr(l.idLista)}')"
+                  class="lsc-btn-x" title="Eliminar lista del feed">✕</button>`
+            : '';
           const cardBorder = esMia ? 'rgba(168,85,247,.55)' : (esEnUso ? 'rgba(71,85,105,.5)' : 'rgba(168,85,247,.5)');
           const cardBg     = esMia ? 'rgba(168,85,247,.12)' : (esEnUso ? 'rgba(71,85,105,.08)' : 'rgba(168,85,247,.08)');
           const anim       = esEnUso ? 'none' : 'despPickListPulse 2.4s ease-in-out infinite';
@@ -9827,6 +9834,7 @@ const DespachoView = (() => {
                 </p>
               </div>
               ${btnH}
+              ${btnX}
             </div>`;
         }).join('');
         listaEl.innerHTML = pickupsHtml + sombrasHtml;
@@ -11269,17 +11277,25 @@ const DespachoView = (() => {
       cont.style.display = 'none'; cont.innerHTML = '';
       return;
     }
-    const items = _listaSombra.items;
     const productos = OfflineManager.getProductosCache() || [];
+    // [v2.13.19] Separar items: identificados (con skuBase) vs libres (sin skuBase)
+    const identificados = [];
+    const libres = [];
+    _listaSombra.items.forEach((it, idx) => {
+      if (it.skuBase) identificados.push({ it, idx });
+      else libres.push({ it, idx });
+    });
     // Orden: pendientes primero, completados al final
-    const sorted = items.map((it, idx) => ({ it, idx })).sort((a, b) => {
+    identificados.sort((a, b) => {
       const aP = (parseFloat(a.it.cantidadEscaneada)||0) < (parseFloat(a.it.cantidad)||0) ? 0 : 1;
       const bP = (parseFloat(b.it.cantidadEscaneada)||0) < (parseFloat(b.it.cantidad)||0) ? 0 : 1;
       if (aP !== bP) return aP - bP;
       return String(a.it.nombre || '').localeCompare(String(b.it.nombre || ''));
     });
     cont.style.display = 'block';
-    cont.innerHTML = sorted.map(({ it, idx }) => {
+    let html = '';
+    // Sección identificados (cards marcables)
+    html += identificados.map(({ it, idx }) => {
       const sol  = parseFloat(it.cantidad) || 0;
       const desp = parseFloat(it.cantidadEscaneada) || 0;
       const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
@@ -11288,27 +11304,22 @@ const DespachoView = (() => {
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
       const flashCls  = it._flash ? ' lsck-flash' : '';
       if (it._flash) it._flash = false;
-      const sinSku    = !it.skuBase;
-      const skuLbl    = it.skuBase || '(sin identificar)';
+      const skuLbl    = it.skuBase;
       const nombreShow = it.nombreMaster || it.nombre;
-      const prod = it.skuBase ? productos.find(p =>
+      const prod = productos.find(p =>
         String(p.idProducto) === String(it.skuBase) ||
         String(p.codigoBarra) === String(it.skuBase)
-      ) : null;
+      );
       const esKg = prod && typeof _esProductoPeso === 'function' && _esProductoPeso(prod);
       const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
-      const icon = completo ? '✓' : (enProg ? '⏳' : (sinSku ? '⚠' : '📋'));
-      const sinSkuBadge = sinSku
-        ? '<span class="lsck-sinsku" title="No se pudo identificar el SKU automáticamente — tócalo para buscar">⚠ sin SKU</span>'
-        : '';
-      const clickable = sinSku ? ` onclick="DespachoView.buscarItemSombra(${idx})" style="cursor:pointer"` : '';
+      const icon = completo ? '✓' : (enProg ? '⏳' : '📋');
       return `
-        <div class="pkck-card lsck-card ${cls}${flashCls}" data-sku-ls="${escAttr(it.skuBase || '')}" data-idx="${idx}"${clickable}>
+        <div class="pkck-card lsck-card ${cls}${flashCls}" data-sku-ls="${escAttr(it.skuBase)}" data-idx="${idx}">
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
               <p class="pkck-name truncate">${escHtml(nombreShow)}</p>
-              <p class="pkck-meta truncate">${escHtml(skuLbl)} ${sinSkuBadge}</p>
+              <p class="pkck-meta truncate">${escHtml(skuLbl)}</p>
             </div>
             <div class="pkck-qty-wrap">
               <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
@@ -11322,6 +11333,32 @@ const DespachoView = (() => {
           <div class="pkck-check-overlay">✓</div>
         </div>`;
     }).join('');
+
+    // [v2.13.19] Sección de items LIBRES (sin SKU identificado) — solo info,
+    // no se pueden marcar. El operador puede tocar uno para buscarlo manualmente.
+    if (libres.length) {
+      html += `
+        <div class="lsck-libres-titulo">
+          <span class="lsck-libres-ico">📝</span>
+          <span>Libres · ${libres.length} sin identificar (solo guía)</span>
+        </div>` +
+        libres.map(({ it, idx }) => `
+          <div class="pkck-card lsck-card lsck-libre" data-idx="${idx}"
+               onclick="DespachoView.buscarItemSombra(${idx})" style="cursor:pointer">
+            <div class="pkck-row">
+              <div class="pkck-icon">📝</div>
+              <div class="flex-1 min-w-0">
+                <p class="pkck-name truncate">${escHtml(it.nombre)}</p>
+                <p class="pkck-meta truncate">↻ toca para buscar producto</p>
+              </div>
+              <div class="pkck-qty-wrap">
+                <p><span class="pkck-qty-sol">×${it.cantidad}</span></p>
+              </div>
+            </div>
+          </div>`).join('');
+    }
+
+    cont.innerHTML = html;
     // Auto-scroll al recién marcado
     if (_lsUltimoMarcadoIdx >= 0) {
       requestAnimationFrame(() => {
@@ -11357,54 +11394,103 @@ const DespachoView = (() => {
     try { badgeUpdate(); } catch(_){}
   }
 
+  // [v2.13.19] Mapeo completo de items del backend al state local
+  function _lsMapItemFromBackend(it) {
+    return {
+      nombre:       it.nombre || it.nombreMaster || '',
+      cantidad:     parseFloat(it.cantidad) || 0,
+      skuBase:      String(it.skuBase || ''),
+      codigoBarra:  String(it.codigoBarra || ''),
+      nombreMaster: it.nombreMaster || it.nombre || '',
+      unidad:       it.unidad || '',
+      codigoVisto:  it.codigoVisto || '',
+      cantidadEscaneada: parseFloat(it.cantidadEscaneada) || 0,
+      productos:    Array.isArray(it.productos) ? it.productos : []
+    };
+  }
+
   function tomarListaSombraDelPanel(idLista) {
     if (_listaSombra && _listaSombra.id !== idLista) {
       if (!confirm('Ya tienes una lista sombra activa. ¿Reemplazarla por la que vas a tomar?')) return;
     }
     const usuario = window.WH_CONFIG?.usuario || '';
     if (!usuario) { toast('Sin sesión activa', 'warn'); return; }
-    try { SoundFX.click(); } catch(_){}
-    toast('Tomando lista...', 'info', 2500);
+    // [v2.13.19] OPTIMISTA: usa la data del feed (que ya viene con items full)
+    // para activar el checklist INMEDIATAMENTE sin esperar al backend.
+    const enFeed = (_lsPanelData || []).find(l => l.idLista === idLista);
+    if (!enFeed || !Array.isArray(enFeed.items)) {
+      toast('Lista no encontrada en feed — refresca', 'warn');
+      _lsRefrescarPanel();
+      return;
+    }
+    _listaSombra = {
+      id: idLista,
+      idBackend: idLista,
+      creada: enFeed.fechaCreacion || new Date().toISOString(),
+      creador: enFeed.usuarioCreador || '',
+      tomadaPor: usuario,
+      estado: 'EN_USO',
+      items: enFeed.items.map(_lsMapItemFromBackend)
+    };
+    _lsItemsAbiertos = true;
+    _lsRecalcular();
+    _lsSave();
+    _lsRender();
+    try { _renderDespFlotante(); } catch(_){}
+    try { SoundFX.pickupOk(); } catch(_){}
+    vibrate([20, 30, 40]);
+    toast(`✓ Lista jalada · ${_listaSombra.items.length} productos`, 'ok', 3500);
+    // Backend en background — si falla por race condition (otro la tomó),
+    // revertimos y avisamos.
     API.tomarListaSombra({ idLista, usuario,
       localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
     }).then(r => {
       if (!r?.ok) {
-        if (r?.error === 'EN_USO_POR_OTRO') {
-          toast('⚠ ' + (r.mensaje || 'Otro operador la tomó primero'), 'warn', 5000);
-        } else if (r?.error === 'YA_COMPLETADA') {
-          toast('⚠ Esta lista ya fue completada', 'warn', 4000);
-        } else {
-          toast('No se pudo tomar: ' + (r?.error || 'error'), 'danger');
-        }
-        _lsRefrescarPanel();
-        return;
+        // Rollback
+        const msg = r?.error === 'EN_USO_POR_OTRO' ? (r.mensaje || 'Otro operador la tomó primero')
+                  : r?.error === 'YA_COMPLETADA'   ? 'Ya fue completada'
+                  : ('No se pudo tomar: ' + (r?.error || 'error'));
+        toast('⚠ ' + msg + ' — la quito de tu vista', 'warn', 5000);
+        _listaSombra = null;
+        _lsSave();
+        _lsRender();
+        try { _renderDespFlotante(); } catch(_){}
       }
-      _listaSombra = {
-        id: idLista,
-        idBackend: idLista,
-        creada: new Date().toISOString(),
-        creador: r.data?.usuarioCreador || '',
-        tomadaPor: usuario,
-        estado: 'EN_USO',
-        items: (r.data?.items || []).map(it => ({
-          nombre: it.nombre || '',
-          cantidad: parseFloat(it.cantidad) || 0,
-          codigoBarraSugerido: it.codigoBarraSugerido || '',
-          codigoVisto: it.codigoVisto || '',
-          cantidadEscaneada: parseFloat(it.cantidadEscaneada) || 0,
-          productos: it.productos || []
-        }))
-      };
-      _lsItemsAbiertos = true;
-      _lsRecalcular();
+      _lsRefrescarPanel();
+    }).catch(() => {
+      // Sin conexión: dejamos local + warn
+      toast('⚠ Sin conexión — trabajas local, sincroniza después', 'warn', 5000);
+    });
+  }
+
+  // [v2.13.19] Anular lista sombra del feed (optimista). El creador o cualquiera
+  // si no está EN_USO. Marca como ANULADA en backend.
+  function anularListaSombraDelFeed(idLista) {
+    if (!confirm('¿Eliminar esta lista del feed? Esta acción no se puede deshacer.')) return;
+    try { SoundFX.click(); } catch(_){}
+    // Optimista: quitar del panel local
+    _lsPanelData = (_lsPanelData || []).filter(l => l.idLista !== idLista);
+    try { badgeUpdate(); } catch(_){}
+    // Si era la que tenía activa, también la cierro local
+    if (_listaSombra && _listaSombra.id === idLista) {
+      _listaSombra = null;
       _lsSave();
       _lsRender();
-      _lsRefrescarPanel();
-      try { SoundFX.pickupOk(); } catch(_){}
-      vibrate([20, 30, 40]);
-      toast(`✓ Lista tomada · ${_listaSombra.items.length} productos`, 'ok', 4000);
+      try { _renderDespFlotante(); } catch(_){}
+    }
+    API.anularListaSombra({
+      idLista,
+      usuario: window.WH_CONFIG?.usuario || '',
+      localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
+    }).then(r => {
+      if (!r?.ok && r?.error !== 'NO_ENCONTRADA') {
+        toast('No se pudo eliminar: ' + (r?.error || 'error'), 'warn', 4000);
+        _lsRefrescarPanel();
+      } else {
+        toast('Lista eliminada del feed', 'ok', 2500);
+      }
     }).catch(() => {
-      toast('Sin conexión — no se pudo tomar', 'warn');
+      toast('Sin conexión — se eliminó local, pero puede reaparecer al refrescar', 'warn');
     });
   }
 
@@ -11755,8 +11841,7 @@ const DespachoView = (() => {
         return;
       }
       const idLista = 'LS' + Date.now();
-      // [v2.13.18] Identifica skuBase de cada item ANTES de subir — así cuando otro
-      // operador la jala, ya tiene los códigos pre-resueltos (igual que pickup).
+      // [v2.13.18] Identifica skuBase de cada item ANTES de subir
       const productos = OfflineManager.getProductosCache() || [];
       let identificados = 0;
       const items = validos.map(it => {
@@ -11778,27 +11863,43 @@ const DespachoView = (() => {
       cerrarModalLista();
       try { SoundFX.rocket(); } catch(_){}
       vibrate([30, 25, 50]);
-      toast(`📋 Lista subida · ${validos.length} productos · Tócala en el feed para jalar`, 'ok', 5000);
-      console.log('[ListaSombra] subiendo al feed', validos.length, 'items');
-      // [v2.13.17] Crear como DISPONIBLE — NO se activa local automáticamente.
-      // El operador la ve en el feed junto a los pickups y la "jala" para empezar
-      // (mismo modelo mental que pickup).
+      toast(`📋 Lista subida · ${validos.length} productos · ${identificados} con SKU identificado · Tócala en el feed para jalar`, 'ok', 5000);
+      // [v2.13.19] OPTIMISTA: pinta inmediato en el feed local (sin esperar backend)
+      const usuario = window.WH_CONFIG?.usuario || '';
+      const optEntry = {
+        idLista: idLista,
+        fechaCreacion: new Date().toISOString(),
+        usuarioCreador: usuario,
+        estado: 'DISPONIBLE',
+        usuarioTomada: '',
+        items: items,
+        total: items.length,
+        completos: 0
+      };
+      _lsPanelData = [optEntry].concat(_lsPanelData || []);
+      try { badgeUpdate(); } catch(_){}
+      // Backend en background — si falla, removemos la card y avisamos
       API.crearListaSombra({
         idLista: idLista,
-        usuario: window.WH_CONFIG?.usuario || '',
+        usuario: usuario,
         items: JSON.stringify(items),
-        compartir: true,  // siempre disponible para el equipo
+        compartir: true,
         localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
       }).then(r => {
         if (r?.ok) {
-          console.log('[ListaSombra] backend creado:', r.data);
-          _lsRefrescarPanel();  // pinta la card en el feed inmediatamente
+          console.log('[ListaSombra] backend OK:', r.data);
+          _lsRefrescarPanel();  // sync con backend real
         } else {
           console.warn('[ListaSombra] backend NO creado:', r);
-          toast('⚠ No se pudo subir la lista al equipo: ' + (r?.error || ''), 'danger', 5000);
+          // Rollback optimista
+          _lsPanelData = _lsPanelData.filter(l => l.idLista !== idLista);
+          try { badgeUpdate(); } catch(_){}
+          toast('⚠ No se pudo subir al equipo: ' + (r?.error || ''), 'danger', 5000);
         }
       }).catch(e => {
         console.warn('[ListaSombra] crear backend falló:', e?.message);
+        _lsPanelData = _lsPanelData.filter(l => l.idLista !== idLista);
+        try { badgeUpdate(); } catch(_){}
         toast('Sin conexión — la lista no se subió', 'warn', 4000);
       });
     } catch(err) {
@@ -11841,8 +11942,10 @@ const DespachoView = (() => {
            // [v2.13.10] Jalar todo posible con fuzzy match
            jalarTodoPosible,
            // [v2.13.15] Listas compartidas
-           lsToggleCompartir, tomarListaSombraDelPanel,
+           tomarListaSombraDelPanel,
            _lsRefrescarPanel,
+           // [v2.13.19] Anular del feed
+           anularListaSombraDelFeed,
            // Hook expuesto para llamar desde puntos de mutación del cart
            _lsOnCartChange, _lsRehidratar };
 })();

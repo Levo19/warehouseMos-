@@ -123,6 +123,7 @@ function _route(method, e) {
       case 'liberarListaSombra':            return liberarListaSombra(params);
       case 'actualizarProgresoListaSombra': return actualizarProgresoListaSombra(params);
       case 'cerrarListaSombra':             return cerrarListaSombra(params);
+      case 'anularListaSombra':             return anularListaSombra(params);
       case 'getPickups':          return getPickups(params);
       case 'actualizarPickup':    return actualizarPickup(params);
       case 'recibirPickupDeME':   return recibirPickupDeME(params);
