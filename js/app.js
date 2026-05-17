@@ -9590,10 +9590,16 @@ const DespachoView = (() => {
         try {
           const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
           const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
+          // [v2.13.28] Si había sombra activa al despachar, pasar snapshot
+          // al backend para imprimir ticket comparativo PEDIDO vs DESPACHADO.
+          const sombraSnap = (_listaSombra && Array.isArray(_listaSombra.items) && _listaSombra.items.length)
+            ? JSON.stringify(_listaSombra.items)
+            : undefined;
           API.imprimirTicketGuia({
             idGuia: d.idGuia,
             reporteUrl,
-            esperadoDetalles: esperados
+            esperadoDetalles: esperados,
+            sombraSnapshot: sombraSnap
           }).then(r2 => {
             const impreso = r2?.data?.detallesImpresos || 0;
             if (r2?.ok && impreso >= esperados) {

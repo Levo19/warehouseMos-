@@ -461,7 +461,129 @@ function imprimirTicketGuia(params) {
     bLn('    (pidio ' + sol + ', llego ' + desp + ')');
   }
 
-  if (pickupClasif.hasPickup) {
+  // [v2.13.28] CLASIFICACIÓN SOMBRA — si vino sombraSnapshot, comparamos los
+  // items pedidos vs lo realmente despachado (dets). Devuelve OK/PARCIAL/SIN + EXTRAS.
+  function _clasificarPorSombra() {
+    var raw = params.sombraSnapshot;
+    if (!raw) return null;
+    var items;
+    try { items = (typeof raw === 'string') ? JSON.parse(raw) : raw; }
+    catch(e) { return null; }
+    if (!Array.isArray(items) || !items.length) return null;
+    // Construir set de skuBase de la sombra (canónico)
+    var skusSombra = {};
+    items.forEach(function(it) {
+      var sk = String(it.skuBase || '').trim().toUpperCase();
+      if (sk) skusSombra[sk] = it;
+    });
+    // Resolver cada det a su skuBase canónico
+    var prods = _sheetToObjects(getProductosSheet());
+    var equivs = [];
+    try { equivs = _sheetToObjects(_getMosSS().getSheetByName('EQUIVALENCIAS')) || []; } catch(_) {}
+    function _resolverSku(cb) {
+      var cbN = String(cb || '').trim().toUpperCase();
+      if (!cbN) return '';
+      var p = prods.find(function(x) {
+        return parseFloat(x.factorConversion || 1) === 1 &&
+               String(x.estado) !== '0' &&
+              (String(x.codigoBarra || '').trim().toUpperCase() === cbN ||
+               String(x.idProducto  || '').trim().toUpperCase() === cbN);
+      });
+      if (p) return String(p.skuBase || p.idProducto || p.codigoBarra || '').toUpperCase();
+      var e = equivs.find(function(x) { return String(x.codigoBarra || '').trim().toUpperCase() === cbN; });
+      if (e) return String(e.skuBase || '').toUpperCase();
+      return '';
+    }
+    // Mapear dets a su sku resuelto
+    var detsResueltos = dets.map(function(d) {
+      var sku = _resolverSku(d.codigoProducto);
+      return { d: d, sku: sku };
+    });
+    // Para cada item sombra: sumar cantidades de dets que matchean su skuBase
+    var ok = [], parciales = [], sin = [];
+    items.forEach(function(it) {
+      var sk = String(it.skuBase || '').trim().toUpperCase();
+      var pedido = parseFloat(it.cantidad) || 0;
+      var despachado = 0;
+      if (sk) {
+        detsResueltos.forEach(function(r) {
+          if (r.sku === sk) despachado += parseFloat(r.d.cantidad) || 0;
+        });
+      }
+      var item = {
+        nombre: String(it.nombreMaster || it.nombre || '').toUpperCase(),
+        skuBase: sk,
+        pedido: pedido,
+        despachado: despachado
+      };
+      if (despachado === 0) sin.push(item);
+      else if (despachado >= pedido) ok.push(item);
+      else parciales.push(item);
+    });
+    // Extras: dets cuyo skuBase NO está en la sombra (o sin skuBase resuelto)
+    var extras = detsResueltos.filter(function(r) {
+      return !r.sku || !skusSombra[r.sku];
+    }).map(function(r) { return r.d; });
+    return { ok: ok, parciales: parciales, sin: sin, extras: extras, items: items };
+  }
+  var sombraClasif = _clasificarPorSombra();
+
+  // Helper para renderizar línea sombra: "PROD       PED → DESP  marca"
+  function _imprimirItemSombra(it, marca) {
+    var nombre = String(it.nombre || '').toUpperCase();
+    // Línea principal con cantidades alineadas a la derecha
+    var ped  = it.pedido % 1 === 0 ? String(Math.round(it.pedido)) : String(it.pedido);
+    var desp = it.despachado % 1 === 0 ? String(Math.round(it.despachado)) : String(it.despachado);
+    var cantTxt = ped + '/' + desp + ' ' + marca;
+    var prefix = '  ';
+    var ancho = 48 - prefix.length - cantTxt.length - 1;
+    var nombreCorto = nombre.length > ancho ? nombre.substring(0, ancho) : nombre;
+    var pad = 48 - prefix.length - nombreCorto.length - cantTxt.length;
+    if (pad < 1) pad = 1;
+    bLn(prefix + nombreCorto + Array(pad + 1).join(' ') + cantTxt);
+  }
+
+  if (sombraClasif) {
+    // ─── Header especial para sombra ───
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('DESPACHO POR LISTA SOMBRA');
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    var totalItems     = sombraClasif.items.length;
+    var totalAtendidos = sombraClasif.ok.length + sombraClasif.parciales.length;
+    bLn('Items lista: ' + totalItems + '  Atendidos: ' + totalAtendidos);
+    bLn(SEP2);
+    bLn('  PRODUCTO                    PED/DESP');
+    bLn(SEP2);
+    sombraClasif.ok.forEach(function(it) { _imprimirItemSombra(it, '[OK]'); });
+    sombraClasif.parciales.forEach(function(it) { _imprimirItemSombra(it, '[!! ]'); });
+    sombraClasif.sin.forEach(function(it) { _imprimirItemSombra(it, '[NO]'); });
+    bLn(SEP);
+
+    // Extras (fuera de la sombra)
+    if (sombraClasif.extras.length) {
+      b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+      bLn('EXTRAS (' + sombraClasif.extras.length + ') fuera de lista');
+      b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+      bLn(SEP2);
+      sombraClasif.extras.forEach(_imprimirItemDetalle);
+      bLn(SEP);
+    }
+
+    // Totales finales
+    var totalPedido = sombraClasif.items.reduce(function(s, it) { return s + (parseFloat(it.cantidad) || 0); }, 0);
+    var totalDesp   = sombraClasif.ok.reduce(function(s, it) { return s + it.despachado; }, 0)
+                    + sombraClasif.parciales.reduce(function(s, it) { return s + it.despachado; }, 0);
+    var faltan      = Math.max(0, totalPedido - totalDesp);
+    b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
+    bLn('PEDIDO ' + Math.round(totalPedido) + ' uds  ATENDIDO ' + Math.round(totalDesp) + ' uds');
+    if (faltan > 0) {
+      bLn('FALTAN ' + Math.round(faltan) + ' uds  (' + sombraClasif.sin.length + ' items sin)');
+    } else {
+      bLn('LISTA COMPLETA');
+    }
+    b1(0x1b); b1(0x45); b1(0x00); b1(0x1b); b1(0x61); b1(0x00);
+    bLn(SEP);
+  } else if (pickupClasif.hasPickup) {
     // ─── Sección 1: DESPACHADO OK (solicitado === despachado) ───
     b1(0x1b); b1(0x61); b1(0x01); b1(0x1b); b1(0x45); b1(0x01);
     bLn('DESPACHADO OK (' + pickupClasif.ok.length + ')');
