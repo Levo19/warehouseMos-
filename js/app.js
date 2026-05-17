@@ -11239,10 +11239,11 @@ const DespachoView = (() => {
   let _lsItemsAbiertos = true;
   let _lsUltimoMarcadoIdx = -1;
 
-  // [v2.13.18] Render del banner SOLO con resumen. Los items se renderizan
-  // como cards en _renderListaSombraChecklistInline (igual a pickup).
+  // [v2.13.20] Render banner SOMBRA ACTIVA (pkact-banner.is-sombra) + checklist
+  // morado debajo. Refresca también el feed para que la card de la sombra activa
+  // desaparezca de ahí (igual que pickup activo se quita del feed pendientes).
   function _lsRender() {
-    const banner = document.getElementById('despListaSombraBanner');
+    const banner = document.getElementById('despSombraActivaBanner');
     if (banner) {
       if (!_listaSombra || !_listaSombra.items || !_listaSombra.items.length) {
         banner.style.display = 'none';
@@ -11250,24 +11251,19 @@ const DespachoView = (() => {
         banner.style.display = 'block';
         const total      = _listaSombra.items.length;
         const completos  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
-        const parciales  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) > 0 && (i.cantidadEscaneada || 0) < i.cantidad).length;
-        const restantes  = total - completos;
-        const lblProg = document.getElementById('lsProgresoLbl');
-        const lblRest = document.getElementById('lsRestantesLbl');
-        if (lblProg) lblProg.textContent = `${completos} / ${total}`;
-        if (lblRest) lblRest.textContent =
-          restantes === 0 ? '✅ todo completo' :
-          restantes + ' restante' + (restantes === 1 ? '' : 's') +
-          (parciales ? ' · ' + parciales + ' parcial' + (parciales === 1 ? '' : 'es') : '');
-        const bar = document.getElementById('lsBarra');
-        if (bar) bar.style.width = (completos / total * 100).toFixed(1) + '%';
-        // Ocultar el div de items inline (ahora viven afuera)
-        const cont = document.getElementById('lsItems');
-        if (cont) cont.style.display = 'none';
+        const titulo = document.getElementById('sombraActivaTitulo');
+        const lbl    = document.getElementById('sombraActivaProgresoLbl');
+        const bar    = document.getElementById('sombraActivaBar');
+        const creador = _listaSombra.creador ? `Lista de ${_listaSombra.creador}` : 'Sombra activa';
+        if (titulo) titulo.textContent = creador;
+        if (lbl)    lbl.textContent    = `${completos}/${total}`;
+        if (bar)    bar.style.width    = (completos / total * 100).toFixed(1) + '%';
       }
     }
-    // Render checklist principal de items (igual estilo que pickup)
+    // Render checklist morado abajo (cards estilo pickup)
     _renderListaSombraChecklistInline();
+    // Refrescar el feed (la sombra activa se filtra de ahí dentro del render del feed)
+    try { badgeUpdate(); } catch(_){}
   }
 
   function _renderListaSombraChecklistInline() {
@@ -11644,12 +11640,9 @@ const DespachoView = (() => {
     toast._t = setTimeout(() => toast.classList.remove('is-show'), 2200);
   }
 
-  function toggleListaSombra() {
-    if (!_listaSombra) return;
-    _lsItemsAbiertos = !_lsItemsAbiertos;
-    _lsRender();
-    try { SoundFX.click(); } catch(_){}
-  }
+  // [v2.13.20] toggleListaSombra ya no aplica — el banner nuevo no tiene
+  // colapso/expansión, los items siempre se ven como cards abajo (igual pickup).
+  function toggleListaSombra() { /* no-op por compat */ }
 
   function cerrarListaSombra() {
     if (!_listaSombra) return;
