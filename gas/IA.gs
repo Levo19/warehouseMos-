@@ -57,7 +57,7 @@ function _llamarClaude(opts) {
 function analizarListaSombra(params) {
   var texto = String(params && params.texto || '').trim();
   if (!texto) return { ok: false, error: 'TEXTO_VACIO' };
-  if (texto.length > 8000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Max 8000 caracteres' };
+  if (texto.length > 30000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Max 30000 caracteres (~500 productos)' };
 
   var system = [
     'Eres un asistente que limpia listas de productos de almacén.',
@@ -79,8 +79,10 @@ function analizarListaSombra(params) {
     '{"items":[{"nombre":"...","cantidad":N.N,"codigoVisto":"..."}]}'
   ].join('\n');
 
+  // [v2.13.24] max_tokens 8192 (Haiku 4.5 acepta hasta 8192 output)
+  // para soportar listas grandes sin truncar el JSON de respuesta.
   var ia = _llamarClaude({
-    max_tokens: 2048,
+    max_tokens: 8192,
     system: system,
     messages: [{
       role: 'user',

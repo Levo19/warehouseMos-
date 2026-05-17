@@ -11204,7 +11204,8 @@ const DespachoView = (() => {
     const productos = OfflineManager.getProductosCache() || [];
     const equivs    = OfflineManager.getEquivalenciasCache() || [];
 
-    // Helper: dado un codigoBarra del cart, devuelve su skuBase canónico
+    // Helper: dado un codigoBarra del cart, devuelve su skuBase canónico.
+    // [v2.13.24] Usa el campo skuBase del producto, no idProducto.
     function _resolverSkuBase(cb) {
       if (!cb) return '';
       const cbN = normCb(cb);
@@ -11214,8 +11215,8 @@ const DespachoView = (() => {
          String(x.idProducto  || '').trim().toUpperCase() === cbN) &&
         parseFloat(x.factorConversion || 1) === 1
       );
-      if (p) return String(p.idProducto || p.codigoBarra || '');
-      // 2. Equivalencia → skuBase
+      if (p) return String(p.skuBase || p.idProducto || p.codigoBarra || '');
+      // 2. Equivalencia → skuBase (la equivalencia ya tiene skuBase directo)
       const e = equivs.find(x => String(x.codigoBarra || '').trim().toUpperCase() === cbN);
       if (e) return String(e.skuBase || '');
       return '';
@@ -11313,6 +11314,7 @@ const DespachoView = (() => {
       const skuLbl    = it.skuBase;
       const nombreShow = it.nombreMaster || it.nombre;
       const prod = productos.find(p =>
+        String(p.skuBase) === String(it.skuBase) ||
         String(p.idProducto) === String(it.skuBase) ||
         String(p.codigoBarra) === String(it.skuBase)
       );
@@ -11713,6 +11715,7 @@ const DespachoView = (() => {
     const texto = document.getElementById('lsTextoCrudo').value.trim();
     if (!texto) { toast('Pega una lista primero', 'warn'); return; }
     if (texto.length < 10) { toast('La lista parece muy corta', 'warn'); return; }
+    if (texto.length > 30000) { toast('Lista demasiado larga (max 30000 caracteres ~500 productos). Divídela en partes.', 'warn', 6000); return; }
     _lsMostrarPaso(2);
     try { SoundFX.beep(); } catch(_){}
     // Sub-mensajes rotativos para que se sienta vivo
@@ -11806,7 +11809,7 @@ const DespachoView = (() => {
         );
         if (canon) {
           return {
-            skuBase:     String(canon.idProducto || canon.codigoBarra || ''),
+            skuBase:     String(canon.skuBase || canon.idProducto || canon.codigoBarra || ''),
             codigoBarra: String(canon.codigoBarra || ''),
             descripcion: String(canon.descripcion || nombre),
             unidad:      String(canon.unidad || ''),
@@ -11827,7 +11830,7 @@ const DespachoView = (() => {
           );
           if (prod) {
             return {
-              skuBase:     String(prod.idProducto || prod.codigoBarra || ''),
+              skuBase:     String(prod.skuBase || prod.idProducto || prod.codigoBarra || ''),
               codigoBarra: String(prod.codigoBarra || ''),
               descripcion: String(prod.descripcion || nombre),
               unidad:      String(prod.unidad || ''),
@@ -11854,7 +11857,7 @@ const DespachoView = (() => {
     const segundo = scored[1];
     if (segundo && (ganador.s - segundo.s) < 0.15) return null;
     return {
-      skuBase:     String(ganador.p.idProducto || ganador.p.codigoBarra || ''),
+      skuBase:     String(ganador.p.skuBase || ganador.p.idProducto || ganador.p.codigoBarra || ''),
       codigoBarra: String(ganador.p.codigoBarra || ''),
       descripcion: String(ganador.p.descripcion || nombre),
       unidad:      String(ganador.p.unidad || ''),
