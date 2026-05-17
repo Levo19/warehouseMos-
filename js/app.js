@@ -9791,19 +9791,19 @@ const DespachoView = (() => {
             btnH = `<button onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')"
                      class="btn btn-sm flex-shrink-0"
                      style="background:rgba(168,85,247,.25);color:#d8b4fe;border-color:rgba(168,85,247,.4)">
-                     ↩ Retomar
+                     ↩ Continuar
                    </button>`;
           } else if (esEnUso) {
             btnH = `<button disabled class="btn btn-sm flex-shrink-0"
                      style="background:rgba(71,85,105,.3);color:#94a3b8;border-color:rgba(71,85,105,.5);cursor:not-allowed"
-                     title="Tomada por ${escAttr(atp)}">
+                     title="Jalada por ${escAttr(atp)}">
                      🔒 ${escHtml(atp)}
                    </button>`;
           } else {
             btnH = `<button onclick="DespachoView.tomarListaSombraDelPanel('${escAttr(l.idLista)}')"
                      class="btn btn-sm flex-shrink-0"
                      style="background:rgba(168,85,247,.25);color:#d8b4fe;border-color:rgba(168,85,247,.4)">
-                     ▶ Tomar
+                     ▶ Jalar sombra
                    </button>`;
           }
           const cardBorder = esMia ? 'rgba(168,85,247,.55)' : (esEnUso ? 'rgba(71,85,105,.5)' : 'rgba(168,85,247,.5)');
@@ -11681,50 +11681,39 @@ const DespachoView = (() => {
         return;
       }
       const idLista = 'LS' + Date.now();
-      const compartirAlActivar = !!_lsCompartir;
-      _listaSombra = {
-        id: idLista,
-        idBackend: idLista,  // [v2.13.15] mismo ID; backend usa este
-        creada: new Date().toISOString(),
-        creador: window.WH_CONFIG?.usuario || '',
-        tomadaPor: compartirAlActivar ? '' : (window.WH_CONFIG?.usuario || ''),
-        estado: compartirAlActivar ? 'DISPONIBLE' : 'EN_USO',
-        items: validos.map(it => ({
-          nombre: it.nombre,
-          cantidad: it.cantidad,
-          codigoVisto: it.codigoVisto || '',
-          cantidadEscaneada: 0,
-          productos: []
-        }))
-      };
-      _lsRecalcular();
-      _lsSave();
-      _lsRender();
-      try { _renderDespFlotante(); } catch(_){}
+      const items = validos.map(it => ({
+        nombre: it.nombre,
+        cantidad: it.cantidad,
+        codigoVisto: it.codigoVisto || '',
+        cantidadEscaneada: 0,
+        productos: []
+      }));
       cerrarModalLista();
       try { SoundFX.rocket(); } catch(_){}
       vibrate([30, 25, 50]);
-      toast(`📋 Lista sombra activada · ${validos.length} productos`, 'ok', 4000);
-      console.log('[ListaSombra] activada con', validos.length, 'items');
-      // [v2.13.15] Crear en backend (no bloquea — UI ya funciona local)
+      toast(`📋 Lista subida · ${validos.length} productos · Tócala en el feed para jalar`, 'ok', 5000);
+      console.log('[ListaSombra] subiendo al feed', validos.length, 'items');
+      // [v2.13.17] Crear como DISPONIBLE — NO se activa local automáticamente.
+      // El operador la ve en el feed junto a los pickups y la "jala" para empezar
+      // (mismo modelo mental que pickup).
       API.crearListaSombra({
         idLista: idLista,
         usuario: window.WH_CONFIG?.usuario || '',
-        items: JSON.stringify(_listaSombra.items),
-        compartir: compartirAlActivar,
+        items: JSON.stringify(items),
+        compartir: true,  // siempre disponible para el equipo
         localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
       }).then(r => {
         if (r?.ok) {
           console.log('[ListaSombra] backend creado:', r.data);
+          _lsRefrescarPanel();  // pinta la card en el feed inmediatamente
         } else {
           console.warn('[ListaSombra] backend NO creado:', r);
-          toast('⚠ Lista activa solo local — sin sync al backend', 'warn', 4000);
+          toast('⚠ No se pudo subir la lista al equipo: ' + (r?.error || ''), 'danger', 5000);
         }
       }).catch(e => {
         console.warn('[ListaSombra] crear backend falló:', e?.message);
+        toast('Sin conexión — la lista no se subió', 'warn', 4000);
       });
-      // Refrescar el panel de listas disponibles (puede haber cambiado)
-      setTimeout(() => _lsRefrescarPanel(), 1500);
     } catch(err) {
       console.error('[ListaSombra] error en activar:', err);
       document.getElementById('lsErrorTitulo').textContent = 'Error al activar';

@@ -5033,19 +5033,14 @@
           <span class="ls-preview-sub">edita o quita antes de activar</span>
         </div>
         <div id="lsPreviewList" class="ls-preview-list"></div>
-        <!-- [v2.13.15] Checkbox de compartir con el equipo -->
-        <label class="ls-compartir-row">
-          <input type="checkbox" id="lsChkCompartir" onchange="DespachoView.lsToggleCompartir()">
-          <span class="ls-compartir-info">
-            <span class="ls-compartir-titulo">🤝 Compartir con el equipo</span>
-            <span class="ls-compartir-sub">otros operadores podrán tomarla. Sin marcar: solo tú la trabajas.</span>
-          </span>
-        </label>
+        <p class="ls-modal-hint" style="margin-top:10px">
+          📤 La lista se subirá al feed del equipo. Tócala y dale "▶ Jalar sombra" para empezar a despachar.
+        </p>
         <div class="ls-modal-actions">
           <button onclick="DespachoView.volverPaso1()" class="ls-btn-sec">← Volver</button>
           <button onclick="DespachoView.activarListaSombra()" class="ls-btn-pri" id="lsBtnActivar">
-            <span>✓</span>
-            <span>Activar lista sombra</span>
+            <span>📤</span>
+            <span>Subir al feed</span>
           </button>
         </div>
       </div>
