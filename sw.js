@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.22';
+const VERSION = '2.13.23';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -75,6 +75,11 @@ self.addEventListener('install', e => {
       await _broadcast({ type: 'sw-install-progress', done, total, version: VERSION });
     }
     await _broadcast({ type: 'sw-install-done', total, version: VERSION });
+    // [v2.13.23] Auto-skipWaiting: el SW nuevo toma el lugar del viejo
+    // SIN esperar mensaje desde la app. Esto evita "SW pegado" cuando el
+    // frontend no manda SKIP_WAITING (por ejemplo si la app crasheó antes
+    // de mostrar el banner, o el operador ignora el aviso varias veces).
+    self.skipWaiting();
   })());
 });
 

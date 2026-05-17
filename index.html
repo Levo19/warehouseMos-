@@ -1240,6 +1240,22 @@
       box-shadow: 0 0 8px rgba(168,85,247,.5);
     }
 
+    /* [v2.13.23] Checklist sombra: scroll si la lista es grande */
+    #despListaSombraChecklist {
+      max-height: 60vh;
+      overflow-y: auto;
+      padding-right: 4px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(168,85,247,.5) transparent;
+    }
+    #despListaSombraChecklist::-webkit-scrollbar { width: 6px; }
+    #despListaSombraChecklist::-webkit-scrollbar-thumb {
+      background: rgba(168,85,247,.5); border-radius: 3px;
+    }
+    #despListaSombraChecklist::-webkit-scrollbar-track {
+      background: rgba(15,23,42,.4);
+    }
+
     /* [v2.13.15] Panel de listas sombra COMPARTIDAS del equipo */
     .lsc-panel {
       margin-top:10px;
@@ -3498,7 +3514,10 @@
       } catch(e) {}
     };
 
-    navigator.serviceWorker.register('./sw.js').then(reg => {
+    // [v2.13.23] updateViaCache:'none' fuerza al navegador a NO usar el cache
+    // HTTP para sw.js. Sin esto, algunos navegadores (típicamente Chrome con
+    // cache agresiva en cierta PC) sirven sw.js viejo y nunca detectan update.
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then(reg => {
       _reg = reg;
       if (reg.waiting) { _showUpdateBanner(reg.waiting); return; }
       reg.addEventListener('updatefound', () => {

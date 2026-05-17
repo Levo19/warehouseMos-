@@ -9357,6 +9357,10 @@ const DespachoView = (() => {
     // Si hay pickup activo, el carrito legacy se esconde (los extras tienen
     // su propia sección visual abajo del checklist del pickup).
     if (_pickupActivo) { el.style.display = 'none'; return; }
+    // [v2.13.23] Si hay LISTA SOMBRA activa y el cart está vacío, esconder
+    // el mensaje "Abre la cámara" porque el operador ya tiene el checklist
+    // morado arriba. Si tiene items extras, sí los mostramos.
+    if (_listaSombra && !_cart.length) { el.style.display = 'none'; return; }
     el.style.display = 'block';
     if (!_cart.length) {
       el.innerHTML = `
