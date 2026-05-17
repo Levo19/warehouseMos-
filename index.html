@@ -1229,14 +1229,18 @@
       50%     { transform: scale(1.18) rotate(15deg); opacity:1; }
     }
 
-    /* Banner lista sombra activa */
+    /* Banner lista sombra activa — STICKY al hacer scroll */
     .ls-banner {
       margin-top:10px;
       border-radius:14px; padding:10px 12px;
-      background:linear-gradient(135deg, rgba(168,85,247,.14), rgba(99,102,241,.10));
+      background:linear-gradient(135deg, rgba(30,27,75,.92), rgba(15,23,42,.94));
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
       border:1.5px solid rgba(168,85,247,.4);
       box-shadow: 0 4px 16px -6px rgba(168,85,247,.45);
       animation: lsBannerIn .35s cubic-bezier(.34,1.56,.64,1);
+      position: sticky;
+      top: 8px;
+      z-index: 50;
     }
     @keyframes lsBannerIn {
       0%   { opacity:0; transform: translateY(-8px); }
@@ -1335,6 +1339,53 @@
     }
     .ls-item:hover .ls-item-go { opacity:1; transform:scale(1.15); }
     .ls-item[onclick]:active { transform:scale(.98); }
+
+    /* [v2.13.10] Item recién marcado — destacado 3s */
+    .ls-item.is-recien {
+      box-shadow: 0 0 0 2px rgba(16,185,129,.55), 0 0 16px rgba(16,185,129,.4);
+      animation: lsRecienPulse 1.4s ease-in-out 1;
+    }
+    @keyframes lsRecienPulse {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(16,185,129,.55), 0 0 16px rgba(16,185,129,.4); }
+      50%      { box-shadow: 0 0 0 3px rgba(16,185,129,.75), 0 0 22px rgba(16,185,129,.55); }
+    }
+
+    /* Mini toast dentro del banner — no estorba al cart */
+    .ls-toast-mini {
+      position:absolute; bottom:8px; right:10px;
+      padding:5px 11px; border-radius:99px;
+      background:linear-gradient(135deg, rgba(16,185,129,.95), rgba(5,150,105,.95));
+      color:#fff; font-size:.68em; font-weight:800; letter-spacing:.02em;
+      box-shadow: 0 4px 12px -3px rgba(16,185,129,.6);
+      opacity:0; transform: translateY(8px);
+      pointer-events:none;
+      transition: opacity .25s, transform .25s;
+    }
+    .ls-toast-mini.is-show {
+      opacity:1; transform: translateY(0);
+    }
+
+    /* Botón Jalar todo posible */
+    .ls-btn-jalar {
+      width:100%; margin-top:8px;
+      padding:8px 12px; border-radius:10px; border:none; cursor:pointer;
+      background:linear-gradient(135deg, #ec4899, #a855f7);
+      color:#fff; font-weight:900; font-size:.72em; letter-spacing:.06em;
+      display:flex; align-items:center; justify-content:center; gap:8px;
+      box-shadow: 0 4px 12px -3px rgba(168,85,247,.5);
+      transition: all .18s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .ls-btn-jalar:hover { transform: translateY(-1px); box-shadow: 0 6px 16px -3px rgba(168,85,247,.65); }
+    .ls-btn-jalar:active { transform: scale(.97); }
+    .ls-btn-jalar:disabled {
+      background:rgba(71,85,105,.4); color:#64748b; cursor:not-allowed;
+      box-shadow:none;
+    }
+    .lsj-icono {
+      font-size:14px;
+      animation: dslSparkle 2.4s ease-in-out infinite;
+    }
 
     /* Modal IA */
     .ls-modal {
@@ -1798,6 +1849,16 @@
       position:fixed;left:10px;right:10px;bottom:74px;z-index:9995;
       max-width:520px;margin:0 auto;
       animation:despflotIn .35s cubic-bezier(.34,1.56,.64,1);
+      cursor: pointer;
+    }
+    /* [v2.13.10] Variante para lista sombra activa sin producto */
+    .despflot.is-sombra .despflot-inner {
+      background:linear-gradient(135deg, rgba(76,29,149,.97), rgba(30,27,75,.97));
+      box-shadow: 0 6px 20px -6px rgba(168,85,247,.55);
+      border: 1px solid rgba(168,85,247,.35);
+    }
+    .despflot.is-sombra .despflot-goto {
+      background:linear-gradient(135deg, #a855f7, #6366f1);
     }
     @keyframes despflotIn {
       from { opacity:0;transform:translateY(30px) scale(.94); }
@@ -4719,7 +4780,12 @@
         <div class="ls-banner-bar-bg">
           <div class="ls-banner-bar-fill" id="lsBarra" style="width:0%"></div>
         </div>
-        <div id="lsItems" class="ls-items" style="display:none"></div>
+        <button onclick="DespachoView.jalarTodoPosible()" class="ls-btn-jalar" id="lsBtnJalar"
+                title="Jala automáticamente los items con match único y alta confianza">
+          <span class="lsj-icono">🚀</span>
+          <span>JALAR TODO POSIBLE</span>
+        </button>
+        <div id="lsItems" class="ls-items"></div>
       </div>
 
     </div><!-- /despHeaderCollapsible -->

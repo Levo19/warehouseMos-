@@ -8466,7 +8466,11 @@ const DespachoView = (() => {
   // operador está en el catálogo de Productos viendo el "membrete
   // digital" y apunta el escáner a la pantalla).
   function hayDespachoActivo() {
-    return !!_pickupActivo || (Array.isArray(_cart) && _cart.length > 0);
+    // [v2.13.10] Lista sombra también cuenta como "actividad" para que el
+    // flotante se vea desde otras vistas y el operador pueda volver al despacho.
+    return !!_pickupActivo
+        || (Array.isArray(_cart) && _cart.length > 0)
+        || !!(_listaSombra && _listaSombra.items && _listaSombra.items.length);
   }
   // Procesa un código escaneado desde cualquier módulo. Reusa _onDespResult
   // (busca candidato → suma a pickup o cart). Como el banner del pickup
@@ -8542,10 +8546,32 @@ const DespachoView = (() => {
     if (!flot) return;
     const enDespacho = !!(window.App && App.getView && App.getView() === 'despacho');
     const activo = _despProductoActivo();
-    if (!hayDespachoActivo() || enDespacho || !activo) {
+    // [v2.13.10] Mostrar flotante también si hay lista sombra (aunque cart vacío)
+    if (!hayDespachoActivo() || enDespacho) {
       flot.style.display = 'none';
       return;
     }
+    if (!activo) {
+      // Sin producto activo pero hay lista sombra → mostrar resumen de sombra
+      if (_listaSombra && _listaSombra.items && _listaSombra.items.length) {
+        const total = _listaSombra.items.length;
+        const completos = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
+        const nom   = document.getElementById('despflotNombre');
+        const meta  = document.getElementById('despflotMeta');
+        const ctrls = document.getElementById('despflotCtrls');
+        if (nom) nom.textContent = '📋 Lista sombra activa';
+        if (meta) meta.textContent = `${completos}/${total} items · toca para volver al despacho`;
+        if (ctrls) ctrls.innerHTML = '<span style="font-size:1.3em;opacity:.7">→</span>';
+        const goto = document.getElementById('despflotGoto');
+        if (goto) goto.onclick = () => { try { App.nav('despacho'); } catch(_){} };
+        flot.style.display = 'block';
+        flot.classList.add('is-sombra');
+        return;
+      }
+      flot.style.display = 'none';
+      return;
+    }
+    flot.classList.remove('is-sombra');
     const nom   = document.getElementById('despflotNombre');
     const meta  = document.getElementById('despflotMeta');
     const ctrls = document.getElementById('despflotCtrls');
@@ -9459,6 +9485,19 @@ const DespachoView = (() => {
     if (_dspGenerarBusy) {
       toast('Espera, ya estamos generando la guía...', 'warn');
       return;
+    }
+    // [v2.13.10] Aviso si la lista sombra está incompleta — el operador
+    // puede continuar igual (no bloquea), solo confirma. La lista se
+    // cierra al cerrar el despacho sin importar el estado.
+    if (_listaSombra && _listaSombra.items) {
+      const restantes = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) < i.cantidad);
+      if (restantes.length > 0) {
+        const lista = restantes.slice(0, 5).map(i => `  · ${i.nombre} (${(i.cantidadEscaneada||0).toFixed(1)}/${i.cantidad.toFixed(1)})`).join('\n');
+        const masTxt = restantes.length > 5 ? `\n  · …y ${restantes.length - 5} más` : '';
+        if (!confirm(`⚠ Lista sombra incompleta — quedan ${restantes.length} items sin atender:\n\n${lista}${masTxt}\n\n¿Despachar igual? La lista sombra se cerrará tras el despacho.`)) {
+          return;
+        }
+      }
     }
 
     // Si hay un pickup activo, ese es el camino: cierra contra cerrarPickupConDespacho
@@ -11071,6 +11110,10 @@ const DespachoView = (() => {
     });
   }
 
+  // [v2.13.10] Items visibles por default (toggle solo para colapsar manualmente)
+  let _lsItemsAbiertos = true;
+  let _lsUltimoMarcadoIdx = -1;
+
   function _lsRender() {
     const banner = document.getElementById('despListaSombraBanner');
     if (!banner) return;
@@ -11089,26 +11132,115 @@ const DespachoView = (() => {
       restantes + ' restante' + (restantes === 1 ? '' : 's') +
       (parciales ? ' · ' + parciales + ' parcial' + (parciales === 1 ? '' : 'es') : '');
     document.getElementById('lsBarra').style.width = (completos / total * 100).toFixed(1) + '%';
+    // Items SIEMPRE visibles por default (a menos que el operador haya colapsado)
     const cont = document.getElementById('lsItems');
-    if (cont && cont.style.display !== 'none') {
+    if (cont) {
+      cont.style.display = _lsItemsAbiertos ? 'flex' : 'none';
+      document.getElementById('lsBtnToggle')?.classList.toggle('is-open', _lsItemsAbiertos);
+    }
+    if (cont && _lsItemsAbiertos) {
       cont.innerHTML = _listaSombra.items.map((it, i) => {
         const esc = it.cantidadEscaneada || 0;
         let cls = 'is-pendiente', check = '○';
         if (esc >= it.cantidad) { cls = 'is-completo'; check = '✓'; }
         else if (esc > 0)       { cls = 'is-parcial';  check = '½'; }
         const flashCls = it._flash ? ' is-flash' : '';
+        const recienCls = i === _lsUltimoMarcadoIdx ? ' is-recien' : '';
         if (it._flash) it._flash = false;
         // [v2.13.9] Click sobre item pendiente/parcial → abre buscador con nombre
         const clickable = esc < it.cantidad ? ` onclick="DespachoView.buscarItemSombra(${i})" style="cursor:pointer"` : '';
         const hint = esc < it.cantidad ? '<span class="ls-item-go" title="Buscar este producto">🔍</span>' : '';
-        return `<div class="ls-item ${cls}${flashCls}"${clickable}>
+        return `<div class="ls-item ${cls}${flashCls}${recienCls}" data-idx="${i}"${clickable}>
           <span class="ls-item-check">${check}</span>
           <span class="ls-item-nombre">${escHtml(it.nombre)}</span>
           <span class="ls-item-cant">${esc.toFixed(1)}/${it.cantidad.toFixed(1)}</span>
           ${hint}
         </div>`;
       }).join('');
+      // [v2.13.10] Auto-scroll al último item marcado dentro del panel
+      if (_lsUltimoMarcadoIdx >= 0) {
+        requestAnimationFrame(() => {
+          const el = cont.querySelector(`[data-idx="${_lsUltimoMarcadoIdx}"]`);
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Limpiar el highlight después de 3s
+          setTimeout(() => {
+            _lsUltimoMarcadoIdx = -1;
+            const cont2 = document.getElementById('lsItems');
+            if (cont2) {
+              cont2.querySelectorAll('.ls-item.is-recien').forEach(n => n.classList.remove('is-recien'));
+            }
+          }, 3000);
+        });
+      }
     }
+  }
+
+  // [v2.13.10] Jalar TODO lo posible — fuzzy match items pendientes contra
+  // el catálogo. Si un item tiene exactamente UN match con score >= 0.7,
+  // lo agrega al cart con la cantidad pedida. Los ambiguos quedan para tap.
+  function jalarTodoPosible() {
+    if (!_listaSombra || !_listaSombra.items) { toast('No hay lista sombra activa', 'warn'); return; }
+    const pendientes = _listaSombra.items
+      .map((it, i) => ({ it, i }))
+      .filter(({ it }) => (it.cantidadEscaneada || 0) < it.cantidad);
+    if (!pendientes.length) {
+      toast('Todo ya está atendido ✨', 'info');
+      return;
+    }
+    const productos = OfflineManager.getProductosCache() || [];
+    let agregados = 0, ambiguos = 0, sinMatch = 0;
+    const detalleAmbiguos = [];
+    pendientes.forEach(({ it, i }) => {
+      // Buscar candidatos con score alto
+      const scored = productos
+        .map(p => ({ p, s: _lsScore(it.nombre, p.descripcion || '') }))
+        .filter(x => x.s >= 0.7)
+        .sort((a, b) => b.s - a.s);
+      if (!scored.length) { sinMatch++; return; }
+      // Si el mejor está muy por encima del segundo (gap >= 0.15) o solo hay 1 → seguro
+      const ganador = scored[0];
+      const segundo = scored[1];
+      const esUnico = !segundo || (ganador.s - segundo.s) >= 0.15;
+      if (!esUnico) {
+        ambiguos++;
+        detalleAmbiguos.push(it.nombre);
+        return;
+      }
+      // Agregar al cart con la cantidad faltante
+      const faltante = it.cantidad - (it.cantidadEscaneada || 0);
+      const cb = String(ganador.p.codigoBarra || ganador.p.idProducto || '');
+      if (!cb) { sinMatch++; return; }
+      const yaEnCart = _cart.find(c => c.codigoBarra === cb);
+      if (yaEnCart) {
+        yaEnCart.cantidad = (parseFloat(yaEnCart.cantidad) || 0) + faltante;
+      } else {
+        _cart.push({
+          codigoBarra: cb,
+          descripcion: ganador.p.descripcion || it.nombre,
+          unidad: ganador.p.unidad || '',
+          cantidad: faltante,
+          stockDisp: 0,
+          _extraPickup: false
+        });
+      }
+      agregados++;
+    });
+    if (agregados > 0) {
+      _saveCart();
+      _renderCart();
+      _updateFooter();
+      badgeUpdate();
+      try { SoundFX.rocket(); } catch(_){}
+      vibrate([30, 25, 50]);
+    }
+    // Resumen al usuario
+    const partes = [];
+    if (agregados > 0) partes.push(`✅ ${agregados} jalados`);
+    if (ambiguos > 0)  partes.push(`⚠ ${ambiguos} ambiguos`);
+    if (sinMatch > 0)  partes.push(`❌ ${sinMatch} sin match`);
+    const resumen = partes.join(' · ') || 'Sin cambios';
+    toast(resumen + (ambiguos > 0 ? ' — los ambiguos requieren confirmación manual' : ''),
+          agregados > 0 ? 'ok' : 'warn', 6000);
   }
 
   // [v2.13.9] Tap en item de sombra → abre buscador con el nombre pre-llenado
@@ -11144,6 +11276,8 @@ const DespachoView = (() => {
     _lsRecalcular();
     let nuevosCompletos = 0;
     let nuevosParciales = 0;
+    let ultimoMarcado = -1;
+    let ultimoNombre = '';
     _listaSombra.items.forEach((it, i) => {
       const escAhora = it.cantidadEscaneada || 0;
       const escAntes = antes[i].esc;
@@ -11151,35 +11285,57 @@ const DespachoView = (() => {
       if (completoAhora && !antes[i].completo) {
         it._flash = true;
         nuevosCompletos++;
+        ultimoMarcado = i;
+        ultimoNombre = it.nombre;
       } else if (escAhora > escAntes && !completoAhora) {
         it._flash = true;
         nuevosParciales++;
+        if (ultimoMarcado < 0) { ultimoMarcado = i; ultimoNombre = it.nombre; }
       }
     });
+    // [v2.13.10] Track del último para auto-scroll en render
+    if (ultimoMarcado >= 0) _lsUltimoMarcadoIdx = ultimoMarcado;
     _lsSave();
     _lsRender();
-    // SFX según resultado
+    // SFX + toast según resultado
     if (nuevosCompletos > 0) {
       try { SoundFX.pickupItemOk(); } catch(_){}
       vibrate([15, 25, 35]);
+      _lsToastMini(`✓ Completo: ${ultimoNombre.substring(0, 32)}`);
       // Si TODO está completo, chime grande
       const restantes = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) < i.cantidad).length;
       if (restantes === 0) {
         setTimeout(() => { try { SoundFX.pickupOk(); } catch(_){} }, 250);
+        _lsToastMini('🎉 Lista sombra completa');
       }
     } else if (nuevosParciales > 0) {
       try { SoundFX.savedTick && SoundFX.savedTick(); } catch(_){}
+      _lsToastMini(`+ Marcado: ${ultimoNombre.substring(0, 32)}`);
     }
   }
 
+  // [v2.13.10] Toast pequeñito que aparece DENTRO del banner — no estorba al cart
+  function _lsToastMini(msg) {
+    const banner = document.getElementById('despListaSombraBanner');
+    if (!banner) return;
+    let toast = banner.querySelector('.ls-toast-mini');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'ls-toast-mini';
+      banner.appendChild(toast);
+    }
+    toast.textContent = msg;
+    toast.classList.remove('is-show');
+    void toast.offsetWidth; // reflow
+    toast.classList.add('is-show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toast.classList.remove('is-show'), 2200);
+  }
+
   function toggleListaSombra() {
-    const cont = document.getElementById('lsItems');
-    const btn  = document.getElementById('lsBtnToggle');
-    if (!cont) return;
-    const abierto = cont.style.display !== 'none';
-    cont.style.display = abierto ? 'none' : 'flex';
-    btn?.classList.toggle('is-open', !abierto);
-    if (!abierto) _lsRender();
+    if (!_listaSombra) return;
+    _lsItemsAbiertos = !_lsItemsAbiertos;
+    _lsRender();
     try { SoundFX.click(); } catch(_){}
   }
 
@@ -11189,6 +11345,7 @@ const DespachoView = (() => {
     _listaSombra = null;
     _lsSave();
     _lsRender();
+    try { _renderDespFlotante(); } catch(_){}
     try { SoundFX.click(); } catch(_){}
     toast('Lista sombra removida', 'info', 2500);
   }
@@ -11316,6 +11473,7 @@ const DespachoView = (() => {
     _lsRecalcular();
     _lsSave();
     _lsRender();
+    try { _renderDespFlotante(); } catch(_){}
     cerrarModalLista();
     try { SoundFX.rocket(); } catch(_){}
     vibrate([30, 25, 50]);
@@ -11350,6 +11508,8 @@ const DespachoView = (() => {
            _lsPrevSetCant, _lsPrevDel,
            // [v2.13.9] Tap-to-search en item de sombra
            buscarItemSombra,
+           // [v2.13.10] Jalar todo posible con fuzzy match
+           jalarTodoPosible,
            // Hook expuesto para llamar desde puntos de mutación del cart
            _lsOnCartChange, _lsRehidratar };
 })();
