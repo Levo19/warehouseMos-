@@ -11461,27 +11461,61 @@ const DespachoView = (() => {
   }
 
   function activarListaSombra() {
-    const validos = _lsPreviewBuffer.filter(i => i.nombre && i.cantidad > 0);
-    if (!validos.length) { toast('No hay productos válidos en la lista', 'warn'); return; }
-    _listaSombra = {
-      id: 'LS' + Date.now(),
-      creada: new Date().toISOString(),
-      items: validos.map(it => ({
-        nombre: it.nombre,
-        cantidad: it.cantidad,
-        codigoVisto: it.codigoVisto || '',
-        cantidadEscaneada: 0,
-        productos: []
-      }))
-    };
-    _lsRecalcular();
-    _lsSave();
-    _lsRender();
-    try { _renderDespFlotante(); } catch(_){}
-    cerrarModalLista();
-    try { SoundFX.rocket(); } catch(_){}
-    vibrate([30, 25, 50]);
-    toast(`📋 Lista sombra activada · ${validos.length} productos`, 'ok', 4000);
+    console.log('[ListaSombra] activarListaSombra() called · buffer:', _lsPreviewBuffer);
+    try {
+      // [v2.13.14] Diagnóstico claro: si por alguna razón el buffer está vacío
+      // (raro pero pasó), mostrar mensaje en el modal en lugar de fallar silenciosamente.
+      if (!Array.isArray(_lsPreviewBuffer) || !_lsPreviewBuffer.length) {
+        document.getElementById('lsErrorTitulo').textContent = 'Preview vacío';
+        document.getElementById('lsErrorMsg').textContent = 'La lista no tiene productos para activar. Vuelve atrás y analiza de nuevo.';
+        _lsMostrarPaso(4);
+        try { SoundFX.warn(); } catch(_){}
+        return;
+      }
+      // Re-leer cantidades desde los inputs por si el oninput no disparó en algún caso
+      // (iOS Safari a veces no dispara input cuando se hace click directo sin focus)
+      const inputs = document.querySelectorAll('#lsPreviewList .ls-prev-cant-input');
+      inputs.forEach((inp, i) => {
+        if (!_lsPreviewBuffer[i]) return;
+        const v = parseFloat(inp.value);
+        if (!isNaN(v)) _lsPreviewBuffer[i].cantidad = Math.round(v * 10) / 10;
+      });
+      const validos = _lsPreviewBuffer.filter(i => i && i.nombre && i.cantidad > 0);
+      if (!validos.length) {
+        document.getElementById('lsErrorTitulo').textContent = 'Cantidades inválidas';
+        document.getElementById('lsErrorMsg').textContent =
+          'Todas las cantidades son 0 o no válidas. Ajusta los valores y vuelve a intentar.';
+        _lsMostrarPaso(4);
+        try { SoundFX.warn(); } catch(_){}
+        return;
+      }
+      _listaSombra = {
+        id: 'LS' + Date.now(),
+        creada: new Date().toISOString(),
+        items: validos.map(it => ({
+          nombre: it.nombre,
+          cantidad: it.cantidad,
+          codigoVisto: it.codigoVisto || '',
+          cantidadEscaneada: 0,
+          productos: []
+        }))
+      };
+      _lsRecalcular();
+      _lsSave();
+      _lsRender();
+      try { _renderDespFlotante(); } catch(_){}
+      cerrarModalLista();
+      try { SoundFX.rocket(); } catch(_){}
+      vibrate([30, 25, 50]);
+      toast(`📋 Lista sombra activada · ${validos.length} productos`, 'ok', 4000);
+      console.log('[ListaSombra] activada con', validos.length, 'items');
+    } catch(err) {
+      console.error('[ListaSombra] error en activar:', err);
+      document.getElementById('lsErrorTitulo').textContent = 'Error al activar';
+      document.getElementById('lsErrorMsg').textContent = err?.message || String(err);
+      _lsMostrarPaso(4);
+      try { SoundFX.error(); } catch(_){}
+    }
   }
 
   return { cargar, pauseCamera,
