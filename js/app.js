@@ -11178,20 +11178,42 @@ const DespachoView = (() => {
   }
 
   // Recorre cart y actualiza cantidadEscaneada de cada item de la sombra.
-  // [v2.13.13] Prioridad de match:
-  //   1. Si item.codigoBarraSugerido está set → match EXACTO por código
-  //   2. Si no → fuzzy match por descripción (>=0.6)
+  // [v2.13.18] Match por skuBase (resolviendo el código escaneado del cart al
+  // canónico). Esto soporta equivalencias: si escaneas un EAN equivalente, se
+  // resuelve a su skuBase canónico y matchea contra el item de la sombra.
   function _lsRecalcular() {
     if (!_listaSombra || !_listaSombra.items) return;
+    const productos = OfflineManager.getProductosCache() || [];
+    const equivs    = OfflineManager.getEquivalenciasCache() || [];
+
+    // Helper: dado un codigoBarra del cart, devuelve su skuBase canónico
+    function _resolverSkuBase(cb) {
+      if (!cb) return '';
+      const cbN = normCb(cb);
+      // 1. Match directo en productos canónicos
+      const p = productos.find(x =>
+        (String(x.codigoBarra || '').trim().toUpperCase() === cbN ||
+         String(x.idProducto  || '').trim().toUpperCase() === cbN) &&
+        parseFloat(x.factorConversion || 1) === 1
+      );
+      if (p) return String(p.idProducto || p.codigoBarra || '');
+      // 2. Equivalencia → skuBase
+      const e = equivs.find(x => String(x.codigoBarra || '').trim().toUpperCase() === cbN);
+      if (e) return String(e.skuBase || '');
+      return '';
+    }
+
     _listaSombra.items.forEach(item => {
       let cantAcum = 0;
       const matcheados = [];
+      const skuItem = String(item.skuBase || '').trim().toUpperCase();
       _cart.forEach(c => {
         let matchea = false;
-        if (item.codigoBarraSugerido && String(c.codigoBarra) === String(item.codigoBarraSugerido)) {
-          matchea = true;
-        } else if (!item.codigoBarraSugerido) {
-          // Solo aplica fuzzy si no tenemos SKU resuelto
+        if (skuItem) {
+          const skuCart = String(_resolverSkuBase(c.codigoBarra) || '').trim().toUpperCase();
+          if (skuCart && skuCart === skuItem) matchea = true;
+        } else {
+          // Fallback fuzzy si el item no tiene skuBase identificado
           const sc = _lsScore(item.nombre, c.descripcion || '');
           if (sc >= 0.6) matchea = true;
         }
@@ -11200,7 +11222,7 @@ const DespachoView = (() => {
           matcheados.push(c.codigoBarra);
         }
       });
-      item.cantidadEscaneada = Math.round(cantAcum * 10) / 10;
+      item.cantidadEscaneada = Math.round(cantAcum * 1000) / 1000;
       item.productos = matcheados;
     });
   }
@@ -11209,69 +11231,104 @@ const DespachoView = (() => {
   let _lsItemsAbiertos = true;
   let _lsUltimoMarcadoIdx = -1;
 
+  // [v2.13.18] Render del banner SOLO con resumen. Los items se renderizan
+  // como cards en _renderListaSombraChecklistInline (igual a pickup).
   function _lsRender() {
     const banner = document.getElementById('despListaSombraBanner');
-    if (!banner) return;
+    if (banner) {
+      if (!_listaSombra || !_listaSombra.items || !_listaSombra.items.length) {
+        banner.style.display = 'none';
+      } else {
+        banner.style.display = 'block';
+        const total      = _listaSombra.items.length;
+        const completos  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
+        const parciales  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) > 0 && (i.cantidadEscaneada || 0) < i.cantidad).length;
+        const restantes  = total - completos;
+        const lblProg = document.getElementById('lsProgresoLbl');
+        const lblRest = document.getElementById('lsRestantesLbl');
+        if (lblProg) lblProg.textContent = `${completos} / ${total}`;
+        if (lblRest) lblRest.textContent =
+          restantes === 0 ? '✅ todo completo' :
+          restantes + ' restante' + (restantes === 1 ? '' : 's') +
+          (parciales ? ' · ' + parciales + ' parcial' + (parciales === 1 ? '' : 'es') : '');
+        const bar = document.getElementById('lsBarra');
+        if (bar) bar.style.width = (completos / total * 100).toFixed(1) + '%';
+        // Ocultar el div de items inline (ahora viven afuera)
+        const cont = document.getElementById('lsItems');
+        if (cont) cont.style.display = 'none';
+      }
+    }
+    // Render checklist principal de items (igual estilo que pickup)
+    _renderListaSombraChecklistInline();
+  }
+
+  function _renderListaSombraChecklistInline() {
+    const cont = document.getElementById('despListaSombraChecklist');
+    if (!cont) return;
     if (!_listaSombra || !_listaSombra.items || !_listaSombra.items.length) {
-      banner.style.display = 'none';
+      cont.style.display = 'none'; cont.innerHTML = '';
       return;
     }
-    banner.style.display = 'block';
-    const total      = _listaSombra.items.length;
-    const completos  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
-    const parciales  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) > 0 && (i.cantidadEscaneada || 0) < i.cantidad).length;
-    const restantes  = total - completos;
-    document.getElementById('lsProgresoLbl').textContent = `${completos} / ${total}`;
-    document.getElementById('lsRestantesLbl').textContent =
-      restantes === 0 ? '✅ todo completo' :
-      restantes + ' restante' + (restantes === 1 ? '' : 's') +
-      (parciales ? ' · ' + parciales + ' parcial' + (parciales === 1 ? '' : 'es') : '');
-    document.getElementById('lsBarra').style.width = (completos / total * 100).toFixed(1) + '%';
-    // Items SIEMPRE visibles por default (a menos que el operador haya colapsado)
-    const cont = document.getElementById('lsItems');
-    if (cont) {
-      cont.style.display = _lsItemsAbiertos ? 'flex' : 'none';
-      document.getElementById('lsBtnToggle')?.classList.toggle('is-open', _lsItemsAbiertos);
-    }
-    if (cont && _lsItemsAbiertos) {
-      cont.innerHTML = _listaSombra.items.map((it, i) => {
-        const esc = it.cantidadEscaneada || 0;
-        let cls = 'is-pendiente', check = '○';
-        if (esc >= it.cantidad) { cls = 'is-completo'; check = '✓'; }
-        else if (esc > 0)       { cls = 'is-parcial';  check = '½'; }
-        const flashCls = it._flash ? ' is-flash' : '';
-        const recienCls = i === _lsUltimoMarcadoIdx ? ' is-recien' : '';
-        if (it._flash) it._flash = false;
-        // [v2.13.9] Click sobre item pendiente/parcial → abre buscador con nombre
-        const clickable = esc < it.cantidad ? ` onclick="DespachoView.buscarItemSombra(${i})" style="cursor:pointer"` : '';
-        const hint = esc < it.cantidad ? '<span class="ls-item-go" title="Buscar este producto">🔍</span>' : '';
-        // [v2.13.13] Badge 🔗 si el SKU está identificado (jalado pero pendiente de escaneo)
-        const skuBadge = it.codigoBarraSugerido && esc < it.cantidad
-          ? '<span class="ls-item-sku" title="SKU identificado: ' + escAttr(it.codigoBarraSugerido) + ' — escanea para confirmar">🔗</span>'
-          : '';
-        return `<div class="ls-item ${cls}${flashCls}${recienCls}" data-idx="${i}"${clickable}>
-          <span class="ls-item-check">${check}</span>
-          <span class="ls-item-nombre">${escHtml(it.nombre)}</span>
-          ${skuBadge}
-          <span class="ls-item-cant">${esc.toFixed(1)}/${it.cantidad.toFixed(1)}</span>
-          ${hint}
+    const items = _listaSombra.items;
+    const productos = OfflineManager.getProductosCache() || [];
+    // Orden: pendientes primero, completados al final
+    const sorted = items.map((it, idx) => ({ it, idx })).sort((a, b) => {
+      const aP = (parseFloat(a.it.cantidadEscaneada)||0) < (parseFloat(a.it.cantidad)||0) ? 0 : 1;
+      const bP = (parseFloat(b.it.cantidadEscaneada)||0) < (parseFloat(b.it.cantidad)||0) ? 0 : 1;
+      if (aP !== bP) return aP - bP;
+      return String(a.it.nombre || '').localeCompare(String(b.it.nombre || ''));
+    });
+    cont.style.display = 'block';
+    cont.innerHTML = sorted.map(({ it, idx }) => {
+      const sol  = parseFloat(it.cantidad) || 0;
+      const desp = parseFloat(it.cantidadEscaneada) || 0;
+      const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
+      const completo  = desp >= sol && sol > 0;
+      const enProg    = desp > 0 && desp < sol;
+      const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
+      const flashCls  = it._flash ? ' lsck-flash' : '';
+      if (it._flash) it._flash = false;
+      const sinSku    = !it.skuBase;
+      const skuLbl    = it.skuBase || '(sin identificar)';
+      const nombreShow = it.nombreMaster || it.nombre;
+      const prod = it.skuBase ? productos.find(p =>
+        String(p.idProducto) === String(it.skuBase) ||
+        String(p.codigoBarra) === String(it.skuBase)
+      ) : null;
+      const esKg = prod && typeof _esProductoPeso === 'function' && _esProductoPeso(prod);
+      const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
+      const icon = completo ? '✓' : (enProg ? '⏳' : (sinSku ? '⚠' : '📋'));
+      const sinSkuBadge = sinSku
+        ? '<span class="lsck-sinsku" title="No se pudo identificar el SKU automáticamente — tócalo para buscar">⚠ sin SKU</span>'
+        : '';
+      const clickable = sinSku ? ` onclick="DespachoView.buscarItemSombra(${idx})" style="cursor:pointer"` : '';
+      return `
+        <div class="pkck-card lsck-card ${cls}${flashCls}" data-sku-ls="${escAttr(it.skuBase || '')}" data-idx="${idx}"${clickable}>
+          <div class="pkck-row">
+            <div class="pkck-icon">${icon}</div>
+            <div class="flex-1 min-w-0">
+              <p class="pkck-name truncate">${escHtml(nombreShow)}</p>
+              <p class="pkck-meta truncate">${escHtml(skuLbl)} ${sinSkuBadge}</p>
+            </div>
+            <div class="pkck-qty-wrap">
+              <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
+              <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
+            </div>
+          </div>
+          <div class="pkck-bar-wrap">
+            <div class="pkck-bar-fill" style="width:${pct}%"></div>
+            ${enProg ? '<div class="pkck-bar-shimmer"></div>' : ''}
+          </div>
+          <div class="pkck-check-overlay">✓</div>
         </div>`;
-      }).join('');
-      // [v2.13.10] Auto-scroll al último item marcado dentro del panel
-      if (_lsUltimoMarcadoIdx >= 0) {
-        requestAnimationFrame(() => {
-          const el = cont.querySelector(`[data-idx="${_lsUltimoMarcadoIdx}"]`);
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          // Limpiar el highlight después de 3s
-          setTimeout(() => {
-            _lsUltimoMarcadoIdx = -1;
-            const cont2 = document.getElementById('lsItems');
-            if (cont2) {
-              cont2.querySelectorAll('.ls-item.is-recien').forEach(n => n.classList.remove('is-recien'));
-            }
-          }, 3000);
-        });
-      }
+    }).join('');
+    // Auto-scroll al recién marcado
+    if (_lsUltimoMarcadoIdx >= 0) {
+      requestAnimationFrame(() => {
+        const el = cont.querySelector(`[data-idx="${_lsUltimoMarcadoIdx}"]`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => { _lsUltimoMarcadoIdx = -1; }, 3000);
+      });
     }
   }
 
@@ -11641,14 +11698,31 @@ const DespachoView = (() => {
     try { SoundFX.click(); } catch(_){}
   }
 
-  // [v2.13.15] Configuración compartida: si compartir=true al activar,
-  // la lista queda DISPONIBLE en backend para que cualquier operador la tome.
-  // Si false (default), el creador se la queda directo (EN_USO).
-  let _lsCompartir = false;
-  function lsToggleCompartir() {
-    _lsCompartir = !_lsCompartir;
-    const chk = document.getElementById('lsChkCompartir');
-    if (chk) chk.checked = _lsCompartir;
+  // [v2.13.18] Identificar skuBase canónico a partir del nombre del item.
+  // Solo busca canónicos (factor=1) activos. Devuelve match único con score>=0.7
+  // y gap>=0.15 vs el segundo, o null si ambiguo. Esto evita asociar a SKU equivocado.
+  function _lsIdentificarSkuBase(nombre, productos) {
+    if (!nombre) return null;
+    const candidatos = productos.filter(p => {
+      const factor = parseFloat(p.factorConversion || 1);
+      const activo = String(p.estado) !== '0' && String(p.estado) !== 0;
+      return factor === 1 && activo;
+    });
+    const scored = candidatos
+      .map(p => ({ p, s: _lsScore(nombre, p.descripcion || '') }))
+      .filter(x => x.s >= 0.7)
+      .sort((a, b) => b.s - a.s);
+    if (!scored.length) return null;
+    const ganador = scored[0];
+    const segundo = scored[1];
+    if (segundo && (ganador.s - segundo.s) < 0.15) return null;
+    return {
+      skuBase:     String(ganador.p.idProducto || ganador.p.codigoBarra || ''),
+      codigoBarra: String(ganador.p.codigoBarra || ''),
+      descripcion: String(ganador.p.descripcion || nombre),
+      unidad:      String(ganador.p.unidad || ''),
+      score:       ganador.s
+    };
   }
 
   function activarListaSombra() {
@@ -11681,13 +11755,26 @@ const DespachoView = (() => {
         return;
       }
       const idLista = 'LS' + Date.now();
-      const items = validos.map(it => ({
-        nombre: it.nombre,
-        cantidad: it.cantidad,
-        codigoVisto: it.codigoVisto || '',
-        cantidadEscaneada: 0,
-        productos: []
-      }));
+      // [v2.13.18] Identifica skuBase de cada item ANTES de subir — así cuando otro
+      // operador la jala, ya tiene los códigos pre-resueltos (igual que pickup).
+      const productos = OfflineManager.getProductosCache() || [];
+      let identificados = 0;
+      const items = validos.map(it => {
+        const m = _lsIdentificarSkuBase(it.nombre, productos);
+        if (m) identificados++;
+        return {
+          nombre: it.nombre,
+          cantidad: it.cantidad,
+          codigoVisto: it.codigoVisto || '',
+          skuBase: m ? m.skuBase : '',
+          codigoBarra: m ? m.codigoBarra : '',
+          nombreMaster: m ? m.descripcion : '',
+          unidad: m ? m.unidad : '',
+          cantidadEscaneada: 0,
+          productos: []
+        };
+      });
+      console.log(`[ListaSombra] identificados ${identificados}/${items.length} skuBase al subir`);
       cerrarModalLista();
       try { SoundFX.rocket(); } catch(_){}
       vibrate([30, 25, 50]);

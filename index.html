@@ -1438,6 +1438,36 @@
       display:block; font-size:.65em; color:#94a3b8; margin-top:2px;
     }
 
+    /* [v2.13.18] Cards de lista sombra — variante morada del pickup */
+    .lsck-card {
+      border-color: rgba(168,85,247,.4) !important;
+      background: linear-gradient(135deg, rgba(76,29,149,.18), rgba(30,27,75,.85)) !important;
+    }
+    .lsck-card.is-completo {
+      border-color: rgba(34,197,94,.55) !important;
+      background: linear-gradient(135deg, rgba(5,46,22,.6), rgba(20,83,45,.4)) !important;
+    }
+    .lsck-card.is-progreso {
+      border-color: rgba(245,158,11,.55) !important;
+      background: linear-gradient(135deg, rgba(120,53,15,.5), rgba(180,83,9,.25)) !important;
+    }
+    .lsck-card.lsck-flash {
+      animation: lsckFlash .55s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes lsckFlash {
+      0%   { transform: scale(1);   box-shadow: 0 0 0 0 rgba(168,85,247,.7); }
+      45%  { transform: scale(1.02); box-shadow: 0 0 0 6px rgba(168,85,247,.3); }
+      100% { transform: scale(1);   box-shadow: 0 0 0 0 rgba(168,85,247,0); }
+    }
+    .lsck-sinsku {
+      display:inline-block; font-size:.6em; font-weight:800;
+      padding:1px 6px; border-radius:99px;
+      background:rgba(245,158,11,.15);
+      border:1px solid rgba(245,158,11,.4);
+      color:#fbbf24;
+      margin-left:4px;
+    }
+
     /* [v2.13.13] Badge SKU identificado */
     .ls-item-sku {
       font-size:11px; flex-shrink:0;
@@ -4899,13 +4929,11 @@
         <div class="ls-banner-bar-bg">
           <div class="ls-banner-bar-fill" id="lsBarra" style="width:0%"></div>
         </div>
-        <button onclick="DespachoView.jalarTodoPosible()" class="ls-btn-jalar" id="lsBtnJalar"
-                title="Identifica el SKU de los items con match único — luego escanea físicamente para confirmar cantidades">
-          <span class="lsj-icono">🔗</span>
-          <span>IDENTIFICAR SKUs</span>
-        </button>
-        <div id="lsItems" class="ls-items"></div>
+        <div id="lsItems" class="ls-items" style="display:none"></div>
       </div>
+
+      <!-- [v2.13.18] Checklist principal de items (igual estilo que pickup, color morado) -->
+      <div id="despListaSombraChecklist" class="space-y-2.5 mb-3" style="display:none"></div>
 
     </div><!-- /despHeaderCollapsible -->
 
