@@ -1350,6 +1350,15 @@
     .ls-item:hover .ls-item-go { opacity:1; transform:scale(1.15); }
     .ls-item[onclick]:active { transform:scale(.98); }
 
+    /* [v2.13.13] Badge SKU identificado */
+    .ls-item-sku {
+      font-size:11px; flex-shrink:0;
+      padding:1px 5px; border-radius:99px;
+      background:linear-gradient(135deg, rgba(99,102,241,.3), rgba(168,85,247,.25));
+      border:1px solid rgba(168,85,247,.5);
+      color:#c4b5fd;
+    }
+
     /* [v2.13.10] Item recién marcado — destacado 3s */
     .ls-item.is-recien {
       box-shadow: 0 0 0 2px rgba(16,185,129,.55), 0 0 16px rgba(16,185,129,.4);
@@ -4792,9 +4801,9 @@
           <div class="ls-banner-bar-fill" id="lsBarra" style="width:0%"></div>
         </div>
         <button onclick="DespachoView.jalarTodoPosible()" class="ls-btn-jalar" id="lsBtnJalar"
-                title="Jala automáticamente los items con match único y alta confianza">
-          <span class="lsj-icono">🚀</span>
-          <span>JALAR TODO POSIBLE</span>
+                title="Identifica el SKU de los items con match único — luego escanea físicamente para confirmar cantidades">
+          <span class="lsj-icono">🔗</span>
+          <span>IDENTIFICAR SKUs</span>
         </button>
         <div id="lsItems" class="ls-items"></div>
       </div>

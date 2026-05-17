@@ -11102,15 +11102,25 @@ const DespachoView = (() => {
     return inter / Math.max(ta.size, tb.size);
   }
 
-  // Recorre cart y actualiza cantidadEscaneada de cada item de la sombra
+  // Recorre cart y actualiza cantidadEscaneada de cada item de la sombra.
+  // [v2.13.13] Prioridad de match:
+  //   1. Si item.codigoBarraSugerido está set → match EXACTO por código
+  //   2. Si no → fuzzy match por descripción (>=0.6)
   function _lsRecalcular() {
     if (!_listaSombra || !_listaSombra.items) return;
     _listaSombra.items.forEach(item => {
       let cantAcum = 0;
       const matcheados = [];
       _cart.forEach(c => {
-        const sc = _lsScore(item.nombre, c.descripcion || '');
-        if (sc >= 0.6) {
+        let matchea = false;
+        if (item.codigoBarraSugerido && String(c.codigoBarra) === String(item.codigoBarraSugerido)) {
+          matchea = true;
+        } else if (!item.codigoBarraSugerido) {
+          // Solo aplica fuzzy si no tenemos SKU resuelto
+          const sc = _lsScore(item.nombre, c.descripcion || '');
+          if (sc >= 0.6) matchea = true;
+        }
+        if (matchea) {
           cantAcum += parseFloat(c.cantidad) || 0;
           matcheados.push(c.codigoBarra);
         }
@@ -11160,9 +11170,14 @@ const DespachoView = (() => {
         // [v2.13.9] Click sobre item pendiente/parcial → abre buscador con nombre
         const clickable = esc < it.cantidad ? ` onclick="DespachoView.buscarItemSombra(${i})" style="cursor:pointer"` : '';
         const hint = esc < it.cantidad ? '<span class="ls-item-go" title="Buscar este producto">🔍</span>' : '';
+        // [v2.13.13] Badge 🔗 si el SKU está identificado (jalado pero pendiente de escaneo)
+        const skuBadge = it.codigoBarraSugerido && esc < it.cantidad
+          ? '<span class="ls-item-sku" title="SKU identificado: ' + escAttr(it.codigoBarraSugerido) + ' — escanea para confirmar">🔗</span>'
+          : '';
         return `<div class="ls-item ${cls}${flashCls}${recienCls}" data-idx="${i}"${clickable}>
           <span class="ls-item-check">${check}</span>
           <span class="ls-item-nombre">${escHtml(it.nombre)}</span>
+          ${skuBadge}
           <span class="ls-item-cant">${esc.toFixed(1)}/${it.cantidad.toFixed(1)}</span>
           ${hint}
         </div>`;
@@ -11185,73 +11200,51 @@ const DespachoView = (() => {
     }
   }
 
-  // [v2.13.10] Jalar TODO lo posible — fuzzy match items pendientes contra
-  // el catálogo. Si un item tiene exactamente UN match con score >= 0.7,
-  // lo agrega al cart con la cantidad pedida. Los ambiguos quedan para tap.
+  // [v2.13.13] Identificar SKUs — NO toca el cart. Solo resuelve qué producto
+  // del catálogo corresponde a cada item de la sombra (igual que pickup pre-resolved).
+  // Cuando el operador escanea físicamente ese código, el producto entra al cart
+  // y por match exacto (no fuzzy) se marca el item de la sombra.
   function jalarTodoPosible() {
     if (!_listaSombra || !_listaSombra.items) { toast('No hay lista sombra activa', 'warn'); return; }
     const pendientes = _listaSombra.items
       .map((it, i) => ({ it, i }))
-      .filter(({ it }) => (it.cantidadEscaneada || 0) < it.cantidad);
+      .filter(({ it }) => (it.cantidadEscaneada || 0) < it.cantidad && !it.codigoBarraSugerido);
     if (!pendientes.length) {
-      toast('Todo ya está atendido ✨', 'info');
+      toast('Todo identificado ✨ — escanea para confirmar cantidades', 'info');
       return;
     }
     const productos = OfflineManager.getProductosCache() || [];
-    let agregados = 0, ambiguos = 0, sinMatch = 0;
-    const detalleAmbiguos = [];
+    let identificados = 0, ambiguos = 0, sinMatch = 0;
     pendientes.forEach(({ it, i }) => {
-      // Buscar candidatos con score alto
       const scored = productos
         .map(p => ({ p, s: _lsScore(it.nombre, p.descripcion || '') }))
         .filter(x => x.s >= 0.7)
         .sort((a, b) => b.s - a.s);
       if (!scored.length) { sinMatch++; return; }
-      // Si el mejor está muy por encima del segundo (gap >= 0.15) o solo hay 1 → seguro
       const ganador = scored[0];
       const segundo = scored[1];
       const esUnico = !segundo || (ganador.s - segundo.s) >= 0.15;
-      if (!esUnico) {
-        ambiguos++;
-        detalleAmbiguos.push(it.nombre);
-        return;
-      }
-      // [v2.13.12] Pre-cargar producto al cart con cantidad 0 — el operador
-      // escanea físicamente para sumar y confirmar lo que tiene en mano.
-      // La sombra es solo sugerencia, no auto-completa cantidades.
+      if (!esUnico) { ambiguos++; return; }
       const cb = String(ganador.p.codigoBarra || ganador.p.idProducto || '');
       if (!cb) { sinMatch++; return; }
-      const yaEnCart = _cart.find(c => c.codigoBarra === cb);
-      if (yaEnCart) {
-        // Si ya estaba, no toco la cantidad existente (operador puede haber empezado)
-      } else {
-        _cart.push({
-          codigoBarra: cb,
-          descripcion: ganador.p.descripcion || it.nombre,
-          unidad: ganador.p.unidad || '',
-          cantidad: 0,           // ← pendiente de escaneo
-          stockDisp: 0,
-          _extraPickup: false,
-          _jaladoSombra: true    // marca informativa
-        });
-      }
-      agregados++;
+      // SOLO resolvemos SKU en la sombra — no tocamos el cart
+      it.codigoBarraSugerido = cb;
+      it.descripcionSugerida = ganador.p.descripcion || it.nombre;
+      identificados++;
     });
-    if (agregados > 0) {
-      _saveCart();
-      _renderCart();
-      _updateFooter();
-      badgeUpdate();
+    if (identificados > 0) {
+      _lsSave();
+      _lsRender();
       try { SoundFX.rocket(); } catch(_){}
       vibrate([30, 25, 50]);
     }
-    // [v2.13.12] Resumen claro: jalados = pre-cargados con cantidad 0, hay que escanear
     const partes = [];
-    if (agregados > 0) partes.push(`📥 ${agregados} pre-cargados (cantidad 0 — escanea para confirmar)`);
-    if (ambiguos > 0)  partes.push(`⚠ ${ambiguos} ambiguos`);
-    if (sinMatch > 0)  partes.push(`❌ ${sinMatch} sin match`);
+    if (identificados > 0) partes.push(`🔗 ${identificados} identificados`);
+    if (ambiguos > 0)      partes.push(`⚠ ${ambiguos} ambiguos`);
+    if (sinMatch > 0)      partes.push(`❌ ${sinMatch} sin match`);
     const resumen = partes.join(' · ') || 'Sin cambios';
-    toast(resumen, agregados > 0 ? 'ok' : 'warn', 7000);
+    const cola = identificados > 0 ? ' — escanea para confirmar cantidades' : '';
+    toast(resumen + cola, identificados > 0 ? 'ok' : 'warn', 7000);
   }
 
   // [v2.13.9] Tap en item de sombra → abre buscador con el nombre pre-llenado
