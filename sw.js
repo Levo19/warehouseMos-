@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.10';
+const VERSION = '2.13.11';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso

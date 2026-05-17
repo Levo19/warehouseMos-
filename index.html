@@ -1246,7 +1246,13 @@
       0%   { opacity:0; transform: translateY(-8px); }
       100% { opacity:1; transform: translateY(0); }
     }
-    .ls-banner-head { display:flex; align-items:center; gap:10px; }
+    .ls-banner-head {
+      display:flex; align-items:center; gap:10px;
+      cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+      padding:2px 0;
+    }
+    .ls-banner-head:active { opacity:.85; }
     .ls-banner-ico { font-size:22px; flex-shrink:0; }
     .ls-banner-info { flex:1; min-width:0; }
     .ls-banner-title { font-size:.78em; font-weight:900; color:#e9d5ff; letter-spacing:.04em; }
@@ -1255,15 +1261,19 @@
       font-family: ui-monospace, monospace; margin-top:1px;
     }
     .ls-banner-sep { color:#64748b; margin:0 4px; }
-    .ls-banner-toggle, .ls-banner-close {
+    .ls-banner-toggle {
+      color:#c4b5fd; font-size:22px; padding:4px 6px;
+      line-height:1; display:inline-flex; align-items:center;
+      transition: transform .25s cubic-bezier(.34,1.56,.64,1);
+    }
+    .ls-banner-toggle.is-open { transform: rotate(180deg); }
+    .ls-banner-close {
       background:transparent; border:none; cursor:pointer;
-      color:#a78bfa; font-size:18px; padding:4px 8px;
+      color:#fca5a5; font-size:18px; padding:6px 10px;
       transition: all .15s;
       -webkit-tap-highlight-color:transparent;
     }
-    .ls-banner-toggle:active, .ls-banner-close:active { transform:scale(.85); }
-    .ls-banner-toggle.is-open { transform: rotate(180deg); }
-    .ls-banner-close { color:#fca5a5; }
+    .ls-banner-close:active { transform:scale(.85); }
     .ls-banner-bar-bg {
       height:5px; margin-top:8px;
       background:rgba(15,23,42,.6); border-radius:99px; overflow:hidden;
@@ -4761,8 +4771,10 @@
       </button>
 
       <!-- [v2.13.8] Banner de lista sombra ACTIVA -->
+      <!-- [v2.13.11] La cabecera entera es clickeable (toggle items). Solo la X
+           cierra y necesita stopPropagation -->
       <div id="despListaSombraBanner" class="ls-banner" style="display:none">
-        <div class="ls-banner-head">
+        <div class="ls-banner-head" onclick="DespachoView.toggleListaSombra()">
           <span class="ls-banner-ico">📋</span>
           <div class="ls-banner-info">
             <div class="ls-banner-title">Lista sombra activa</div>
@@ -4772,10 +4784,9 @@
               <span id="lsRestantesLbl">0 restantes</span>
             </div>
           </div>
-          <button onclick="DespachoView.toggleListaSombra()" class="ls-banner-toggle"
-                  id="lsBtnToggle" title="Mostrar/ocultar items">▾</button>
-          <button onclick="DespachoView.cerrarListaSombra()" class="ls-banner-close"
-                  title="Quitar lista sombra">✕</button>
+          <span class="ls-banner-toggle" id="lsBtnToggle" title="Mostrar/ocultar items">▾</span>
+          <button onclick="event.stopPropagation();DespachoView.cerrarListaSombra()"
+                  class="ls-banner-close" title="Quitar lista sombra">✕</button>
         </div>
         <div class="ls-banner-bar-bg">
           <div class="ls-banner-bar-fill" id="lsBarra" style="width:0%"></div>

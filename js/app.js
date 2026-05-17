@@ -8562,8 +8562,11 @@ const DespachoView = (() => {
         if (nom) nom.textContent = '📋 Lista sombra activa';
         if (meta) meta.textContent = `${completos}/${total} items · toca para volver al despacho`;
         if (ctrls) ctrls.innerHTML = '<span style="font-size:1.3em;opacity:.7">→</span>';
+        // [v2.13.11] TODO el flotante es clickable en modo sombra (no solo el goto)
+        const goFn = () => { try { App.nav('despacho'); } catch(_){} };
+        flot.onclick = goFn;
         const goto = document.getElementById('despflotGoto');
-        if (goto) goto.onclick = () => { try { App.nav('despacho'); } catch(_){} };
+        if (goto) goto.onclick = (ev) => { ev.stopPropagation(); goFn(); };
         flot.style.display = 'block';
         flot.classList.add('is-sombra');
         return;
@@ -8572,6 +8575,7 @@ const DespachoView = (() => {
       return;
     }
     flot.classList.remove('is-sombra');
+    flot.onclick = null;
     const nom   = document.getElementById('despflotNombre');
     const meta  = document.getElementById('despflotMeta');
     const ctrls = document.getElementById('despflotCtrls');
