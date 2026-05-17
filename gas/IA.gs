@@ -57,7 +57,9 @@ function _llamarClaude(opts) {
 function analizarListaSombra(params) {
   var texto = String(params && params.texto || '').trim();
   if (!texto) return { ok: false, error: 'TEXTO_VACIO' };
-  if (texto.length > 30000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Max 30000 caracteres (~500 productos)' };
+  // [v2.13.25] Sin chunking en backend — el frontend ya trozó la lista en
+  // bloques de ~30 productos. Cada llamada es chica.
+  if (texto.length > 50000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Chunk demasiado grande — el frontend debería haberlo trozado más' };
 
   var system = [
     'Eres un asistente que limpia listas de productos de almacén.',

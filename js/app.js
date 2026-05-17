@@ -11711,58 +11711,106 @@ const DespachoView = (() => {
     _lsMostrarPaso(1);
   }
 
+  // [v2.13.25] Chunking automático: si la lista es larga, parte en bloques
+  // de ~30 productos y procesa secuencialmente con progreso visible. Esto
+  // permite pegar listas de cualquier tamaño sin esperar gigante ni saturar
+  // el rate-limit de Claude. Costo: ~$0.0005 por chunk, prácticamente gratis.
   async function analizarListaConIA() {
     const texto = document.getElementById('lsTextoCrudo').value.trim();
     if (!texto) { toast('Pega una lista primero', 'warn'); return; }
     if (texto.length < 10) { toast('La lista parece muy corta', 'warn'); return; }
-    if (texto.length > 30000) { toast('Lista demasiado larga (max 30000 caracteres ~500 productos). Divídela en partes.', 'warn', 6000); return; }
+    if (texto.length > 200000) {
+      toast('Lista enorme (>200k chars). Divídela manualmente en 2 pegados.', 'warn', 6000);
+      return;
+    }
+
     _lsMostrarPaso(2);
     try { SoundFX.beep(); } catch(_){}
-    // Sub-mensajes rotativos para que se sienta vivo
-    const subs = [
+
+    // ── 1. Trocear por líneas no-vacías ────────────────────────
+    const lineas = texto.split(/\r?\n/).filter(l => l.trim().length > 0);
+    const CHUNK_SIZE = 30;          // ~30 productos por chunk
+    const CHUNK_THRESHOLD = 45;     // umbral: hasta 45 líneas = 1 chunk
+
+    const chunks = [];
+    if (lineas.length <= CHUNK_THRESHOLD) {
+      // Lista chica → 1 solo chunk con el texto original (preserva cabeceras)
+      chunks.push(texto);
+    } else {
+      // Lista grande → N chunks por líneas
+      for (let i = 0; i < lineas.length; i += CHUNK_SIZE) {
+        chunks.push(lineas.slice(i, i + CHUNK_SIZE).join('\n'));
+      }
+    }
+    const totalChunks = chunks.length;
+    console.log(`[ListaSombra] ${lineas.length} líneas → ${totalChunks} chunks`);
+
+    // ── 2. Aviso al operador si va a trocear ───────────────────
+    const subEl = document.getElementById('lsLoadingSub');
+    if (totalChunks > 1) {
+      toast(`📦 Lista larga · IA la procesará en ${totalChunks} partes`, 'info', 4000);
+    }
+
+    // ── 3. Procesar secuencial con progreso ────────────────────
+    const buffer = [];
+    let chunkOk = 0;
+    let chunkErr = 0;
+    let primerError = null;
+    const subsRot = [
       'Limpiando cabeceras y normalizando cantidades',
       'Detectando códigos y descripciones',
       'Casi listo…'
     ];
-    let subIdx = 0;
-    const subInterval = setInterval(() => {
-      subIdx = (subIdx + 1) % subs.length;
-      const el = document.getElementById('lsLoadingSub');
-      if (el) el.textContent = subs[subIdx];
-    }, 1800);
+    let subRotIdx = 0;
 
-    try {
-      const res = await API.analizarListaSombra({ texto });
-      clearInterval(subInterval);
-      if (!res || !res.ok) {
-        const err = res?.error || 'Error desconocido';
-        const msg = err === 'KEY_NOT_SET'
-          ? 'La API key de Claude no está configurada. Avisa al administrador.'
-          : (res?.mensaje || 'Inténtalo de nuevo o pega la lista en formato más limpio');
-        document.getElementById('lsErrorTitulo').textContent = err === 'KEY_NOT_SET' ? 'IA no configurada' : 'No pude analizar';
-        document.getElementById('lsErrorMsg').textContent = msg;
-        _lsMostrarPaso(4);
-        try { SoundFX.warn(); } catch(_){}
-        return;
+    for (let i = 0; i < chunks.length; i++) {
+      if (subEl) {
+        subEl.textContent = totalChunks > 1
+          ? `Procesando parte ${i + 1} de ${totalChunks} · ${buffer.length} productos detectados`
+          : subsRot[subRotIdx++ % subsRot.length];
       }
-      _lsPreviewBuffer = (res.data?.items || []).slice();
-      if (!_lsPreviewBuffer.length) {
-        document.getElementById('lsErrorTitulo').textContent = 'Sin productos detectados';
-        document.getElementById('lsErrorMsg').textContent = 'La IA no encontró líneas con productos válidos. Revisa el texto pegado.';
-        _lsMostrarPaso(4);
-        try { SoundFX.warn(); } catch(_){}
-        return;
+      try {
+        const res = await API.analizarListaSombra({ texto: chunks[i] });
+        if (res?.ok && Array.isArray(res.data?.items)) {
+          buffer.push.apply(buffer, res.data.items);
+          chunkOk++;
+        } else {
+          chunkErr++;
+          if (!primerError) primerError = res;
+          console.warn('[Chunk', i + 1, '/', totalChunks, '] error:', res?.error);
+          // Si es KEY_NOT_SET, abortar todo (no tiene sentido seguir)
+          if (res?.error === 'KEY_NOT_SET') break;
+        }
+      } catch(e) {
+        chunkErr++;
+        console.warn('[Chunk', i + 1, '] excepción:', e?.message);
+        if (!primerError) primerError = { error: 'NETWORK', mensaje: e?.message };
       }
-      _renderPreview();
-      _lsMostrarPaso(3);
-      try { SoundFX.done(); } catch(_){}
-      vibrate([20, 30, 40]);
-    } catch(e) {
-      clearInterval(subInterval);
-      document.getElementById('lsErrorTitulo').textContent = 'Sin conexión';
-      document.getElementById('lsErrorMsg').textContent = e?.message || 'Verifica tu internet';
+    }
+
+    // ── 4. Mostrar resultado ───────────────────────────────────
+    if (!buffer.length) {
+      const err = primerError?.error || 'Error desconocido';
+      const msg = err === 'KEY_NOT_SET'
+        ? 'La API key de Claude no está configurada. Avisa al administrador.'
+        : (primerError?.mensaje || 'Inténtalo de nuevo o pega la lista en formato más limpio');
+      document.getElementById('lsErrorTitulo').textContent = err === 'KEY_NOT_SET' ? 'IA no configurada' : 'No pude analizar';
+      document.getElementById('lsErrorMsg').textContent = msg;
       _lsMostrarPaso(4);
-      try { SoundFX.error(); } catch(_){}
+      try { SoundFX.warn(); } catch(_){}
+      return;
+    }
+
+    _lsPreviewBuffer = buffer;
+    _renderPreview();
+    _lsMostrarPaso(3);
+    try { SoundFX.done(); } catch(_){}
+    vibrate([20, 30, 40]);
+
+    if (totalChunks > 1) {
+      const errTxt = chunkErr > 0 ? ` (${chunkErr} parte(s) fallaron)` : '';
+      toast(`✓ ${totalChunks} partes procesadas · ${buffer.length} productos${errTxt}`,
+            chunkErr ? 'warn' : 'ok', 5000);
     }
   }
 
