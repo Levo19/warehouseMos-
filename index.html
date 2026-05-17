@@ -1306,6 +1306,23 @@
       50%  { transform: scale(1.03); box-shadow: 0 0 0 6px rgba(34,197,94,.15); }
       100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34,197,94,0); }
     }
+    /* [v2.13.30] Cart agrupado por skuBase (cuando hay sombra) */
+    .desp-cart-grupo .desp-cart-codigos {
+      margin-top: 6px; padding-top: 4px;
+      border-top: 1px dashed rgba(99,102,241,.25);
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .desp-cart-subrow {
+      display: flex; align-items: center; gap: 6px;
+      padding: 2px 4px; border-radius: 4px;
+      background: rgba(15,23,42,.4);
+    }
+    .desp-cart-sub-cb {
+      flex: 1; font-family: ui-monospace, monospace;
+      font-size: 10px; color: #94a3b8;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .desp-cart-subrow .desp-qty-wrap { transform-origin: right; }
 
     /* [v2.13.15] Panel de listas sombra COMPARTIDAS del equipo */
     .lsc-panel {

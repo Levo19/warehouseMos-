@@ -9068,7 +9068,15 @@ const DespachoView = (() => {
     _cerrarInlinePicker();
     const candidatos = _buscarDespCandidatos(val);
     if (!candidatos.length) {
-      if (statusEl) { statusEl.textContent = '⚠ ' + val + ' · no existe en catálogo'; statusEl.style.color = '#f87171'; }
+      // [v2.13.30] Diagnóstico útil: si las cachés están vacías, el error
+      // no es del código sino del setup. Avisar explícito al operador.
+      const nProds  = (OfflineManager.getProductosCache() || []).length;
+      const nEquivs = (OfflineManager.getEquivalenciasCache() || []).length;
+      let msg = '⚠ ' + val + ' · no existe en catálogo';
+      if (nProds === 0 || nEquivs === 0) {
+        msg = `⚠ Catálogo vacío (${nProds}p / ${nEquivs}eq) — refresca app`;
+      }
+      if (statusEl) { statusEl.textContent = msg; statusEl.style.color = '#f87171'; }
       SoundFX.warn(); vibrate([50, 25, 50]);
       inp.select();
       return;
@@ -9381,15 +9389,115 @@ const DespachoView = (() => {
         </div>`;
       return;
     }
-    // [v2.13.29] Si hay sombra activa, mostrar items en orden INVERSO
-    // (último escaneado primero) para feedback visual inmediato. Sin sombra,
-    // orden natural como siempre.
-    const itemsView = _listaSombra ? _cart.slice().reverse() : _cart;
-    el.innerHTML = itemsView.map((item, i) => {
+    // [v2.13.30] Cuando hay SOMBRA activa, AGRUPAR por skuBase visualmente.
+    // Estructura interna del cart se mantiene (1 entry por código escaneado),
+    // pero la VISTA muestra "Producto · skuBase · N un" con suma de canónico
+    // + equivalentes. El backend recibe códigos individuales sin cambios.
+    // Sin sombra: vista normal (1 línea por código).
+    const itemsBase = _listaSombra ? _cart.slice().reverse() : _cart;
+    let itemsView = itemsBase;
+    if (_listaSombra) {
+      // Agrupar por skuBase
+      const productosCache = OfflineManager.getProductosCache() || [];
+      const equivsCache    = OfflineManager.getEquivalenciasCache() || [];
+      function _resolverSku(cb) {
+        const cbN = normCb(cb);
+        if (!cbN) return '';
+        const p = productosCache.find(x =>
+          (String(x.codigoBarra || '').trim().toUpperCase() === cbN ||
+           String(x.idProducto  || '').trim().toUpperCase() === cbN) &&
+          parseFloat(x.factorConversion || 1) === 1);
+        if (p) return { sku: String(p.skuBase || p.idProducto || p.codigoBarra || ''), desc: String(p.descripcion || ''), unidad: String(p.unidad || '') };
+        const e = equivsCache.find(x => String(x.codigoBarra || '').trim().toUpperCase() === cbN);
+        if (e) {
+          const sk = String(e.skuBase || '');
+          const can = productosCache.find(x =>
+            parseFloat(x.factorConversion || 1) === 1 &&
+            (String(x.skuBase || '').trim().toUpperCase() === sk.toUpperCase() ||
+             String(x.idProducto || '').trim().toUpperCase() === sk.toUpperCase() ||
+             String(x.codigoBarra || '').trim().toUpperCase() === sk.toUpperCase()));
+          return { sku: sk, desc: String(can?.descripcion || ''), unidad: String(can?.unidad || '') };
+        }
+        return { sku: '', desc: '', unidad: '' };
+      }
+      // Agrupar (preservando orden de primera aparición)
+      const grupos = [];
+      const skuIdx = new Map();
+      itemsBase.forEach(c => {
+        const info = _resolverSku(c.codigoBarra);
+        const key = info.sku || ('__' + c.codigoBarra);  // si no resuelve, key única
+        if (!skuIdx.has(key)) {
+          skuIdx.set(key, grupos.length);
+          grupos.push({
+            skuBase: info.sku,
+            descripcion: info.desc || c.descripcion || c.codigoBarra,
+            unidad: info.unidad || c.unidad || '',
+            cantidadTotal: 0,
+            codigos: []   // {codigoBarra, cantidad, stockDisp}
+          });
+        }
+        const g = grupos[skuIdx.get(key)];
+        g.cantidadTotal += parseFloat(c.cantidad) || 0;
+        g.codigos.push({
+          codigoBarra: c.codigoBarra,
+          cantidad: parseFloat(c.cantidad) || 0,
+          stockDisp: c.stockDisp || 0,
+          descripcion: c.descripcion
+        });
+      });
+      // Render agrupado
+      el.innerHTML = grupos.map((g, i) => {
+        const esUltimo = i === 0;
+        const tieneVarios = g.codigos.length > 1;
+        const skuLbl = g.skuBase || '(sin SKU)';
+        const codigosHtml = g.codigos.map(c => {
+          const safeId = escAttr(c.codigoBarra);
+          const cb = escHtml(c.codigoBarra);
+          const over = c.stockDisp > 0 && c.cantidad > c.stockDisp;
+          const overWarn = over ? `<span class="text-[10px] text-red-400">⚠</span>` : '';
+          return `
+            <div class="desp-cart-subrow">
+              <span class="desp-cart-sub-cb">${cb} ${overWarn}</span>
+              <div class="desp-qty-wrap" style="transform:scale(.85)">
+                <button class="desp-qty-btn" onclick="DespachoView.decQty('${safeId}')">−</button>
+                <input id="despQty-${safeId}" type="number" inputmode="decimal" step="0.1" min="0"
+                       value="${c.cantidad}"
+                       class="desp-qty-input"
+                       onblur="DespachoView.blurQty('${safeId}',this.value)"
+                       onfocus="this.select()">
+                <button class="desp-qty-btn" onclick="DespachoView.incQty('${safeId}')">+</button>
+                <button class="desp-qty-btn" style="border-color:rgba(239,68,68,.4);color:#f87171;margin-left:2px"
+                        onclick="DespachoView.quitarItem('${safeId}')">✕</button>
+              </div>
+            </div>`;
+        }).join('');
+        return `
+          <div class="card-sm desp-cart-item desp-cart-grupo${esUltimo ? ' desp-cart-recien' : ''}"
+               style="animation-delay:${i*.03}s">
+            <div class="flex items-center gap-3">
+              <div class="flex-1 min-w-0">
+                <p class="font-semibold text-sm truncate">${escHtml(g.descripcion)}</p>
+                <p class="text-[10px] text-slate-500 font-mono">
+                  <span style="color:#a5b4fc">${escHtml(skuLbl)}</span>
+                  ${tieneVarios ? `<span class="ml-1 text-[9px] text-slate-500">· ${g.codigos.length} códigos</span>` : ''}
+                </p>
+              </div>
+              <div class="text-right shrink-0">
+                <div class="text-base font-bold text-amber-300">${g.cantidadTotal}</div>
+                <div class="text-[10px] text-slate-500">${g.unidad || 'un'}</div>
+              </div>
+            </div>
+            <div class="desp-cart-codigos">${codigosHtml}</div>
+          </div>`;
+      }).join('');
+      return;
+    }
+    // Sin sombra: vista normal (1 línea por código)
+    el.innerHTML = itemsBase.map((item, i) => {
       const over     = item.stockDisp > 0 && item.cantidad > item.stockDisp;
       const safeId   = escAttr(item.codigoBarra);
       const overWarn = over ? `<span class="text-xs text-red-400">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
-      const esUltimo = _listaSombra && i === 0;
+      const esUltimo = false;
       return `
       <div class="card-sm desp-cart-item flex items-center gap-3${esUltimo ? ' desp-cart-recien' : ''}"
            id="despRow-${safeId}" style="animation-delay:${i*.03}s">
