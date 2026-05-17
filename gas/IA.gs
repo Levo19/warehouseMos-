@@ -114,3 +114,56 @@ function analizarListaSombra(params) {
 
   return { ok: true, data: { items: limpios, total: limpios.length } };
 }
+
+// ============================================================
+// testAnthropic() — ejecutar desde el editor GAS para verificar
+// que la key esté bien configurada y funcione end-to-end.
+//   ✅ → Logger.log dice "OK · modelo: ... · respondió: ..."
+//   ❌ KEY_NOT_SET → falta setear ANTHROPIC_API_KEY en Script Properties
+//   ❌ API_ERROR_401 → key inválida o expirada
+//   ❌ API_ERROR_429 → sin saldo / rate limit
+// ============================================================
+function testAnthropic() {
+  Logger.log('— Test Anthropic API —');
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!key) {
+    Logger.log('❌ ANTHROPIC_API_KEY no configurada en Script Properties');
+    return { ok: false, mensaje: 'Configura la key en ⚙ → Script Properties' };
+  }
+  Logger.log('🔑 Key encontrada (prefijo: ' + key.substring(0, 12) + '...)');
+  Logger.log('📡 Llamando al modelo...');
+
+  var res = _llamarClaude({
+    max_tokens: 100,
+    messages: [{
+      role: 'user',
+      content: 'Responde solo "PONG" en mayúsculas. Nada más.'
+    }]
+  });
+
+  if (!res.ok) {
+    Logger.log('❌ ERROR: ' + res.error + ' · ' + (res.mensaje || ''));
+    if (res.error === 'API_ERROR_401') Logger.log('   → Key inválida. Verifica que sea sk-ant-...');
+    if (res.error === 'API_ERROR_429') Logger.log('   → Sin saldo o rate limit. Revisa billing en console.anthropic.com');
+    if (res.error === 'API_ERROR_400') Logger.log('   → Request malformado. Avisa al dev.');
+    return res;
+  }
+
+  Logger.log('✅ OK · modelo respondió: "' + res.text.trim() + '"');
+  Logger.log('   tokens usados: input=' + (res.raw.usage?.input_tokens || '?') +
+             ' · output=' + (res.raw.usage?.output_tokens || '?'));
+  Logger.log('   → Listo. Ya puedes usar "Subir Lista" en Despacho Rápido.');
+  return { ok: true, text: res.text };
+}
+
+// Variante que también testea el parser de listas con un ejemplo real
+function testAnalizarLista() {
+  Logger.log('— Test analizarListaSombra —');
+  var ejemplo = 'Codigo  Descripcion              Pedido\n' +
+                '111111  AJI PANCA POLVO 250GR    5.0\n' +
+                '222222  AJINOMOTO 1KG BOLSA      18\n' +
+                '333333  AZUCAR RUBIA SACO        2';
+  var res = analizarListaSombra({ texto: ejemplo });
+  Logger.log(JSON.stringify(res, null, 2));
+  return res;
+}

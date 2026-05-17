@@ -1329,6 +1329,12 @@
     }
     .ls-item.is-completo .ls-item-cant { background:rgba(16,185,129,.2); color:#6ee7b7; }
     .ls-item.is-parcial  .ls-item-cant { background:rgba(245,158,11,.2); color:#fcd34d; }
+    .ls-item-go {
+      font-size:13px; flex-shrink:0; opacity:.45;
+      transition: opacity .15s, transform .15s;
+    }
+    .ls-item:hover .ls-item-go { opacity:1; transform:scale(1.15); }
+    .ls-item[onclick]:active { transform:scale(.98); }
 
     /* Modal IA */
     .ls-modal {

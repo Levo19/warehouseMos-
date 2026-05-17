@@ -11098,13 +11098,39 @@ const DespachoView = (() => {
         else if (esc > 0)       { cls = 'is-parcial';  check = '½'; }
         const flashCls = it._flash ? ' is-flash' : '';
         if (it._flash) it._flash = false;
-        return `<div class="ls-item ${cls}${flashCls}">
+        // [v2.13.9] Click sobre item pendiente/parcial → abre buscador con nombre
+        const clickable = esc < it.cantidad ? ` onclick="DespachoView.buscarItemSombra(${i})" style="cursor:pointer"` : '';
+        const hint = esc < it.cantidad ? '<span class="ls-item-go" title="Buscar este producto">🔍</span>' : '';
+        return `<div class="ls-item ${cls}${flashCls}"${clickable}>
           <span class="ls-item-check">${check}</span>
           <span class="ls-item-nombre">${escHtml(it.nombre)}</span>
           <span class="ls-item-cant">${esc.toFixed(1)}/${it.cantidad.toFixed(1)}</span>
+          ${hint}
         </div>`;
       }).join('');
     }
+  }
+
+  // [v2.13.9] Tap en item de sombra → abre buscador con el nombre pre-llenado
+  // y dispara la búsqueda. El operador toca un resultado y se agrega al cart.
+  function buscarItemSombra(idx) {
+    if (!_listaSombra || !_listaSombra.items[idx]) return;
+    const it = _listaSombra.items[idx];
+    // Tomar palabras significativas para buscar (las 2-3 primeras suelen ser únicas)
+    const tokens = _lsTokens(it.nombre);
+    const query = tokens.slice(0, 3).join(' ') || it.nombre;
+    try { SoundFX.click(); } catch(_){}
+    abrirDespBusqueda();
+    setTimeout(() => {
+      const inp = document.getElementById('despSearchInput');
+      if (inp) {
+        inp.value = query;
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+        // Selecciono el texto para que si quiere editarlo, sea fácil
+        inp.select();
+      }
+      despBuscarInput(query);
+    }, 120);
   }
 
   // Llamado tras cada cambio del carrito — actualiza sombra y dispara sfx si hay nuevo match
@@ -11322,6 +11348,8 @@ const DespachoView = (() => {
            abrirModalLista, cerrarModalLista, analizarListaConIA,
            volverPaso1, activarListaSombra, toggleListaSombra, cerrarListaSombra,
            _lsPrevSetCant, _lsPrevDel,
+           // [v2.13.9] Tap-to-search en item de sombra
+           buscarItemSombra,
            // Hook expuesto para llamar desde puntos de mutación del cart
            _lsOnCartChange, _lsRehidratar };
 })();
