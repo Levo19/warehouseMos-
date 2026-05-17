@@ -11777,10 +11777,58 @@ const DespachoView = (() => {
     try { SoundFX.click(); } catch(_){}
   }
 
-  // [v2.13.18] Identificar skuBase canónico a partir del nombre del item.
-  // Solo busca canónicos (factor=1) activos. Devuelve match único con score>=0.7
-  // y gap>=0.15 vs el segundo, o null si ambiguo. Esto evita asociar a SKU equivocado.
-  function _lsIdentificarSkuBase(nombre, productos) {
+  // [v2.13.21] Identificar skuBase canónico priorizando código sobre descripción.
+  // Pasos:
+  //   1. Si codigoVisto está set → match exacto contra canónicos.codigoBarra
+  //      o equivalencias.codigoBarra (resolviendo al skuBase del canónico).
+  //   2. Si no encuentra por código → fuzzy match por descripción (>=0.7, gap>=0.15).
+  //   3. Si ni código ni descripción → null (queda como "libre" en la UI).
+  function _lsIdentificarSkuBase(nombre, productos, codigoVisto) {
+    // PASO 1: match exacto por código (más confiable)
+    if (codigoVisto) {
+      const cb = normCb(codigoVisto);
+      if (cb) {
+        // Canónico directo (factor=1, activo)
+        const canon = productos.find(p =>
+          parseFloat(p.factorConversion || 1) === 1 &&
+          String(p.estado) !== '0' && String(p.estado) !== 0 &&
+          String(p.codigoBarra || '').trim().toUpperCase() === cb
+        );
+        if (canon) {
+          return {
+            skuBase:     String(canon.idProducto || canon.codigoBarra || ''),
+            codigoBarra: String(canon.codigoBarra || ''),
+            descripcion: String(canon.descripcion || nombre),
+            unidad:      String(canon.unidad || ''),
+            via:         'codigo_canonico',
+            score:       1.0
+          };
+        }
+        // Equivalencia → resolver al canónico
+        const equivs = OfflineManager.getEquivalenciasCache() || [];
+        const eq = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cb);
+        if (eq) {
+          const skuB = String(eq.skuBase || '').trim().toUpperCase();
+          const prod = productos.find(p =>
+            parseFloat(p.factorConversion || 1) === 1 &&
+            String(p.estado) !== '0' && String(p.estado) !== 0 &&
+            (String(p.idProducto || '').trim().toUpperCase() === skuB ||
+             String(p.codigoBarra || '').trim().toUpperCase() === skuB)
+          );
+          if (prod) {
+            return {
+              skuBase:     String(prod.idProducto || prod.codigoBarra || ''),
+              codigoBarra: String(prod.codigoBarra || ''),
+              descripcion: String(prod.descripcion || nombre),
+              unidad:      String(prod.unidad || ''),
+              via:         'codigo_equivalencia',
+              score:       1.0
+            };
+          }
+        }
+      }
+    }
+    // PASO 2: fuzzy match por descripción (fallback)
     if (!nombre) return null;
     const candidatos = productos.filter(p => {
       const factor = parseFloat(p.factorConversion || 1);
@@ -11800,6 +11848,7 @@ const DespachoView = (() => {
       codigoBarra: String(ganador.p.codigoBarra || ''),
       descripcion: String(ganador.p.descripcion || nombre),
       unidad:      String(ganador.p.unidad || ''),
+      via:         'descripcion',
       score:       ganador.s
     };
   }
