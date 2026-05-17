@@ -1314,20 +1314,31 @@ const Session = (() => {
   // ───────────────────────────────────────────────
   //  Wake Lock — pantalla activa con sesión
   // ───────────────────────────────────────────────
+  // [v2.13.32] Chip wake-lock como TOAST efímero (3s). Antes era permanente
+  // arriba a la derecha y tapaba iconos del topbar (usuario, cesta merma).
+  // La función sigue ACTIVA en background — el chip es solo un indicador
+  // visual al activarse. Mientras tengas sesión, la pantalla NO se apaga.
   function _whWakeRenderChip(on) {
     let chip = document.getElementById('whWakeChip');
     if (!on) { if (chip) chip.remove(); return; }
-    // En móvil el chip tapa la topbar → la función sigue activa pero no se muestra.
-    // En tablet/desktop (>=768px) sí se muestra discreto arriba a la derecha.
-    const esMobile = window.matchMedia('(max-width: 768px)').matches;
-    if (esMobile) return;
-    if (!chip) {
-      chip = document.createElement('div');
-      chip.id = 'whWakeChip';
-      chip.style.cssText = 'position:fixed;top:8px;right:8px;z-index:9998;display:inline-flex;align-items:center;gap:4px;padding:4px 9px;border-radius:9999px;background:linear-gradient(135deg,rgba(251,191,36,0.18),rgba(245,158,11,0.12));border:1px solid rgba(251,191,36,0.5);color:#fcd34d;font-size:11px;font-weight:800;backdrop-filter:blur(4px);box-shadow:0 2px 6px rgba(0,0,0,0.3);pointer-events:none;font-family:system-ui,sans-serif';
-      chip.innerHTML = '<span>🔆</span><span>Pantalla activa</span>';
-      document.body.appendChild(chip);
-    }
+    // Evitar duplicar si el toast ya se está mostrando
+    if (chip) return;
+    chip = document.createElement('div');
+    chip.id = 'whWakeChip';
+    chip.style.cssText = 'position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-12px);z-index:9998;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:9999px;background:linear-gradient(135deg,rgba(251,191,36,0.95),rgba(245,158,11,0.95));border:1px solid rgba(251,191,36,0.6);color:#451a03;font-size:12px;font-weight:800;backdrop-filter:blur(6px);box-shadow:0 8px 24px rgba(0,0,0,0.4);pointer-events:none;font-family:system-ui,sans-serif;opacity:0;transition:opacity .35s ease,transform .35s cubic-bezier(.34,1.56,.64,1)';
+    chip.innerHTML = '<span>🔆</span><span>Pantalla activa</span>';
+    document.body.appendChild(chip);
+    // Entrar
+    requestAnimationFrame(() => {
+      chip.style.opacity = '1';
+      chip.style.transform = 'translateX(-50%) translateY(0)';
+    });
+    // Salir tras 3s
+    setTimeout(() => {
+      chip.style.opacity = '0';
+      chip.style.transform = 'translateX(-50%) translateY(-12px)';
+      setTimeout(() => { try { chip.remove(); } catch(_){} }, 380);
+    }, 3000);
   }
   async function _activarWakeLock() {
     if (!('wakeLock' in navigator)) return;
