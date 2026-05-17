@@ -4851,38 +4851,6 @@
       </button>
 
       <!-- [v2.13.8] Banner de lista sombra ACTIVA -->
-      <!-- [v2.13.20] Banner SOMBRA ACTIVA — mismo estilo que pkact-banner pero morado -->
-      <div id="despSombraActivaBanner" class="pkact-banner is-sombra" style="display:none;margin-bottom:10px">
-        <div class="flex items-center gap-3">
-          <div style="font-size:24px;flex-shrink:0">📋</div>
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-bold text-sm" id="sombraActivaTitulo" style="color:#d8b4fe">Sombra activa</span>
-              <span class="text-xs text-slate-400" id="sombraActivaProgresoLbl">0/0</span>
-              <span class="pkck-autosave">
-                <span class="pkck-autosave-dot"></span>
-                <span>sync</span>
-              </span>
-            </div>
-            <div class="pkact-bar-bg">
-              <div class="pkact-bar-fill" id="sombraActivaBar" style="width:0%"></div>
-            </div>
-          </div>
-          <button onclick="DespachoView.cerrarListaSombra()" title="Soltar sombra"
-                  style="flex-shrink:0;padding:8px 12px;border-radius:10px;
-                         background:linear-gradient(135deg,rgba(168,85,247,.25),rgba(124,58,237,.2));
-                         color:#e9d5ff;border:1.5px solid rgba(168,85,247,.55);
-                         font-size:.72em;font-weight:900;cursor:pointer;letter-spacing:.04em;
-                         -webkit-tap-highlight-color:transparent;white-space:nowrap;
-                         box-shadow:0 0 12px -3px rgba(168,85,247,.4)">
-            🔓 SOLTAR
-          </button>
-        </div>
-      </div>
-
-      <!-- [v2.13.18] Checklist principal de items (igual estilo que pickup, color morado) -->
-      <div id="despListaSombraChecklist" class="space-y-2.5 mb-3" style="display:none"></div>
-
     </div><!-- /despHeaderCollapsible -->
 
     <!-- ═══ PANEL CÁMARA INLINE (telón abierto) ═══════════════════ -->
@@ -4927,6 +4895,37 @@
 
     <!-- ═══ CHECKLIST INLINE DEL PICKUP (visible solo si hay pickup activo) ═══ -->
     <div id="despPickupChecklistInline" class="space-y-2.5 mb-3" style="display:none"></div>
+
+    <!-- ═══ [v2.13.26] BANNER + CHECKLIST SOMBRA — AFUERA del header para que
+         sigan visibles cuando se abre cámara/scan (igual que pickup) ═══ -->
+    <div id="despSombraActivaBanner" class="pkact-banner is-sombra" style="display:none;margin-bottom:10px">
+      <div class="flex items-center gap-3">
+        <div style="font-size:24px;flex-shrink:0">📋</div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-bold text-sm" id="sombraActivaTitulo" style="color:#d8b4fe">Sombra activa</span>
+            <span class="text-xs text-slate-400" id="sombraActivaProgresoLbl">0/0</span>
+            <span class="pkck-autosave">
+              <span class="pkck-autosave-dot"></span>
+              <span>sync</span>
+            </span>
+          </div>
+          <div class="pkact-bar-bg">
+            <div class="pkact-bar-fill" id="sombraActivaBar" style="width:0%"></div>
+          </div>
+        </div>
+        <button onclick="DespachoView.cerrarListaSombra()" title="Soltar sombra"
+                style="flex-shrink:0;padding:8px 12px;border-radius:10px;
+                       background:linear-gradient(135deg,rgba(168,85,247,.25),rgba(124,58,237,.2));
+                       color:#e9d5ff;border:1.5px solid rgba(168,85,247,.55);
+                       font-size:.72em;font-weight:900;cursor:pointer;letter-spacing:.04em;
+                       -webkit-tap-highlight-color:transparent;white-space:nowrap;
+                       box-shadow:0 0 12px -3px rgba(168,85,247,.4)">
+          🔓 SOLTAR
+        </button>
+      </div>
+    </div>
+    <div id="despListaSombraChecklist" class="space-y-2.5 mb-3" style="display:none"></div>
 
     <!-- ═══ SECCIÓN EXTRAS (items escaneados fuera del pickup) ═══ -->
     <div id="despExtrasSection" class="desp-extras-section" style="display:none">
