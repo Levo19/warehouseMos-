@@ -7911,12 +7911,20 @@ const EnvasadorView = (() => {
   function _render() {
     const container = document.getElementById('listEnvasadorCatalog');
     if (!container) return;
-    const list = _filtroUrg ? _catalog.filter(b => b.worstUrg) : _catalog;
+    let list = _filtroUrg ? _catalog.filter(b => b.worstUrg) : _catalog;
+    // [v2.13.33] Filtro búsqueda inteligente
+    if (typeof _searchQuery !== 'undefined' && _searchQuery) {
+      list = list.filter(b => _matchBase(b, _searchQuery));
+    }
 
     if (!list.length) {
-      container.innerHTML = _filtroUrg
-        ? '<div class="card text-center py-8"><p class="text-2xl mb-2">✅</p><p class="font-semibold">¡Sin urgentes!</p></div>'
-        : '<p class="text-slate-500 text-center py-8 text-sm">Sin productos envasables configurados</p>';
+      if (typeof _searchQuery !== 'undefined' && _searchQuery) {
+        container.innerHTML = `<div class="card text-center py-8"><p class="text-2xl mb-2">🔍</p><p class="font-semibold">Sin resultados para "${escHtml(_searchQuery)}"</p><p class="text-xs text-slate-500 mt-1">Probá con menos palabras o el código de barras</p></div>`;
+      } else {
+        container.innerHTML = _filtroUrg
+          ? '<div class="card text-center py-8"><p class="text-2xl mb-2">✅</p><p class="font-semibold">¡Sin urgentes!</p></div>'
+          : '<p class="text-slate-500 text-center py-8 text-sm">Sin productos envasables configurados</p>';
+      }
       return;
     }
 
@@ -8051,7 +8059,113 @@ const EnvasadorView = (() => {
     _render();
   }
 
-  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh };
+  // [v2.13.33] Búsqueda inteligente: voz + código (canon+equiv) + descripción
+  let _searchQuery = '';
+  let _searchOpen = false;
+
+  function searchToggle() {
+    _searchOpen = !_searchOpen;
+    const tb = document.getElementById('envToolbar');
+    const inp = document.getElementById('envSearchInput');
+    if (!tb) return;
+    tb.classList.toggle('env-search-open', _searchOpen);
+    try { SoundFX && SoundFX.ping && SoundFX.ping(); } catch(_){}
+    if (_searchOpen) {
+      setTimeout(() => { try { inp && inp.focus(); } catch(_){} }, 300);
+    } else {
+      // Limpiar al cerrar
+      _searchQuery = '';
+      if (inp) inp.value = '';
+      try { Voice && Voice.stopListen && Voice.stopListen(); } catch(_){}
+      const mic = document.getElementById('envSearchMic');
+      if (mic) mic.classList.remove('recording');
+      _render();
+    }
+  }
+
+  function searchInput(val) {
+    _searchQuery = String(val || '').trim();
+    _render();
+    // Si es código de barras escaneado (8+ dígitos puros), sonido + flash al match
+    if (/^\d{8,}$/.test(_searchQuery)) {
+      setTimeout(() => {
+        const cards = document.querySelectorAll('#listEnvasadorCatalog .env-base-card');
+        if (cards.length === 1) {
+          cards[0].classList.add('env-search-result-flash');
+          try { SoundFX && SoundFX.beep && SoundFX.beep(); } catch(_){}
+          setTimeout(() => cards[0].classList.remove('env-search-result-flash'), 700);
+        }
+      }, 50);
+    }
+  }
+
+  function searchVoice() {
+    if (!window.Voice || !Voice.supported || !Voice.supported().stt) {
+      alert('🎤 Tu navegador no soporta reconocimiento de voz.');
+      return;
+    }
+    const mic = document.getElementById('envSearchMic');
+    const inp = document.getElementById('envSearchInput');
+    if (!inp) return;
+    if (mic && mic.classList.contains('recording')) {
+      try { Voice.stopListen(); } catch(_){}
+      mic.classList.remove('recording');
+      return;
+    }
+    if (mic) mic.classList.add('recording');
+    try { SoundFX && SoundFX.click && SoundFX.click(); } catch(_){}
+    Voice.listen({
+      lang: 'es-PE',
+      interim: true,
+      onResult: (txt, isFinal) => {
+        inp.value = txt;
+        searchInput(txt);
+        if (isFinal) {
+          if (mic) mic.classList.remove('recording');
+        }
+      },
+      onError: () => { if (mic) mic.classList.remove('recording'); },
+      onEnd:   () => { if (mic) mic.classList.remove('recording'); }
+    });
+  }
+
+  // Match: prioridad código → descripción
+  // Si query es numérica 8+ dígitos: solo código (canon + equiv)
+  // Si no: descripción (case-insensitive, tokens, sin acentos)
+  function _matchBase(base, query) {
+    if (!query) return true;
+    const q = query.toLowerCase().trim();
+    const esCodigo = /^\d{4,}$/.test(q);
+
+    if (esCodigo) {
+      // Buscar en codigoBarra del base + sus derivados
+      const codigosBase = [base.codigoBarra, base.idProducto]
+        .filter(Boolean).map(c => String(c).toLowerCase());
+      const codigosDeriv = (base.derivados || []).flatMap(d =>
+        [d.codigoBarra, d.idProducto].filter(Boolean).map(c => String(c).toLowerCase())
+      );
+      // Equivalencias por skuBase
+      const equivs = (typeof OfflineManager !== 'undefined' && OfflineManager.getEquivalenciasCache)
+        ? OfflineManager.getEquivalenciasCache() : [];
+      const skuBase = String(base.skuBase || base.idProducto || '').toUpperCase();
+      const equivCodes = equivs
+        .filter(e => String(e.skuBase || '').toUpperCase() === skuBase)
+        .map(e => String(e.codigoBarra || '').toLowerCase());
+      const todos = [...codigosBase, ...codigosDeriv, ...equivCodes];
+      return todos.some(c => c.includes(q));
+    }
+
+    // Descripción — case + sin acentos, tokens
+    const norm = s => String(s || '')
+      .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const desc = norm(base.descripcion) + ' ' +
+      (base.derivados || []).map(d => norm(d.descripcion)).join(' ');
+    const tokens = norm(q).split(/\s+/).filter(Boolean);
+    return tokens.every(t => desc.includes(t));
+  }
+
+  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh,
+           searchToggle, searchInput, searchVoice };
 })();
 
 // ════════════════════════════════════════════════
