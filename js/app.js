@@ -8486,6 +8486,54 @@ const PrintHub = (() => {
 })();
 window.PrintHub = PrintHub;
 
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.39] Keypad táctil DELEGADO para inputs de clave admin
+// Un solo listener global maneja TODOS los keypads (sheetEnvAuth +
+// sheetReabrirAdmin + futuros). Cada keypad declara su target con
+// data-target="<inputId>". Las teclas con data-d, data-del, data-ok.
+// ════════════════════════════════════════════════════════════════════
+document.addEventListener('click', function(e) {
+  const btn = e.target.closest('.wh-key');
+  if (!btn) return;
+  const keypad = btn.closest('.wh-keypad');
+  if (!keypad) return;
+  const targetId = keypad.dataset.target;
+  const input = targetId ? document.getElementById(targetId) : null;
+  if (!input) return;
+  e.preventDefault();
+  try { if (navigator.vibrate) navigator.vibrate(15); } catch(_){}
+  if (btn.hasAttribute('data-del')) {
+    input.value = String(input.value || '').slice(0, -1);
+    return;
+  }
+  if (btn.hasAttribute('data-ok-reabrir')) {
+    // Confirmación específica reabrir guía
+    if (typeof App !== 'undefined' && App.confirmarReabrirAdmin) {
+      App.confirmarReabrirAdmin();
+    }
+    return;
+  }
+  if (btn.hasAttribute('data-ok')) {
+    // Confirmación envasado auth
+    if (typeof EnvasadosView !== 'undefined' && EnvasadosView.validarAuth) {
+      EnvasadosView.validarAuth();
+    }
+    return;
+  }
+  const d = btn.dataset.d;
+  if (d && (input.value || '').length < (parseInt(input.maxLength, 10) || 8)) {
+    input.value = (input.value || '') + String(d);
+    // Auto-submit al alcanzar maxlength (consistente con MOS AdminAuthModal)
+    const max = parseInt(input.maxLength, 10) || 8;
+    if (input.value.length === max) {
+      setTimeout(() => {
+        if (targetId === 'reabrirAdminInput' && typeof App !== 'undefined' && App.confirmarReabrirAdmin) App.confirmarReabrirAdmin();
+        else if (targetId === 'envAuthClave' && typeof EnvasadosView !== 'undefined' && EnvasadosView.validarAuth) EnvasadosView.validarAuth();
+      }, 120);
+    }
+  }
+});
+
 // ════════════════════════════════════════════════
 // DESPACHO RÁPIDO
 // ════════════════════════════════════════════════

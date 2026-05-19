@@ -6091,6 +6091,43 @@
     }
     .clave-admin-input:focus { border-color: #3b82f6; outline: none; }
 
+    /* [v2.13.39] Keypad táctil para inputs de clave admin */
+    .wh-keypad {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
+      margin-top: 12px;
+    }
+    .wh-key {
+      padding: 12px 0; font-size: 17px; font-weight: 700;
+      background: linear-gradient(180deg, rgba(30,41,59,.85), rgba(15,23,42,.85));
+      border: 1px solid rgba(51,65,85,.5);
+      color: #e2e8f0;
+      border-radius: 10px; cursor: pointer;
+      transition: all .12s;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    .wh-key:hover {
+      background: linear-gradient(180deg, rgba(51,65,85,.85), rgba(30,41,59,.85));
+      border-color: rgba(167,139,250,.5);
+    }
+    .wh-key:active {
+      transform: scale(.94);
+      background: rgba(99,102,241,.3);
+    }
+    .wh-key-del {
+      color: #fca5a5;
+      background: linear-gradient(180deg, rgba(127,29,29,.4), rgba(69,10,10,.5));
+      border-color: rgba(239,68,68,.4);
+    }
+    .wh-key-ok {
+      color: #6ee7b7;
+      background: linear-gradient(180deg, rgba(6,78,59,.5), rgba(4,47,38,.6));
+      border-color: rgba(16,185,129,.5);
+    }
+    .wh-key-ok:hover {
+      background: linear-gradient(180deg, rgba(16,185,129,.5), rgba(6,78,59,.7));
+    }
+
     /* ── Camera state border (5 estados) ── */
     .cam-state-listo       { border: 3px solid rgba(34,197,94,.7); box-shadow: 0 0 12px rgba(34,197,94,.3); }
     .cam-state-procesando  { border: 3px solid rgba(245,158,11,.7); animation: camPulse 1s infinite; }
@@ -7600,8 +7637,23 @@
   <div class="mb-3">
     <label class="text-xs text-slate-400">Clave admin · 8 dígitos (4 globales + 4 PIN personal)</label>
     <input id="envAuthClave" class="input mt-1 text-center font-mono text-lg tracking-widest"
-           type="password" inputmode="numeric" maxlength="8" placeholder="••••••••"
-           autocomplete="off"/>
+           type="password" inputmode="none" maxlength="8" placeholder="••••••••"
+           autocomplete="off" readonly/>
+    <!-- [v2.13.39] Keypad táctil — manipula el input value directamente -->
+    <div class="wh-keypad" data-target="envAuthClave">
+      <button class="wh-key" data-d="1">1</button>
+      <button class="wh-key" data-d="2">2</button>
+      <button class="wh-key" data-d="3">3</button>
+      <button class="wh-key" data-d="4">4</button>
+      <button class="wh-key" data-d="5">5</button>
+      <button class="wh-key" data-d="6">6</button>
+      <button class="wh-key" data-d="7">7</button>
+      <button class="wh-key" data-d="8">8</button>
+      <button class="wh-key" data-d="9">9</button>
+      <button class="wh-key wh-key-del" data-del>⌫</button>
+      <button class="wh-key" data-d="0">0</button>
+      <button class="wh-key wh-key-ok" data-ok>✓</button>
+    </div>
     <p id="envAuthErr" class="text-xs text-red-400 mt-1 min-h-[16px] text-center"></p>
   </div>
 
@@ -8587,8 +8639,23 @@
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
   <p class="font-bold text-base mb-2">🔒 Guía cerrada</p>
   <p class="text-xs text-slate-400 mb-4">Reabrir requiere clave de administrador.</p>
-  <input id="reabrirAdminInput" type="password" inputmode="numeric" maxlength="8"
-         class="clave-admin-input" placeholder="• • • • • • • •"/>
+  <input id="reabrirAdminInput" type="password" inputmode="none" maxlength="8"
+         class="clave-admin-input" placeholder="• • • • • • • •" readonly/>
+  <!-- [v2.13.39] Keypad táctil para reabrir guía -->
+  <div class="wh-keypad" data-target="reabrirAdminInput">
+    <button class="wh-key" data-d="1">1</button>
+    <button class="wh-key" data-d="2">2</button>
+    <button class="wh-key" data-d="3">3</button>
+    <button class="wh-key" data-d="4">4</button>
+    <button class="wh-key" data-d="5">5</button>
+    <button class="wh-key" data-d="6">6</button>
+    <button class="wh-key" data-d="7">7</button>
+    <button class="wh-key" data-d="8">8</button>
+    <button class="wh-key" data-d="9">9</button>
+    <button class="wh-key wh-key-del" data-del>⌫</button>
+    <button class="wh-key" data-d="0">0</button>
+    <button class="wh-key wh-key-ok" data-ok-reabrir>✓</button>
+  </div>
   <label class="flex items-center gap-2 mt-3 mb-4">
     <input id="reabrirAdminRemember" type="checkbox"/>
     <span class="text-xs text-slate-400">Recordar 30 min en este dispositivo</span>
