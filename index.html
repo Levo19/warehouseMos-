@@ -2019,6 +2019,48 @@
       0%,100% { opacity:1; }
       50%     { opacity:.7; }
     }
+    /* [v2.13.37] Filtros + agrupación por zona/estación */
+    .selimp-filtros {
+      display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+      padding:6px 4px 10px;
+      border-bottom:1px solid rgba(51,65,85,.4);
+      margin-bottom:6px;
+    }
+    .selimp-filtro-chip {
+      padding:4px 10px;border-radius:99px;cursor:pointer;
+      font-size:.7em;font-weight:800;letter-spacing:.02em;
+      background:rgba(99,102,241,.18);
+      border:1px solid rgba(99,102,241,.45);
+      color:#c4b5fd;
+      transition:all .15s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .selimp-filtro-chip:hover { background:rgba(99,102,241,.3); }
+    .selimp-filtro-chip:active { transform:scale(.95); }
+    .selimp-filtro-chip.is-all {
+      background:rgba(168,85,247,.22);
+      border-color:rgba(168,85,247,.5);
+      color:#d8b4fe;
+    }
+    .selimp-filtro-tipo {
+      background:rgba(34,197,94,.16);
+      border-color:rgba(34,197,94,.4);
+      color:#86efac;
+    }
+    .selimp-contador {
+      margin-left:auto;font-size:.66em;color:#64748b;
+      font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+    }
+    .selimp-zona-header {
+      font-size:.66em;font-weight:800;letter-spacing:.08em;
+      color:#22d3ee;text-transform:uppercase;
+      padding:8px 2px 3px;margin-top:4px;
+    }
+    .selimp-est-header {
+      font-size:.6em;font-weight:700;letter-spacing:.06em;
+      color:#94a3b8;text-transform:uppercase;
+      padding:2px 8px 3px;margin-left:8px;
+    }
 
     /* ── MEMBRETE DIGITAL — overlay de códigos de barra ─────────── */
     .cod-overlay {

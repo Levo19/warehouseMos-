@@ -1157,6 +1157,21 @@ const Session = (() => {
     _intervalGpsWH = setInterval(() => {
       if (document.visibilityState === 'visible') _gpsRegistrarWH(false);
     }, 5 * 60 * 1000);
+
+    // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
+    // Cuando el admin abra el modal de elegir impresora, ya estará cacheado
+    // → modal abre INSTANT en vez de "⏳ Cargando impresoras..." por 2-3s.
+    if (esAdmin && typeof API !== 'undefined' && API.getImpresorasEcosistema) {
+      setTimeout(() => {
+        API.getImpresorasEcosistema().then(r => {
+          const arr = (r && r.ok && r.data) || [];
+          try {
+            window._whPrintersCache = { ts: Date.now(), data: arr };
+            localStorage.setItem('wh_printers_cache', JSON.stringify(window._whPrintersCache));
+          } catch(_){}
+        }).catch(() => {});
+      }, 1500);
+    }
   }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
@@ -8206,6 +8221,11 @@ const PrintHub = (() => {
     return r === 'MASTER' || r === 'ADMINISTRADOR';
   }
 
+  // [v2.13.37] Filtros del modal — persisten entre aperturas en sesión.
+  // filtroZona: null = mi zona (WH_CONFIG.zona) · '__all__' = todas las zonas
+  // filtroTipo: null = todos · 'TICKET' · 'ADHESIVO' · 'ZPL'
+  let _filtros = { filtroZona: null, filtroTipo: null };
+
   // Punto de entrada único. apiMethod = nombre del método en API
   // (ej. 'imprimirTicketGuia'). titulo = texto descriptivo para el modal.
   function imprimir(apiMethod, params, titulo) {
@@ -8220,22 +8240,101 @@ const PrintHub = (() => {
       const lst = document.getElementById('selImpresoraLista');
       const tit = document.getElementById('selImpresoraTitulo');
       if (tit) tit.textContent = titulo || 'Imprimir';
-      if (lst) lst.innerHTML = '<div class="selimp-loading">⏳ Cargando impresoras...</div>';
+      // [v2.13.37] Pintar INSTANT desde cache si existe
+      let pintadoFromCache = false;
+      try {
+        const raw = localStorage.getItem('wh_printers_cache');
+        if (raw) {
+          const cache = JSON.parse(raw);
+          if (cache && cache.data && (Date.now() - (cache.ts || 0) < 5 * 60 * 1000)) {
+            window._whPrintersCache = cache;
+            if (lst) _renderLista(cache.data);
+            pintadoFromCache = true;
+          }
+        }
+      } catch(_){}
+      if (!pintadoFromCache && lst) {
+        lst.innerHTML = '<div class="selimp-loading">⏳ Cargando impresoras...</div>';
+      }
       if (ov) { ov.style.display = 'flex'; requestAnimationFrame(() => ov.classList.add('is-open')); }
+      // Siempre refrescar en bg (incluso si pintamos de cache)
       API.getImpresorasEcosistema().then(r => {
         const imps = (r && r.ok && r.data) || [];
+        // Actualizar cache
+        try {
+          const cache = { ts: Date.now(), data: imps };
+          window._whPrintersCache = cache;
+          localStorage.setItem('wh_printers_cache', JSON.stringify(cache));
+        } catch(_){}
         _renderLista(imps);
       }).catch(() => {
-        if (lst) lst.innerHTML = '<div class="selimp-err">No se pudieron cargar las impresoras. Toca "Almacén" para usar la de siempre.</div>' +
-          '<button class="selimp-card selimp-default" onclick="PrintHub.elegir(\'\')"><div class="selimp-ico">🏭</div><div class="selimp-info"><div class="selimp-nombre">Impresora del Almacén</div><div class="selimp-meta">Por defecto</div></div></button>';
+        if (!pintadoFromCache && lst) {
+          lst.innerHTML = '<div class="selimp-err">No se pudieron cargar las impresoras. Toca "Almacén" para usar la de siempre.</div>' +
+            '<button class="selimp-card selimp-default" onclick="PrintHub.elegir(\'\')"><div class="selimp-ico">🏭</div><div class="selimp-info"><div class="selimp-nombre">Impresora del Almacén</div><div class="selimp-meta">Por defecto</div></div></button>';
+        }
       });
     });
   }
 
-  function _renderLista(imps) {
+  // [v2.13.37] Aplica los filtros activos a una lista de impresoras
+  function _aplicarFiltros(imps) {
+    if (!Array.isArray(imps)) return [];
+    const miZona = String(window.WH_CONFIG?.zona || '').trim();
+    return imps.filter(p => {
+      // Filtro por tipo
+      if (_filtros.filtroTipo && String(p.tipo || '').toUpperCase() !== _filtros.filtroTipo) return false;
+      // Filtro por zona — null = mi zona (default), '__all__' = todas
+      if (_filtros.filtroZona === '__all__') return true;
+      const zonaProp = String(p.idZona || '').trim();
+      const zonaUser = _filtros.filtroZona || miZona;
+      if (!zonaUser) return true; // si no hay zona del user, mostrar todas
+      return zonaProp === zonaUser || !zonaProp; // permite impresoras sin zona asignada
+    });
+  }
+
+  // [v2.13.37] Cambia un filtro y re-renderiza
+  function toggleZona() {
+    _filtros.filtroZona = _filtros.filtroZona === '__all__' ? null : '__all__';
+    const imps = (window._whPrintersCache && window._whPrintersCache.data) || [];
+    _renderLista(imps);
+  }
+  function toggleTipo() {
+    const tipos = [null, 'TICKET', 'ADHESIVO', 'ZPL'];
+    const idx = tipos.indexOf(_filtros.filtroTipo);
+    _filtros.filtroTipo = tipos[(idx + 1) % tipos.length];
+    const imps = (window._whPrintersCache && window._whPrintersCache.data) || [];
+    _renderLista(imps);
+  }
+
+  // [v2.13.37] _renderLista refactorizado — filtros + agrupación por zona
+  function _renderLista(impsRaw) {
     const lst = document.getElementById('selImpresoraLista');
     if (!lst) return;
+    const _stTx = {
+      ONLINE: 'online', PC_OFFLINE: 'PC apagada', PRINTER_OFFLINE: 'apagada',
+      SIN_PAPEL: 'sin papel', SIN_TINTA: 'sin tinta', ATASCO: 'atasco',
+      TAPA_ABIERTA: 'tapa abierta', PAUSED: 'pausada', DISABLED: 'deshabilitada',
+      ERROR: 'error', SIN_ID: 'sin ID', ID_INVALIDO: 'ID inválido', UNKNOWN: 'sin señal'
+    };
+    // Aplicar filtros activos
+    const imps = _aplicarFiltros(impsRaw);
+    const miZona = String(window.WH_CONFIG?.zona || '').trim();
+    const tipoLbl = _filtros.filtroTipo
+      ? (_filtros.filtroTipo === 'TICKET' ? '🧾 tickets'
+       : _filtros.filtroTipo === 'ADHESIVO' ? '🏷 adhesivos' : '📄 ZPL')
+      : '🧾 todos los tipos';
+    const zonaLbl = _filtros.filtroZona === '__all__' ? '🌐 todas las zonas' : `📍 ${miZona || 'mi zona'}`;
+    const totalRaw = (impsRaw || []).length;
+    const totalFilt = imps.length;
+    // Barra de filtros + contador
     let html = `
+      <div class="selimp-filtros">
+        <button class="selimp-filtro-chip ${_filtros.filtroZona === '__all__' ? 'is-all' : ''}"
+                onclick="PrintHub.toggleZona()">${zonaLbl}</button>
+        <button class="selimp-filtro-chip selimp-filtro-tipo"
+                onclick="PrintHub.toggleTipo()">${tipoLbl}</button>
+        <span class="selimp-contador">${totalFilt === totalRaw ? totalRaw : (totalFilt + '/' + totalRaw)} impresora${totalFilt !== 1 ? 's' : ''}</span>
+      </div>
       <button class="selimp-card selimp-default" onclick="PrintHub.elegir('')">
         <div class="selimp-ico">🏭</div>
         <div class="selimp-info">
@@ -8244,50 +8343,75 @@ const PrintHub = (() => {
         </div>
       </button>`;
     if (!imps.length) {
-      html += '<div class="selimp-empty">No hay otras impresoras activas registradas en el ecosistema</div>';
-    } else {
-      // [v2.13.36] Schema semántico v2.41.82 — 12 estados con razón, icon, color
-      const _stTx = {
-        ONLINE: 'online', PC_OFFLINE: 'PC apagada', PRINTER_OFFLINE: 'apagada',
-        SIN_PAPEL: 'sin papel', SIN_TINTA: 'sin tinta', ATASCO: 'atasco',
-        TAPA_ABIERTA: 'tapa abierta', PAUSED: 'pausada', DISABLED: 'deshabilitada',
-        ERROR: 'error', SIN_ID: 'sin ID', ID_INVALIDO: 'ID inválido', UNKNOWN: 'sin señal'
-      };
-      html += imps.map(i => {
-        const ico = String(i.app || i.appOrigen || '').indexOf('express') >= 0 ? '🛒' : '🏭';
-        const enUso = i.enUso
-          ? ` · 🟢 en uso${i.enUsoPor ? ' (' + escHtml(i.enUsoPor) + ')' : ''}`
-          : '';
-        const st = i.state || (i.online ? 'ONLINE' : 'UNKNOWN');
-        const stTxt = _stTx[st] || 'sin señal';
-        const stIcon = i.icon || (st === 'ONLINE' ? '🟢' : '❔');
-        const disabled = st !== 'ONLINE';
-        const cardCls = `selimp-card ${i.enUso ? 'is-enuso' : ''} ${disabled ? 'is-disabled' : ''} selimp-st-${st.toLowerCase()}`;
-        const onClick = disabled
-          ? `onclick="event.preventDefault();PrintHub._avisar('${escAttr(i.reason || stTxt)}')"`
-          : `onclick="PrintHub.elegir('${escAttr(i.printNodeId)}')"`;
-        const reasonLine = (disabled && i.reason) ? `<div class="selimp-reason">${escHtml(i.reason)}</div>` : '';
-        const compInfo = i.computer
-          ? ` · 💻 ${escHtml(i.computer)}${i.computerState && i.computerState !== 'connected' ? ' <span class="selimp-pc-off">(desconectada)</span>' : ''}`
-          : '';
-        const subMeta = [
-          i.tipo ? (i.tipo === 'ADHESIVO' ? '🏷 ' : '🧾 ') + i.tipo : '',
-          i.ubicacion || i.zonaNombre || ''
-        ].filter(Boolean).join(' · ');
-        return `
-        <button class="${cardCls}" ${onClick} title="${escAttr(i.reason || stTxt)}">
-          <div class="selimp-ico">${ico}</div>
-          <div class="selimp-info">
-            <div class="selimp-nombre">
-              ${escHtml(i.nombre)}
-              <span class="selimp-state-pill selimp-state-${st.toLowerCase()}">${stIcon} ${stTxt}</span>
-            </div>
-            <div class="selimp-meta">${escHtml(subMeta)}${compInfo}${enUso}</div>
-            ${reasonLine}
-          </div>
-        </button>`;
-      }).join('');
+      const msgEmpty = totalRaw > 0
+        ? `<div class="selimp-empty">Ninguna impresora coincide con los filtros<br><span class="text-xs">Cambia los chips arriba o "🌐 todas las zonas"</span></div>`
+        : `<div class="selimp-empty">No hay otras impresoras activas registradas en el ecosistema</div>`;
+      html += msgEmpty;
+      lst.innerHTML = html;
+      return;
     }
+    // Agrupar por zona+estación (mismo patrón que MOS _liqRenderPrinters)
+    const zonas = {};
+    imps.forEach(p => {
+      const zk = p.idZona || '_sin_zona';
+      const zLbl = p.zonaNombre || p.idZona || '(sin zona)';
+      if (!zonas[zk]) zonas[zk] = { label: zLbl, estaciones: {}, sinEst: [] };
+      if (p.idEstacion) {
+        const ek = p.idEstacion;
+        if (!zonas[zk].estaciones[ek]) {
+          zonas[zk].estaciones[ek] = { label: p.estacionNombre || p.idEstacion, items: [] };
+        }
+        zonas[zk].estaciones[ek].items.push(p);
+      } else {
+        zonas[zk].sinEst.push(p);
+      }
+    });
+    const _renderCard = (i) => {
+      const ico = String(i.app || i.appOrigen || '').indexOf('express') >= 0 ? '🛒' : '🏭';
+      const enUso = i.enUso
+        ? ` · 🟢 en uso${i.enUsoPor ? ' (' + escHtml(i.enUsoPor) + ')' : ''}`
+        : '';
+      const st = i.state || (i.online ? 'ONLINE' : 'UNKNOWN');
+      const stTxt = _stTx[st] || 'sin señal';
+      const stIcon = i.icon || (st === 'ONLINE' ? '🟢' : '❔');
+      const disabled = st !== 'ONLINE';
+      const cardCls = `selimp-card ${i.enUso ? 'is-enuso' : ''} ${disabled ? 'is-disabled' : ''} selimp-st-${st.toLowerCase()}`;
+      const onClick = disabled
+        ? `onclick="event.preventDefault();PrintHub._avisar('${escAttr(i.reason || stTxt)}')"`
+        : `onclick="PrintHub.elegir('${escAttr(i.printNodeId)}')"`;
+      const reasonLine = (disabled && i.reason) ? `<div class="selimp-reason">${escHtml(i.reason)}</div>` : '';
+      const compInfo = i.computer
+        ? ` · 💻 ${escHtml(i.computer)}${i.computerState && i.computerState !== 'connected' ? ' <span class="selimp-pc-off">(desconectada)</span>' : ''}`
+        : '';
+      const tipoIco = i.tipo === 'ADHESIVO' ? '🏷 ' : i.tipo === 'ZPL' ? '📄 ' : '🧾 ';
+      const subMeta = (i.tipo ? tipoIco + i.tipo : '') + compInfo + enUso;
+      return `
+      <button class="${cardCls}" ${onClick} title="${escAttr(i.reason || stTxt)}">
+        <div class="selimp-ico">${ico}</div>
+        <div class="selimp-info">
+          <div class="selimp-nombre">
+            ${escHtml(i.nombre)}
+            <span class="selimp-state-pill selimp-state-${st.toLowerCase()}">${stIcon} ${stTxt}</span>
+          </div>
+          <div class="selimp-meta">${subMeta}</div>
+          ${reasonLine}
+        </div>
+      </button>`;
+    };
+    Object.keys(zonas)
+      .sort((a, b) => zonas[a].label.localeCompare(zonas[b].label))
+      .forEach(zk => {
+        const z = zonas[zk];
+        html += `<div class="selimp-zona-header">📍 ${escHtml(z.label)}</div>`;
+        Object.keys(z.estaciones).sort((a, b) => z.estaciones[a].label.localeCompare(z.estaciones[b].label)).forEach(ek => {
+          const e = z.estaciones[ek];
+          html += `<div class="selimp-est-header">🏷 ${escHtml(e.label)}</div>`;
+          html += e.items.map(_renderCard).join('');
+        });
+        if (z.sinEst.length) {
+          html += z.sinEst.map(_renderCard).join('');
+        }
+      });
     lst.innerHTML = html;
   }
 
@@ -8325,7 +8449,7 @@ const PrintHub = (() => {
     _pendiente = null;
   }
 
-  return { imprimir, elegir, cancelar, _avisar };
+  return { imprimir, elegir, cancelar, _avisar, toggleZona, toggleTipo };
 })();
 window.PrintHub = PrintHub;
 
