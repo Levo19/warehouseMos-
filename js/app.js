@@ -8246,22 +8246,54 @@ const PrintHub = (() => {
     if (!imps.length) {
       html += '<div class="selimp-empty">No hay otras impresoras activas registradas en el ecosistema</div>';
     } else {
+      // [v2.13.36] Schema semántico v2.41.82 — 12 estados con razón, icon, color
+      const _stTx = {
+        ONLINE: 'online', PC_OFFLINE: 'PC apagada', PRINTER_OFFLINE: 'apagada',
+        SIN_PAPEL: 'sin papel', SIN_TINTA: 'sin tinta', ATASCO: 'atasco',
+        TAPA_ABIERTA: 'tapa abierta', PAUSED: 'pausada', DISABLED: 'deshabilitada',
+        ERROR: 'error', SIN_ID: 'sin ID', ID_INVALIDO: 'ID inválido', UNKNOWN: 'sin señal'
+      };
       html += imps.map(i => {
-        const ico = String(i.app || '').indexOf('express') >= 0 ? '🛒' : '🏭';
+        const ico = String(i.app || i.appOrigen || '').indexOf('express') >= 0 ? '🛒' : '🏭';
         const enUso = i.enUso
           ? ` · 🟢 en uso${i.enUsoPor ? ' (' + escHtml(i.enUsoPor) + ')' : ''}`
           : '';
+        const st = i.state || (i.online ? 'ONLINE' : 'UNKNOWN');
+        const stTxt = _stTx[st] || 'sin señal';
+        const stIcon = i.icon || (st === 'ONLINE' ? '🟢' : '❔');
+        const disabled = st !== 'ONLINE';
+        const cardCls = `selimp-card ${i.enUso ? 'is-enuso' : ''} ${disabled ? 'is-disabled' : ''} selimp-st-${st.toLowerCase()}`;
+        const onClick = disabled
+          ? `onclick="event.preventDefault();PrintHub._avisar('${escAttr(i.reason || stTxt)}')"`
+          : `onclick="PrintHub.elegir('${escAttr(i.printNodeId)}')"`;
+        const reasonLine = (disabled && i.reason) ? `<div class="selimp-reason">${escHtml(i.reason)}</div>` : '';
+        const compInfo = i.computer
+          ? ` · 💻 ${escHtml(i.computer)}${i.computerState && i.computerState !== 'connected' ? ' <span class="selimp-pc-off">(desconectada)</span>' : ''}`
+          : '';
+        const subMeta = [
+          i.tipo ? (i.tipo === 'ADHESIVO' ? '🏷 ' : '🧾 ') + i.tipo : '',
+          i.ubicacion || i.zonaNombre || ''
+        ].filter(Boolean).join(' · ');
         return `
-        <button class="selimp-card ${i.enUso ? 'is-enuso' : ''}" onclick="PrintHub.elegir('${escAttr(i.printNodeId)}')">
+        <button class="${cardCls}" ${onClick} title="${escAttr(i.reason || stTxt)}">
           <div class="selimp-ico">${ico}</div>
           <div class="selimp-info">
-            <div class="selimp-nombre">${escHtml(i.nombre)}</div>
-            <div class="selimp-meta">${escHtml(i.ubicacion || '')}${enUso}</div>
+            <div class="selimp-nombre">
+              ${escHtml(i.nombre)}
+              <span class="selimp-state-pill selimp-state-${st.toLowerCase()}">${stIcon} ${stTxt}</span>
+            </div>
+            <div class="selimp-meta">${escHtml(subMeta)}${compInfo}${enUso}</div>
+            ${reasonLine}
           </div>
         </button>`;
       }).join('');
     }
     lst.innerHTML = html;
+  }
+
+  // [v2.13.36] Aviso cuando user toca una impresora no disponible
+  function _avisar(razon) {
+    if (typeof toast === 'function') toast('🖨 ' + (razon || 'No disponible'), 'error', 5000);
   }
 
   function elegir(printerIdOverride) {
@@ -8293,7 +8325,7 @@ const PrintHub = (() => {
     _pendiente = null;
   }
 
-  return { imprimir, elegir, cancelar };
+  return { imprimir, elegir, cancelar, _avisar };
 })();
 window.PrintHub = PrintHub;
 

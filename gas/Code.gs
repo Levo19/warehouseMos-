@@ -436,15 +436,66 @@ function getPrinterNodeId(tipo, idZona) {
 // ahora mismo (tienen una caja ME abierta apuntando a ese printNodeId).
 // La usa el modal de selección de impresora para admin/master en WH.
 // ════════════════════════════════════════════════════════════════════
+// [v2.13.35] Delega a MOS para obtener estado semántico de PrintNode
+// (12 estados: ONLINE, PC_OFFLINE, SIN_PAPEL, SIN_TINTA, etc).
+// Antes este endpoint leía solo la hoja IMPRESORAS y no consultaba
+// PrintNode → no había forma de saber si la impresora podía imprimir.
+// Si MOS no responde, fallback al modo legacy local.
+var _MOS_GAS_URL_PRINT = 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
+
 function getImpresorasEcosistema() {
+  try {
+    var resp = UrlFetchApp.fetch(_MOS_GAS_URL_PRINT + '?action=getPrintNodePrinters', {
+      method: 'get',
+      muteHttpExceptions: true,
+      followRedirects: true
+    });
+    if (resp.getResponseCode() === 200) {
+      var json = JSON.parse(resp.getContentText() || '{}');
+      if (json.ok && Array.isArray(json.data)) {
+        // Enriquecer con "enUso" (caja ME abierta apuntando a esta impresora)
+        var enUsoSet = {};
+        try {
+          var cajasSh = _getMosExpressSS().getSheetByName('CAJAS');
+          if (cajasSh) {
+            _sheetToObjects(cajasSh).forEach(function(c) {
+              if (String(c.Estado || '').trim().toUpperCase() === 'ABIERTA' && c.PrintNode_ID) {
+                enUsoSet[String(c.PrintNode_ID).trim()] = String(c.Vendedor || c.Estacion || '').trim();
+              }
+            });
+          }
+        } catch(_){}
+        json.data.forEach(function(p) {
+          var pid = String(p.printNodeId || '').trim();
+          p.enUso = !!enUsoSet[pid];
+          p.enUsoPor = enUsoSet[pid] || '';
+        });
+        // Ordenar: ONLINE primero, luego en uso, luego problemas, luego SIN_ID al final
+        var ord = { ONLINE: 0, PAUSED: 4, DISABLED: 5, SIN_ID: 9, ID_INVALIDO: 8 };
+        json.data.sort(function(a, b) {
+          var oa = ord[a.state] != null ? ord[a.state] : 3;
+          var ob = ord[b.state] != null ? ord[b.state] : 3;
+          if (oa !== ob) return oa - ob;
+          if (a.enUso !== b.enUso) return a.enUso ? -1 : 1;
+          return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+        });
+        return json;
+      }
+    }
+  } catch(eM) { /* fallback legacy */ }
+  return _getImpresorasEcosistemaLegacy();
+}
+
+// Fallback local: lee la hoja IMPRESORAS sin estado PrintNode.
+// Las cards quedarán en UNKNOWN — el frontend las muestra como "sin señal".
+function _getImpresorasEcosistemaLegacy() {
   try {
     var sheet = _getMosSS().getSheetByName('IMPRESORAS');
     if (!sheet) return { ok: false, error: 'Hoja IMPRESORAS no encontrada en MOS.' };
     var rows = _sheetToObjects(sheet).filter(function(r) {
-      return _esActivo(r.activo) && String(r.printNodeId || '').trim() !== '';
+      return _esActivo(r.activo);
     });
 
-    // Set de printNodeId que tienen una caja ME ABIERTA ahora mismo.
     var enUsoSet = {};
     try {
       var cajasSh = _getMosExpressSS().getSheetByName('CAJAS');
@@ -455,42 +506,43 @@ function getImpresorasEcosistema() {
           }
         });
       }
-    } catch(eC) { /* ME no conectado — todas quedan sin badge "en uso" */ }
+    } catch(_){}
 
     var lista = rows.map(function(r) {
-      var pid = String(r.printNodeId).trim();
-      // Nombre legible: usa r.nombre si existe, sino arma uno con tipo+zona
+      var pid = String(r.printNodeId || '').trim();
       var nombre = String(r.nombre || r.descripcion || '').trim();
       if (!nombre) {
         nombre = String(r.tipo || 'Impresora') +
                  (r.idZona ? ' · ' + r.idZona : '') +
                  (r.idEstacion ? ' · ' + r.idEstacion : '');
       }
-      var app = String(r.appOrigen || '').toLowerCase();
-      var ubicacion = app.indexOf('warehouse') >= 0 ? 'Almacén'
-                    : app.indexOf('express') >= 0   ? 'MosExpress'
-                    : (r.idZona || r.appOrigen || '');
       return {
-        printNodeId: pid,
-        nombre:      nombre,
-        tipo:        String(r.tipo || ''),
-        idZona:      String(r.idZona || ''),
-        idEstacion:  String(r.idEstacion || ''),
-        app:         app,
-        ubicacion:   ubicacion,
-        enUso:       !!enUsoSet[pid],
-        enUsoPor:    enUsoSet[pid] || ''
+        id:              pid ? parseInt(pid, 10) : null,
+        printNodeId:     pid,
+        nombre:          nombre,
+        nombrePN:        '',
+        nombreCatalogo:  nombre,
+        computer:        '',
+        computerState:   '',
+        printerStateRaw: '',
+        // Estado semántico — sin información real
+        state:           pid ? 'UNKNOWN' : 'SIN_ID',
+        reason:          pid ? 'MOS no respondió · estado desconocido' : 'Falta asignar ID de PrintNode',
+        icon:            pid ? '❔' : '⚙',
+        color:           'gray',
+        online:          false,
+        registrada:      true,
+        idEstacion:      String(r.idEstacion || ''),
+        estacionNombre:  String(r.idEstacion || ''),
+        idZona:          String(r.idZona || ''),
+        zonaNombre:      String(r.idZona || ''),
+        appOrigen:       String(r.appOrigen || ''),
+        tipo:            String(r.tipo || 'TICKET'),
+        enUso:           !!enUsoSet[pid],
+        enUsoPor:        enUsoSet[pid] || ''
       };
     });
-
-    // Ordenar: en uso primero, luego almacén, luego el resto
-    lista.sort(function(a, b) {
-      if (a.enUso !== b.enUso) return a.enUso ? -1 : 1;
-      if (a.ubicacion !== b.ubicacion) return String(a.ubicacion).localeCompare(String(b.ubicacion));
-      return String(a.nombre).localeCompare(String(b.nombre));
-    });
-
-    return { ok: true, data: lista };
+    return { ok: true, data: lista, _fallback: true };
   } catch(e) {
     return { ok: false, error: e.message };
   }

@@ -1966,6 +1966,59 @@
       padding:10px 16px 14px;font-size:.66em;color:#64748b;text-align:center;
       border-top:1px solid rgba(51,65,85,.4);
     }
+    /* [v2.13.36] Estados semánticos PrintNode v2.41.82 */
+    .selimp-state-pill {
+      display:inline-block;font-size:.6em;font-weight:800;
+      padding:1px 6px;border-radius:6px;
+      margin-left:6px;letter-spacing:.03em;
+      vertical-align:middle;
+    }
+    .selimp-state-online {
+      background:rgba(16,185,129,.18);color:#6ee7b7;
+      border:1px solid rgba(16,185,129,.4);
+    }
+    .selimp-state-pc_offline {
+      background:rgba(249,115,22,.18);color:#fdba74;
+      border:1px solid rgba(249,115,22,.55);
+      animation:selimpBlink 1.6s ease-in-out infinite;
+    }
+    .selimp-state-sin_papel, .selimp-state-sin_tinta, .selimp-state-tapa_abierta {
+      background:rgba(251,191,36,.18);color:#fcd34d;
+      border:1px solid rgba(251,191,36,.55);
+    }
+    .selimp-state-atasco, .selimp-state-error, .selimp-state-printer_offline, .selimp-state-id_invalido {
+      background:rgba(239,68,68,.18);color:#fca5a5;
+      border:1px solid rgba(239,68,68,.55);
+      animation:selimpBlink 1.2s ease-in-out infinite;
+    }
+    .selimp-state-paused, .selimp-state-disabled {
+      background:rgba(148,163,184,.18);color:#cbd5e1;
+      border:1px solid rgba(148,163,184,.4);
+    }
+    .selimp-state-sin_id {
+      background:rgba(99,102,241,.18);color:#c4b5fd;
+      border:1px dashed rgba(99,102,241,.5);
+    }
+    .selimp-state-unknown {
+      background:rgba(100,116,139,.18);color:#94a3b8;
+      border:1px solid rgba(100,116,139,.4);
+    }
+    .selimp-card.is-disabled {
+      opacity:.65;filter:grayscale(.3);cursor:not-allowed;
+    }
+    .selimp-card.is-disabled:hover {
+      transform:none;border-color:rgba(239,68,68,.4);
+    }
+    .selimp-reason {
+      font-size:.66em;color:#fca5a5;margin-top:3px;font-style:italic;
+    }
+    .selimp-pc-off {
+      color:#fdba74;font-weight:700;
+    }
+    @keyframes selimpBlink {
+      0%,100% { opacity:1; }
+      50%     { opacity:.7; }
+    }
 
     /* ── MEMBRETE DIGITAL — overlay de códigos de barra ─────────── */
     .cod-overlay {
