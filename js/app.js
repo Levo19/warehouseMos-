@@ -3448,7 +3448,20 @@ const App = (() => {
     const clave = document.getElementById('reabrirAdminInput').value.trim();
     if (clave.length !== 8) return (typeof toast === 'function' && toast('Clave debe ser de 8 dígitos', 'warn'));
     try {
-      const res = await API.verificarClaveAdmin({ clave });
+      // [v2.13.38] Auditoría enriquecida (tier + tiempo + deviceId)
+      const t0 = _reabrirCtx._t0 || Date.now();
+      const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+      const res = await API.verificarClaveAdmin({
+        clave,
+        accion: 'REABRIR_GUIA',
+        refDocumento: _reabrirCtx.idGuia,
+        appOrigen: 'warehouseMos',
+        tier: 1,
+        cache_hit: 0,
+        tiempo_verify_ms: Date.now() - t0,
+        deviceId: devId,
+        dispositivo: devId
+      });
       if (!res || !res.ok) return (typeof toast === 'function' && toast('Clave incorrecta', 'warn'));
       if (document.getElementById('reabrirAdminRemember').checked) {
         localStorage.setItem(ADMIN_REMEMBER_KEY, String(Date.now() + 30 * 60 * 1000));
@@ -7678,9 +7691,18 @@ const EnvasadosView = (() => {
     }
   }
 
+  // [v2.13.38] Catálogo de tiers de auth en WH (alineado con MOS)
+  const _WH_AUTH_TIERS = {
+    'REABRIR_GUIA': 1, 'EDITAR_ENVASADO': 1,
+    'ANULAR_ENVASADO': 2, 'APROBAR_DISPOSITIVO_INSITU': 2, 'PROCESAR_MERMAS': 2
+  };
+  // _envAuthT0 — timestamp para medir tiempo_verify_ms
+  let _envAuthT0 = 0;
+
   // Valida la clave contra MOS (via WH backend). Si ok, pasa al PASO 2.
   async function validarAuth() {
     if (!_envAuthCtx) return;
+    if (!_envAuthT0) _envAuthT0 = Date.now();
     const clave = document.getElementById('envAuthClave').value.trim();
     const errEl = document.getElementById('envAuthErr');
     if (clave.length !== 8 || !/^\d+$/.test(clave)) {
@@ -7690,10 +7712,21 @@ const EnvasadosView = (() => {
     errEl.textContent = '';
     _toggleLoading('sheetEnvAuth', 'envAuthLoading', true);
     try {
+      const accion = _envAuthCtx.modo === 'editar' ? 'EDITAR_ENVASADO' : 'ANULAR_ENVASADO';
+      const tier = _WH_AUTH_TIERS[accion] || 2;
+      const tiempo_verify_ms = Date.now() - _envAuthT0;
+      const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
       const res = await API.verificarClaveAdmin({
         clave,
-        accion: _envAuthCtx.modo === 'editar' ? 'EDITAR_ENVASADO' : 'ANULAR_ENVASADO',
-        refDocumento: _envAuthCtx.idEnvasado
+        accion,
+        refDocumento: _envAuthCtx.idEnvasado,
+        appOrigen: 'warehouseMos',
+        // [v2.13.38] Auditoría enriquecida
+        tier: tier,
+        cache_hit: 0,
+        tiempo_verify_ms: tiempo_verify_ms,
+        deviceId: devId,
+        dispositivo: devId
       });
       _toggleLoading('sheetEnvAuth', 'envAuthLoading', false);
       if (!res || !res.ok) {
