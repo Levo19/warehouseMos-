@@ -1568,6 +1568,29 @@ const Session = (() => {
           localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
           localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
         } catch(_) {}
+        // [v2.13.34] Si el cron 23h marcó Forzar_Logout, cerrar la sesión
+        // local y volver al login. Limpiar el flag en MOS para no quedar
+        // en bucle.
+        if (d.forzar_logout) {
+          try {
+            const ses = (typeof _cargarSesion === 'function') ? _cargarSesion() : null;
+            if (ses) {
+              console.log('[WH] Forzar_Logout recibido del cron 23h · cerrando sesión');
+              if (typeof clearTimeout === 'function' && typeof lockTimer !== 'undefined') try { clearTimeout(lockTimer); } catch(_){}
+              if (typeof clearInterval === 'function' && typeof lockInterval !== 'undefined') try { clearInterval(lockInterval); } catch(_){}
+              if (typeof _liberarWakeLock === 'function') try { _liberarWakeLock(); } catch(_){}
+              if (typeof _limpiarSesion === 'function') _limpiarSesion();
+              try { sesionActual = null; } catch(_){}
+              try { document.getElementById('lockScreen').style.display = 'none'; } catch(_){}
+              if (typeof _ocultarApp === 'function') try { _ocultarApp(); } catch(_){}
+              if (typeof mostrarLogin === 'function') try { mostrarLogin(); } catch(_){}
+              // Fire-and-forget: limpiar flag en MOS
+              fetch(mosUrl + '?action=marcarLogoutHonrado&deviceId=' + encodeURIComponent(devId))
+                .catch(() => {});
+              return 'ACTIVO';
+            }
+          } catch(eFL) { console.error('[WH] forzar_logout fallo:', eFL); }
+        }
         // Si veníamos de un estado pendiente/error y el polling detectó ACTIVO,
         // recargar la pestaña para que el resto de init() corra correctamente.
         if (yaTeniaPolling) {
