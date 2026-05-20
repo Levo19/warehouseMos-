@@ -767,8 +767,11 @@ function imprimirTicketGuia(params) {
           bLn('Comentario:');
           b1(0x1b); b1(0x45); b1(0x00);
           b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);  // double-height + bold
+          // [v2.13.x] Imprimir el comentario COMPLETO — antes se cortaba a
+          // 4 líneas y se perdía info crítica del proveedor/operador.
+          // Decisión del admin: ver todo el comentario es obligatorio.
           var comLines = _wrapPalabras(String(pi.comentario), 24);
-          for (var ci = 0; ci < comLines.length && ci < 4; ci++) bLn(comLines[ci]);
+          for (var ci = 0; ci < comLines.length; ci++) bLn(comLines[ci]);
           b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
         }
 
@@ -1345,8 +1348,10 @@ function _construirAvisoIngresoBytes(pi, provName, reporteUrl) {
     bLn('Comentario:');
     b1(0x1b); b1(0x45); b1(0x00);
     b1(0x1b); b1(0x21); b1(0x10); b1(0x1b); b1(0x45); b1(0x01);
+    // [v2.13.x] Imprimir el comentario COMPLETO — antes se cortaba a
+    // 5 líneas. Decisión del admin: ver todo el comentario es obligatorio.
     var comLines = _wrapPalabras(String(pi.comentario), 24);
-    for (var ci = 0; ci < comLines.length && ci < 5; ci++) bLn(comLines[ci]);
+    for (var ci = 0; ci < comLines.length; ci++) bLn(comLines[ci]);
     b1(0x1b); b1(0x21); b1(0x00); b1(0x1b); b1(0x45); b1(0x00);
   }
 
