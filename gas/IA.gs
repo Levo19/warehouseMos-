@@ -469,6 +469,110 @@ function reprocesarOCRGuia(params) {
   return analizarFacturaProveedor(params);
 }
 
+// ============================================================
+// [v2.13.42] procesarOCRMasivoMes — corre el OCR sobre TODAS las guías
+// INGRESO_PROVEEDOR del mes que tengan foto pero NO tengan OCR_Estado
+// (o tengan estado vacío). Útil para arranque del Centro Tributario:
+// procesa todo el histórico de fotos sin OCR para que el IGV a favor
+// del mes se pueble retroactivamente.
+//
+// params: { mes, anio, soloSinProcesar }
+//   soloSinProcesar=true (default): solo guías sin OCR_Estado o con estado vacío
+//   soloSinProcesar=false: re-procesa TODAS las del mes (cuidado: usa créditos)
+//
+// Procesa secuencial con delay 500ms entre llamadas (no saturar API).
+// 30 guías ≈ 60-90s total. Devuelve resumen con stats.
+// ============================================================
+function procesarOCRMasivoMes(params) {
+  var mes = parseInt(params.mes, 10);
+  var anio = parseInt(params.anio || params.año || params.year, 10);
+  if (!mes || !anio) { var hoy = new Date(); mes = hoy.getMonth() + 1; anio = hoy.getFullYear(); }
+  var soloSinProcesar = params.soloSinProcesar !== false; // default true
+
+  var sheet = getSheet('GUIAS');
+  if (!sheet) return { ok: false, error: 'GUIAS no encontrada' };
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0].map(function(h){ return String(h).trim(); });
+  var idxId    = hdrs.indexOf('idGuia');
+  var idxTipo  = hdrs.indexOf('tipo');
+  var idxFecha = hdrs.indexOf('fecha');
+  var idxFoto  = hdrs.indexOf('foto');
+  var idxOCRE  = hdrs.indexOf('OCR_Estado');
+
+  // Recolectar candidatas
+  var candidatas = [];
+  for (var i = 1; i < data.length; i++) {
+    var tipo = String(data[i][idxTipo] || '');
+    if (tipo !== 'INGRESO_PROVEEDOR') continue;
+    var fecha = data[i][idxFecha];
+    var d = fecha instanceof Date ? fecha : new Date(fecha);
+    if (isNaN(d.getTime())) continue;
+    if (d.getFullYear() !== anio || (d.getMonth() + 1) !== mes) continue;
+    var hayFoto = !!String(data[i][idxFoto] || '').trim();
+    if (!hayFoto) continue;
+    var ocrEstado = idxOCRE >= 0 ? String(data[i][idxOCRE] || '') : '';
+    if (soloSinProcesar && ocrEstado) continue;
+    candidatas.push({ idGuia: String(data[i][idxId] || ''), fila: i + 1 });
+  }
+
+  var stats = {
+    ok: true,
+    mes: mes, anio: anio,
+    soloSinProcesar: soloSinProcesar,
+    total: candidatas.length,
+    procesadas: 0,
+    conIGV: 0,
+    sinIGV: 0,
+    ilegibles: 0,
+    no_comprobante: 0,
+    errores: 0,
+    totalIGVRecuperado: 0,
+    detalles: []
+  };
+
+  // Apps Script timeout = 6 min. A ~2s por OCR + 500ms delay = ~2.5s/guía.
+  // Permite ~120 guías como máximo en una corrida. 30 está holgado.
+  // Si hay más de 120 candidatas, partir en batches.
+  var maxPorRun = 120;
+  if (candidatas.length > maxPorRun) {
+    candidatas = candidatas.slice(0, maxPorRun);
+    stats.batched = true;
+    stats.mensaje = 'Procesando primeras ' + maxPorRun + ' guías — corre de nuevo para continuar';
+  }
+
+  for (var j = 0; j < candidatas.length; j++) {
+    var g = candidatas[j];
+    try {
+      var r = analizarFacturaProveedor({ idGuia: g.idGuia });
+      if (r.ok && r.data) {
+        stats.procesadas++;
+        var est = r.data.estado;
+        if (est === 'PROCESADO' && r.data.igvRecuperable > 0) {
+          stats.conIGV++;
+          stats.totalIGVRecuperado += r.data.igvRecuperable;
+        } else if (est === 'SIN_IGV')       stats.sinIGV++;
+        else if (est === 'ILEGIBLE')        stats.ilegibles++;
+        else if (est === 'NO_COMPROBANTE')  stats.no_comprobante++;
+        stats.detalles.push({
+          idGuia: g.idGuia, estado: est,
+          igv: r.data.igvRecuperable, conf: r.data.confidence
+        });
+      } else {
+        stats.errores++;
+        stats.detalles.push({ idGuia: g.idGuia, error: r.error || 'sin detalle' });
+      }
+    } catch(e) {
+      stats.errores++;
+      stats.detalles.push({ idGuia: g.idGuia, error: e.message });
+    }
+    Utilities.sleep(500); // throttle API
+  }
+
+  stats.totalIGVRecuperado = Math.round(stats.totalIGVRecuperado * 100) / 100;
+  Logger.log('[OCR masivo] ' + JSON.stringify(stats));
+  return stats;
+}
+
 // Variante que también testea el parser de listas con un ejemplo real
 function testAnalizarLista() {
   Logger.log('— Test analizarListaSombra —');
