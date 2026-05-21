@@ -47,6 +47,27 @@ function subirFotoEntidad(params) {
     if (makeThumb) {
       thumbUrl = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=w200';
     }
+    // [v2.13.41] Hook OCR — si la foto es de una GUÍA (típicamente
+    // INGRESO_PROVEEDOR con factura/boleta del proveedor), disparar análisis
+    // automático con Claude para extraer IGV recuperable. Async, no bloquea
+    // el upload — si falla, el admin puede re-procesar desde Centro Tributario.
+    if (entidad === 'guia') {
+      try {
+        // Llamar en el mismo request (Apps Script no tiene "background" real
+        // pero el upload ya terminó, esto es trabajo extra que el frontend
+        // puede esperar 3-5s adicionales — vale la pena).
+        var ocr = analizarFacturaProveedor({ idGuia: idEntidad });
+        if (ocr.ok) {
+          Logger.log('[OCR factura] guía ' + idEntidad + ' · estado: ' + ocr.data.estado +
+                     ' · IGV: ' + ocr.data.igvRecuperable + ' · conf: ' + ocr.data.confidence);
+        } else {
+          Logger.log('[OCR factura] guía ' + idEntidad + ' FALLÓ: ' + ocr.error);
+        }
+      } catch(eOCR) {
+        Logger.log('[OCR factura] excepción: ' + eOCR.message);
+      }
+    }
+
     return { ok: true, data: {
       fileId:   fileId,
       url:      fullUrl,

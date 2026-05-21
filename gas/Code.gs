@@ -116,6 +116,10 @@ function _route(method, e) {
       case 'crearDespachoRapido': return crearDespachoRapido(params);
       // ── IA (Claude API) ─────────────────────────────────
       case 'analizarListaSombra': return analizarListaSombra(params);
+      // [v2.13.41] Centro Tributario — OCR boletas/facturas proveedor
+      case 'analizarFacturaProveedor': return analizarFacturaProveedor(params);
+      case 'igvFavorMes':              return igvFavorMes(params);
+      case 'reprocesarOCRGuia':        return reprocesarOCRGuia(params);
       // ── Listas Sombra compartidas ────────────────────────
       case 'crearListaSombra':              return crearListaSombra(params);
       case 'getListasSombra':               return getListasSombra(params);
