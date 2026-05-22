@@ -3177,7 +3177,7 @@ const App = (() => {
     });
   }
 
-  function showUsuarioDialog() {
+  async function showUsuarioDialog() {
     const nombre = await _whPrompt('Nombre del operador:', window.WH_CONFIG.usuario, { titulo: 'Cambiar operador', maxlength: 60 });
     if (nombre) {
       window.WH_CONFIG.usuario = nombre;
@@ -6066,7 +6066,7 @@ const GuiasView = (() => {
     toast('↩ Deshecho', 'warn', 1200);
   }
 
-  function camLimpiarTodo() {
+  async function camLimpiarTodo() {
     if (!Object.keys(_camSession).length) return;
     const total = Object.values(_camSession).reduce((s, i) => s + i.qty, 0);
     if (!await _whConfirm(`¿Limpiar los ${total} ítems de esta sesión?\n\nLos ya guardados en GAS quedan en la guía.`, { warning: true, titulo: 'Limpiar sesión', okText: 'Limpiar' })) return;
@@ -9969,7 +9969,7 @@ const DespachoView = (() => {
     _saveCart(); _renderDespList(); vibrate(8);
   }
 
-  function despEditQty(cb) {
+  async function despEditQty(cb) {
     const item = _cart.find(c => c.codigoBarra === cb);
     if (!item) return;
     const input = await _whPrompt('Nueva cantidad (decimales: usa punto):', String(item.cantidad), { titulo: item.descripcion || cb, inputMode: 'decimal', maxlength: 10 });
@@ -9994,7 +9994,7 @@ const DespachoView = (() => {
     toast('↩ Deshecho', 'warn', 1200);
   }
 
-  function despLimpiarTodo() {
+  async function despLimpiarTodo() {
     if (!_cart.length) return;
     if (!await _whConfirm('¿Vaciar el carrito de despacho?', { warning: true, titulo: 'Vaciar carrito', okText: 'Vaciar' })) return;
     _cart = []; _despLastHistory = [];
@@ -10258,7 +10258,7 @@ const DespachoView = (() => {
     }
   }
 
-  function confirmarDespacho() {
+  async function confirmarDespacho() {
     // ─── LOCK ANTI-DOBLE-CLICK ───────────────────────────────
     // Bug histórico (12 may + 13 may): triple click generaba 3 guías en
     // <30s. El backend ahora tiene idempotencia, pero acá bloqueamos en
@@ -10407,7 +10407,7 @@ const DespachoView = (() => {
     });
   }
 
-  function cancelar() {
+  async function cancelar() {
     if (!_cart.length) return;
     if (!await _whConfirm('¿Vaciar el carrito de despacho?', { warning: true, titulo: 'Vaciar carrito', okText: 'Vaciar' })) return;
     _cart = []; _saveCart(); _renderCart(); _updateFooter();
@@ -10896,7 +10896,7 @@ const DespachoView = (() => {
     vibrate(justCompletado ? [20, 30, 60] : 12);
     _scheduleAutosavePickup();
   }
-  function _pkckMas(skuBase) {
+  async function _pkckMas(skuBase) {
     const item = _pkckItemPorSku(skuBase);
     if (!item) return;
     const sol      = parseFloat(item.solicitado) || 0;
@@ -11002,7 +11002,7 @@ const DespachoView = (() => {
 
     const _close = () => { overlay.style.display = 'none'; };
     document.getElementById('pkckModalQtyCancel').onclick = _close;
-    okBtn.onclick = () => {
+    okBtn.onclick = async () => {
       const qty = parseFloat(String(input.value).replace(',', '.'));
       if (!qty || qty <= 0) { toast('Ingresa un peso válido', 'warn'); return; }
       const nuevoTotal = (parseFloat(item.despachado) || 0) + qty;
@@ -12175,7 +12175,7 @@ const DespachoView = (() => {
     };
   }
 
-  function tomarListaSombraDelPanel(idLista) {
+  async function tomarListaSombraDelPanel(idLista) {
     if (_listaSombra && _listaSombra.id !== idLista) {
       if (!await _whConfirm('Ya tienes una lista sombra activa.\n\n¿Reemplazarla por la que vas a tomar?', { warning: true, titulo: 'Reemplazar lista' })) return;
     }
@@ -12231,7 +12231,7 @@ const DespachoView = (() => {
 
   // [v2.13.19] Anular lista sombra del feed (optimista). El creador o cualquiera
   // si no está EN_USO. Marca como ANULADA en backend.
-  function anularListaSombraDelFeed(idLista) {
+  async function anularListaSombraDelFeed(idLista) {
     if (!await _whConfirm('¿Eliminar esta lista del feed?\n\nEsta acción no se puede deshacer.', { danger: true, titulo: 'Eliminar lista', okText: 'Eliminar' })) return;
     try { SoundFX.click(); } catch(_){}
     // Optimista: quitar del panel local
@@ -12414,7 +12414,7 @@ const DespachoView = (() => {
   // colapso/expansión, los items siempre se ven como cards abajo (igual pickup).
   function toggleListaSombra() { /* no-op por compat */ }
 
-  function cerrarListaSombra() {
+  async function cerrarListaSombra() {
     if (!_listaSombra) return;
     // [v2.13.15] 3 opciones: liberar (vuelve a DISPONIBLE) · cancelar · ocultar local
     const tieneBackend = !!_listaSombra.idBackend;
@@ -17116,7 +17116,7 @@ const FotoPicker = (() => {
     return m ? m[1] : '';
   }
 
-  function abrir(idPreingreso, fotos, onSelect) {
+  async function abrir(idPreingreso, fotos, onSelect) {
     _onSelect = onSelect || (() => {});
     const arr = Array.isArray(fotos) ? fotos.filter(Boolean)
       : String(fotos || '').split(',').map(s => s.trim()).filter(Boolean);
