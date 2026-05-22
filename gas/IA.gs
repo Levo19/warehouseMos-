@@ -584,3 +584,283 @@ function testAnalizarLista() {
   Logger.log(JSON.stringify(res, null, 2));
   return res;
 }
+
+// ============================================================
+// [v2.13.42] extraerCostosFactura — OCR ITEMS LÍNEA POR LÍNEA
+// del comprobante del proveedor (FACTURA / BOLETA / TICKET / nota
+// manuscrita). El usuario sube la foto al ingresar guía, este OCR
+// pre-puebla los costos para reducir tipeo del admin.
+// ------------------------------------------------------------
+// params: { idGuia }   // toma la foto del campo `foto` de GUIAS
+// Retorna: {
+//   ok: true,
+//   data: {
+//     items: [
+//       { descripcion, cantidad, precioUnitario, subtotal, confidence }
+//     ],
+//     totalDocumento: número (header),
+//     confidenceGlobal: 0-100 (peor del lote),
+//     notas: string
+//   }
+// }
+// ============================================================
+function extraerCostosFactura(params) {
+  var idGuia = String(params && params.idGuia || '').trim();
+  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
+
+  // 1. Reusar la lógica de descarga de foto de analizarFacturaProveedor
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = getSheet('GUIAS');
+  if (!sheet) return { ok: false, error: 'Hoja GUIAS no encontrada' };
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0].map(function(h){ return String(h).trim(); });
+  var idxId  = hdrs.indexOf('idGuia');
+  var idxFoto = hdrs.indexOf('foto');
+  if (idxId < 0 || idxFoto < 0) return { ok: false, error: 'Columnas idGuia/foto no encontradas' };
+  var filaIdx = -1;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) === idGuia) { filaIdx = i; break; }
+  }
+  if (filaIdx < 0) return { ok: false, error: 'Guía ' + idGuia + ' no encontrada' };
+  var urlFoto = String(data[filaIdx][idxFoto] || '').trim();
+  if (!urlFoto) return { ok: false, error: 'La guía no tiene foto del comprobante' };
+
+  var imgBase64, imgMime;
+  try {
+    var match = urlFoto.match(/[?&]id=([^&]+)/);
+    if (match) {
+      var file = DriveApp.getFileById(match[1]);
+      var blob = file.getBlob();
+      imgMime   = blob.getContentType() || 'image/jpeg';
+      imgBase64 = Utilities.base64Encode(blob.getBytes());
+    } else {
+      var resp = UrlFetchApp.fetch(urlFoto, { muteHttpExceptions: true });
+      if (resp.getResponseCode() !== 200) return { ok: false, error: 'No se pudo descargar la foto' };
+      imgMime   = resp.getHeaders()['Content-Type'] || 'image/jpeg';
+      imgBase64 = Utilities.base64Encode(resp.getBlob().getBytes());
+    }
+  } catch(e) { return { ok: false, error: 'Descarga foto: ' + e.message }; }
+
+  // 2. Prompt enfocado a items
+  var system = [
+    'Eres un experto en lectura de documentos comerciales peruanos.',
+    'Recibes una imagen de un comprobante (factura, boleta, ticket impreso, ',
+    'o incluso una hoja manuscrita) y debes extraer la LISTA DE PRODUCTOS',
+    'con sus precios unitarios.',
+    '',
+    'POR CADA LÍNEA DE PRODUCTO devuelve:',
+    '- descripcion: nombre del producto tal como aparece (MAYÚSCULAS, limpio)',
+    '- cantidad: número decimal (ej: 2.0, 5.5)',
+    '- precioUnitario: precio por unidad en soles (no el subtotal)',
+    '- subtotal: cantidad × precio unitario, o el valor que aparece en la línea',
+    '- confidence: 0-100, qué tan seguro estás de los 3 valores anteriores juntos',
+    '',
+    'INTERPRETACIÓN DE CONFIDENCE:',
+    '- 95-100: texto impreso claro, valores nítidos',
+    '- 80-94:  texto algo borroso o letra manuscrita legible',
+    '- 60-79:  letra difícil, posibles errores en algún dígito',
+    '- <60:    no estoy seguro, posible error grave (números ambiguos)',
+    '',
+    'REGLAS IMPORTANTES:',
+    '- Si solo ves total sin desglose por línea, retorna items: []',
+    '- Si el comprobante es de un producto sin detalle, retorna 1 item con la info',
+    '- Ignora encabezados, totales finales, IGV, propinas',
+    '- Si una línea no tiene precio claro, OMÍTELA (no inventes)',
+    '- Si una cantidad no se ve, asume 1',
+    '',
+    'RESPONDE EXCLUSIVAMENTE con JSON válido (sin markdown, sin comentarios):',
+    '{',
+    '  "items": [',
+    '    {"descripcion": "...", "cantidad": N, "precioUnitario": N, "subtotal": N, "confidence": N},',
+    '    ...',
+    '  ],',
+    '  "totalDocumento": N,',
+    '  "confidenceGlobal": N,',
+    '  "notas": "string corto"',
+    '}'
+  ].join('\n');
+
+  var apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) return { ok: false, error: 'KEY_NOT_SET' };
+
+  var payload = {
+    model:      IA_MODELO_DEFAULT,
+    max_tokens: 4096,                        // listas largas
+    system:     system,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: imgMime, data: imgBase64 } },
+        { type: 'text', text: 'Analiza este comprobante y extrae la lista de productos con sus precios. Devuelve solo el JSON.' }
+      ]
+    }]
+  };
+
+  try {
+    var resp2 = UrlFetchApp.fetch(IA_ENDPOINT, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (resp2.getResponseCode() !== 200) {
+      return { ok: false, error: 'API_ERROR_' + resp2.getResponseCode(), mensaje: resp2.getContentText().substring(0, 300) };
+    }
+    var apiData = JSON.parse(resp2.getContentText());
+    var text = (apiData.content && apiData.content[0] && apiData.content[0].text) || '';
+    var first = text.indexOf('{');
+    var last  = text.lastIndexOf('}');
+    if (first < 0 || last < 0) return { ok: false, error: 'PARSE_FAIL', mensaje: text.substring(0, 200) };
+    var parsed = JSON.parse(text.substring(first, last + 1));
+
+    var items = (parsed.items || []).map(function(it) {
+      return {
+        descripcion:    String(it.descripcion || '').toUpperCase().trim(),
+        cantidad:       parseFloat(it.cantidad) || 1,
+        precioUnitario: parseFloat(it.precioUnitario) || 0,
+        subtotal:       parseFloat(it.subtotal) || 0,
+        confidence:     Math.max(0, Math.min(100, parseInt(it.confidence, 10) || 0))
+      };
+    }).filter(function(it){ return it.descripcion && it.precioUnitario > 0; });
+
+    return { ok: true, data: {
+      items:            items,
+      totalDocumento:   parseFloat(parsed.totalDocumento) || 0,
+      confidenceGlobal: Math.max(0, Math.min(100, parseInt(parsed.confidenceGlobal, 10) || 0)),
+      notas:            String(parsed.notas || '')
+    }};
+  } catch(eA) { return { ok: false, error: 'NETWORK', mensaje: eA.message }; }
+}
+
+// ============================================================
+// [v2.13.42] extraerCorreccionesJefa — OCR DEL TICKET LLENO POR
+// LA JEFA. La foto viene en base64 del cliente (no de Drive).
+// El admin saca foto desde su tablet/celular.
+// ------------------------------------------------------------
+// Estrategia: pasamos a Claude la foto + un CONTEXTO con la lista
+// de items que ya estaban en el ticket impreso (skuBase, descripcion,
+// costo, venta actual, margen objetivo). Claude debe matchear lo que
+// jefa escribió a cada item del contexto y extraer:
+//   - skuBase del item original (matching)
+//   - ventaNueva (si escribió un nuevo precio venta)
+//   - margenNuevoPct (si escribió un nuevo margen, 0..1)
+//   - tachó (true si parece tachado/anulado)
+//   - confidence (qué tan seguro está del valor extraído)
+//
+// params:
+//   fotoBase64:    string (data:image/jpeg;base64,...)
+//   contextoItems: array de { skuBase, descripcion, costo, ventaActual, margenActualPct }
+// ============================================================
+function extraerCorreccionesJefa(params) {
+  if (!params || !params.fotoBase64) return { ok: false, error: 'fotoBase64 requerida' };
+  if (!params.contextoItems || !Array.isArray(params.contextoItems) || !params.contextoItems.length) {
+    return { ok: false, error: 'contextoItems[] requerido' };
+  }
+  var apiKey = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) return { ok: false, error: 'KEY_NOT_SET' };
+
+  // Limpiar prefijo data:image/...;base64,
+  var fotoBase64 = String(params.fotoBase64);
+  var imgMime = 'image/jpeg';
+  var m = fotoBase64.match(/^data:(image\/[a-z]+);base64,(.+)$/);
+  if (m) { imgMime = m[1]; fotoBase64 = m[2]; }
+
+  // Construir contexto compacto para el prompt
+  var ctxList = params.contextoItems.map(function(it, idx) {
+    return (idx + 1) + '. SKU:' + it.skuBase
+         + ' · ' + String(it.descripcion || '').substring(0, 50)
+         + ' · COSTO:' + (parseFloat(it.costo) || 0).toFixed(2)
+         + ' · VENTA-ACT:' + (parseFloat(it.ventaActual) || 0).toFixed(2)
+         + ' · MARGEN-OBJ:' + ((parseFloat(it.margenActualPct) || 0) * 100).toFixed(0) + '%';
+  }).join('\n');
+
+  var system = [
+    'Eres un asistente que lee correcciones manuscritas en un ticket impreso.',
+    'El ticket fue impreso desde un sistema con cuadros por producto.',
+    'La jefa lo recibió, lo llenó a mano (escribió nuevos precios o márgenes),',
+    'lo devolvió, y ahora tienes la foto del ticket lleno.',
+    '',
+    'TU TAREA: por cada producto del CONTEXTO de abajo, identifica si la jefa',
+    'escribió algo nuevo y extrae los valores.',
+    '',
+    'CONTEXTO (productos que estaban en el ticket impreso):',
+    ctxList,
+    '',
+    'POR CADA producto donde detectes escritura de la jefa, devuelve:',
+    '- skuBase: del contexto (numerado arriba)',
+    '- ventaNueva: número si escribió nuevo precio venta, null si no',
+    '- margenNuevoPct: número 0..1 si escribió porcentaje (60% = 0.60), null si no',
+    '- tachado: true si tachó algún campo (ignorar producto)',
+    '- confidence: 0-100',
+    '- notas: opcional (string corto)',
+    '',
+    'REGLAS:',
+    '- Si jefa NO escribió nada en un producto, OMÍTELO del resultado',
+    '- Si escribió "100" sin contexto, probablemente es precio venta (no margen)',
+    '- Si escribió "60%" o "60 %", es margen objetivo',
+    '- Si escribió ambos (venta + margen), retorna ambos',
+    '- Letra manuscrita es ambigua: si dudas entre 8 y 3, baja confidence',
+    '- Confidence ≥95: muy seguro · 80-94: probable · <80: dudoso',
+    '',
+    'RESPONDE EXCLUSIVAMENTE con JSON válido:',
+    '{',
+    '  "correcciones": [',
+    '    {"skuBase": "...", "ventaNueva": N|null, "margenNuevoPct": N|null, "tachado": false, "confidence": N, "notas": ""}',
+    '  ],',
+    '  "confidenceGlobal": N,',
+    '  "notas": "string corto"',
+    '}'
+  ].join('\n');
+
+  var payload = {
+    model:      IA_MODELO_DEFAULT,
+    max_tokens: 4096,
+    system:     system,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: imgMime, data: fotoBase64 } },
+        { type: 'text',  text: 'Lee el ticket lleno por la jefa y devuelve las correcciones detectadas.' }
+      ]
+    }]
+  };
+
+  try {
+    var resp3 = UrlFetchApp.fetch(IA_ENDPOINT, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    if (resp3.getResponseCode() !== 200) {
+      return { ok: false, error: 'API_ERROR_' + resp3.getResponseCode(), mensaje: resp3.getContentText().substring(0, 300) };
+    }
+    var apiData2 = JSON.parse(resp3.getContentText());
+    var text2 = (apiData2.content && apiData2.content[0] && apiData2.content[0].text) || '';
+    var first2 = text2.indexOf('{');
+    var last2  = text2.lastIndexOf('}');
+    if (first2 < 0 || last2 < 0) return { ok: false, error: 'PARSE_FAIL', mensaje: text2.substring(0, 200) };
+    var parsed2 = JSON.parse(text2.substring(first2, last2 + 1));
+
+    var correcciones = (parsed2.correcciones || []).map(function(c) {
+      return {
+        skuBase:        String(c.skuBase || '').trim(),
+        ventaNueva:     (c.ventaNueva !== null && c.ventaNueva !== undefined) ? parseFloat(c.ventaNueva) : null,
+        margenNuevoPct: (c.margenNuevoPct !== null && c.margenNuevoPct !== undefined) ? parseFloat(c.margenNuevoPct) : null,
+        tachado:        !!c.tachado,
+        confidence:     Math.max(0, Math.min(100, parseInt(c.confidence, 10) || 0)),
+        notas:          String(c.notas || '')
+      };
+    }).filter(function(c){
+      return c.skuBase && (c.ventaNueva !== null || c.margenNuevoPct !== null || c.tachado);
+    });
+
+    return { ok: true, data: {
+      correcciones:     correcciones,
+      confidenceGlobal: Math.max(0, Math.min(100, parseInt(parsed2.confidenceGlobal, 10) || 0)),
+      notas:            String(parsed2.notas || '')
+    }};
+  } catch(eC) { return { ok: false, error: 'NETWORK', mensaje: eC.message }; }
+}

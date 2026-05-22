@@ -122,6 +122,9 @@ function _route(method, e) {
       case 'reprocesarOCRGuia':        return reprocesarOCRGuia(params);
       // [v2.13.42] OCR masivo retroactivo del mes
       case 'procesarOCRMasivoMes':     return procesarOCRMasivoMes(params);
+      // [v2.13.42] OCRs para flow Costos-Jefa (MOS reporte profesional)
+      case 'extraerCostosFactura':     return extraerCostosFactura(params);
+      case 'extraerCorreccionesJefa':  return extraerCorreccionesJefa(params);
       // ── Listas Sombra compartidas ────────────────────────
       case 'crearListaSombra':              return crearListaSombra(params);
       case 'getListasSombra':               return getListasSombra(params);
