@@ -434,6 +434,8 @@ function igvFavorMes(params) {
       fecha:         d.toISOString(),
       idProveedor:   String(data[i][idxProv] || ''),
       tieneFoto:     hayFoto,
+      // [v2.13.43] URL de la foto para mostrar thumbnail + abrir comprobante grande
+      urlFoto:       hayFoto ? String(data[i][idxFoto] || '') : '',
       ocrEstado:     ocrEstado,
       rucEmisor:     idxRUC >= 0 ? String(data[i][idxRUC] || '') : '',
       razonSocial:   idxRS  >= 0 ? String(data[i][idxRS] || '')  : '',
