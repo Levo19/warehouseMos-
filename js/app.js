@@ -2,6 +2,132 @@
 'use strict';
 
 // ════════════════════════════════════════════════
+// [WH] Modales custom genéricos (reemplazan confirm/prompt/alert nativos).
+// Paleta WH: verde esmeralda + ámbar. Vanilla DOM, funcionan en cualquier
+// función async — drop-in replacement de los nativos del browser.
+// Uso:
+//   if (!await _whConfirm('texto', opts)) return;
+//   const v = await _whPrompt('label', defaultValue, opts);
+//   await _whAlert('mensaje', opts);
+// ════════════════════════════════════════════════
+function _whEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function _whConfirm(msg, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const accent = opts.danger ? 'danger' : (opts.warning ? 'warn' : 'primary');
+    const icoMap = { danger: '⚠', warn: '🟡', primary: '❓' };
+    const titulo = opts.titulo || (opts.danger ? 'Confirmar acción' : '¿Continuar?');
+    const backdrop = document.createElement('div');
+    backdrop.className = 'wh-modal-generic-backdrop';
+    backdrop.innerHTML = `
+      <div class="wh-modal-generic wh-modal-generic-${accent}" role="dialog" aria-modal="true">
+        <div class="wh-modal-generic-head">
+          <span class="wh-modal-generic-ico">${icoMap[accent]}</span>
+          <strong>${_whEsc(titulo)}</strong>
+          <button class="wh-modal-generic-close" data-cancel>✕</button>
+        </div>
+        <div class="wh-modal-generic-body">${(msg || '').split('\n\n').map(p => '<p>' + _whEsc(p).replace(/\n/g, '<br>') + '</p>').join('')}</div>
+        <div class="wh-modal-generic-foot">
+          <button class="wh-modal-generic-btn wh-modal-generic-btn-ghost" data-cancel>${_whEsc(opts.cancelText || 'Cancelar')}</button>
+          <button class="wh-modal-generic-btn wh-modal-generic-btn-${accent}" data-ok>${_whEsc(opts.okText || (opts.danger ? 'Sí, continuar' : 'Aceptar'))}</button>
+        </div>
+      </div>`;
+    const cerrar = (v) => {
+      backdrop.classList.remove('is-open');
+      setTimeout(() => { try { backdrop.remove(); } catch(_){} }, 200);
+      resolve(v);
+    };
+    backdrop.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (t === backdrop || (t.closest && t.closest('[data-cancel]'))) cerrar(false);
+      else if (t.closest && t.closest('[data-ok]')) cerrar(true);
+    });
+    document.body.appendChild(backdrop);
+    requestAnimationFrame(() => backdrop.classList.add('is-open'));
+  });
+}
+function _whPrompt(label, defaultValue, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const isLong = opts.textarea === true;
+    const inputHtml = isLong
+      ? `<textarea class="wh-modal-generic-input" rows="3" maxlength="${opts.maxlength || 240}" placeholder="${_whEsc(opts.placeholder || '')}">${_whEsc(defaultValue || '')}</textarea>`
+      : `<input type="${opts.inputType || 'text'}" inputmode="${opts.inputMode || ''}" maxlength="${opts.maxlength || ''}" class="wh-modal-generic-input" value="${_whEsc(defaultValue || '')}" placeholder="${_whEsc(opts.placeholder || '')}" />`;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'wh-modal-generic-backdrop';
+    backdrop.innerHTML = `
+      <div class="wh-modal-generic wh-modal-generic-primary" role="dialog" aria-modal="true">
+        <div class="wh-modal-generic-head">
+          <span class="wh-modal-generic-ico">✏</span>
+          <strong>${_whEsc(opts.titulo || 'Ingresar dato')}</strong>
+          <button class="wh-modal-generic-close" data-cancel>✕</button>
+        </div>
+        <div class="wh-modal-generic-body">
+          <label class="wh-modal-generic-label">${_whEsc(label || '')}</label>
+          ${inputHtml}
+        </div>
+        <div class="wh-modal-generic-foot">
+          <button class="wh-modal-generic-btn wh-modal-generic-btn-ghost" data-cancel>Cancelar</button>
+          <button class="wh-modal-generic-btn wh-modal-generic-btn-primary" data-ok>${_whEsc(opts.okText || 'Aceptar')}</button>
+        </div>
+      </div>`;
+    const cerrar = (v) => {
+      backdrop.classList.remove('is-open');
+      setTimeout(() => { try { backdrop.remove(); } catch(_){} }, 200);
+      resolve(v);
+    };
+    const getVal = () => {
+      const i = backdrop.querySelector('.wh-modal-generic-input');
+      return i ? String(i.value || '') : '';
+    };
+    backdrop.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (t === backdrop || (t.closest && t.closest('[data-cancel]'))) cerrar(null);
+      else if (t.closest && t.closest('[data-ok]')) cerrar(getVal());
+    });
+    backdrop.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && !isLong) cerrar(getVal());
+      else if (ev.key === 'Escape') cerrar(null);
+    });
+    document.body.appendChild(backdrop);
+    requestAnimationFrame(() => backdrop.classList.add('is-open'));
+    setTimeout(() => {
+      try { backdrop.querySelector('.wh-modal-generic-input')?.focus(); } catch(_){}
+      try { backdrop.querySelector('.wh-modal-generic-input')?.select(); } catch(_){}
+    }, 220);
+  });
+}
+function _whAlert(msg, opts) {
+  opts = opts || {};
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'wh-modal-generic-backdrop';
+    backdrop.innerHTML = `
+      <div class="wh-modal-generic wh-modal-generic-primary" role="dialog" aria-modal="true">
+        <div class="wh-modal-generic-head">
+          <span class="wh-modal-generic-ico">💡</span>
+          <strong>${_whEsc(opts.titulo || 'Aviso')}</strong>
+          <button class="wh-modal-generic-close" data-ok>✕</button>
+        </div>
+        <div class="wh-modal-generic-body">${(msg || '').split('\n\n').map(p => '<p>' + _whEsc(p).replace(/\n/g, '<br>') + '</p>').join('')}</div>
+        <div class="wh-modal-generic-foot">
+          <button class="wh-modal-generic-btn wh-modal-generic-btn-primary" data-ok>OK</button>
+        </div>
+      </div>`;
+    const cerrar = () => {
+      backdrop.classList.remove('is-open');
+      setTimeout(() => { try { backdrop.remove(); } catch(_){} }, 200);
+      resolve();
+    };
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop || ev.target.closest('[data-ok]')) cerrar();
+    });
+    document.body.appendChild(backdrop);
+    requestAnimationFrame(() => backdrop.classList.add('is-open'));
+  });
+}
+
+// ════════════════════════════════════════════════
 // Vibración táctil (feedback)
 // ════════════════════════════════════════════════
 let _userActivated = false;
@@ -1869,7 +1995,7 @@ const Session = (() => {
       if (!_verifPollTimer) _verifPollTimer = setInterval(_verificarDispositivoWH, 15 * 1000);
     } catch(e) {
       if (btn) { btn.disabled = false; btn.textContent = '📨 Solicitar acceso'; }
-      alert('Error: ' + (e.message || 'sin conexión'));
+      _whAlert('Error: ' + (e.message || 'sin conexión'), { titulo: 'Error solicitar acceso' });
     }
   }
 
@@ -1886,8 +2012,8 @@ const Session = (() => {
     }
   }
 
-  function cerrarSesionDesdeLock() {
-    if (!confirm('¿Cerrar sesión? Se perderá el reporte de turno.')) return;
+  async function cerrarSesionDesdeLock() {
+    if (!await _whConfirm('¿Cerrar sesión?\n\nSe perderá el reporte de turno.', { warning: true, titulo: 'Cerrar sesión', okText: 'Cerrar sesión' })) return;
     clearTimeout(lockTimer);
     clearInterval(lockInterval);
     if (_lockQuoteInterval) { clearInterval(_lockQuoteInterval); _lockQuoteInterval = null; }
@@ -2567,7 +2693,7 @@ const Dashboard = (() => {
   }
 
   async function aceptarTeorico(idAlerta) {
-    if (!confirm('¿Aplicar el stock teórico? Se creará un ajuste automático que iguala el stock real al teórico.')) return;
+    if (!await _whConfirm('¿Aplicar el stock teórico?\n\nSe creará un ajuste automático que iguala el stock real al teórico.', { warning: true, titulo: 'Aplicar stock teórico', okText: 'Aplicar' })) return;
     try {
       const res = await API.aceptarTeoricoAlerta({
         idAlerta,
@@ -3052,7 +3178,7 @@ const App = (() => {
   }
 
   function showUsuarioDialog() {
-    const nombre = prompt('Nombre del operador:', window.WH_CONFIG.usuario);
+    const nombre = await _whPrompt('Nombre del operador:', window.WH_CONFIG.usuario, { titulo: 'Cambiar operador', maxlength: 60 });
     if (nombre) {
       window.WH_CONFIG.usuario = nombre;
       localStorage.setItem('wh_usuario', nombre);
@@ -5834,14 +5960,15 @@ const GuiasView = (() => {
     vibrate(8);
   }
 
-  function camQtyEdit(cb) {
+  async function camQtyEdit(cb) {
     const entry = _camSession[cb];
     if (!entry) return;
-    // prompt() bloquea el hilo → el scanner no dispara mientras el diálogo está abierto
-    const input = prompt(
-      (entry.prod.descripcion || cb) + '\nNueva cantidad (decimales: usa punto):',
-      String(entry.qty)
-    );
+    // [v2.x.x] Modal custom — antes prompt() nativo bloqueaba el scanner
+    const input = await _whPrompt('Nueva cantidad (decimales: usa punto):', String(entry.qty), {
+      titulo: entry.prod.descripcion || cb,
+      inputMode: 'decimal',
+      maxlength: 10
+    });
     if (input === null) return; // cancelado
     const newQty = parseFloat(input.replace(',', '.'));
     if (isNaN(newQty) || newQty < 0) { toast('Cantidad inválida', 'warn', 2000); return; }
@@ -5942,7 +6069,7 @@ const GuiasView = (() => {
   function camLimpiarTodo() {
     if (!Object.keys(_camSession).length) return;
     const total = Object.values(_camSession).reduce((s, i) => s + i.qty, 0);
-    if (!confirm(`¿Limpiar los ${total} ítems de esta sesión?\n(Los ya guardados en GAS quedan en la guía.)`)) return;
+    if (!await _whConfirm(`¿Limpiar los ${total} ítems de esta sesión?\n\nLos ya guardados en GAS quedan en la guía.`, { warning: true, titulo: 'Limpiar sesión', okText: 'Limpiar' })) return;
     // Anular solo los locales (aún no confirmados por GAS)
     if (_guiaActual?.detalle) {
       const cbs = new Set(Object.keys(_camSession));
@@ -7336,7 +7463,7 @@ const EnvasadosView = (() => {
     else if (fechaVenc < hoyStr) avisos.push('⚠ Fecha de vencimiento pasada');
 
     if (avisos.length > 0) {
-      const ok = confirm(avisos.join('\n') + '\n\n¿Continuar de todas formas?');
+      const ok = await _whConfirm(avisos.join('\n') + '\n\n¿Continuar de todas formas?', { warning: true, titulo: 'Avisos' });
       if (!ok) return;
     }
 
@@ -7460,7 +7587,7 @@ const EnvasadosView = (() => {
   // backend, y hace rollback si el backend falla.
   async function anular(idEnvasado, codigoDerivado, unidades) {
     if (!idEnvasado) return;
-    if (!confirm('¿Anular este envasado?\n\nRevierte el stock consumido y producido. El registro queda como ANULADO en el historial.')) return;
+    if (!await _whConfirm('¿Anular este envasado?\n\nRevierte el stock consumido y producido. El registro queda como ANULADO en el historial.', { danger: true, titulo: 'Anular envasado', okText: 'Anular' })) return;
     // Buscar la entrada en cache para hacer rollback exacto si falla
     const cache = OfflineManager.getEnvasadosCache();
     const env = cache.find(e => e.idEnvasado === idEnvasado);
@@ -8172,7 +8299,7 @@ const EnvasadorView = (() => {
 
   function searchVoice() {
     if (!window.Voice || !Voice.supported || !Voice.supported().stt) {
-      alert('🎤 Tu navegador no soporta reconocimiento de voz.');
+      _whAlert('🎤 Tu navegador no soporta reconocimiento de voz.', { titulo: 'Voz no disponible' });
       return;
     }
     const mic = document.getElementById('envSearchMic');
@@ -9845,7 +9972,7 @@ const DespachoView = (() => {
   function despEditQty(cb) {
     const item = _cart.find(c => c.codigoBarra === cb);
     if (!item) return;
-    const input = prompt((item.descripcion || cb) + '\nNueva cantidad (decimales: usa punto):', String(item.cantidad));
+    const input = await _whPrompt('Nueva cantidad (decimales: usa punto):', String(item.cantidad), { titulo: item.descripcion || cb, inputMode: 'decimal', maxlength: 10 });
     if (input === null) return;
     const newQty = parseFloat(input.replace(',', '.'));
     if (isNaN(newQty) || newQty < 0) { toast('Cantidad inválida', 'warn', 2000); return; }
@@ -9869,7 +9996,7 @@ const DespachoView = (() => {
 
   function despLimpiarTodo() {
     if (!_cart.length) return;
-    if (!confirm('¿Vaciar el carrito de despacho?')) return;
+    if (!await _whConfirm('¿Vaciar el carrito de despacho?', { warning: true, titulo: 'Vaciar carrito', okText: 'Vaciar' })) return;
     _cart = []; _despLastHistory = [];
     _saveCart(); _renderDespList(); vibrate(20);
   }
@@ -10148,7 +10275,7 @@ const DespachoView = (() => {
       if (restantes.length > 0) {
         const lista = restantes.slice(0, 5).map(i => `  · ${i.nombre} (${(i.cantidadEscaneada||0).toFixed(1)}/${i.cantidad.toFixed(1)})`).join('\n');
         const masTxt = restantes.length > 5 ? `\n  · …y ${restantes.length - 5} más` : '';
-        if (!confirm(`⚠ Lista sombra incompleta — quedan ${restantes.length} items sin atender:\n\n${lista}${masTxt}\n\n¿Despachar igual? La lista sombra se cerrará tras el despacho.`)) {
+        if (!await _whConfirm(`⚠ Lista sombra incompleta — quedan ${restantes.length} items sin atender:\n\n${lista}${masTxt}\n\n¿Despachar igual?\n\nLa lista sombra se cerrará tras el despacho.`, { warning: true, titulo: 'Lista incompleta', okText: 'Despachar igual' })) {
           return;
         }
       }
@@ -10282,7 +10409,7 @@ const DespachoView = (() => {
 
   function cancelar() {
     if (!_cart.length) return;
-    if (!confirm('¿Vaciar el carrito de despacho?')) return;
+    if (!await _whConfirm('¿Vaciar el carrito de despacho?', { warning: true, titulo: 'Vaciar carrito', okText: 'Vaciar' })) return;
     _cart = []; _saveCart(); _renderCart(); _updateFooter();
   }
 
@@ -10775,7 +10902,7 @@ const DespachoView = (() => {
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
     if (prevDesp >= sol && sol > 0) {
-      if (!confirm(`Ya llevas ${prevDesp}/${sol} de "${item.nombre || skuBase}".\n¿Sumar 1 más (sobre-despacho)?`)) return;
+      if (!await _whConfirm(`Ya llevas ${prevDesp}/${sol} de "${item.nombre || skuBase}".\n\n¿Sumar 1 más (sobre-despacho)?`, { warning: true, titulo: 'Sobre-despacho' })) return;
     }
     const cb = _pkckCodigoDe(item);
     item._ultimoCb = cb;
@@ -10883,7 +11010,7 @@ const DespachoView = (() => {
       if (nuevoTotal > sol && sol > 0) {
         const exceso = nuevoTotal - sol;
         const msg = `Estás pesando ${fmt(qty,3)} ${u} pero faltaba solo ${fmt(sol - prevDesp,3)} ${u}.\n\nNuevo total: ${fmt(nuevoTotal,3)} ${u} (${fmt(exceso,3)} ${u} de más)\n\n¿Confirmar igual?`;
-        if (!confirm(msg)) {
+        if (!await _whConfirm(msg, { warning: true })) {
           input.select();
           try { SoundFX.warn(); } catch(_){}
           return;
@@ -11325,7 +11452,7 @@ const DespachoView = (() => {
     if (esParcial && !completo) {
       const items = _pickupActivo.items || [];
       const falt  = items.filter(it => (parseFloat(it.despachado)||0) < (parseFloat(it.solicitado)||0)).length;
-      if (!confirm(`Cerrar despacho con ${falt} item${falt!==1?'s':''} sin completar?\nLos faltantes quedarán en observación de la guía.`)) return;
+      if (!await _whConfirm(`¿Cerrar despacho con ${falt} item${falt!==1?'s':''} sin completar?\n\nLos faltantes quedarán en observación de la guía.`, { warning: true, titulo: 'Cerrar despacho parcial', okText: 'Cerrar' })) return;
     }
 
     // Construir despachoDetalle desde despachadoPorCodigo de cada item
@@ -11551,7 +11678,7 @@ const DespachoView = (() => {
     if (!_pickupActivo) return;
     const idP = _pickupActivo.idPickup;
     const zona = _pickupActivo.idZona || '';
-    if (!confirm('¿Soltar este pickup?\nEl progreso despachado se conserva en la hoja.\nOtro operador podrá tomarlo.')) return;
+    if (!await _whConfirm('¿Soltar este pickup?\n\nEl progreso despachado se conserva en la hoja.\nOtro operador podrá tomarlo.', { warning: true, titulo: 'Soltar pickup', okText: 'Soltar' })) return;
 
     try { SoundFX.warn(); } catch(_){}
     vibrate([30, 20, 60]);
@@ -12050,7 +12177,7 @@ const DespachoView = (() => {
 
   function tomarListaSombraDelPanel(idLista) {
     if (_listaSombra && _listaSombra.id !== idLista) {
-      if (!confirm('Ya tienes una lista sombra activa. ¿Reemplazarla por la que vas a tomar?')) return;
+      if (!await _whConfirm('Ya tienes una lista sombra activa.\n\n¿Reemplazarla por la que vas a tomar?', { warning: true, titulo: 'Reemplazar lista' })) return;
     }
     const usuario = window.WH_CONFIG?.usuario || '';
     if (!usuario) { toast('Sin sesión activa', 'warn'); return; }
@@ -12105,7 +12232,7 @@ const DespachoView = (() => {
   // [v2.13.19] Anular lista sombra del feed (optimista). El creador o cualquiera
   // si no está EN_USO. Marca como ANULADA en backend.
   function anularListaSombraDelFeed(idLista) {
-    if (!confirm('¿Eliminar esta lista del feed? Esta acción no se puede deshacer.')) return;
+    if (!await _whConfirm('¿Eliminar esta lista del feed?\n\nEsta acción no se puede deshacer.', { danger: true, titulo: 'Eliminar lista', okText: 'Eliminar' })) return;
     try { SoundFX.click(); } catch(_){}
     // Optimista: quitar del panel local
     _lsPanelData = (_lsPanelData || []).filter(l => l.idLista !== idLista);
@@ -12293,9 +12420,9 @@ const DespachoView = (() => {
     const tieneBackend = !!_listaSombra.idBackend;
     let ok;
     if (tieneBackend) {
-      ok = confirm('¿Liberar la lista sombra? Volverá a estar DISPONIBLE para que otro operador la tome. El carrito de despacho se mantiene.');
+      ok = await _whConfirm('¿Liberar la lista sombra?\n\nVolverá a estar DISPONIBLE para que otro operador la tome. El carrito de despacho se mantiene.', { warning: true, titulo: 'Liberar lista', okText: 'Liberar' });
     } else {
-      ok = confirm('¿Quitar la lista sombra local? El carrito de despacho se mantiene.');
+      ok = await _whConfirm('¿Quitar la lista sombra local?\n\nEl carrito de despacho se mantiene.', { titulo: 'Quitar lista local' });
     }
     if (!ok) return;
     if (tieneBackend) {
@@ -17002,7 +17129,7 @@ const FotoPicker = (() => {
     if (arr.length === 1) {
       // Una sola foto: confirmar rápido sin abrir modal
       const fid = _extractFileId(arr[0]);
-      if (confirm('El preingreso tiene 1 foto adjunta. ¿Usarla en la guía?')) {
+      if (await _whConfirm('El preingreso tiene 1 foto adjunta.\n\n¿Usarla en la guía?', { titulo: 'Foto preingreso' })) {
         _onSelect(fid || null);
       } else {
         _onSelect(null);
