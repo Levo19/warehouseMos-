@@ -70,7 +70,9 @@ function toast(msg, ms = 2200) {
 }
 
 async function api(action, body) {
-  const r = await fetch(GAS_URL + '?action=' + action, { method: 'POST', body: JSON.stringify(body || {}) });
+  // OJO: el router de WH lee params del body JSON para POST (NO de la querystring).
+  // Por eso el action debe ir DENTRO del body, no en la URL.
+  const r = await fetch(GAS_URL, { method: 'POST', body: JSON.stringify(Object.assign({ action }, body || {})) });
   return await r.json();
 }
 

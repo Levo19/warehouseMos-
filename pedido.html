@@ -582,8 +582,8 @@ async function enviarPedido(){
       state.items = mockIA();
       state.pedidoId = 'P'+Date.now().toString().slice(-6);
     } else {
-      const body = { token, adjuntos: state.adjuntos.map(a=>({tipo:a.tipo,nombre:a.nombre,mime:a.mime,b64:a.b64})), texto: state.texto };
-      const r = await fetch(BACKEND_URL + '?action=clienteRecibirPedido', { method:'POST', body: JSON.stringify(body) });
+      const body = { action:'clienteRecibirPedido', token, adjuntos: state.adjuntos.map(a=>({tipo:a.tipo,nombre:a.nombre,mime:a.mime,b64:a.b64})), texto: state.texto };
+      const r = await fetch(BACKEND_URL, { method:'POST', body: JSON.stringify(body) });
       const d = await r.json();
       state.items = d.items || []; state.pedidoId = d.idPedido;
     }
@@ -597,8 +597,9 @@ async function enviarPedido(){
 async function confirmarPedido(){
   try {
     if (!DEMO_MODE){
-      await fetch(BACKEND_URL + '?action=clienteConfirmarPedido', {
-        method:'POST', body: JSON.stringify({ idPedido: state.pedidoId, items: state.items })
+      await fetch(BACKEND_URL, {
+        method:'POST',
+        body: JSON.stringify({ action:'clienteConfirmarPedido', idPedido: state.pedidoId, items: state.items })
       });
     }
     // Guardar histórico local
@@ -653,8 +654,9 @@ async function registrarme(){
   const telefono = ($('#regTel')?.value || '').trim();
   if (!nombre) { toast('⚠ Falta tu nombre'); soundError(); return; }
   try {
-    const r = await fetch(BACKEND_URL + '?action=clienteRegistrar', {
-      method:'POST', body: JSON.stringify({ token, nombre, telefono, tipo:'minorista' })
+    const r = await fetch(BACKEND_URL, {
+      method:'POST',
+      body: JSON.stringify({ action:'clienteRegistrar', token, nombre, telefono, tipo:'minorista' })
     });
     const d = await r.json();
     if (d?.ok && d.data?.token) {
