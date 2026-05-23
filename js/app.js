@@ -1657,7 +1657,7 @@ const Session = (() => {
   //      requería 2 round-trips.
   const _AUTH_CACHE_KEY    = 'wh_device_auth_date';
   const _AUTH_CACHE_ID_KEY = 'wh_device_auth_id';
-  const _AUTH_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hora
+  const _AUTH_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas — stale-while-revalidate: la app abre instant si verificó hace <12h y refresca en background. Si master suspende el dispositivo, el polling de 15s en pendiente o el _verificarDispositivoSilencioso() en background lo cazan.
 
   async function _verificarDispositivoWH() {
     const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
@@ -1669,7 +1669,7 @@ const Session = (() => {
       return 'ACTIVO';
     }
 
-    // ── Cache hit: si verificó hace <1h y el deviceId coincide, autorizar al instante.
+    // ── Cache hit: si verificó hace <12h y el deviceId coincide, autorizar al instante.
     try {
       const ts = parseInt(localStorage.getItem(_AUTH_CACHE_KEY) || '0', 10);
       const cachedId = localStorage.getItem(_AUTH_CACHE_ID_KEY);
@@ -1704,7 +1704,7 @@ const Session = (() => {
         _verifEstado = 'ACTIVO';
         _ocultarPantallaVerif();
         if (_verifPollTimer) { clearInterval(_verifPollTimer); _verifPollTimer = null; }
-        // Persistir cache 1h
+        // Persistir cache 12h
         try {
           localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
           localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
