@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f172a">
+<title>Gestión de Clientes · warehouseMos</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; background: linear-gradient(135deg, #0b1220, #0f1f3a); color: #e6f0ff; min-height: 100vh; }
+  .glass { background: rgba(255,255,255,.05); backdrop-filter: blur(14px); border: 1px solid rgba(255,255,255,.1); border-radius: 14px; }
+  .cta { background: linear-gradient(135deg, #10b981, #06b6d4); color: #02101a; font-weight: 700; padding: 10px 16px; border-radius: 10px; border: 0; cursor: pointer; }
+  .cta-ghost { background: rgba(255,255,255,.06); color: #cfe9ff; border: 1px solid rgba(255,255,255,.1); padding: 8px 12px; border-radius: 9px; cursor: pointer; font-size: 12.5px; }
+  input { background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.1); color: #fff; border-radius: 9px; padding: 9px 12px; width: 100%; font-family: inherit; }
+  input:focus { outline: none; border-color: #10b981; }
+  table { width: 100%; font-size: 13px; }
+  th { text-align: left; color: #9ab; font-weight: 600; padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 11px; text-transform: uppercase; }
+  td { padding: 10px 6px; border-bottom: 1px solid rgba(255,255,255,.04); }
+  tr:hover td { background: rgba(255,255,255,.03); }
+  .badge-prem { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #1a1100; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; font-weight: 700; }
+  #toast { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%) translateY(80px); background: rgba(15,23,42,.95); border: 1px solid rgba(255,255,255,.1); padding: 10px 18px; border-radius: 12px; transition: .3s; pointer-events: none; z-index: 1000; }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body class="p-6">
+
+<div id="toast"></div>
+
+<div class="max-w-5xl mx-auto">
+  <header class="mb-6">
+    <div class="text-xs text-sky-300/80 uppercase tracking-widest font-semibold">warehouseMos · admin</div>
+    <h1 class="text-2xl font-extrabold mt-1">👥 Gestión de clientes del portal</h1>
+    <p class="text-sm text-slate-400 mt-1">Cada cliente tiene su link único memorable para mandar pedidos.</p>
+  </header>
+
+  <!-- Form alta -->
+  <section class="glass p-5 mb-6">
+    <h2 class="font-bold text-base mb-3">➕ Nuevo cliente</h2>
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <input id="inNombre" placeholder="Nombre bonito (ej: Don Pepe)">
+      <input id="inTel" placeholder="Teléfono (+51 ...)">
+      <select id="inTipo" class="bg-slate-800/60 border border-white/10 rounded-lg px-3 py-2 text-sm">
+        <option value="minorista">Minorista</option>
+        <option value="mayorista">Mayorista</option>
+        <option value="recurrente">Recurrente</option>
+      </select>
+      <button class="cta" onclick="crear()">Crear y obtener link</button>
+    </div>
+    <div class="text-xs text-slate-500 mt-2">El token se genera automáticamente del nombre + 3 dígitos.</div>
+  </section>
+
+  <!-- Tabla -->
+  <section class="glass p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="font-bold text-base">Clientes registrados</h2>
+      <button class="cta-ghost" onclick="cargar()">⟳ Refrescar</button>
+    </div>
+    <div id="tablaCont"><div class="text-slate-400 text-sm">Cargando…</div></div>
+  </section>
+</div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec';
+const PORTAL_BASE = location.origin + location.pathname.replace(/clientes\.html$/, '') + 'pedido.html';
+
+function toast(msg, ms = 2200) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+async function api(action, body) {
+  const r = await fetch(GAS_URL + '?action=' + action, { method: 'POST', body: JSON.stringify(body || {}) });
+  return await r.json();
+}
+
+async function cargar() {
+  document.getElementById('tablaCont').innerHTML = '<div class="text-slate-400 text-sm">Cargando…</div>';
+  try {
+    const r = await fetch(GAS_URL + '?action=clienteListar', { method: 'GET' });
+    const d = await r.json();
+    const clientes = (d.ok && d.data && d.data.clientes) || [];
+    if (!clientes.length) {
+      document.getElementById('tablaCont').innerHTML = '<div class="text-slate-400 text-sm italic">Aún no hay clientes. Crea uno arriba.</div>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Token</th><th>Nombre</th><th>Teléfono</th><th>Tipo</th><th>Último pedido</th><th>Acciones</th></tr></thead><tbody>';
+    clientes.forEach(c => {
+      const link = PORTAL_BASE + '?c=' + encodeURIComponent(c.token);
+      const ultimo = c.ultimoPedido ? new Date(c.ultimoPedido).toLocaleDateString('es-PE') : '—';
+      html += `<tr>
+        <td><code class="text-emerald-300 text-xs">${c.token}</code> ${c.premium ? '<span class="badge-prem">★ Premium</span>' : ''}</td>
+        <td class="font-semibold">${esc(c.nombre)}</td>
+        <td class="text-slate-300">${esc(c.telefono || '—')}</td>
+        <td class="text-slate-300">${esc(c.tipo || '—')}</td>
+        <td class="text-slate-400 text-xs">${ultimo}</td>
+        <td>
+          <button class="cta-ghost" onclick="copiar('${esc(link)}')">📋 Copiar link</button>
+          <button class="cta-ghost" onclick="whatsApp('${esc(c.telefono || '')}','${esc(c.nombre)}','${esc(link)}')">💬 WhatsApp</button>
+        </td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('tablaCont').innerHTML = html;
+  } catch (e) {
+    document.getElementById('tablaCont').innerHTML = '<div class="text-red-400 text-sm">❌ ' + e.message + '</div>';
+  }
+}
+
+async function crear() {
+  const nombre = document.getElementById('inNombre').value.trim();
+  const telefono = document.getElementById('inTel').value.trim();
+  const tipo = document.getElementById('inTipo').value;
+  if (!nombre) { toast('⚠ Falta el nombre'); return; }
+  try {
+    const d = await api('clienteRegistrar', { nombre, telefono, tipo });
+    if (d.ok && d.data) {
+      toast(`✓ ${d.data.nombre} creado · token ${d.data.token}`);
+      document.getElementById('inNombre').value = '';
+      document.getElementById('inTel').value = '';
+      cargar();
+    } else {
+      toast('❌ ' + (d.error || 'error desconocido'));
+    }
+  } catch (e) { toast('❌ ' + e.message); }
+}
+
+function copiar(link) {
+  navigator.clipboard.writeText(link).then(() => toast('🔗 Link copiado'));
+}
+
+function whatsApp(tel, nombre, link) {
+  const msg = encodeURIComponent(
+    `Hola ${nombre} 👋\n\nDesde Inversiones MOS ya puedes mandarnos tu pedido en segundos por este link personal (foto, audio, texto o Excel):\n\n${link}\n\nGuárdalo en tus contactos. ¡Gracias!`
+  );
+  const phone = tel.replace(/\D/g, '');
+  const url = phone
+    ? `https://wa.me/${phone}?text=${msg}`
+    : `https://wa.me/?text=${msg}`;
+  window.open(url, '_blank');
+}
+
+function esc(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[c]);
+}
+
+cargar();
+</script>
+</body>
+</html>

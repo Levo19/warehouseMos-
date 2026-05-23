@@ -125,6 +125,15 @@ function _route(method, e) {
       // [v2.13.42] OCRs para flow Costos-Jefa (MOS reporte profesional)
       case 'extraerCostosFactura':     return extraerCostosFactura(params);
       case 'extraerCorreccionesJefa':  return extraerCorreccionesJefa(params);
+      // ── Portal de pedidos del cliente (pedido.html) ──────
+      case 'clienteInfo':            return clienteInfo(params);
+      case 'clienteRegistrar':       return clienteRegistrar(params);
+      case 'clienteListar':          return clienteListar();
+      case 'clienteRecibirPedido':   return clienteRecibirPedido(params);
+      case 'clienteConfirmarPedido': return clienteConfirmarPedido(params);
+      case 'clienteEstadoPedido':    return clienteEstadoPedido(params);
+      case 'clienteInboxPolling':    return clienteInboxPolling(params);
+
       // ── Listas Sombra compartidas ────────────────────────
       case 'crearListaSombra':              return crearListaSombra(params);
       case 'getListasSombra':               return getListasSombra(params);

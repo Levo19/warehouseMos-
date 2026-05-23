@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>Pedidos · Inversiones MOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --bg-1:#0b1220; --bg-2:#0f1f3a; --bg-3:#0a1828;
+    --accent:#10b981; --accent-2:#06b6d4; --warn:#f59e0b; --bad:#ef4444;
+  }
+  html,body{margin:0;padding:0;font-family:'Inter',system-ui,-apple-system,sans-serif;color:#e6f0ff;
+    background:linear-gradient(135deg,var(--bg-1) 0%,var(--bg-2) 55%,var(--bg-3) 100%);
+    min-height:100vh; min-height:100svh; overflow-x:hidden;}
+  body{padding-bottom:120px;}
+
+  /* ── Glass cards ── */
+  .glass{background:rgba(255,255,255,.04); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+    border:1px solid rgba(255,255,255,.08); border-radius:18px;}
+  .glass-strong{background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14);}
+
+  /* ── Botón modo de entrada ── */
+  .modo-btn{position:relative; padding:18px 16px; border-radius:18px; cursor:pointer;
+    background:linear-gradient(135deg,rgba(255,255,255,.06),rgba(255,255,255,.02));
+    border:1px solid rgba(255,255,255,.1); transition:.18s ease;}
+  .modo-btn:active{transform:scale(.97);}
+  .modo-btn:hover{border-color:rgba(16,185,129,.5); background:linear-gradient(135deg,rgba(16,185,129,.08),rgba(6,182,212,.04));}
+  .modo-btn .ico{font-size:32px; line-height:1;}
+  .modo-btn .badge{position:absolute; top:10px; right:10px; background:var(--accent); color:#022; border-radius:999px;
+    padding:2px 8px; font-size:11px; font-weight:700;}
+
+  /* ── CTA principal ── */
+  .cta{background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    box-shadow:0 10px 30px -10px rgba(16,185,129,.6); transition:.2s; border:0; cursor:pointer;
+    border-radius:14px; padding:16px; font-weight:700; color:#02101a; font-size:16px; width:100%;}
+  .cta:active{transform:scale(.98);}
+  .cta:disabled{filter:grayscale(.8) brightness(.6); cursor:not-allowed;}
+  .cta-ghost{background:rgba(255,255,255,.05); color:#cfe9ff; border:1px solid rgba(255,255,255,.12);
+    border-radius:12px; padding:12px; font-weight:600; cursor:pointer;}
+  .cta-ghost:active{transform:scale(.98);}
+
+  /* ── Tarjeta adjunto ── */
+  .adjunto{display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:12px;
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.06); margin-bottom:8px;}
+  .adjunto .preview{width:46px; height:46px; border-radius:10px; background:rgba(0,0,0,.3);
+    display:grid; place-items:center; overflow:hidden; flex:none;}
+  .adjunto .preview img{width:100%; height:100%; object-fit:cover;}
+  .adjunto .info{flex:1; min-width:0;} .adjunto .info b{display:block; font-size:13px; color:#fff;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .adjunto .info span{font-size:11px; color:#9ab;}
+  .adjunto .del{background:rgba(239,68,68,.15); color:#fda4a4; border:0; border-radius:8px;
+    width:30px; height:30px; cursor:pointer;}
+
+  /* ── Animaciones ── */
+  @keyframes pulse-ring{0%{box-shadow:0 0 0 0 rgba(16,185,129,.6);}70%{box-shadow:0 0 0 20px rgba(16,185,129,0);}100%{box-shadow:0 0 0 0 rgba(16,185,129,0);}}
+  .pulse{animation:pulse-ring 1.6s infinite;}
+  @keyframes shimmer{0%{background-position:-400px 0;}100%{background-position:400px 0;}}
+  .shimmer{background:linear-gradient(90deg,rgba(255,255,255,.04) 0%,rgba(255,255,255,.12) 50%,rgba(255,255,255,.04) 100%);
+    background-size:800px 100%; animation:shimmer 1.4s infinite linear; border-radius:8px;}
+  @keyframes bar{0%,100%{height:8px;}50%{height:24px;}}
+  .bar{display:inline-block; width:4px; margin:0 2px; background:var(--accent); border-radius:2px; animation:bar 1s infinite ease-in-out;}
+  .bar:nth-child(2){animation-delay:.15s;} .bar:nth-child(3){animation-delay:.3s;}
+  .bar:nth-child(4){animation-delay:.45s;} .bar:nth-child(5){animation-delay:.6s;}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:none;}}
+  .fadeUp{animation:fadeUp .25s ease both;}
+
+  /* ── Timeline ── */
+  .tl-step{display:flex; gap:12px; padding:10px 0; position:relative;}
+  .tl-step::after{content:""; position:absolute; left:12px; top:36px; bottom:-10px; width:2px; background:rgba(255,255,255,.1);}
+  .tl-step:last-child::after{display:none;}
+  .tl-dot{width:26px; height:26px; border-radius:50%; background:rgba(255,255,255,.08); display:grid; place-items:center; flex:none; font-size:14px;}
+  .tl-step.done .tl-dot{background:var(--accent); color:#02101a;}
+  .tl-step.now .tl-dot{background:var(--accent-2); color:#021018; animation:pulse-ring 1.5s infinite;}
+
+  /* ── Confeti canvas ── */
+  #confetti{position:fixed; inset:0; pointer-events:none; z-index:9999;}
+
+  /* ── Toast ── */
+  #toast{position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(100px);
+    background:rgba(15,23,42,.92); border:1px solid rgba(255,255,255,.1); color:#e6f0ff;
+    padding:12px 18px; border-radius:12px; font-size:14px; transition:.3s; pointer-events:none; z-index:1000;}
+  #toast.show{transform:translateX(-50%) translateY(0);}
+
+  textarea, input[type=text]{background:rgba(0,0,0,.25); border:1px solid rgba(255,255,255,.1); color:#fff;
+    border-radius:12px; padding:12px 14px; width:100%; font-family:inherit; resize:vertical;}
+  textarea:focus, input[type=text]:focus{outline:none; border-color:var(--accent);}
+
+  .chip{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px;
+    background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); font-size:12px; cursor:pointer;}
+  .chip.on{background:var(--accent); color:#02101a; border-color:transparent;}
+
+  /* iOS safe area */
+  @supports(padding:max(0px)){body{padding-bottom:max(120px,env(safe-area-inset-bottom));}}
+</style>
+</head>
+<body>
+
+<canvas id="confetti"></canvas>
+<div id="toast"></div>
+
+<main id="app" class="max-w-md mx-auto px-4 pt-6">
+  <!-- vistas se inyectan aquí dinámicamente -->
+</main>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════
+ * PORTAL DE PEDIDOS — Inversiones MOS (cliente)
+ * v1.0 · 2026-05-22
+ *
+ * Single-file standalone. Pegar en warehouseMos/pedido.html (GitHub Pages).
+ * URL pública:   .../warehouseMos/pedido.html?c=DONPEPE
+ *                                              └─ token del cliente
+ *
+ * BACKEND (cuando se conecte): cambiar BACKEND_URL y poner DEMO_MODE=false.
+ * Endpoints esperados en WH (sin implementar todavía):
+ *   POST clienteRecibirPedido  { token, adjuntos:[{tipo,nombre,b64}], texto }
+ *        → { idPedido, items:[{nombre,cantidad,unidad,duda?}], totalEstimado }
+ *   POST clienteConfirmarPedido { idPedido, items[] }
+ *        → { ok, eta }  (dispara FCM a WH para alerta visual+sonora)
+ *   GET  clienteEstadoPedido?p=ID
+ *        → { estado, timeline:[{paso,ts}] }
+ * ════════════════════════════════════════════════════════════════════ */
+const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec';
+const DEMO_MODE   = false;  // backend ClientePortal.gs ya está deployado
+const APP_NAME    = 'Inversiones MOS';
+
+/* ──────────── STATE ──────────── */
+const params  = new URLSearchParams(location.search);
+const token   = (params.get('c') || '').toUpperCase();   // ej: DONPEPE
+const pedidoQ = params.get('p') || '';                   // tracking de un pedido específico
+
+const state = {
+  view: 'home',          // home | foto | audio | excel | texto | revisar | enviando | preview | confirmado | tracking
+  cliente: { token, nombre: bonitoNombre(token) || 'Cliente' },
+  adjuntos: [],          // [{tipo:'foto'|'audio'|'excel'|'texto', nombre, mime, b64, size, dur?}]
+  texto: '',
+  items: [],             // resultado IA
+  pedidoId: '',
+  premium: localStorage.getItem('mosCliPremium')==='1',
+  historial: JSON.parse(localStorage.getItem('mosCliHist') || '[]'),
+  favoritos: JSON.parse(localStorage.getItem('mosCliFav') || '[]'),
+};
+
+/* ──────────── HELPERS ──────────── */
+const $ = sel => document.querySelector(sel);
+const app = $('#app');
+
+function bonitoNombre(s){
+  if(!s) return '';
+  return s.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());
+}
+function vibrar(p){ if(navigator.vibrate) navigator.vibrate(p); }
+function toast(msg, ms=2200){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._t); toast._t = setTimeout(()=>t.classList.remove('show'), ms);
+}
+function fmtKB(b){ return b<1024 ? b+' B' : b<1024*1024 ? (b/1024).toFixed(1)+' KB' : (b/1024/1024).toFixed(1)+' MB'; }
+
+/* ──────────── SONIDOS (Web Audio API, sin assets) ──────────── */
+let _ac;
+function ac(){ return _ac ||= new (window.AudioContext||window.webkitAudioContext)(); }
+function tone(freq, dur=.12, type='sine', vol=.18){
+  const a=ac(), o=a.createOscillator(), g=a.createGain();
+  o.type=type; o.frequency.value=freq; o.connect(g); g.connect(a.destination);
+  g.gain.setValueAtTime(0,a.currentTime); g.gain.linearRampToValueAtTime(vol,a.currentTime+.01);
+  g.gain.exponentialRampToValueAtTime(.0001,a.currentTime+dur);
+  o.start(); o.stop(a.currentTime+dur);
+}
+function soundTap(){ tone(880,.06,'sine',.12); }
+function soundSuccess(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.13,'sine',.22),i*70)); }
+function soundError(){ tone(180,.25,'square',.18); }
+function soundRecord(){ tone(440,.08,'sine',.1); }
+
+/* ──────────── CONFETI ──────────── */
+function confetti(){
+  const cnv=$('#confetti'), ctx=cnv.getContext('2d');
+  cnv.width=innerWidth; cnv.height=innerHeight;
+  const cols=['#10b981','#06b6d4','#fbbf24','#a78bfa','#f472b6'];
+  const N=80, parts=Array.from({length:N},()=>({
+    x:innerWidth/2, y:innerHeight*.35,
+    vx:(Math.random()-.5)*9, vy:Math.random()*-12-4,
+    g:.4, s:Math.random()*8+4, r:Math.random()*Math.PI,
+    vr:(Math.random()-.5)*.3, c:cols[Math.floor(Math.random()*cols.length)], a:1
+  }));
+  let frames=0;
+  (function tick(){
+    ctx.clearRect(0,0,cnv.width,cnv.height);
+    parts.forEach(p=>{p.vy+=p.g; p.x+=p.vx; p.y+=p.vy; p.r+=p.vr; p.a-=.008;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r); ctx.globalAlpha=Math.max(0,p.a);
+      ctx.fillStyle=p.c; ctx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.5); ctx.restore();});
+    frames++;
+    if(frames<160) requestAnimationFrame(tick); else ctx.clearRect(0,0,cnv.width,cnv.height);
+  })();
+}
+
+/* ──────────── COMPRESIÓN DE IMAGEN ────────────
+ * Reduce a max 1600px lado mayor, JPEG q=.78. Ahorra mucho data móvil. */
+function comprimirImagen(file){
+  return new Promise((res,rej)=>{
+    const img=new Image(), fr=new FileReader();
+    fr.onload=()=>img.src=fr.result; fr.onerror=rej;
+    img.onload=()=>{
+      const max=1600, r=Math.min(1,max/Math.max(img.width,img.height));
+      const w=Math.round(img.width*r), h=Math.round(img.height*r);
+      const cnv=document.createElement('canvas'); cnv.width=w; cnv.height=h;
+      cnv.getContext('2d').drawImage(img,0,0,w,h);
+      const b64=cnv.toDataURL('image/jpeg',.78);
+      res({ b64, mime:'image/jpeg', size:Math.round(b64.length*.75) });
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+/* ──────────── LECTURA ARCHIVO GENÉRICO → BASE64 ──────────── */
+function leerArchivoBase64(file){
+  return new Promise((res,rej)=>{
+    const fr=new FileReader();
+    fr.onload=()=>res({ b64:fr.result, mime:file.type, size:file.size });
+    fr.onerror=rej; fr.readAsDataURL(file);
+  });
+}
+
+/* ──────────── VISTAS (cada función devuelve string HTML) ──────────── */
+function vista_home(){
+  const yaAdjuntos = state.adjuntos.length;
+  const yaTexto    = state.texto.trim().length;
+  const habilitado = yaAdjuntos || yaTexto;
+  const lastHist = state.historial[0];
+  return `
+    <header class="mb-5 fadeUp">
+      <div class="text-xs text-sky-300/80 uppercase tracking-widest font-semibold">${APP_NAME}</div>
+      <h1 class="text-2xl font-extrabold mt-1">Hola, ${state.cliente.nombre} 👋</h1>
+      <p class="text-sm text-slate-300/80 mt-1">Mándanos tu lista como prefieras — combina las que quieras.</p>
+    </header>
+
+    ${bannerRegistro()}
+
+    ${lastHist ? `
+    <button onclick="repetirUltimo()" class="glass w-full text-left p-4 mb-4 fadeUp" style="border-left:3px solid var(--accent)">
+      <div class="flex items-center gap-3">
+        <div class="text-2xl">🔁</div>
+        <div class="flex-1">
+          <div class="font-bold text-sm">Repetir último pedido</div>
+          <div class="text-xs text-slate-400">${lastHist.items.length} ítems · ${new Date(lastHist.ts).toLocaleDateString('es-PE')}</div>
+        </div>
+        <div class="text-sky-300 text-xl">→</div>
+      </div>
+    </button>` : ''}
+
+    <div class="grid grid-cols-2 gap-3 fadeUp">
+      <div class="modo-btn" onclick="ir('foto')"><div class="ico">📷</div><div class="font-bold mt-2 text-sm">Tomar foto</div><div class="text-xs text-slate-400">a tu lista escrita</div>${countTipo('foto')?`<span class="badge">${countTipo('foto')}</span>`:''}</div>
+      <div class="modo-btn" onclick="ir('audio')"><div class="ico">🎙️</div><div class="font-bold mt-2 text-sm">Grabar audio</div><div class="text-xs text-slate-400">dictado de voz</div>${countTipo('audio')?`<span class="badge">${countTipo('audio')}</span>`:''}</div>
+      <div class="modo-btn" onclick="ir('excel')"><div class="ico">📊</div><div class="font-bold mt-2 text-sm">Subir archivo</div><div class="text-xs text-slate-400">excel · pdf · csv</div>${countTipo('excel')?`<span class="badge">${countTipo('excel')}</span>`:''}</div>
+      <div class="modo-btn" onclick="ir('texto')"><div class="ico">✏️</div><div class="font-bold mt-2 text-sm">Escribir</div><div class="text-xs text-slate-400">texto plano</div>${state.texto.trim()?`<span class="badge">✓</span>`:''}</div>
+    </div>
+
+    ${state.favoritos.length ? `
+    <div class="mt-5 fadeUp">
+      <div class="text-xs text-slate-400 mb-2 font-semibold">⭐ Tus favoritos (tap para agregar)</div>
+      <div class="flex flex-wrap gap-2">
+        ${state.favoritos.map(f=>`<span class="chip" onclick="agregarFavorito('${f.replace(/'/g,"\\'")}')">${f} +</span>`).join('')}
+      </div>
+    </div>`:''}
+
+    <div class="mt-5 flex items-center gap-2 text-xs text-slate-400 fadeUp">
+      <button onclick="descargarPlantilla()" class="cta-ghost text-xs" style="padding:8px 12px">📥 Plantilla Excel</button>
+      <button onclick="compartir()" class="cta-ghost text-xs" style="padding:8px 12px">🔗 Compartir</button>
+    </div>
+
+    ${ (yaAdjuntos || yaTexto) ? `
+    <section class="mt-5 fadeUp">
+      <div class="text-xs text-slate-400 mb-2 font-semibold">Adjuntos preparados (${yaAdjuntos + (yaTexto?1:0)})</div>
+      ${state.adjuntos.map((a,i)=>cardAdjunto(a,i)).join('')}
+      ${yaTexto?`<div class="adjunto"><div class="preview">✏️</div><div class="info"><b>Texto escrito</b><span>${state.texto.length} caracteres</span></div><button class="del" onclick="borrarTexto()">✕</button></div>`:''}
+    </section>`:''}
+
+    <div class="fixed bottom-0 left-0 right-0 px-4 pb-4 pt-3" style="background:linear-gradient(180deg,transparent,rgba(11,18,32,.92) 35%);">
+      <div class="max-w-md mx-auto">
+        <button class="cta" ${habilitado?'':'disabled'} onclick="ir('revisar')">
+          ${habilitado ? `▶ Enviar pedido (${yaAdjuntos+(yaTexto?1:0)})` : 'Agrega al menos uno para enviar'}
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function countTipo(t){ return state.adjuntos.filter(a=>a.tipo===t).length; }
+function cardAdjunto(a,i){
+  const ico = a.tipo==='foto'?'📷' : a.tipo==='audio'?'🎙️' : '📊';
+  const prev = a.tipo==='foto' && a.b64 ? `<img src="${a.b64}">` : ico;
+  return `<div class="adjunto"><div class="preview">${prev}</div>
+    <div class="info"><b>${a.nombre}</b><span>${fmtKB(a.size)}${a.dur?` · ${a.dur}s`:''}</span></div>
+    <button class="del" onclick="borrarAdjunto(${i})">✕</button></div>`;
+}
+
+function vista_foto(){
+  return `
+    ${headerBack('Tomar foto')}
+    <div class="glass p-5 text-center fadeUp">
+      <div class="text-5xl mb-3">📷</div>
+      <p class="text-sm text-slate-300 mb-4">Toma una foto clara de tu lista escrita (o súbela desde galería).</p>
+      <input id="inpFoto" type="file" accept="image/*" capture="environment" multiple class="hidden" onchange="onFotoChange(event)">
+      <button class="cta" onclick="$('#inpFoto').click(); soundTap(); vibrar(20)">📸 Abrir cámara / Galería</button>
+      <p class="text-xs text-slate-500 mt-3">Se comprimen automáticamente para no gastar tus datos.</p>
+    </div>
+    ${footerVolver()}
+  `;
+}
+
+function vista_audio(){
+  return `
+    ${headerBack('Grabar audio')}
+    <div class="glass p-5 text-center fadeUp">
+      <div id="recVisual" class="my-4" style="height:50px;">
+        <span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span>
+      </div>
+      <p id="recStatus" class="text-sm text-slate-300 mb-3">Mantén presionado para grabar</p>
+      <button id="recBtn" class="cta pulse" style="border-radius:50%; width:120px; height:120px; font-size:36px; padding:0;"
+        onpointerdown="iniciarGrabacion()" onpointerup="detenerGrabacion()" onpointerleave="detenerGrabacion()">🎙️</button>
+      <p class="text-xs text-slate-500 mt-4">Tip: dicta producto, cantidad y unidad. Ej: "10 kilos de arroz Costeño".</p>
+    </div>
+    ${footerVolver()}
+  `;
+}
+
+function vista_excel(){
+  return `
+    ${headerBack('Subir archivo')}
+    <div class="glass p-5 fadeUp">
+      <label for="inpExcel" class="block border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer"
+        style="border-color:rgba(16,185,129,.4);"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+        ondragleave="this.style.borderColor='rgba(16,185,129,.4)'"
+        ondrop="event.preventDefault(); onExcelDrop(event)">
+        <div class="text-5xl mb-2">📊</div>
+        <p class="text-sm font-semibold text-emerald-300">Tap para elegir · o arrastra aquí</p>
+        <p class="text-xs text-slate-400 mt-2">Excel (.xlsx .xls) · CSV · PDF · imagen</p>
+      </label>
+      <input id="inpExcel" type="file" multiple accept=".xlsx,.xls,.csv,.pdf,image/*" class="hidden" onchange="onExcelChange(event)">
+      <div class="mt-4 flex items-center gap-2 text-xs text-slate-400">
+        <button onclick="descargarPlantilla()" class="cta-ghost text-xs" style="padding:8px 12px">📥 Descargar plantilla</button>
+      </div>
+    </div>
+    ${footerVolver()}
+  `;
+}
+
+function vista_texto(){
+  return `
+    ${headerBack('Escribir lista')}
+    <div class="glass p-5 fadeUp">
+      <textarea id="txtArea" rows="10" placeholder="Ej:&#10;10 kg arroz Costeño&#10;2 cajas Coca-Cola 3L&#10;6 lt aceite Primor&#10;1 saco azúcar rubia">${state.texto.replace(/</g,'&lt;')}</textarea>
+      <p class="text-xs text-slate-500 mt-2">Un producto por línea. La IA reconoce cantidades, unidades y marcas.</p>
+      <button class="cta mt-4" onclick="guardarTexto()">✓ Guardar y volver</button>
+    </div>
+    ${footerVolver()}
+  `;
+}
+
+function vista_revisar(){
+  const total = state.adjuntos.length + (state.texto.trim()?1:0);
+  return `
+    ${headerBack('Revisar y enviar')}
+    <div class="glass p-5 fadeUp">
+      <div class="text-sm text-slate-300 mb-3">Vas a enviar <b class="text-emerald-300">${total} entrada${total!==1?'s':''}</b>:</div>
+      ${state.adjuntos.map((a,i)=>cardAdjunto(a,i)).join('')}
+      ${state.texto.trim()?`<div class="adjunto"><div class="preview">✏️</div><div class="info"><b>Texto escrito</b><span>${state.texto.length} car.</span></div><button class="del" onclick="borrarTexto()">✕</button></div>`:''}
+
+      ${detectarDuplicado() ? `
+      <div class="glass p-3 my-3" style="border-left:3px solid var(--warn)">
+        <div class="text-sm font-semibold text-amber-300">⚠ Posible pedido duplicado</div>
+        <div class="text-xs text-slate-300">Hace poco enviaste algo muy similar. ¿Continuar igual?</div>
+      </div>`:''}
+
+      <button class="cta mt-4" onclick="enviarPedido()">🚀 Enviar a ${APP_NAME}</button>
+      <button class="cta-ghost w-full mt-2" onclick="ir('home')">← Volver a agregar más</button>
+    </div>
+  `;
+}
+
+function vista_enviando(){
+  return `
+    <div class="glass p-6 my-10 text-center fadeUp">
+      <div class="text-6xl mb-4">🪄</div>
+      <h2 class="text-xl font-bold mb-2">Procesando con IA…</h2>
+      <p class="text-sm text-slate-400 mb-5">Estamos leyendo y entendiendo tu pedido.</p>
+      <div class="shimmer h-3 mb-2"></div>
+      <div class="shimmer h-3 mb-2" style="width:80%"></div>
+      <div class="shimmer h-3" style="width:60%"></div>
+    </div>
+  `;
+}
+
+function vista_preview(){
+  const totalEst = state.items.reduce((s,it)=>s+(it.precioEst||0)*it.cantidad,0);
+  return `
+    ${headerBack('Revisar lo que entendimos','home')}
+    <div class="glass p-5 fadeUp">
+      <div class="text-sm text-slate-300 mb-3">La IA detectó <b class="text-emerald-300">${state.items.length} ítems</b>. Edita o confirma:</div>
+      ${state.items.map((it,i)=>`
+        <div class="adjunto" style="${it.duda?'border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.06)':''}">
+          <div class="preview" style="font-size:18px;">${it.duda?'⚠':'☑'}</div>
+          <div class="info">
+            <b>${it.nombre}</b>
+            <span>${it.cantidad} ${it.unidad}${it.precioEst?` · ~S/ ${(it.precioEst*it.cantidad).toFixed(2)}`:''}</span>
+            ${it.duda?`<span style="color:#fbbf24"> · ${it.duda}</span>`:''}
+          </div>
+          <button class="del" onclick="quitarItem(${i})">✕</button>
+        </div>
+      `).join('')}
+      <div class="text-right text-sm text-slate-300 mt-3">Estimado total: <b class="text-emerald-300">S/ ${totalEst.toFixed(2)}</b></div>
+
+      <div class="mt-4 grid grid-cols-2 gap-2">
+        <button class="cta-ghost" onclick="ir('home')">✏️ Corregir</button>
+        <button class="cta" onclick="confirmarPedido()">✓ Confirmar</button>
+      </div>
+      ${state.premium?'<div class="text-xs text-emerald-300 text-center mt-3">⚡ Premium: con un match 100% se autoconfirma.</div>':''}
+    </div>
+  `;
+}
+
+function vista_confirmado(){
+  const tl = [
+    {p:'Recibido',i:'📨',done:true,now:false},
+    {p:'Cotizando',i:'🧮',done:false,now:true},
+    {p:'Despachando',i:'📦',done:false,now:false},
+    {p:'Listo',i:'✓',done:false,now:false},
+    {p:'En camino',i:'🚚',done:false,now:false},
+  ];
+  return `
+    <div class="text-center py-8 fadeUp">
+      <div class="text-7xl mb-3">✓</div>
+      <h2 class="text-2xl font-extrabold">¡Pedido enviado!</h2>
+      <p class="text-sm text-slate-300 mt-1">Tu nro de pedido: <b class="text-emerald-300">#${state.pedidoId}</b></p>
+    </div>
+    <div class="glass p-5 fadeUp">
+      <div class="text-xs text-slate-400 mb-2 font-semibold">Estado en vivo</div>
+      ${tl.map(s=>`<div class="tl-step ${s.done?'done':''} ${s.now?'now':''}">
+        <div class="tl-dot">${s.i}</div>
+        <div class="flex-1 pt-1"><div class="font-semibold text-sm">${s.p}</div></div>
+      </div>`).join('')}
+    </div>
+    <div class="mt-4 grid grid-cols-2 gap-2 fadeUp">
+      <button class="cta-ghost" onclick="enviarWhatsApp()">💬 Avisar por WhatsApp</button>
+      <button class="cta" onclick="reiniciar()">＋ Nuevo pedido</button>
+    </div>
+  `;
+}
+
+function headerBack(titulo, dest='home'){
+  return `<header class="flex items-center gap-3 mb-4 fadeUp">
+    <button class="cta-ghost" style="padding:8px 12px" onclick="ir('${dest}')">←</button>
+    <h2 class="font-bold text-lg">${titulo}</h2>
+  </header>`;
+}
+function footerVolver(){
+  return `<div class="fixed bottom-0 left-0 right-0 px-4 pb-4 pt-3" style="background:linear-gradient(180deg,transparent,rgba(11,18,32,.92) 35%);">
+    <div class="max-w-md mx-auto"><button class="cta-ghost w-full" onclick="ir('home')">✓ Listo, volver al menú</button></div></div>`;
+}
+
+/* ──────────── RENDER ROUTER ──────────── */
+function render(){
+  app.innerHTML = ({
+    home: vista_home, foto: vista_foto, audio: vista_audio, excel: vista_excel,
+    texto: vista_texto, revisar: vista_revisar, enviando: vista_enviando,
+    preview: vista_preview, confirmado: vista_confirmado,
+  }[state.view] || vista_home)();
+}
+function ir(v){ state.view = v; soundTap(); vibrar(15); render(); window.scrollTo(0,0); }
+
+/* ──────────── ACCIONES FOTO ──────────── */
+async function onFotoChange(e){
+  for (const f of e.target.files) {
+    const { b64, mime, size } = await comprimirImagen(f);
+    state.adjuntos.push({ tipo:'foto', nombre:f.name||'foto.jpg', mime, b64, size });
+  }
+  toast(`📷 ${e.target.files.length} foto(s) agregada(s)`);
+  soundSuccess(); vibrar([20,40,20]); render();
+}
+
+/* ──────────── ACCIONES AUDIO ──────────── */
+let _rec, _chunks=[], _recStart=0, _recStream;
+async function iniciarGrabacion(){
+  try {
+    _recStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+    _rec = new MediaRecorder(_recStream);
+    _chunks=[]; _recStart=Date.now();
+    _rec.ondataavailable = e => _chunks.push(e.data);
+    _rec.onstop = async ()=>{
+      const blob = new Blob(_chunks, { type:'audio/webm' });
+      const b64 = await new Promise(res=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.readAsDataURL(blob); });
+      const dur = Math.round((Date.now()-_recStart)/1000);
+      state.adjuntos.push({ tipo:'audio', nombre:`audio_${Date.now()}.webm`, mime:'audio/webm', b64, size:blob.size, dur });
+      _recStream.getTracks().forEach(t=>t.stop());
+      toast(`🎙️ Audio ${dur}s agregado`); soundSuccess(); vibrar([20,40,20]); render();
+    };
+    _rec.start();
+    $('#recStatus').textContent = 'Grabando… suelta para detener';
+    $('#recBtn').style.background = 'linear-gradient(135deg,#ef4444,#f59e0b)';
+    soundRecord();
+  } catch(e){ toast('❌ Sin permiso de micrófono'); soundError(); }
+}
+function detenerGrabacion(){
+  if (_rec && _rec.state === 'recording') _rec.stop();
+}
+
+/* ──────────── ACCIONES EXCEL/ARCHIVO ──────────── */
+async function onExcelChange(e){ await procesarArchivos(e.target.files); }
+async function onExcelDrop(e){ await procesarArchivos(e.dataTransfer.files); }
+async function procesarArchivos(files){
+  for (const f of files){
+    if (f.type.startsWith('image/')) {
+      const { b64, mime, size } = await comprimirImagen(f);
+      state.adjuntos.push({ tipo:'foto', nombre:f.name, mime, b64, size });
+    } else {
+      const { b64, mime, size } = await leerArchivoBase64(f);
+      state.adjuntos.push({ tipo:'excel', nombre:f.name, mime, b64, size });
+    }
+  }
+  toast(`📊 ${files.length} archivo(s) agregado(s)`); soundSuccess(); vibrar([20,40,20]); render();
+}
+
+/* ──────────── TEXTO ──────────── */
+function guardarTexto(){
+  state.texto = $('#txtArea').value;
+  toast('✏️ Texto guardado'); soundSuccess(); vibrar(20); ir('home');
+}
+function borrarTexto(){ state.texto=''; render(); }
+function borrarAdjunto(i){ state.adjuntos.splice(i,1); render(); }
+
+/* ──────────── PLANTILLA EXCEL (CSV) ──────────── */
+function descargarPlantilla(){
+  const csv = 'Producto,Cantidad,Unidad,Notas\nArroz Costeño,2,saco,\nAceite Primor 1L,6,unidad,\nCoca-Cola 3L,4,unidad,\n';
+  const blob = new Blob(['﻿'+csv], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download='plantilla_pedido.csv'; a.click(); URL.revokeObjectURL(url);
+  toast('📥 Plantilla descargada'); soundTap();
+}
+
+/* ──────────── COMPARTIR ──────────── */
+async function compartir(){
+  const url = location.href;
+  const txt = `Pedido a ${APP_NAME}: ${url}`;
+  if (navigator.share) { try{ await navigator.share({title:APP_NAME, text:txt, url}); }catch(e){} }
+  else { navigator.clipboard.writeText(url); toast('🔗 Link copiado'); soundSuccess(); }
+}
+function enviarWhatsApp(){
+  const txt = encodeURIComponent(`Acabo de enviar mi pedido a ${APP_NAME}. Nro #${state.pedidoId}. ¡Avísenme cuando salga! 🙌`);
+  location.href = `https://wa.me/?text=${txt}`;
+}
+
+/* ──────────── FAVORITOS / HISTORIAL ──────────── */
+function agregarFavorito(nombre){
+  state.texto = (state.texto ? state.texto + '\n' : '') + '1 unidad ' + nombre;
+  toast(`+ ${nombre}`); soundTap(); vibrar(15); render();
+}
+function repetirUltimo(){
+  const h = state.historial[0]; if (!h) return;
+  state.texto = h.items.map(it=>`${it.cantidad} ${it.unidad} ${it.nombre}`).join('\n');
+  toast('🔁 Cargado último pedido — revisa y envía'); soundSuccess(); vibrar([20,40,20]);
+  ir('revisar');
+}
+
+/* ──────────── DUPLICADOS ──────────── */
+function detectarDuplicado(){
+  const h = state.historial[0]; if (!h) return false;
+  const horas = (Date.now() - h.ts) / 1000 / 3600;
+  if (horas > 6) return false;
+  return Math.abs(h.items.length - (state.adjuntos.length+(state.texto?1:0))) <= 1;
+}
+
+/* ──────────── ENVÍO (DEMO o real) ──────────── */
+async function enviarPedido(){
+  ir('enviando');
+  try {
+    if (DEMO_MODE) {
+      await new Promise(r=>setTimeout(r,2500)); // simular IA
+      state.items = mockIA();
+      state.pedidoId = 'P'+Date.now().toString().slice(-6);
+    } else {
+      const body = { token, adjuntos: state.adjuntos.map(a=>({tipo:a.tipo,nombre:a.nombre,mime:a.mime,b64:a.b64})), texto: state.texto };
+      const r = await fetch(BACKEND_URL + '?action=clienteRecibirPedido', { method:'POST', body: JSON.stringify(body) });
+      const d = await r.json();
+      state.items = d.items || []; state.pedidoId = d.idPedido;
+    }
+    state.view='preview'; render(); soundSuccess(); vibrar([30,60,30]);
+    if (state.premium && state.items.every(it=>!it.duda)) confirmarPedido();
+  } catch (e) {
+    toast('❌ Error al enviar: ' + e.message); soundError(); ir('revisar');
+  }
+}
+
+async function confirmarPedido(){
+  try {
+    if (!DEMO_MODE){
+      await fetch(BACKEND_URL + '?action=clienteConfirmarPedido', {
+        method:'POST', body: JSON.stringify({ idPedido: state.pedidoId, items: state.items })
+      });
+    }
+    // Guardar histórico local
+    state.historial.unshift({ ts: Date.now(), pedidoId: state.pedidoId, items: state.items });
+    state.historial = state.historial.slice(0,10);
+    localStorage.setItem('mosCliHist', JSON.stringify(state.historial));
+    state.view = 'confirmado'; render();
+    confetti(); soundSuccess(); vibrar([40,80,40,80,120]);
+  } catch(e){ toast('❌ ' + e.message); soundError(); }
+}
+
+function quitarItem(i){ state.items.splice(i,1); render(); }
+function reiniciar(){
+  state.adjuntos=[]; state.texto=''; state.items=[]; state.pedidoId='';
+  ir('home');
+}
+
+/* ──────────── MOCK IA (cuando DEMO_MODE=true) ──────────── */
+function mockIA(){
+  return [
+    { nombre:'Arroz Costeño', cantidad:2, unidad:'saco', precioEst:130 },
+    { nombre:'Azúcar rubia',  cantidad:1, unidad:'saco', precioEst:150 },
+    { nombre:'Aceite Primor 1L', cantidad:6, unidad:'unidad', precioEst:9.5 },
+    { nombre:'Coca-Cola 3L',  cantidad:4, unidad:'unidad', precioEst:12 },
+    { nombre:'Limpiavidrios', cantidad:1, unidad:'unidad', precioEst:0, duda:'¿qué marca? Sapolio / Poett' },
+  ];
+}
+
+/* ──────────── INIT ──────────── */
+async function initCliente(){
+  if (DEMO_MODE) return;
+  // Si hay token en URL, traer datos reales del cliente
+  if (token) {
+    try {
+      const r = await fetch(BACKEND_URL + '?action=clienteInfo&token=' + encodeURIComponent(token));
+      const d = await r.json();
+      if (d?.ok && d.data?.existe) {
+        state.cliente.nombre = d.data.nombre;
+        state.cliente.premium = !!d.data.premium;
+        if (state.cliente.premium) localStorage.setItem('mosCliPremium','1');
+      } else {
+        state.necesitaRegistro = true; // token desconocido — invitar a registrarse
+      }
+    } catch(e) { /* offline o backend caído — seguimos en silencio */ }
+  } else {
+    state.necesitaRegistro = true; // sin token — invitar a registrarse
+  }
+}
+
+async function registrarme(){
+  const nombre   = ($('#regNombre')?.value || '').trim();
+  const telefono = ($('#regTel')?.value || '').trim();
+  if (!nombre) { toast('⚠ Falta tu nombre'); soundError(); return; }
+  try {
+    const r = await fetch(BACKEND_URL + '?action=clienteRegistrar', {
+      method:'POST', body: JSON.stringify({ token, nombre, telefono, tipo:'minorista' })
+    });
+    const d = await r.json();
+    if (d?.ok && d.data?.token) {
+      toast('✓ Listo, ' + d.data.nombre);
+      soundSuccess(); vibrar([30,60,30]);
+      // Redirigir con el nuevo token para que la próxima vez ya lo reconozca
+      const u = new URL(location.href); u.searchParams.set('c', d.data.token);
+      location.replace(u.toString());
+    } else { toast('❌ ' + (d?.error || 'no se pudo registrar')); soundError(); }
+  } catch(e) { toast('❌ ' + e.message); soundError(); }
+}
+
+// Banner inline de registro (se inyecta en vista_home)
+function bannerRegistro(){
+  if (!state.necesitaRegistro) return '';
+  return `
+    <div class="glass-strong p-4 mb-4 fadeUp" style="border-left:3px solid #06b6d4">
+      <div class="font-bold text-sm mb-1">¡Hola! 👋 Primero personalízate</div>
+      <div class="text-xs text-slate-300 mb-3">Así guardamos tus pedidos y te avisamos cuando estén listos.</div>
+      <input id="regNombre" type="text" placeholder="Tu nombre o nombre de tu bodega" class="mb-2" />
+      <input id="regTel" type="text" placeholder="Tu teléfono (opcional)" />
+      <button class="cta mt-3" onclick="registrarme()">✓ Empezar a pedir</button>
+    </div>`;
+}
+
+window.addEventListener('load', async ()=>{
+  await initCliente();
+  render();
+});
+// "Despertar" el audio context al primer tap (requerido por iOS)
+document.addEventListener('touchstart', ()=>{ if(_ac && _ac.state==='suspended') _ac.resume(); }, { once:true });
+document.addEventListener('click', ()=>{ if(_ac && _ac.state==='suspended') _ac.resume(); }, { once:true });
+</script>
+</body>
+</html>

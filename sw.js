@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.43';
+const VERSION = '2.13.44';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -49,6 +49,9 @@ const LOCAL_ASSETS = [
   './js/offline.js',
   './js/scanner.js',
   './js/sounds.js',
+  './js/clienteInbox.js',
+  './pedido.html',
+  './clientes.html',
 ];
 
 // ── Instalar: cachear secuencial con reporte de progreso ──
