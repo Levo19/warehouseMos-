@@ -160,9 +160,16 @@ function clienteRecibirPedido(params) {
   // ── Pasar el texto consolidado por la IA de listas (la que ya existe) ──
   var textoFinal = textosParaIA.join('\n');
   var items = [];
+  var notaProc = '';
   if (textoFinal) {
     var res = analizarListaSombra({ texto: textoFinal });
-    if (res.ok) items = (res.data && res.data.items) || [];
+    if (res.ok && res.data && Array.isArray(res.data.items) && res.data.items.length > 0) {
+      items = res.data.items;
+    } else {
+      // Fallback regex: listas estructuradas tipo "N unidad nombre" — IA no respondió bien
+      items = _cliFallbackParse(textoFinal);
+      notaProc = res.ok ? 'fallback regex (IA sin items)' : ('IA falló: ' + (res.error || '?'));
+    }
   }
   // Marcar audio/excel para review humano
   var hayAdjuntoNoIA = adjMeta.some(function(a) { return a.tipo === 'audio' || a.tipo === 'excel'; });
@@ -170,25 +177,63 @@ function clienteRecibirPedido(params) {
     items.push({ nombre: 'Adjunto sin procesar IA — revisar manualmente', cantidad: 1, unidad: 'rev', duda: 'audio/excel adjunto' });
   }
 
-  // Normalizar a la shape que espera el frontend
+  // Normalizar a la shape que espera el frontend (solo nombre+cantidad+unidad)
   var itemsFront = items.map(function(it) {
     return {
-      nombre: it.nombre, cantidad: it.cantidad,
-      unidad: it.unidad || 'unidad', precioEst: 0,
+      nombre: String(it.nombre || '').toUpperCase().trim(),
+      cantidad: Math.round((parseFloat(it.cantidad) || 0) * 10) / 10,
+      unidad: it.unidad || 'unidad',
+      codigoVisto: it.codigoVisto || '',
       duda: it.duda || ''
     };
-  });
+  }).filter(function(it) { return it.nombre && it.cantidad > 0; });
 
   // Guardar registros
-  _shPedidos().appendRow([idPedido, token, new Date(), 'PREVIEW', '', 0, '']);
+  _shPedidos().appendRow([idPedido, token, new Date(), 'PREVIEW', '', 0, notaProc || '']);
   itemsFront.forEach(function(it, i) {
-    _shPedidoItems().appendRow([idPedido, i, it.nombre, it.cantidad, it.unidad, it.precioEst, it.duda]);
+    _shPedidoItems().appendRow([idPedido, i, it.nombre, it.cantidad, it.unidad, 0, it.duda]);
   });
   adjMeta.forEach(function(a) {
     _shPedidoAdj().appendRow([idPedido, a.tipo, a.nombre, a.url || '', new Date()]);
   });
 
-  return { ok: true, data: { idPedido: idPedido, items: itemsFront, totalEstimado: 0, nombreCliente: nombreCli } };
+  return { ok: true, data: { idPedido: idPedido, items: itemsFront, nombreCliente: nombreCli, nota: notaProc, textoOriginal: textoFinal } };
+}
+
+// ── Fallback regex parser para listas tipo "N unidad nombre" ─
+// Cuando la IA no responde o devuelve 0 items, intentamos un parser
+// simple por línea: número + unidad opcional + nombre.
+// Ej: "10 ajinomoto kilo" → { nombre:'AJINOMOTO', cantidad:10, unidad:'kilo' }
+function _cliFallbackParse(texto) {
+  var lines = String(texto || '').split(/\r?\n/);
+  var items = [];
+  var unidades = ['kg','kilo','kilos','gr','gramo','gramos','lt','litro','litros','saco','sacos','caja','cajas','paquete','paquetes','unidad','unidades','und','u','botella','botellas','lata','latas','bolsa','bolsas','docena','docenas','tarro','tarros','frasco','frascos','pack'];
+  lines.forEach(function(line) {
+    var l = String(line).trim();
+    if (!l) return;
+    var m = l.match(/^(\d+(?:[.,]\d+)?)\s+(.+)$/);
+    if (!m) return;
+    var qty = parseFloat(m[1].replace(',', '.'));
+    if (!(qty > 0)) return;
+    var rest = m[2].trim();
+    // Buscar unidad al inicio o al final
+    var palabras = rest.split(/\s+/);
+    var unidad = 'unidad';
+    if (palabras.length >= 2) {
+      var primera = palabras[0].toLowerCase().replace(/[.,]$/, '');
+      var ultima  = palabras[palabras.length - 1].toLowerCase().replace(/[.,]$/, '');
+      if (unidades.indexOf(primera) >= 0) {
+        unidad = primera;
+        palabras.shift();
+      } else if (unidades.indexOf(ultima) >= 0) {
+        unidad = ultima;
+        palabras.pop();
+      }
+    }
+    var nombre = palabras.join(' ').trim().toUpperCase();
+    if (nombre) items.push({ nombre: nombre, cantidad: qty, unidad: unidad });
+  });
+  return items;
 }
 
 // ── 5. CONFIRMAR PEDIDO → crea lista sombra real ───────────
@@ -207,23 +252,31 @@ function clienteConfirmarPedido(params) {
   var cli = _cliBuscarToken(tokenCli);
   var nombreCli = cli ? cli.nombre : tokenCli;
 
-  // Crear lista sombra usando la función que ya existe
-  var textoLista = items.map(function(it) {
-    return it.cantidad + ' ' + (it.unidad || 'und') + ' ' + it.nombre;
-  }).join('\n');
+  // Crear lista sombra usando la función que ya existe.
+  // OJO: crearListaSombra requiere `usuario`. Pasamos el nombre del cliente
+  // como usuario para que el almacenero vea "lista de Don Pepe" en su panel.
+  // Se crea como DISPONIBLE (compartida) para que cualquier almacenero pueda
+  // tomarla. El matching real contra el catálogo lo hace el operador al escanear.
+  var itemsParaLista = items.map(function(it) {
+    return {
+      nombre: String(it.nombre || '').toUpperCase().trim(),
+      cantidad: parseFloat(it.cantidad) || 1,
+      unidad: it.unidad || 'unidad',
+      codigoVisto: it.codigoVisto || ''
+    };
+  });
   var idListaSombra = '';
   try {
     var ls = crearListaSombra({
-      origen: 'CLIENTE_PORTAL',
-      cliente: nombreCli,
-      tokenCliente: tokenCli,
-      texto: textoLista,
-      items: items,
-      nota: 'Pedido cliente #' + idPedido
+      usuario:   'Cliente: ' + nombreCli,
+      idLista:   'LSCLI' + idPedido.substring(2), // prefijo CLI para distinguir
+      items:     itemsParaLista,
+      compartir: true,
+      nota:      'Pedido portal cliente — ' + nombreCli + ' (' + tokenCli + ') · #' + idPedido
     });
     idListaSombra = (ls && ls.data && ls.data.idLista) || (ls && ls.idLista) || '';
   } catch(e) {
-    // Si la función no acepta esos params, igual marcamos confirmado y dejamos pendiente la lista sombra
+    // Si crearListaSombra falla, igual confirmamos el pedido — el operador puede crearla a mano
   }
 
   // Actualizar pedido

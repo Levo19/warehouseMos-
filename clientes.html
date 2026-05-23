@@ -109,22 +109,47 @@ async function cargar() {
   }
 }
 
-async function crear() {
+function crear() {
   const nombre = document.getElementById('inNombre').value.trim();
   const telefono = document.getElementById('inTel').value.trim();
   const tipo = document.getElementById('inTipo').value;
   if (!nombre) { toast('⚠ Falta el nombre'); return; }
-  try {
-    const d = await api('clienteRegistrar', { nombre, telefono, tipo });
-    if (d.ok && d.data) {
-      toast(`✓ ${d.data.nombre} creado · token ${d.data.token}`);
-      document.getElementById('inNombre').value = '';
-      document.getElementById('inTel').value = '';
-      cargar();
-    } else {
-      toast('❌ ' + (d.error || 'error desconocido'));
-    }
-  } catch (e) { toast('❌ ' + e.message); }
+
+  // ── OPTIMISTA: limpio inputs y muestro toast YA ──
+  document.getElementById('inNombre').value = '';
+  document.getElementById('inTel').value = '';
+  toast(`✓ ${nombre} creado · generando token…`);
+
+  // Insert optimista de fila pendiente al tope de la tabla
+  const tabla = document.querySelector('#tablaCont table tbody');
+  let tempRow = null;
+  if (tabla) {
+    tempRow = document.createElement('tr');
+    tempRow.style.opacity = '.6';
+    tempRow.innerHTML = `<td colspan="6" class="text-slate-400">⏳ Creando <b>${esc(nombre)}</b>…</td>`;
+    tabla.insertBefore(tempRow, tabla.firstChild);
+  }
+
+  // ── Fire-and-forget al backend, rollback si falla ──
+  api('clienteRegistrar', { nombre, telefono, tipo })
+    .then(d => {
+      if (d.ok && d.data) {
+        toast(`✓ Token: ${d.data.token}`);
+        cargar(); // refresca lista con el token real
+      } else {
+        if (tempRow) tempRow.remove();
+        toast('❌ ' + (d.error || 'error desconocido'));
+        // Re-llenar inputs para que el usuario pueda corregir
+        document.getElementById('inNombre').value = nombre;
+        document.getElementById('inTel').value = telefono;
+      }
+    })
+    .catch(e => {
+      if (tempRow) tempRow.remove();
+      toast('❌ ' + e.message);
+      document.getElementById('inNombre').value = nombre;
+      document.getElementById('inTel').value = telefono;
+    });
 }
 
 function copiar(link) {

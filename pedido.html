@@ -396,31 +396,56 @@ function vista_enviando(){
 }
 
 function vista_preview(){
-  const totalEst = state.items.reduce((s,it)=>s+(it.precioEst||0)*it.cantidad,0);
+  const n = state.items.length;
+  const vacio = n === 0;
   return `
-    ${headerBack('Revisar lo que entendimos','home')}
+    ${headerBack('Revisar tu pedido','home')}
     <div class="glass p-5 fadeUp">
-      <div class="text-sm text-slate-300 mb-3">La IA detectó <b class="text-emerald-300">${state.items.length} ítems</b>. Edita o confirma:</div>
-      ${state.items.map((it,i)=>`
-        <div class="adjunto" style="${it.duda?'border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.06)':''}">
-          <div class="preview" style="font-size:18px;">${it.duda?'⚠':'☑'}</div>
-          <div class="info">
-            <b>${it.nombre}</b>
-            <span>${it.cantidad} ${it.unidad}${it.precioEst?` · ~S/ ${(it.precioEst*it.cantidad).toFixed(2)}`:''}</span>
-            ${it.duda?`<span style="color:#fbbf24"> · ${it.duda}</span>`:''}
-          </div>
-          <button class="del" onclick="quitarItem(${i})">✕</button>
+      ${vacio ? `
+        <div class="text-center py-4">
+          <div class="text-4xl mb-2">🤔</div>
+          <div class="font-bold text-amber-300 mb-1">No pude entender la lista</div>
+          <div class="text-xs text-slate-300 mb-4">Asegúrate que cada línea tenga <b>cantidad + nombre</b>.<br>Ej: <code class="text-emerald-300">10 ajinomoto</code> · <code class="text-emerald-300">5 kg pimienta</code></div>
         </div>
-      `).join('')}
-      <div class="text-right text-sm text-slate-300 mt-3">Estimado total: <b class="text-emerald-300">S/ ${totalEst.toFixed(2)}</b></div>
+        <button class="cta" onclick="ir('home')">← Volver y corregir</button>
+        <button class="cta-ghost w-full mt-2" onclick="agregarManual()">＋ Agregar ítem a mano</button>
+      ` : `
+        <div class="text-sm text-slate-300 mb-3">Vamos a despachar <b class="text-emerald-300">${n} producto${n!==1?'s':''}</b>:</div>
+        ${state.items.map((it,i)=>`
+          <div class="adjunto" style="${it.duda?'border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.06)':''}">
+            <div class="preview" style="font-size:18px;">${it.duda?'⚠':'📦'}</div>
+            <div class="info">
+              <b>${it.nombre}</b>
+              <span>${it.cantidad} ${it.unidad}${it.codigoVisto?` · cód: ${it.codigoVisto}`:''}</span>
+              ${it.duda?`<span style="color:#fbbf24"> · ${it.duda}</span>`:''}
+            </div>
+            <button class="del" onclick="quitarItem(${i})">✕</button>
+          </div>
+        `).join('')}
+        <button class="cta-ghost w-full mt-2" onclick="agregarManual()">＋ Agregar otro a mano</button>
 
-      <div class="mt-4 grid grid-cols-2 gap-2">
-        <button class="cta-ghost" onclick="ir('home')">✏️ Corregir</button>
-        <button class="cta" onclick="confirmarPedido()">✓ Confirmar</button>
-      </div>
-      ${state.premium?'<div class="text-xs text-emerald-300 text-center mt-3">⚡ Premium: con un match 100% se autoconfirma.</div>':''}
+        <div class="mt-4 grid grid-cols-2 gap-2">
+          <button class="cta-ghost" onclick="ir('home')">✏️ Corregir</button>
+          <button class="cta" onclick="confirmarPedido()">✓ Enviar al almacén</button>
+        </div>
+        ${state.premium?'<div class="text-xs text-emerald-300 text-center mt-3">⚡ Premium activo</div>':''}
+      `}
     </div>
   `;
+}
+
+function agregarManual(){
+  const linea = prompt('Escribe el producto y cantidad (ej: "10 kg arroz Costeño"):');
+  if (!linea) return;
+  const m = linea.trim().match(/^(\d+(?:[.,]\d+)?)\s+(.+)$/);
+  if (m) {
+    const qty = parseFloat(m[1].replace(',','.'));
+    const rest = m[2].trim();
+    state.items.push({ nombre: rest.toUpperCase(), cantidad: qty, unidad: 'unidad', duda:'' });
+  } else {
+    state.items.push({ nombre: linea.toUpperCase(), cantidad: 1, unidad: 'unidad', duda:'' });
+  }
+  render(); soundSuccess(); vibrar(20);
 }
 
 function vista_confirmado(){
