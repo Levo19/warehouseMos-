@@ -7358,12 +7358,29 @@
                     border-radius:8px;color:#f1f5f9;font-size:.95rem;box-sizing:border-box">
     </div>
 
-    <!-- Observaciones (el almacenero puede describir el producto brevemente) -->
+    <!-- [v2.13.48] Descripción REQUERIDA + Marca separada — antes solo había
+         un textarea "observaciones" que se mandaba como descripción pero el
+         operador a veces lo dejaba vacío sin darse cuenta. Ahora ambos
+         campos son visibles con label claro y descripción es obligatoria. -->
+    <!-- Marca del producto -->
+    <div style="margin-bottom:12px">
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Marca</p>
+      <input type="text" id="pnMarca" placeholder="Ej: Costeño, Coca-Cola, Inca Kola…"
+             style="width:100%;padding:10px 13px;background:#0f172a;border:1px solid #334155;
+                    border-radius:8px;color:#f1f5f9;font-size:.88rem;box-sizing:border-box">
+    </div>
+
+    <!-- Descripción del producto (OBLIGATORIA — se valida antes de enviar) -->
     <div style="margin-bottom:18px">
-      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Descripción / observaciones</p>
-      <textarea id="pnObservaciones" rows="2" placeholder="Ej: caja grande color azul, sin etiqueta…"
+      <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">
+        Descripción del producto <span style="color:#f87171">*</span>
+      </p>
+      <textarea id="pnObservaciones" rows="2" placeholder="Ej: Arroz superior bolsa 1kg · OBLIGATORIO"
              style="width:100%;padding:10px 13px;background:#0f172a;border:1px solid #334155;
                     border-radius:8px;color:#f1f5f9;font-size:.88rem;resize:none;box-sizing:border-box"></textarea>
+      <p style="font-size:.62rem;color:#64748b;margin-top:4px">
+        Sin descripción no se puede aprobar en MOS · sé claro: nombre + presentación
+      </p>
     </div>
 
     <div style="display:flex;gap:8px">

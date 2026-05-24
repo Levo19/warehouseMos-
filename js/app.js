@@ -6184,7 +6184,9 @@ const GuiasView = (() => {
     const fv = document.getElementById('pnFechaVenc');
     if (fv) fv.value = '';
     const obs = document.getElementById('pnObservaciones');
-    if (obs) obs.value = '';
+    if (obs) { obs.value = ''; obs.style.borderColor = '#334155'; obs.style.boxShadow = ''; }
+    const marca = document.getElementById('pnMarca');
+    if (marca) marca.value = ''; // [v2.13.48] reset campo marca
     const prev = document.getElementById('pnFotoPreview');
     if (prev) prev.style.display = 'none';
     const inp = document.getElementById('pnFotoInput');
@@ -6280,6 +6282,25 @@ const GuiasView = (() => {
     const cantidad = parseFloat(document.getElementById('pnCantidad')?.value) || 1;
     const fechaVenc = document.getElementById('pnFechaVenc')?.value || '';
     const obs      = (document.getElementById('pnObservaciones')?.value || '').trim();
+    const marca    = (document.getElementById('pnMarca')?.value || '').trim();
+
+    // [v2.13.48] VALIDACIÓN OBLIGATORIA descripción — antes el operador
+    // confirmaba con campo vacío y la fila quedaba sin descripción en la hoja.
+    if (!obs) {
+      const obsEl = document.getElementById('pnObservaciones');
+      if (obsEl) {
+        obsEl.style.borderColor = '#f87171';
+        obsEl.style.boxShadow = '0 0 0 3px rgba(248,113,113,.25)';
+        obsEl.focus();
+        setTimeout(() => {
+          obsEl.style.borderColor = '#334155';
+          obsEl.style.boxShadow = '';
+        }, 2500);
+      }
+      try { toast('⚠ Falta la descripción del producto', 'warn', 3000); } catch(_) {}
+      try { vibrate?.([60, 80, 60]); } catch(_) {}
+      return;  // NO enviar al backend
+    }
 
     const params = {
       codigoBarra:     _pnCodigo || '',
@@ -6287,6 +6308,7 @@ const GuiasView = (() => {
       cantidad,
       fechaVencimiento: fechaVenc,
       descripcion:     obs,
+      marca:           marca,   // [v2.13.48] el backend lo esperaba pero el frontend nunca lo mandaba
       usuario:         window.WH_CONFIG?.usuario || '',
       idSesion:        window.WH_CONFIG?.idSesion || ''
     };
