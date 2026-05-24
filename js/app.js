@@ -6255,21 +6255,45 @@ const GuiasView = (() => {
   }
 
   function _pnFotoSeleccionada(input) {
-    const file = input.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      const dataUrl = e.target.result;
-      _pnFotoBase64 = dataUrl.split(',')[1] || '';
-      _pnFotoMime   = file.type || 'image/jpeg';
-      const img = document.getElementById('pnFotoImg');
-      if (img) img.src = dataUrl;
-      const prev = document.getElementById('pnFotoPreview');
-      if (prev) prev.style.display = 'block';
-      const btnTxt = document.getElementById('pnFotoBtn');
-      if (btnTxt) btnTxt.textContent = '✓ Foto lista — toca para cambiar';
-    };
-    reader.readAsDataURL(file);
+    // [v2.13.49] Handler más robusto + feedback claro si algo falla.
+    try {
+      const file = input.files && input.files[0];
+      if (!file) return; // usuario canceló el picker — no es error
+      // Validación tamaño (10MB max) para evitar payloads gigantes
+      const sizeMB = file.size / 1024 / 1024;
+      if (sizeMB > 10) {
+        try { toast('⚠ Foto muy grande (' + sizeMB.toFixed(1) + 'MB) · máx 10MB', 'warn', 4000); } catch(_){}
+        input.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onerror = (err) => {
+        console.error('[PN foto] FileReader error', err);
+        try { toast('❌ No se pudo leer la foto · intenta otra', 'error', 4000); } catch(_){}
+      };
+      reader.onload = e => {
+        try {
+          const dataUrl = e.target.result;
+          _pnFotoBase64 = String(dataUrl || '').split(',')[1] || '';
+          _pnFotoMime   = file.type || 'image/jpeg';
+          const img = document.getElementById('pnFotoImg');
+          if (img) img.src = dataUrl;
+          const prev = document.getElementById('pnFotoPreview');
+          if (prev) prev.style.display = 'block';
+          const btnTxt = document.getElementById('pnFotoBtn');
+          if (btnTxt) btnTxt.textContent = '✓ Foto lista — toca para cambiar';
+          try { vibrate?.(15); } catch(_){}
+          try { toast('📷 Foto cargada (' + sizeMB.toFixed(1) + 'MB)', 'ok', 2000); } catch(_){}
+        } catch(eIn) {
+          console.error('[PN foto] onload handler error', eIn);
+          try { toast('❌ Error procesando la foto', 'error', 4000); } catch(_){}
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch(e) {
+      console.error('[PN foto] handler outer error', e);
+      try { toast('❌ Error al subir foto: ' + (e.message || e), 'error', 4000); } catch(_){}
+    }
   }
 
   let _pnSubmitting = false;

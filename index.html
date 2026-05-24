@@ -7321,25 +7321,29 @@
                     box-sizing:border-box;-webkit-tap-highlight-color:transparent">
     </div>
 
-    <!-- Foto -->
+    <!-- [v2.13.49] Foto — patrón nativo <label for> en vez de button+click()
+         para que el picker abra confiable en todas las tablets/browsers.
+         Quitado capture="environment" para permitir elegir cámara O galería
+         (algunos operadores prefieren subir foto ya tomada). -->
     <div style="margin-bottom:12px">
       <p style="font-size:.68rem;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Foto del producto</p>
       <div id="pnFotoPreview" style="display:none;margin-bottom:8px">
         <img id="pnFotoImg" style="width:100%;height:150px;object-fit:cover;border-radius:9px;border:1px solid #334155">
       </div>
-      <button onclick="document.getElementById('pnFotoInput').click()"
+      <input type="file" id="pnFotoInput" accept="image/*"
+             style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0"
+             onchange="GuiasView._pnFotoSeleccionada(this)">
+      <label for="pnFotoInput" role="button" tabindex="0"
               style="width:100%;padding:11px;border:2px dashed #334155;background:#0f172a;
                      border-radius:9px;color:#64748b;font-size:.8rem;cursor:pointer;
                      display:flex;align-items:center;justify-content:center;gap:7px;
-                     -webkit-tap-highlight-color:transparent">
+                     -webkit-tap-highlight-color:transparent;user-select:none;box-sizing:border-box">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
           <circle cx="12" cy="13" r="4"/>
         </svg>
         <span id="pnFotoBtn">Tomar / elegir foto</span>
-      </button>
-      <input type="file" id="pnFotoInput" accept="image/*" capture="environment"
-             style="display:none" onchange="GuiasView._pnFotoSeleccionada(this)">
+      </label>
     </div>
 
     <!-- Cantidad -->
