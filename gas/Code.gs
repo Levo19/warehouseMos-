@@ -214,6 +214,13 @@ function _route(method, e) {
       case 'editarPNCantidad':           return editarPNCantidad(params);
       case 'aprobarProductoNuevo':       return aprobarProductoNuevo(params);
 
+      // ── Devoluciones zona ME → WH (two-party witness) ──
+      case 'crearDevolucionZona':          return crearDevolucionZona(params);
+      case 'getDevolucionesZona':          return getDevolucionesZona(params);
+      case 'getDevolucionDetalle':         return getDevolucionDetalle(params.idDevolucion);
+      case 'confirmarRecepcionDevolucion': return confirmarRecepcionDevolucion(params);
+      case 'reconciliarDevolucionZona':    return reconciliarDevolucionZona(params);
+
       // ── Lotes ──────────────────────────────────────────────
       case 'getLotesVencimiento': return getLotesVencimiento(params);
 

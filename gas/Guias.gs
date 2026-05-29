@@ -1607,7 +1607,13 @@ function _crearDespachoRapidoImpl(params) {
 }
 
 function _validarTipoGuia(tipo) {
+  // [v2.13.51] Agregado INGRESO_DEVOLUCION_ZONA — flujo two-party witness:
+  // zona ME envía devolución → operador WH valida → solo lo que confirma
+  // como BUEN_ESTADO se materializa en esta guía y suma stock real.
+  // La tabla intermedia DEVOLUCIONES_ZONA solo guarda el comparativo,
+  // NUNCA toca stock directamente.
   var validos = ['INGRESO_PROVEEDOR','INGRESO_JEFATURA','INGRESO_ENVASADO',
+                 'INGRESO_DEVOLUCION_ZONA',
                  'SALIDA_DEVOLUCION','SALIDA_ZONA','SALIDA_JEFATURA',
                  'SALIDA_ENVASADO','SALIDA_MERMA'];
   return validos.indexOf(tipo) >= 0;
