@@ -457,3 +457,204 @@ function setupTriggersAuditoria() {
 
   return { ok: true, mensaje: 'Triggers configurados: 21:00 cierre + 22:00 auditoría' };
 }
+
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.55] Reconciliación masiva del stock — auto-corrige
+// todas las discrepancias mayores a un umbral mediante AJUSTES
+// auditados. Cada corrección queda como fila en hoja AJUSTES con
+// tipo INC/DEC y motivo trazable.
+//
+// Política confirmada:
+//  - El stock SIEMPRE debe igualar el teórico (= Σ AJUSTES + Σ INGRESOS − Σ SALIDAS)
+//  - Si difiere → se crea AJUSTE explícito por la diferencia
+//  - cada ajuste es auditado: usuario, motivo, fecha
+//  - LockService para evitar 2 ejecuciones concurrentes
+// ════════════════════════════════════════════════════════════════════
+function reconciliarStockMasivo(params) {
+  params = params || {};
+  var maxDiffAuto = parseFloat(params.maxDiffAuto || 0);  // 0 = corregir todas. Si >0, solo corrige diff<=N
+  var dryRun      = params.dryRun === true || params.dryRun === 'true';
+  var autorizadoPor = String(params.autorizadoPor || 'sistema-reconciliacion');
+  var motivoLabel   = String(params.motivo || 'Reconciliación masiva auto');
+
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch(eL) {
+    return { ok: false, error: 'Lock saturado, retry: ' + eL.message };
+  }
+  try {
+    // 1) Re-correr auditoría para tener datos frescos
+    var auditRes = auditarStockGlobal();
+    if (!auditRes.ok) return auditRes;
+
+    // 2) Leer alertas pendientes
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var alertSh = ss.getSheetByName('ALERTAS_STOCK');
+    if (!alertSh) return { ok: true, data: { corregidas: 0, omitidas: 0, errores: 0 } };
+    var alerts = _sheetToObjects(alertSh).filter(function(r) {
+      return String(r.revisado || '').toUpperCase() !== 'SI';
+    });
+
+    var corregidas = 0, omitidas = 0, errores = 0;
+    var detalles = [];
+
+    alerts.forEach(function(a) {
+      var diff = parseFloat(a.diferencia) || 0;
+      var absDiff = Math.abs(diff);
+      // diff = stockReal − stockTeorico
+      // Para igualar real → teórico, hay que aplicar −diff
+      var ajusteCantidad = -diff;
+      // Si umbral activo y la diff es mayor → omitir (requiere revisión manual)
+      if (maxDiffAuto > 0 && absDiff > maxDiffAuto) {
+        omitidas++;
+        detalles.push({ codigoProducto: a.codigoProducto, diff: diff, accion: 'OMITIDA_UMBRAL' });
+        return;
+      }
+      if (dryRun) {
+        detalles.push({ codigoProducto: a.codigoProducto, diff: diff, accion: 'DRY_RUN' });
+        corregidas++;
+        return;
+      }
+      try {
+        // crearAjuste internamente llama _actualizarStock con el delta correcto
+        var resAj = crearAjuste({
+          codigoProducto: String(a.codigoProducto),
+          tipoAjuste:     ajusteCantidad > 0 ? 'INC' : 'DEC',
+          cantidadAjuste: Math.abs(ajusteCantidad),
+          motivo:         motivoLabel + ' · diff=' + diff.toFixed(2) +
+                          ' · real=' + a.stockReal + ' · teo=' + a.stockTeorico,
+          usuario:        autorizadoPor
+        });
+        if (resAj && resAj.ok) {
+          corregidas++;
+          detalles.push({ codigoProducto: a.codigoProducto, diff: diff, accion: 'CORREGIDO', idAjuste: resAj.data.idAjuste });
+          // Marcar alerta revisada
+          var alertData = alertSh.getDataRange().getValues();
+          var alertHdr = alertData[0];
+          var idxAId  = alertHdr.indexOf('idAlerta');
+          var idxARev = alertHdr.indexOf('revisado');
+          var idxAFR  = alertHdr.indexOf('fechaRevision');
+          for (var i = 1; i < alertData.length; i++) {
+            if (String(alertData[i][idxAId]) === String(a.idAlerta)) {
+              alertSh.getRange(i + 1, idxARev + 1).setValue('SI');
+              if (idxAFR >= 0) alertSh.getRange(i + 1, idxAFR + 1).setValue(new Date());
+              break;
+            }
+          }
+        } else {
+          errores++;
+          detalles.push({ codigoProducto: a.codigoProducto, diff: diff, accion: 'ERROR', error: (resAj && resAj.error) || 'sin info' });
+        }
+      } catch(e) {
+        errores++;
+        detalles.push({ codigoProducto: a.codigoProducto, diff: diff, accion: 'EXCEPCION', error: e.message });
+      }
+    });
+
+    Logger.log('[reconciliarStockMasivo] corregidas=' + corregidas + ' omitidas=' + omitidas + ' errores=' + errores);
+    return { ok: true, data: { corregidas: corregidas, omitidas: omitidas, errores: errores, dryRun: dryRun, detalles: detalles } };
+  } finally {
+    try { lock.releaseLock(); } catch(_){}
+  }
+}
+
+// [v2.13.55] Reconciliar UN solo producto por codigoBarra (canónico o equivalente).
+// Útil para tap "Reconciliar" en panel admin MOS por fila.
+function reconciliarStockProducto(params) {
+  var codigoBarra = String(params.codigoBarra || params.codigoProducto || '').trim();
+  if (!codigoBarra) return { ok: false, error: 'codigoBarra requerido' };
+  var autorizadoPor = String(params.autorizadoPor || 'admin-mos');
+
+  // Reusamos la matemática de auditarStockGlobal pero solo para este código
+  var stockSh = getSheet('STOCK');
+  var stockData = _sheetToObjects(stockSh);
+  var miFila = null;
+  for (var i = 0; i < stockData.length; i++) {
+    if (String(stockData[i].codigoProducto).trim() === codigoBarra) {
+      miFila = stockData[i];
+      break;
+    }
+  }
+  var real = miFila ? (parseFloat(miFila.cantidadDisponible) || 0) : 0;
+
+  // Sumar movimientos
+  var teorico = 0;
+  try {
+    var guiaMap = {};
+    _sheetToObjects(getSheet('GUIAS')).forEach(function(g) {
+      var est = String(g.estado || '').toUpperCase();
+      if (est === 'CERRADA' || est === 'AUTOCERRADA') guiaMap[g.idGuia] = String(g.tipo || '').toUpperCase();
+    });
+    _sheetToObjects(getSheet('GUIA_DETALLE')).forEach(function(d) {
+      if (String(d.codigoProducto).trim() !== codigoBarra) return;
+      if (String(d.observacion || '').toUpperCase() === 'ANULADO') return;
+      var tipoG = guiaMap[d.idGuia];
+      if (!tipoG) return;
+      var cant = Math.abs(parseFloat(d.cantidadRecibida || d.cantidadReal || d.cantidadEsperada || 0));
+      if (cant <= 0) return;
+      if (tipoG.indexOf('INGRESO') === 0) teorico += cant;
+      else if (tipoG.indexOf('SALIDA') === 0) teorico -= cant;
+    });
+    var ajSh = getSheet('AJUSTES');
+    if (ajSh) {
+      _sheetToObjects(ajSh).forEach(function(a) {
+        if (String(a.codigoProducto).trim() !== codigoBarra) return;
+        var cant = Math.abs(parseFloat(a.cantidadAjuste || 0));
+        var tipoA = String(a.tipoAjuste || '').toUpperCase();
+        if (cant <= 0) return;
+        if (tipoA === 'INC' || tipoA === 'INI') teorico += cant;
+        else if (tipoA === 'DEC') teorico -= cant;
+      });
+    }
+  } catch(e) {
+    return { ok: false, error: 'Error calculando teórico: ' + e.message };
+  }
+
+  var diff = real - teorico;
+  if (Math.abs(diff) <= 0.5) {
+    return { ok: true, data: { codigoBarra: codigoBarra, real: real, teorico: teorico, diff: diff, accion: 'YA_CUADRA' } };
+  }
+  // Aplicar ajuste para igualar real → teórico
+  var ajusteCantidad = -diff;
+  var resAj = crearAjuste({
+    codigoProducto: codigoBarra,
+    tipoAjuste:     ajusteCantidad > 0 ? 'INC' : 'DEC',
+    cantidadAjuste: Math.abs(ajusteCantidad),
+    motivo:         'Reconciliación manual · diff=' + diff.toFixed(2) + ' · real=' + real + ' · teo=' + teorico,
+    usuario:        autorizadoPor
+  });
+  if (!resAj || !resAj.ok) return { ok: false, error: 'Error creando ajuste: ' + (resAj && resAj.error) };
+  return {
+    ok: true,
+    data: {
+      codigoBarra: codigoBarra,
+      real: real, teorico: teorico, diff: diff,
+      ajusteAplicado: ajusteCantidad,
+      idAjuste: resAj.data.idAjuste,
+      accion: 'CORREGIDO'
+    }
+  };
+}
+
+// [v2.13.55] Cron 21:00 mejorado: LockService + flag idempotente diario.
+// Garantiza que aunque se dispare 2x (rare), solo aplica una vez por día.
+function cerrarGuiasAbiertasGlobalSafe() {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch(e) {
+    Logger.log('[cron21] lock saturado: ' + e.message);
+    return { ok: false, error: 'lock' };
+  }
+  try {
+    var hoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    var prop = PropertiesService.getScriptProperties();
+    var ultimo = prop.getProperty('cron_cierre_diario_ts') || '';
+    if (ultimo === hoy) {
+      Logger.log('[cron21] ya corrió hoy ' + hoy);
+      return { ok: true, data: { skipped: true, fecha: hoy } };
+    }
+    var res = cerrarGuiasAbiertasGlobal();
+    prop.setProperty('cron_cierre_diario_ts', hoy);
+    return res;
+  } finally {
+    try { lock.releaseLock(); } catch(_){}
+  }
+}

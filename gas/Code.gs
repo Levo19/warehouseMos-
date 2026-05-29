@@ -254,7 +254,10 @@ function _route(method, e) {
       case 'runInternalTests':         return runInternalTests(params);
       case 'verificarHorario':    return verificarHorario(params);
       case 'forzarCierreSesionesNocturno': return forzarCierreSesionesNocturno();
-      case 'auditarStockGlobal':  return auditarStockGlobal();
+      case 'auditarStockGlobal':       return auditarStockGlobal();
+      // [v2.13.55] Reconciliación stock
+      case 'reconciliarStockMasivo':   return reconciliarStockMasivo(params);
+      case 'reconciliarStockProducto': return reconciliarStockProducto(params);
       case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 
       // ── Personal ───────────────────────────────────────────

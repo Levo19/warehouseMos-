@@ -189,20 +189,45 @@ function _agregarDetalleGuiaImpl(params) {
     var qtyNueva    = qtyAnterior + cantRecibida;
     sheet.getRange(dr + 1, idxRec + 1).setValue(qtyNueva);
 
-    // Si la guía ya está CERRADA, ajustar stock por la diferencia agregada
-    // Auto-suma sobre guía CERRADA: ajustar stock por la cantidad agregada
-    // (excepto en envasados, que manejan stock directo)
+    // [v2.13.55] Política nueva: si guía CERRADA → en vez de AUTO_SUMA silenciosa,
+    // crear AJUSTE EXPLÍCITO en hoja AJUSTES. Razones:
+    //   1. Visibilidad: la edición queda como movimiento auditable separado
+    //   2. Reconciliación: la suma teórica cuadra (AJUSTES + INGRESOS - SALIDAS)
+    //   3. Idempotencia: si se reintenta por timeout, el AJUSTE no duplica
+    //      stock (crearAjuste verifica duplicados en últimos 10s por usuario+motivo)
     var guiaInfo2 = _getGuiaInfo(params.idGuia);
     if (guiaInfo2 && String(guiaInfo2.estado).toUpperCase() === 'CERRADA'
         && cantRecibida !== 0 && !_esGuiaEnvasado(guiaInfo2.tipo)) {
       var esIngreso2 = String(guiaInfo2.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
       var deltaSum = esIngreso2 ? cantRecibida : -cantRecibida;
-      _actualizarStock(cbProd, deltaSum, {
-        tipoOperacion: 'AUTO_SUMA_DETALLE',
-        origen:        existingId,
-        usuario:       String(params.usuario || ''),
-        observacion:   'idGuia=' + params.idGuia
-      });
+      try {
+        if (typeof crearAjuste === 'function') {
+          crearAjuste({
+            codigoProducto: cbProd,
+            tipoAjuste:     deltaSum > 0 ? 'INC' : 'DEC',
+            cantidadAjuste: Math.abs(deltaSum),
+            motivo:         'Edición guía cerrada · idGuia=' + params.idGuia +
+                            ' · detalle=' + existingId + ' · +' + cantRecibida + 'u',
+            usuario:        String(params.usuario || 'sistema')
+          });
+        } else {
+          // Fallback al comportamiento legacy si crearAjuste no disponible
+          _actualizarStock(cbProd, deltaSum, {
+            tipoOperacion: 'EDICION_GUIA_CERRADA',
+            origen:        existingId,
+            usuario:       String(params.usuario || ''),
+            observacion:   'idGuia=' + params.idGuia
+          });
+        }
+      } catch(eAj) {
+        Logger.log('[agregarDetalle] AJUSTE fallo, fallback a _actualizarStock: ' + eAj.message);
+        _actualizarStock(cbProd, deltaSum, {
+          tipoOperacion: 'EDICION_GUIA_CERRADA',
+          origen:        existingId,
+          usuario:       String(params.usuario || ''),
+          observacion:   'idGuia=' + params.idGuia
+        });
+      }
     }
 
     return {
@@ -422,8 +447,8 @@ function _actualizarCantidadDetalleImpl(params) {
       var codigo        = String(data[i][idxCod] || '');
       var obsActual     = idxObs >= 0 ? String(data[i][idxObs] || '').toUpperCase() : '';
 
-      // Ajustar stock por diff SOLO si guía CERRADA y NO es envasado
-      // (envasados manejan stock directo, no via cerrarGuia)
+      // [v2.13.55] Edición de cantidad en guía CERRADA → crear AJUSTE explícito
+      // por la diferencia. Reemplaza el EDICION_CANTIDAD silencioso anterior.
       var guiaInfo = _getGuiaInfo(idGuia);
       if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA' && codigo
           && !_esGuiaEnvasado(guiaInfo.tipo)) {
@@ -431,12 +456,34 @@ function _actualizarCantidadDetalleImpl(params) {
         if (diff !== 0) {
           var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
           var delta = esIngreso ? diff : -diff;
-          _actualizarStock(codigo, delta, {
-            tipoOperacion: 'EDICION_CANTIDAD',
-            origen:        idDetalle,
-            usuario:       String(params.usuario || ''),
-            observacion:   'idGuia=' + idGuia + ' diff=' + diff
-          });
+          try {
+            if (typeof crearAjuste === 'function') {
+              crearAjuste({
+                codigoProducto: codigo,
+                tipoAjuste:     delta > 0 ? 'INC' : 'DEC',
+                cantidadAjuste: Math.abs(delta),
+                motivo:         'Edición cantidad guía cerrada · idGuia=' + idGuia +
+                                ' · detalle=' + idDetalle +
+                                ' · ' + cantidadVieja + '→' + cantidad + 'u',
+                usuario:        String(params.usuario || 'sistema')
+              });
+            } else {
+              _actualizarStock(codigo, delta, {
+                tipoOperacion: 'EDICION_CANTIDAD',
+                origen:        idDetalle,
+                usuario:       String(params.usuario || ''),
+                observacion:   'idGuia=' + idGuia + ' diff=' + diff
+              });
+            }
+          } catch(eAj) {
+            Logger.log('[actualizarCantidad] AJUSTE fallo, fallback: ' + eAj.message);
+            _actualizarStock(codigo, delta, {
+              tipoOperacion: 'EDICION_CANTIDAD',
+              origen:        idDetalle,
+              usuario:       String(params.usuario || ''),
+              observacion:   'idGuia=' + idGuia + ' diff=' + diff
+            });
+          }
         }
       }
 
