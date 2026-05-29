@@ -182,6 +182,9 @@ const API = (() => {
     agregarDetalle:           (p) => post({ action: 'agregarDetalleGuia',        ...p }),
     actualizarFechaVencimiento: (p) => post({ action: 'actualizarFechaVencimiento',  ...p }),
     actualizarCantidadDetalle:  (p) => post({ action: 'actualizarCantidadDetalle',   ...p }),
+    // [v2.13.53] Lotes — FIFO + historial trazable
+    getLotesFIFO:               (p) => call({ action: 'getLotesFIFO',                ...p }),
+    getHistorialLote:           (p) => call({ action: 'getHistorialLote',            ...p }),
     cerrarGuia:         (id, u)  => post({ action: 'cerrarGuia', idGuia: id, usuario: u }),
 
     // Preingresos

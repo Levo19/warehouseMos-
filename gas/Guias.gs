@@ -527,27 +527,269 @@ function _getGuiaInfo(idGuia) {
   return null;
 }
 
-// ── Actualizar solo la fecha de vencimiento de un detalle existente ─
+// ── Actualizar fecha vencimiento de detalle + SINCRONIZAR LOTE ─────
+// [v2.13.53] Antes solo escribía la fecha en GUIA_DETALLE sin crear lote.
+// Resultado: detalles con fecha pero sin fila en LOTES_VENCIMIENTO →
+// invisible para alertas/FIFO. Ahora crea/actualiza/anula lote según caso.
+//
+// Política confirmada por usuario:
+//   - Clave única: (codigoProducto, fechaVencimiento) por guía
+//   - Si edita fecha → actualiza la misma fila
+//   - Si borra fecha → marca lote como ANULADO
+//   - Lote NO se duplica si re-aplica misma fecha
 function actualizarFechaVencimiento(params) {
   var idDetalle = String(params.idDetalle || '');
-  var fechaVenc = params.fechaVencimiento || '';
+  var fechaVencRaw = params.fechaVencimiento || '';
   if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
 
   var sheet  = getSheet('GUIA_DETALLE');
   var data   = sheet.getDataRange().getValues();
   var hdrs   = data[0];
-  var idxId  = hdrs.indexOf('idDetalle');
-  var idxVenc= hdrs.indexOf('fechaVencimiento');
+  var idxId   = hdrs.indexOf('idDetalle');
+  var idxVenc = hdrs.indexOf('fechaVencimiento');
+  var idxLote = hdrs.indexOf('idLote');
+  var idxCod  = hdrs.indexOf('codigoProducto');
+  var idxRec  = hdrs.indexOf('cantidadRecibida');
+  var idxIdG  = hdrs.indexOf('idGuia');
   if (idxId < 0 || idxVenc < 0) return { ok: false, error: 'Columnas no encontradas' };
 
   for (var i = 1; i < data.length; i++) {
-    if (String(data[i][idxId]) === idDetalle) {
-      var val = fechaVenc ? new Date(fechaVenc + 'T12:00:00') : '';
-      sheet.getRange(i + 1, idxVenc + 1).setValue(val);
-      return { ok: true };
+    if (String(data[i][idxId]) !== idDetalle) continue;
+
+    // 1) Escribir la fecha en el detalle (o limpiar si vacía)
+    var val = fechaVencRaw ? new Date(fechaVencRaw + 'T12:00:00') : '';
+    sheet.getRange(i + 1, idxVenc + 1).setValue(val);
+
+    // 2) Sincronizar LOTES_VENCIMIENTO
+    var codigoProducto = String(data[i][idxCod] || '').trim();
+    var cantidad       = parseFloat(data[i][idxRec]) || 0;
+    var idGuia         = String(data[i][idxIdG] || '');
+    var idLoteActual   = idxLote >= 0 ? String(data[i][idxLote] || '') : '';
+    var resLote = _sincronizarLoteDesdeDetalle({
+      idLoteActual:   idLoteActual,
+      codigoProducto: codigoProducto,
+      cantidad:       cantidad,
+      fechaVenc:      val,
+      idGuia:         idGuia,
+      idDetalle:      idDetalle,
+      usuario:        String(params.usuario || ''),
+      motivo:         'edit_fecha_venc_desde_detalle'
+    });
+    if (resLote && resLote.idLote && idxLote >= 0 && resLote.idLote !== idLoteActual) {
+      sheet.getRange(i + 1, idxLote + 1).setNumberFormat('@').setValue(resLote.idLote);
     }
+    return { ok: true, data: { idLote: resLote && resLote.idLote, accion: resLote && resLote.accion } };
   }
   return { ok: false, error: 'Detalle no encontrado: ' + idDetalle };
+}
+
+// [v2.13.53] Helper canónico: sincroniza un lote desde la info de un detalle.
+// Política: clave (codigoProducto, fechaVencimiento) por guía.
+//
+// Casos:
+//   A) idLoteActual vacío + fecha nueva con valor → INSERT nuevo lote
+//   B) idLoteActual vacío + fecha vacía           → no-op (nunca tuvo lote)
+//   C) idLoteActual existe + fecha vacía          → ANULAR lote
+//   D) idLoteActual existe + fecha = misma del lote → no-op
+//   E) idLoteActual existe + fecha distinta       → UPDATE fecha+cantidad del lote
+//
+// Devuelve: {idLote, accion: INSERT|UPDATE|ANULAR|NOOP}
+function _sincronizarLoteDesdeDetalle(opts) {
+  var sheet = getSheet('LOTES_VENCIMIENTO');
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0];
+  var idxId    = hdrs.indexOf('idLote');
+  var idxCod   = hdrs.indexOf('codigoProducto');
+  var idxVenc  = hdrs.indexOf('fechaVencimiento');
+  var idxQI    = hdrs.indexOf('cantidadInicial');
+  var idxQA    = hdrs.indexOf('cantidadActual');
+  var idxGuia  = hdrs.indexOf('idGuia');
+  var idxEst   = hdrs.indexOf('estado');
+
+  var fechaVenc = opts.fechaVenc;
+  var fechaVencStr = (fechaVenc instanceof Date && !isNaN(fechaVenc.getTime()))
+    ? Utilities.formatDate(fechaVenc, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+    : '';
+  var idLoteActual = String(opts.idLoteActual || '');
+
+  // CASO C: idLoteActual existe + fecha vacía → ANULAR
+  if (idLoteActual && !fechaVencStr) {
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idxId]) !== idLoteActual) continue;
+      if (idxEst >= 0) sheet.getRange(i + 1, idxEst + 1).setValue('ANULADO');
+      _logMovimientoLote({
+        idLote: idLoteActual, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
+        accion: 'ANULAR', cantidad: 0, motivo: opts.motivo || 'fecha eliminada', usuario: opts.usuario
+      });
+      return { idLote: idLoteActual, accion: 'ANULAR' };
+    }
+    return { idLote: idLoteActual, accion: 'NOOP' };
+  }
+
+  // CASO B: sin lote y sin fecha → nada
+  if (!idLoteActual && !fechaVencStr) return { idLote: '', accion: 'NOOP' };
+
+  // CASO E o D: tiene lote y fecha (puede ser igual o distinta)
+  if (idLoteActual) {
+    for (var j = 1; j < data.length; j++) {
+      if (String(data[j][idxId]) !== idLoteActual) continue;
+      var fechaActualLote = data[j][idxVenc];
+      var fechaActualStr = fechaActualLote instanceof Date
+        ? Utilities.formatDate(fechaActualLote, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(fechaActualLote || '').substring(0, 10);
+      // D: fecha igual y cantidad igual → no-op (excepto si lote estaba ANULADO, reactivar)
+      var estActual = String(data[j][idxEst] || '').toUpperCase();
+      var cantActual = parseFloat(data[j][idxQA]) || 0;
+      if (fechaActualStr === fechaVencStr && cantActual === opts.cantidad && estActual === 'ACTIVO') {
+        return { idLote: idLoteActual, accion: 'NOOP' };
+      }
+      // E: actualizar fecha y cantidad
+      if (idxVenc >= 0) sheet.getRange(j + 1, idxVenc + 1).setValue(opts.fechaVenc);
+      if (idxQI   >= 0) sheet.getRange(j + 1, idxQI + 1).setValue(opts.cantidad);
+      if (idxQA   >= 0) sheet.getRange(j + 1, idxQA + 1).setValue(opts.cantidad);
+      if (idxEst  >= 0 && estActual !== 'ACTIVO') sheet.getRange(j + 1, idxEst + 1).setValue('ACTIVO');
+      _logMovimientoLote({
+        idLote: idLoteActual, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
+        accion: 'UPDATE', cantidad: opts.cantidad,
+        motivo: 'fecha=' + fechaVencStr + ' (era ' + fechaActualStr + ')', usuario: opts.usuario
+      });
+      return { idLote: idLoteActual, accion: 'UPDATE' };
+    }
+  }
+
+  // CASO A: no tenía lote, hay fecha → buscar lote previo (codigoProducto + idGuia + fecha
+  // exacta) por si ya existe otro detalle con misma combinación; reusar idLote.
+  for (var k = 1; k < data.length; k++) {
+    if (String(data[k][idxCod]).toUpperCase() !== String(opts.codigoProducto).toUpperCase()) continue;
+    if (idxGuia >= 0 && String(data[k][idxGuia]) !== String(opts.idGuia)) continue;
+    var fLote = data[k][idxVenc];
+    var fStr  = fLote instanceof Date
+      ? Utilities.formatDate(fLote, Session.getScriptTimeZone(), 'yyyy-MM-dd')
+      : String(fLote || '').substring(0, 10);
+    if (fStr !== fechaVencStr) continue;
+    var idReuse = String(data[k][idxId]);
+    // Reactivar si estaba ANULADO
+    if (idxEst >= 0) sheet.getRange(k + 1, idxEst + 1).setValue('ACTIVO');
+    if (idxQI  >= 0) sheet.getRange(k + 1, idxQI + 1).setValue(opts.cantidad);
+    if (idxQA  >= 0) sheet.getRange(k + 1, idxQA + 1).setValue(opts.cantidad);
+    _logMovimientoLote({
+      idLote: idReuse, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
+      accion: 'REUSE', cantidad: opts.cantidad, motivo: 'mismo (cod,guia,fecha)', usuario: opts.usuario
+    });
+    return { idLote: idReuse, accion: 'UPDATE' };
+  }
+
+  // Crear nuevo lote
+  var nuevoId = _generateId('LOT');
+  var nextRow = sheet.getLastRow() + 1;
+  sheet.appendRow([nuevoId, String(opts.codigoProducto), opts.fechaVenc, opts.cantidad, opts.cantidad,
+                   String(opts.idGuia), 'ACTIVO', new Date()]);
+  sheet.getRange(nextRow, 2).setNumberFormat('@').setValue(String(opts.codigoProducto));
+  _logMovimientoLote({
+    idLote: nuevoId, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
+    accion: 'INSERT', cantidad: opts.cantidad, motivo: opts.motivo || '', usuario: opts.usuario
+  });
+  return { idLote: nuevoId, accion: 'INSERT' };
+}
+
+// [v2.13.53] Log de movimientos del lote en hoja LOTES_HISTORIAL.
+// Para auditoría completa: quién, cuándo, qué cambió, en qué guía.
+function _logMovimientoLote(opts) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName('LOTES_HISTORIAL');
+    if (!sh) {
+      sh = ss.insertSheet('LOTES_HISTORIAL');
+      sh.appendRow(['ts','idLote','codigoProducto','idGuia','accion','cantidad','motivo','usuario']);
+      sh.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#0f172a').setFontColor('#22d3ee');
+      sh.setFrozenRows(1);
+    }
+    sh.appendRow([
+      new Date(),
+      String(opts.idLote || ''),
+      String(opts.codigoProducto || ''),
+      String(opts.idGuia || ''),
+      String(opts.accion || ''),
+      parseFloat(opts.cantidad) || 0,
+      String(opts.motivo || ''),
+      String(opts.usuario || '')
+    ]);
+  } catch(e) { Logger.log('[_logMovimientoLote] ' + e.message); }
+}
+
+// [v2.13.53] Devuelve lotes ACTIVOS de un producto ordenados por fechaVencimiento ASC.
+// Útil para FIFO real al despachar: el lote que vence primero sale primero.
+// Si cantidadActual > 0 está disponible para consumo.
+function getLotesFIFO(params) {
+  var codigoProducto = String(params.codigoProducto || '').trim();
+  if (!codigoProducto) return { ok: false, error: 'codigoProducto requerido' };
+  var sheet = getSheet('LOTES_VENCIMIENTO');
+  if (!sheet) return { ok: true, data: [] };
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { ok: true, data: [] };
+  var hdrs = data[0];
+  var idxId   = hdrs.indexOf('idLote');
+  var idxCod  = hdrs.indexOf('codigoProducto');
+  var idxVenc = hdrs.indexOf('fechaVencimiento');
+  var idxQA   = hdrs.indexOf('cantidadActual');
+  var idxEst  = hdrs.indexOf('estado');
+  var idxGuia = hdrs.indexOf('idGuia');
+  var idxCre  = hdrs.indexOf('fechaCreacion');
+  var hoy = new Date();
+  var lotes = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxCod]).toUpperCase() !== codigoProducto.toUpperCase()) continue;
+    var est = String(data[i][idxEst] || '').toUpperCase();
+    if (est !== 'ACTIVO') continue;
+    var cant = parseFloat(data[i][idxQA]) || 0;
+    if (cant <= 0) continue;
+    var fv = data[i][idxVenc];
+    var diasRestantes = null;
+    if (fv instanceof Date && !isNaN(fv.getTime())) {
+      diasRestantes = Math.ceil((fv.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+    }
+    lotes.push({
+      idLote:           String(data[i][idxId]),
+      codigoProducto:   String(data[i][idxCod]),
+      fechaVencimiento: fv instanceof Date ? fv.toISOString() : String(fv || ''),
+      cantidadActual:   cant,
+      idGuia:           String(data[i][idxGuia] || ''),
+      diasRestantes:    diasRestantes,
+      fechaCreacion:    data[i][idxCre] instanceof Date ? data[i][idxCre].toISOString() : String(data[i][idxCre] || '')
+    });
+  }
+  // Orden FIFO: el que vence primero → primero (lotes sin fecha al final)
+  lotes.sort(function(a, b) {
+    if (!a.fechaVencimiento && !b.fechaVencimiento) return 0;
+    if (!a.fechaVencimiento) return 1;
+    if (!b.fechaVencimiento) return -1;
+    return new Date(a.fechaVencimiento).getTime() - new Date(b.fechaVencimiento).getTime();
+  });
+  return { ok: true, data: lotes };
+}
+
+// [v2.13.53] Historial completo de un lote — para trazabilidad UI.
+function getHistorialLote(params) {
+  var idLote = String(params.idLote || '').trim();
+  if (!idLote) return { ok: false, error: 'idLote requerido' };
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('LOTES_HISTORIAL');
+  if (!sh) return { ok: true, data: [] };
+  var d = sh.getDataRange().getValues();
+  if (d.length < 2) return { ok: true, data: [] };
+  var h = d[0];
+  var idxTs = h.indexOf('ts');
+  var idxId = h.indexOf('idLote');
+  var rows = [];
+  for (var i = 1; i < d.length; i++) {
+    if (String(d[i][idxId]) !== idLote) continue;
+    var r = {};
+    for (var c = 0; c < h.length; c++) r[h[c]] = d[i][c];
+    if (r.ts instanceof Date) r.ts = r.ts.toISOString();
+    rows.push(r);
+  }
+  rows.sort(function(a, b) { return String(b.ts).localeCompare(String(a.ts)); });
+  return { ok: true, data: rows };
 }
 
 // ── Anular un ítem de detalle ────────────────────────────

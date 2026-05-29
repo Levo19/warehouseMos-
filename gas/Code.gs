@@ -153,6 +153,9 @@ function _route(method, e) {
       case 'setupPickupTriggers':   return setupPickupTriggers();
       case 'agregarDetalleGuia':        return agregarDetalleGuia(params);
       case 'actualizarFechaVencimiento':  return actualizarFechaVencimiento(params);
+      // [v2.13.53] Lotes — FIFO + historial
+      case 'getLotesFIFO':                return getLotesFIFO(params);
+      case 'getHistorialLote':            return getHistorialLote(params);
       case 'actualizarCantidadDetalle':   return actualizarCantidadDetalle(params);
       case 'actualizarPreciosDetalle':    return actualizarPreciosDetalle(params);
       case 'cerrarGuia':                return cerrarGuia(params.idGuia, params.usuario, params.idSesion);

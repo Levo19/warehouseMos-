@@ -7284,6 +7284,79 @@
 </div>
 
 <!-- ════════════════════════════════════════════════
+     [v2.13.53] MODAL: LOTES (FIFO + HISTORIAL)
+     Diseño dark slate moderno · efectos visuales y sonoros
+═══════════════════════════════════════════════════ -->
+<style>
+  #modalLotes.modal-overlay { backdrop-filter: blur(8px); }
+  #modalLotes .modal-box {
+    background: linear-gradient(160deg, #0f172a 0%, #1e293b 60%, #0f172a 100%);
+    border: 2px solid rgba(34,211,238,.45);
+    box-shadow: 0 25px 60px -15px rgba(0,0,0,.75), 0 0 0 1px rgba(34,211,238,.15);
+    max-width: 540px; padding: 0; overflow: hidden;
+  }
+  .lot-hdr {
+    background: linear-gradient(135deg, rgba(34,211,238,.18), rgba(8,145,178,.05));
+    border-bottom: 1px solid rgba(34,211,238,.3);
+    padding: 16px 20px; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  }
+  .lot-hdr-ttl { font-weight:900; font-size:1.05rem; color:#67e8f9; letter-spacing:.4px; }
+  .lot-hdr-sub { font-size:.65rem; color:#94a3b8; text-transform:uppercase; letter-spacing:.5px; }
+  .lot-hdr .x { background:rgba(15,23,42,.6); border:1px solid rgba(148,163,184,.3); color:#cbd5e1; width:34px; height:34px; border-radius:999px; font-weight:900; cursor:pointer; transition:all .15s; }
+  .lot-hdr .x:hover { background:rgba(220,38,38,.4); border-color:#dc2626; }
+  .lot-body { padding: 16px 20px 20px; max-height: 70vh; overflow-y: auto; }
+  .lot-body::-webkit-scrollbar { width:8px; }
+  .lot-body::-webkit-scrollbar-track { background:rgba(15,23,42,.4); border-radius:4px; }
+  .lot-body::-webkit-scrollbar-thumb { background: linear-gradient(180deg, rgba(34,211,238,.55), rgba(8,145,178,.55)); border-radius:4px; }
+  .lot-tabs { display:flex; gap:6px; margin-bottom:14px; }
+  .lot-tab { flex:1; padding:8px 12px; border-radius:8px; background:rgba(71,85,105,.4); color:#cbd5e1; font-weight:700; font-size:.75rem; cursor:pointer; border:0; transition:all .15s; }
+  .lot-tab.active { background: linear-gradient(135deg,#22d3ee,#0891b2); color:#fff; box-shadow:0 4px 12px -2px rgba(34,211,238,.45); }
+  .lot-card { background: rgba(30,41,59,.65); border:1px solid rgba(148,163,184,.18); border-radius:12px; padding:10px 12px; margin-bottom:8px; transition:all .2s; animation: lotIn .25s cubic-bezier(.34,1.56,.64,1) both; }
+  .lot-card:hover { background: rgba(30,41,59,.85); border-color: rgba(34,211,238,.4); }
+  .lot-card.vencido { border-color: rgba(248,113,113,.5); background: rgba(127,29,29,.18); }
+  .lot-card.proxim { border-color: rgba(251,191,36,.5); background: rgba(120,53,15,.15); }
+  .lot-card.ok    { border-color: rgba(52,211,153,.4); }
+  .lot-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+  .lot-id { font-family: ui-monospace,monospace; font-size:.65rem; color:#94a3b8; }
+  .lot-cant { font-weight:900; font-size:1.05rem; color:#f8fafc; }
+  .lot-meta { display:flex; flex-wrap:wrap; gap:8px; font-size:.7rem; color:#cbd5e1; }
+  .lot-badge { padding:2px 8px; border-radius:999px; font-weight:800; font-size:.65rem; letter-spacing:.3px; }
+  .lot-bd-fifo { background:linear-gradient(135deg,#22d3ee,#0891b2); color:#fff; }
+  .lot-bd-vencido { background:#dc2626; color:#fff; animation: lotPulse 1.4s infinite; }
+  .lot-bd-proxim { background:#f59e0b; color:#fff; }
+  .lot-bd-ok { background:rgba(52,211,153,.2); color:#34d399; }
+  @keyframes lotIn { 0% { opacity:0; transform: translateY(-8px) scale(.98); } 100% { opacity:1; transform: translateY(0) scale(1); } }
+  @keyframes lotPulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+  .lot-hist-item { display:flex; align-items:flex-start; gap:10px; padding:8px 10px; border-left:3px solid rgba(34,211,238,.4); background:rgba(15,23,42,.45); border-radius:6px; margin-bottom:6px; font-size:.7rem; }
+  .lot-hist-acc { font-weight:800; font-size:.65rem; padding:1px 7px; border-radius:4px; letter-spacing:.3px; }
+  .lot-hist-acc.INSERT { background:rgba(52,211,153,.2); color:#34d399; }
+  .lot-hist-acc.UPDATE { background:rgba(34,211,238,.2); color:#67e8f9; }
+  .lot-hist-acc.ANULAR { background:rgba(248,113,113,.2); color:#f87171; }
+  .lot-hist-acc.REUSE  { background:rgba(168,85,247,.2); color:#c4b5fd; }
+  .lot-hist-acc.CONSUMO { background:rgba(251,191,36,.2); color:#fbbf24; }
+  .lot-empty { text-align:center; padding:30px 20px; color:#64748b; font-style:italic; }
+</style>
+<div id="modalLotes" class="modal-overlay" style="z-index:85" onclick="if(event.target===this)cerrarModalLotes()">
+  <div class="modal-box">
+    <div class="lot-hdr">
+      <div>
+        <div class="lot-hdr-ttl">📦 Lotes <span id="lotHdrCodigo" style="color:#94a3b8;font-weight:600"></span></div>
+        <div class="lot-hdr-sub" id="lotHdrSub">FIFO · vence primero, sale primero</div>
+      </div>
+      <button class="x" onclick="cerrarModalLotes()" title="Cerrar">✕</button>
+    </div>
+    <div class="lot-body">
+      <div class="lot-tabs">
+        <button class="lot-tab active" id="lotTabFifo" onclick="cambiarTabLote('fifo')">🎯 FIFO activos</button>
+        <button class="lot-tab" id="lotTabHist" onclick="cambiarTabLote('hist')">📜 Historial</button>
+      </div>
+      <div id="lotContenidoFifo"></div>
+      <div id="lotContenidoHist" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
      MODAL: PRODUCTO NUEVO
 ═══════════════════════════════════════════════════ -->
 <div id="modalProductoNuevo" class="modal-overlay" style="z-index:80">

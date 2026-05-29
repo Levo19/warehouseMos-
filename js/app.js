@@ -18081,6 +18081,149 @@ const DiagnosticoView = (() => {
 })();
 
 // ════════════════════════════════════════════════
+// [v2.13.53] MODAL LOTES — FIFO + Historial trazable
+// ════════════════════════════════════════════════
+let _lotCtxCodigo = '';
+let _lotCtxNombre = '';
+let _lotFifoCache = [];
+let _lotHistCache = [];
+let _lotTabActual = 'fifo';
+
+async function abrirModalLotes(codigoProducto, nombreOpcional) {
+  if (!codigoProducto) { toast('Falta código producto', 'warn'); return; }
+  _lotCtxCodigo = String(codigoProducto).trim();
+  _lotCtxNombre = String(nombreOpcional || '').trim();
+  _lotTabActual = 'fifo';
+  document.getElementById('lotHdrCodigo').textContent = _lotCtxNombre || _lotCtxCodigo;
+  document.getElementById('lotHdrSub').textContent = 'FIFO · vence primero, sale primero';
+  document.getElementById('lotTabFifo').classList.add('active');
+  document.getElementById('lotTabHist').classList.remove('active');
+  document.getElementById('lotContenidoFifo').style.display = '';
+  document.getElementById('lotContenidoHist').style.display = 'none';
+  document.getElementById('lotContenidoFifo').innerHTML =
+    '<div class="lot-empty">⏳ Cargando lotes…</div>';
+  abrirModal('modalLotes');
+  try { SoundFX.beep?.(); } catch(_){}
+  vibrate(15);
+  try {
+    const r = await API.getLotesFIFO({ codigoProducto: _lotCtxCodigo });
+    _lotFifoCache = (r && r.ok) ? (r.data || []) : [];
+    _renderLotesFifo();
+    if (_lotFifoCache.length > 0) { try { SoundFX.done?.(); } catch(_){} }
+  } catch(e) {
+    document.getElementById('lotContenidoFifo').innerHTML =
+      '<div class="lot-empty" style="color:#f87171">⚠ Error: ' + (e.message || e) + '</div>';
+    try { SoundFX.warn?.(); } catch(_){}
+  }
+}
+
+function cerrarModalLotes() {
+  cerrarModal('modalLotes');
+  _lotCtxCodigo = ''; _lotFifoCache = []; _lotHistCache = [];
+}
+
+async function cambiarTabLote(tab) {
+  _lotTabActual = tab;
+  document.getElementById('lotTabFifo').classList.toggle('active', tab === 'fifo');
+  document.getElementById('lotTabHist').classList.toggle('active', tab === 'hist');
+  document.getElementById('lotContenidoFifo').style.display = tab === 'fifo' ? '' : 'none';
+  document.getElementById('lotContenidoHist').style.display = tab === 'hist' ? '' : 'none';
+  try { SoundFX.beep?.(); } catch(_){}
+  vibrate(10);
+  if (tab === 'hist' && !_lotHistCache.length) {
+    document.getElementById('lotContenidoHist').innerHTML =
+      '<div class="lot-empty">⏳ Cargando historial…</div>';
+    try {
+      const idLote = (_lotFifoCache[0] && _lotFifoCache[0].idLote) || '';
+      if (!idLote) {
+        document.getElementById('lotContenidoHist').innerHTML =
+          '<div class="lot-empty">Sin lotes activos para mostrar historial</div>';
+        return;
+      }
+      // Cargar historial de TODOS los lotes activos
+      const all = await Promise.all(_lotFifoCache.map(l =>
+        API.getHistorialLote({ idLote: l.idLote }).then(r => (r && r.ok ? r.data : [])).catch(() => [])
+      ));
+      _lotHistCache = [].concat.apply([], all);
+      _lotHistCache.sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+      _renderLotesHistorial();
+    } catch(e) {
+      document.getElementById('lotContenidoHist').innerHTML =
+        '<div class="lot-empty" style="color:#f87171">⚠ Error: ' + (e.message || e) + '</div>';
+    }
+  }
+}
+
+function _renderLotesFifo() {
+  const cont = document.getElementById('lotContenidoFifo');
+  if (!_lotFifoCache.length) {
+    cont.innerHTML = `
+      <div class="lot-empty">
+        <div style="font-size:2.5rem;margin-bottom:8px">📭</div>
+        <div>Sin lotes activos para este producto</div>
+        <div style="font-size:.65rem;margin-top:4px;opacity:.7">
+          Los lotes se crean al ingresar mercadería con fecha de vencimiento
+        </div>
+      </div>`;
+    return;
+  }
+  const html = _lotFifoCache.map((l, idx) => {
+    const dias = l.diasRestantes;
+    let cardCls = 'ok', badgeTxt = '✓ vigente', badgeCls = 'lot-bd-ok';
+    if (dias !== null) {
+      if (dias < 0)      { cardCls = 'vencido'; badgeTxt = '🚨 VENCIDO ' + Math.abs(dias) + 'd'; badgeCls = 'lot-bd-vencido'; }
+      else if (dias <= 7)  { cardCls = 'vencido'; badgeTxt = '⚠ vence en ' + dias + 'd'; badgeCls = 'lot-bd-vencido'; }
+      else if (dias <= 30) { cardCls = 'proxim';  badgeTxt = '⏳ ' + dias + 'd'; badgeCls = 'lot-bd-proxim'; }
+      else                 { badgeTxt = '✓ ' + dias + 'd'; }
+    } else {
+      badgeTxt = 'sin fecha'; badgeCls = '';
+    }
+    const fifoBadge = idx === 0 ? '<span class="lot-badge lot-bd-fifo">🎯 FIFO</span>' : '';
+    const fechaFmt = l.fechaVencimiento ? new Date(l.fechaVencimiento).toLocaleDateString('es-PE') : '—';
+    return `
+      <div class="lot-card ${cardCls}">
+        <div class="lot-top">
+          <div>
+            <span class="lot-cant">${l.cantidadActual} u</span>
+            <span class="lot-id" style="margin-left:8px">${l.idLote}</span>
+          </div>
+          <div style="display:flex;gap:5px">
+            ${fifoBadge}
+            <span class="lot-badge ${badgeCls}">${badgeTxt}</span>
+          </div>
+        </div>
+        <div class="lot-meta">
+          <span>📅 Vence: <b style="color:#f8fafc">${fechaFmt}</b></span>
+          <span>📋 Guía: <b style="color:#cbd5e1;font-family:ui-monospace,monospace">${l.idGuia || '—'}</b></span>
+        </div>
+      </div>`;
+  }).join('');
+  cont.innerHTML = html;
+}
+
+function _renderLotesHistorial() {
+  const cont = document.getElementById('lotContenidoHist');
+  if (!_lotHistCache.length) {
+    cont.innerHTML = '<div class="lot-empty">Sin movimientos registrados</div>';
+    return;
+  }
+  const html = _lotHistCache.map(m => {
+    const tsStr = m.ts ? new Date(m.ts).toLocaleString('es-PE') : '';
+    return `
+      <div class="lot-hist-item">
+        <span class="lot-hist-acc ${m.accion || ''}">${m.accion || '?'}</span>
+        <div style="flex:1">
+          <div style="color:#cbd5e1"><b style="color:#f8fafc">${m.cantidad || 0}u</b> · ${m.motivo || ''}</div>
+          <div style="color:#94a3b8;font-size:.6rem;margin-top:2px">
+            ${tsStr} · ${m.usuario || '—'} · guía ${m.idGuia || '—'}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  cont.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════
 // Init
 // ════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => App.init());

@@ -704,6 +704,61 @@ function aprobarProductoNuevo(params) {
     Logger.log('aprobarProductoNuevo: stock error: ' + eS.message);
   }
 
+  // [v2.13.53] 6) Crear lote si el PN tiene fechaVencimiento
+  // Bug histórico: PNs aprobados con fechaVencimiento jamás generaban
+  // fila en LOTES_VENCIMIENTO → invisibles para alertas/FIFO.
+  // Ahora también escribe idLote y fechaVencimiento en GUIA_DETALLE
+  // para coherencia con el resto del sistema.
+  try {
+    var idxFvPN = hdrs.indexOf('fechaVencimiento');
+    var fechaVencPN = idxFvPN >= 0 ? row[idxFvPN] : '';
+    if (fechaVencPN) {
+      // Normalizar a Date
+      var fvDate;
+      if (fechaVencPN instanceof Date) fvDate = fechaVencPN;
+      else {
+        var s = String(fechaVencPN).substring(0, 10);
+        fvDate = new Date(s + 'T12:00:00');
+      }
+      if (fvDate && !isNaN(fvDate.getTime()) && idGuia) {
+        // Localizar el detalle aprobado para obtener idDetalle real
+        var dSh2 = getSheet('GUIA_DETALLE');
+        var d2   = dSh2.getDataRange().getValues();
+        var h2   = d2[0];
+        var iId  = h2.indexOf('idDetalle');
+        var iIdG = h2.indexOf('idGuia');
+        var iCod = h2.indexOf('codigoProducto');
+        var iRec = h2.indexOf('cantidadRecibida');
+        var iLot = h2.indexOf('idLote');
+        var iVen = h2.indexOf('fechaVencimiento');
+        for (var dr = 1; dr < d2.length; dr++) {
+          if (String(d2[dr][iIdG]).trim() !== String(idGuia).trim()) continue;
+          if (String(d2[dr][iCod] || '').trim() !== codigoFinal) continue;
+          var idDetalleAprob = String(d2[dr][iId] || '');
+          var cantAprob      = parseFloat(d2[dr][iRec]) || 0;
+          var idLoteActual   = iLot >= 0 ? String(d2[dr][iLot] || '') : '';
+          var resLote = _sincronizarLoteDesdeDetalle({
+            idLoteActual:   idLoteActual,
+            codigoProducto: codigoFinal,
+            cantidad:       cantAprob,
+            fechaVenc:      fvDate,
+            idGuia:         idGuia,
+            idDetalle:      idDetalleAprob,
+            usuario:        String(params.aprobadoPor || params.usuario || 'MOS'),
+            motivo:         'aprobacion_PN_' + params.idProductoNuevo
+          });
+          if (resLote && resLote.idLote && iLot >= 0) {
+            dSh2.getRange(dr + 1, iLot + 1).setNumberFormat('@').setValue(resLote.idLote);
+          }
+          if (iVen >= 0) dSh2.getRange(dr + 1, iVen + 1).setValue(fvDate);
+          break;
+        }
+      }
+    }
+  } catch(eL) {
+    Logger.log('aprobarProductoNuevo: lote error: ' + eL.message);
+  }
+
   return { ok: true, data: { idProducto: idProductoCreado, tipo: tipo, guiaCerrada: guiaCerrada } };
 }
 
