@@ -3367,7 +3367,7 @@ const App = (() => {
       ? [
           { tipo: 'INGRESO_PROVEEDOR',  ico: '🛺', titulo: 'De PROVEEDOR',         desc: 'Compra normal · catálogo proveedores' },
           { tipo: 'INGRESO_JEFATURA',   ico: '👤', titulo: 'De JEFATURA',          desc: 'Devolución admin · admin+master MOS' },
-          { tipo: 'INGRESO_DEVOLUCION', ico: '📍', titulo: 'De ZONA (devolución)', desc: 'Material que regresa de una zona' }
+          { tipo: 'INGRESO_DEVOLUCION_ZONA', ico: '📍', titulo: 'De ZONA (devolución)', desc: 'Material que regresa de una zona' }
         ]
       : [
           { tipo: 'SALIDA_ZONA',        ico: '📍', titulo: 'A ZONA (despacho)', desc: 'Lo más frecuente · catálogo de zonas' },
