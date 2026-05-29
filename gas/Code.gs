@@ -211,6 +211,7 @@ function _route(method, e) {
       case 'getProductosNuevos':         return getProductosNuevos(params);
       case 'getProductosNuevosRecientes': return getProductosNuevosRecientes(params);
       case 'registrarProductoNuevo':     return registrarProductoNuevo(params);
+      case 'editarPNCantidad':           return editarPNCantidad(params);
       case 'aprobarProductoNuevo':       return aprobarProductoNuevo(params);
 
       // ── Lotes ──────────────────────────────────────────────

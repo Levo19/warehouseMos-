@@ -295,103 +295,266 @@ function getProductosCambiadosDesde(params) {
   }
 }
 
+/**
+ * [v2.13.50] Registrar Producto Nuevo — UPSERT por (codigoBarra, idGuia).
+ *
+ * Política redefinida tras bug duplicación "21 → 42":
+ *  - PN + idGuia: NO pueden existir dos filas con mismo (codigoBarra, idGuia, PENDIENTE).
+ *    Si llega un segundo registro idéntico (doble tap, retry, lo que sea):
+ *      · NO crea nuevo PN
+ *      · ACTUALIZA el PN existente (cantidad, foto, marca, descripción, venc)
+ *      · ACTUALIZA GUIA_DETALLE vinculado (REPLACE, NO suma)
+ *      · Devuelve idempotente:true para que el frontend muestre toast suave
+ *  - GUIA_DETALLE gana columna `idProductoNuevo` para enlace 1:1.
+ *  - Constraint UNIQUE (codigoBarra, idGuia) implícito vía este UPSERT.
+ */
 function registrarProductoNuevo(params) {
-  var sheet = getSheet('PRODUCTO_NUEVO');
-  var id    = _generateId('PN');
+  var lock = LockService.getDocumentLock();
+  try { lock.waitLock(15000); } catch(_) {}
+  try {
+    var sheet = getSheet('PRODUCTO_NUEVO');
+    var codigoBarra = String(params.codigoBarra || '').trim();
+    if (!codigoBarra) codigoBarra = _nextNLEVCode();
+    var idGuia    = String(params.idGuia || '').trim();
+    var cantNueva = parseFloat(params.cantidad) || 0;
 
-  // Generar NLEV si no viene código de barra
-  var codigoBarra = String(params.codigoBarra || '').trim();
-  if (!codigoBarra) codigoBarra = _nextNLEVCode();
-
-  // Subir foto a Drive si viene base64
-  var fotoUrl    = String(params.foto || '');
-  var fotoBase64 = String(params.fotoBase64 || '').trim();
-  if (fotoBase64) {
-    try {
-      fotoUrl = _subirFotoProductoNuevo(codigoBarra, fotoBase64, params.mimeType || 'image/jpeg');
-    } catch(e) {
-      Logger.log('Error subiendo foto PN: ' + e.message);
-    }
-  }
-
-  sheet.appendRow([
-    id,
-    params.idGuia           || '',
-    params.marca            || '',
-    params.descripcion      || '',
-    codigoBarra,
-    params.idCategoria      || '',
-    params.unidad           || '',
-    parseFloat(params.cantidad) || 0,
-    params.fechaVencimiento || '',
-    fotoUrl,
-    'PENDIENTE',
-    params.usuario          || '',
-    new Date(),
-    '',
-    ''
-  ]);
-
-  // Si tiene guía → escribir directo a GUIA_DETALLE sin validar catálogo
-  // (el PN aún no está aprobado → no existe en PRODUCTOS_MASTER)
-  // AUTO-SUMA: si ya existe detalle (mismo idGuia + codigoBarra, no anulado),
-  // sumar cantidad en lugar de duplicar. Previene reintentos y doble-clicks.
-  if (params.idGuia) {
-    try {
-      var detSheet  = getSheet('GUIA_DETALLE');
-      var detData   = detSheet.getDataRange().getValues();
-      var hdrs      = detData[0];
-      var idxIdG    = hdrs.indexOf('idGuia');
-      var idxCb     = hdrs.indexOf('codigoProducto');
-      var idxRec    = hdrs.indexOf('cantidadRecibida');
-      var idxObs    = hdrs.indexOf('observacion');
-      var cantNueva = parseFloat(params.cantidad) || 1;
-      var sumado    = false;
-
-      for (var dr = 1; dr < detData.length; dr++) {
-        if (String(detData[dr][idxIdG]) !== String(params.idGuia)) continue;
-        if (String(detData[dr][idxCb]).toUpperCase() !== String(codigoBarra).toUpperCase()) continue;
-        if (String(detData[dr][idxObs] || '').toUpperCase() === 'ANULADO') continue;
-        // Match: sumar al detalle existente
-        var qtyExist = parseFloat(detData[dr][idxRec]) || 0;
-        detSheet.getRange(dr + 1, idxRec + 1).setValue(qtyExist + cantNueva);
-        sumado = true;
+    // ── UPSERT en PRODUCTO_NUEVO ──────────────────────────────────────
+    // Buscar PN existente con mismo (codigoBarra, idGuia) en estado PENDIENTE.
+    // Si encuentra → UPDATE. Si no → INSERT.
+    var existingPN = null;
+    if (idGuia) {
+      var pnData = sheet.getDataRange().getValues();
+      var pnH    = pnData[0];
+      var pIdxId       = pnH.indexOf('idProductoNuevo');
+      var pIdxGuia     = pnH.indexOf('idGuia');
+      var pIdxCb       = pnH.indexOf('codigoBarra');
+      var pIdxEstado   = pnH.indexOf('estado');
+      for (var pr = 1; pr < pnData.length; pr++) {
+        if (String(pnData[pr][pIdxGuia]) !== idGuia) continue;
+        if (String(pnData[pr][pIdxCb]).toUpperCase() !== codigoBarra.toUpperCase()) continue;
+        if (String(pnData[pr][pIdxEstado] || '').toUpperCase() !== 'PENDIENTE') continue;
+        existingPN = { row: pr + 1, id: String(pnData[pr][pIdxId]), headers: pnH };
         break;
       }
-
-      if (!sumado) {
-        var idDetalle  = _generateId('DET');
-        var nextDetRow = detSheet.getLastRow() + 1;
-        detSheet.appendRow([
-          idDetalle,
-          params.idGuia,
-          codigoBarra,
-          0,
-          cantNueva,
-          0,
-          '',
-          'PN_PENDIENTE'
-        ]);
-        detSheet.getRange(nextDetRow, 3).setNumberFormat('@').setValue(codigoBarra);
-      }
-    } catch(e) {
-      Logger.log('Error al agregar detalle PN a guia: ' + e.message);
     }
+
+    // Subir foto a Drive si viene base64 (solo si hay foto nueva)
+    var fotoUrl    = String(params.foto || '');
+    var fotoBase64 = String(params.fotoBase64 || '').trim();
+    if (fotoBase64) {
+      try {
+        fotoUrl = _subirFotoProductoNuevo(codigoBarra, fotoBase64, params.mimeType || 'image/jpeg');
+      } catch(e) {
+        Logger.log('Error subiendo foto PN: ' + e.message);
+      }
+    }
+
+    var id;
+    var idempotente = false;
+
+    if (existingPN) {
+      // ── UPDATE: actualizar fila existente, no crear duplicado ──────
+      id = existingPN.id;
+      idempotente = true;
+      var h = existingPN.headers;
+      var rangeWrite = function(colName, value) {
+        var idx = h.indexOf(colName);
+        if (idx >= 0) sheet.getRange(existingPN.row, idx + 1).setValue(value);
+      };
+      if (params.marca)         rangeWrite('marca',           params.marca);
+      if (params.descripcion)   rangeWrite('descripcion',     params.descripcion);
+      if (params.idCategoria)   rangeWrite('idCategoria',     params.idCategoria);
+      if (params.unidad)        rangeWrite('unidad',          params.unidad);
+      if (cantNueva > 0)        rangeWrite('cantidad',        cantNueva);
+      if (params.fechaVencimiento) rangeWrite('fechaVencimiento', params.fechaVencimiento);
+      if (fotoUrl)              rangeWrite('foto',            fotoUrl);
+      // refrescar fechaRegistro y usuario al último intento (auditoría)
+      if (params.usuario)       rangeWrite('usuario',         params.usuario);
+      rangeWrite('fechaRegistro', new Date());
+      Logger.log('[registrarProductoNuevo] UPSERT idempotente: ' + id + ' cb=' + codigoBarra + ' guia=' + idGuia);
+    } else {
+      // ── INSERT: primera vez para este (codigoBarra, idGuia) ────────
+      id = _generateId('PN');
+      sheet.appendRow([
+        id,
+        idGuia,
+        params.marca            || '',
+        params.descripcion      || '',
+        codigoBarra,
+        params.idCategoria      || '',
+        params.unidad           || '',
+        cantNueva,
+        params.fechaVencimiento || '',
+        fotoUrl,
+        'PENDIENTE',
+        params.usuario          || '',
+        new Date(),
+        '',
+        ''
+      ]);
+      // codigoBarra como texto (DNI-style: nunca number)
+      var pnHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      var pnCbCol = pnHeaders.indexOf('codigoBarra');
+      if (pnCbCol >= 0) {
+        sheet.getRange(sheet.getLastRow(), pnCbCol + 1).setNumberFormat('@').setValue(codigoBarra);
+      }
+    }
+
+    // ── Sincronizar GUIA_DETALLE 1:1 ──────────────────────────────────
+    // Política: REPLACE, no SUM. La cantidad en DET refleja la del PN actual.
+    // Columna idProductoNuevo enlaza 1:1 con PRODUCTO_NUEVO.
+    if (idGuia) {
+      try {
+        var detSheet  = getSheet('GUIA_DETALLE');
+        var detData   = detSheet.getDataRange().getValues();
+        var hdrs      = detData[0];
+        var idxIdG    = hdrs.indexOf('idGuia');
+        var idxCb     = hdrs.indexOf('codigoProducto');
+        var idxRec    = hdrs.indexOf('cantidadRecibida');
+        var idxObs    = hdrs.indexOf('observacion');
+        var idxPN     = hdrs.indexOf('idProductoNuevo');
+
+        // Auto-añadir la columna idProductoNuevo si la hoja no la tiene aún
+        if (idxPN < 0) {
+          var newCol = hdrs.length + 1;
+          detSheet.getRange(1, newCol).setValue('idProductoNuevo');
+          idxPN = newCol - 1;
+        }
+
+        var matchRow = -1;
+        for (var dr = 1; dr < detData.length; dr++) {
+          if (String(detData[dr][idxIdG]) !== idGuia) continue;
+          if (String(detData[dr][idxCb]).toUpperCase() !== codigoBarra.toUpperCase()) continue;
+          if (String(detData[dr][idxObs] || '').toUpperCase() === 'ANULADO') continue;
+          // Solo matchear líneas de origen PN (no del catálogo) — observación PN_*
+          var obsUp = String(detData[dr][idxObs] || '').toUpperCase();
+          if (obsUp.indexOf('PN_') !== 0) continue;
+          matchRow = dr + 1;
+          break;
+        }
+
+        if (matchRow > 0) {
+          // REPLACE cantidad (no sumar) + vincular idProductoNuevo si faltaba
+          detSheet.getRange(matchRow, idxRec + 1).setValue(cantNueva);
+          detSheet.getRange(matchRow, idxPN + 1).setValue(id);
+        } else {
+          var idDetalle = _generateId('DET');
+          // Construir fila respetando el orden real de headers
+          var rowVals = new Array(hdrs.length);
+          for (var i = 0; i < hdrs.length; i++) rowVals[i] = '';
+          rowVals[hdrs.indexOf('idDetalle')]        = idDetalle;
+          rowVals[idxIdG]                           = idGuia;
+          rowVals[idxCb]                            = codigoBarra;
+          var idxEsp = hdrs.indexOf('cantidadEsperada');
+          if (idxEsp >= 0) rowVals[idxEsp] = 0;
+          rowVals[idxRec]                           = cantNueva;
+          var idxPU = hdrs.indexOf('precioUnitario');
+          if (idxPU >= 0) rowVals[idxPU] = 0;
+          var idxLote = hdrs.indexOf('idLote');
+          if (idxLote >= 0) rowVals[idxLote] = '';
+          rowVals[idxObs]                           = 'PN_PENDIENTE';
+          if (idxPN >= 0) rowVals[idxPN]            = id;
+          detSheet.appendRow(rowVals);
+          // codigoBarra como texto (DNI-style)
+          detSheet.getRange(detSheet.getLastRow(), idxCb + 1).setNumberFormat('@').setValue(codigoBarra);
+        }
+      } catch(e) {
+        Logger.log('Error al sync detalle PN ↔ guia: ' + e.message);
+      }
+    }
+
+    // Push solo en INSERT real (no spam en idempotente)
+    if (!idempotente) {
+      try {
+        var descCorta = (params.descripcion || '').substring(0, 40);
+        _notificarMOS(
+          '🆕 Producto nuevo pendiente',
+          descCorta + ' · ' + cantNueva + ' uds · ' + (params.usuario || 'Operador'),
+          params.usuario || null,
+          'WH_PRODUCTO_NUEVO'
+        );
+      } catch(eP) { Logger.log('Push PN nuevo: ' + eP.message); }
+    }
+
+    return { ok: true, data: { idProductoNuevo: id, codigoBarra: codigoBarra, idempotente: idempotente } };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
   }
+}
 
-  // Push: notificar a MOS que llegó un producto nuevo para revisar
+/**
+ * [v2.13.50] Editar cantidad de un PN PENDIENTE — propaga a GUIA_DETALLE.
+ *
+ * Bloqueado si estado != PENDIENTE (regla de auditoría confirmada por el
+ * usuario: post-aprobación no se toca, hay que abrir ajuste de inventario).
+ */
+function editarPNCantidad(params) {
+  var idProductoNuevo = String(params.idProductoNuevo || '').trim();
+  var nuevaCantidad   = parseFloat(params.cantidad);
+  if (!idProductoNuevo) return { ok: false, error: 'Falta idProductoNuevo' };
+  if (!(nuevaCantidad > 0)) return { ok: false, error: 'Cantidad debe ser > 0' };
+
+  var lock = LockService.getDocumentLock();
+  try { lock.waitLock(10000); } catch(_) {}
   try {
-    var descCorta = (params.descripcion || '').substring(0, 40);
-    var qty = parseFloat(params.cantidad) || 0;
-    _notificarMOS(
-      '🆕 Producto nuevo pendiente',
-      descCorta + ' · ' + qty + ' uds · ' + (params.usuario || 'Operador'),
-      params.usuario || null,
-      'WH_PRODUCTO_NUEVO'
-    );
-  } catch(eP) { Logger.log('Push PN nuevo: ' + eP.message); }
+    var sheet = getSheet('PRODUCTO_NUEVO');
+    var data  = sheet.getDataRange().getValues();
+    var h     = data[0];
+    var idxId       = h.indexOf('idProductoNuevo');
+    var idxCantidad = h.indexOf('cantidad');
+    var idxEstado   = h.indexOf('estado');
+    var idxGuia     = h.indexOf('idGuia');
+    var idxCb       = h.indexOf('codigoBarra');
 
-  return { ok: true, data: { idProductoNuevo: id, codigoBarra: codigoBarra } };
+    var pnRow = -1, codigoBarra = '', idGuia = '';
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][idxId]) === idProductoNuevo) {
+        pnRow = r + 1;
+        codigoBarra = String(data[r][idxCb]);
+        idGuia      = String(data[r][idxGuia]);
+        if (String(data[r][idxEstado] || '').toUpperCase() !== 'PENDIENTE') {
+          return { ok: false, error: 'PN ya fue procesado (estado != PENDIENTE), no se puede editar la cantidad' };
+        }
+        break;
+      }
+    }
+    if (pnRow < 0) return { ok: false, error: 'PN no encontrado: ' + idProductoNuevo };
+
+    // Update PN
+    sheet.getRange(pnRow, idxCantidad + 1).setValue(nuevaCantidad);
+
+    // Propagar a GUIA_DETALLE (por idProductoNuevo si la columna existe, sino fallback por codigoBarra+idGuia)
+    if (idGuia) {
+      var detSheet = getSheet('GUIA_DETALLE');
+      var detData  = detSheet.getDataRange().getValues();
+      var hdrs     = detData[0];
+      var idxIdG   = hdrs.indexOf('idGuia');
+      var idxDcb   = hdrs.indexOf('codigoProducto');
+      var idxRec   = hdrs.indexOf('cantidadRecibida');
+      var idxObs   = hdrs.indexOf('observacion');
+      var idxDpn   = hdrs.indexOf('idProductoNuevo');
+      for (var dr = 1; dr < detData.length; dr++) {
+        var match = false;
+        if (idxDpn >= 0 && String(detData[dr][idxDpn]) === idProductoNuevo) {
+          match = true;
+        } else if (String(detData[dr][idxIdG]) === idGuia
+                && String(detData[dr][idxDcb]).toUpperCase() === codigoBarra.toUpperCase()
+                && String(detData[dr][idxObs] || '').toUpperCase().indexOf('PN_') === 0) {
+          match = true;
+        }
+        if (match) {
+          detSheet.getRange(dr + 1, idxRec + 1).setValue(nuevaCantidad);
+          if (idxDpn >= 0 && !detData[dr][idxDpn]) {
+            detSheet.getRange(dr + 1, idxDpn + 1).setValue(idProductoNuevo);
+          }
+          break;
+        }
+      }
+    }
+    return { ok: true, data: { idProductoNuevo: idProductoNuevo, cantidad: nuevaCantidad } };
+  } finally {
+    try { lock.releaseLock(); } catch(_) {}
+  }
 }
 
 function aprobarProductoNuevo(params) {

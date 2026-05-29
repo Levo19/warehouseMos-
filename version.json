@@ -1,1 +1,1 @@
-{ "version": "2.13.49", "build": "20260523-pn-fix-foto-label-for-handler-robusto" }
+{ "version": "2.13.50", "build": "20260529-pn-upsert-codigo-guia-idempotente-replace-no-suma" }

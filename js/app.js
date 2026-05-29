@@ -6356,28 +6356,54 @@ const GuiasView = (() => {
       if (res.ok || res.offline) {
         const cod  = res.data?.codigoBarra || _pnCodigo || '';
         const idPN = res.data?.idProductoNuevo || ('PN_L_' + Date.now());
+        // [v2.13.50] Backend devuelve idempotente:true cuando el (codigoBarra,
+        // idGuia) ya existía como PENDIENTE — significa que el usuario hizo
+        // doble tap o reintentó. NO es error: el registro existe igual.
+        const esIdempotente = !!res.data?.idempotente;
 
-        // Persistir en cache local
-        const pnCache = OfflineManager.getPNCache();
-        pnCache.unshift({ idProductoNuevo: idPN, idGuia, codigoBarra: cod,
-          cantidad, fechaVencimiento: fechaVenc, descripcion: obs, estado: 'PENDIENTE',
-          fechaRegistro: new Date().toISOString() });
-        OfflineManager.setPNCache(pnCache);
+        // Persistir en cache local — solo si NO es idempotente (ya estaba)
+        if (!esIdempotente) {
+          const pnCache = OfflineManager.getPNCache();
+          pnCache.unshift({ idProductoNuevo: idPN, idGuia, codigoBarra: cod,
+            cantidad, fechaVencimiento: fechaVenc, descripcion: obs, estado: 'PENDIENTE',
+            fechaRegistro: new Date().toISOString() });
+          OfflineManager.setPNCache(pnCache);
+        }
 
-        toast(`✓ Producto nuevo registrado · ${cod || idPN}`, 'ok', 3500);
+        toast(esIdempotente
+          ? `✓ Ya registrado · cantidad actualizada a ${cantidad}`
+          : `✓ Producto nuevo registrado · ${cod || idPN}`,
+          'ok', 3500);
         vibrate(20);
 
-        // Si la guía está abierta en detalle → agregar ítem optimista con badge N
+        // Si la guía está abierta en detalle → agregar / actualizar ítem
         if (idGuia && _guiaActual?.idGuia === idGuia) {
+          if (!_guiaActual.detalle) _guiaActual.detalle = [];
+          // [v2.13.50] REEMPLAZAR si ya existe línea PN con mismo codigoBarra
+          // (idempotencia visual: el frontend NO duplica la card del producto)
+          const existIdx = _guiaActual.detalle.findIndex(d =>
+            String(d.codigoProducto || '').toUpperCase() === String(cod || '').toUpperCase()
+            && (d._esPN || String(d.observacion || '').toUpperCase().indexOf('PN_') === 0));
           const itemOpt = {
-            idDetalle: 'DL_PN_' + Date.now(), idGuia,
-            codigoProducto: cod, descripcionProducto: (obs || cod || '(nuevo)') + ' ⬡N',
-            cantidadEsperada: 0, cantidadRecibida: cantidad,
-            precioUnitario: 0, fechaVencimiento: fechaVenc, observacion: '',
+            idDetalle: existIdx >= 0
+              ? _guiaActual.detalle[existIdx].idDetalle
+              : ('DL_PN_' + Date.now()),
+            idGuia,
+            codigoProducto: cod,
+            descripcionProducto: (obs || cod || '(nuevo)') + ' ⬡N',
+            cantidadEsperada: 0,
+            cantidadRecibida: cantidad,
+            precioUnitario: 0,
+            fechaVencimiento: fechaVenc,
+            observacion: 'PN_PENDIENTE',
+            idProductoNuevo: idPN,
             _local: true, _esPN: true
           };
-          if (!_guiaActual.detalle) _guiaActual.detalle = [];
-          _guiaActual.detalle.push(itemOpt);
+          if (existIdx >= 0) {
+            _guiaActual.detalle[existIdx] = itemOpt;
+          } else {
+            _guiaActual.detalle.push(itemOpt);
+          }
           _mostrarDetalleSheet(_guiaActual, false);
         }
 
