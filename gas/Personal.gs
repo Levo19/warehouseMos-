@@ -42,8 +42,8 @@ function loginPersonal(params) {
   });
   if (!operador) return { ok: false, error: 'PIN incorrecto' };
 
-  // Bloqueo por horario laboral — solo afecta a roles no-admin
-  var horario = _horarioPermitido(operador.rol);
+  // [v2.13.56] Bloqueo por horario — incluye idPersonal para resolver horarioCustom
+  var horario = _horarioPermitido(operador.rol, operador.idPersonal);
   if (!horario.permitido) {
     return {
       ok: false,
@@ -468,37 +468,75 @@ function _notificarMOS(titulo, cuerpo, excluirUsuario, idNotif) {
 // DOMINGO: 07:00 - 16:00
 // MASTER y ADMINISTRADOR: 24/7 sin restricción
 // ============================================================
-function _horarioPermitido(rol) {
+// [v2.13.56] _horarioPermitido: prioriza horario custom desde MOS, fallback
+// al hardcoded si MOS no responde (resiliente offline).
+//   Política:
+//     1. MASTER/ADMINISTRADOR si admins_libres → permitido
+//     2. Operador con horarioCustom activo → usa custom
+//     3. Sino → usa CONFIG_HORARIOS_APPS de la app
+//     4. Si MOS no responde → fallback al hardcoded (7-19/16) por defensa
+function _horarioPermitido(rol, idPersonal) {
+  // Consultar a MOS (con cache CacheService 5 min para no martillar)
+  try {
+    var cache = CacheService.getScriptCache();
+    var ckey = 'mos_horario_' + (idPersonal || '_anon') + '_' + (rol || '');
+    var cached = cache.get(ckey);
+    if (cached) {
+      try { return JSON.parse(cached); } catch(_){}
+    }
+    var mosUrl = _getMosGasUrl();
+    if (mosUrl) {
+      var payload = JSON.stringify({
+        action:     'resolverHorarioPersonal',
+        idPersonal: idPersonal || '',
+        rol:        rol || '',
+        app:        'warehouseMos'
+      });
+      var res = UrlFetchApp.fetch(mosUrl, {
+        method: 'post', contentType: 'text/plain',
+        payload: payload, muteHttpExceptions: true
+      });
+      var jr = JSON.parse(res.getContentText());
+      if (jr && jr.ok && jr.data) {
+        cache.put(ckey, JSON.stringify(jr.data), 300);  // 5 min
+        return jr.data;
+      }
+    }
+  } catch(e) { Logger.log('[_horarioPermitido] MOS fallo: ' + e.message); }
+  // ─── Fallback hardcoded (compat) ───────────────────────────────
   var rolUp = String(rol || '').toUpperCase();
   if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') return { permitido: true, motivo: 'rol_admin' };
-
-  var tz   = Session.getScriptTimeZone();
+  var tz = Session.getScriptTimeZone();
   var ahora = new Date();
-  var dia  = parseInt(Utilities.formatDate(ahora, tz, 'u'), 10); // 1=lun, 7=dom
+  var dia  = parseInt(Utilities.formatDate(ahora, tz, 'u'), 10);
   var hora = parseInt(Utilities.formatDate(ahora, tz, 'H'), 10);
   var min  = parseInt(Utilities.formatDate(ahora, tz, 'm'), 10);
   var horaDecimal = hora + (min / 60);
-
   var apertura = 7;
-  var cierre   = (dia === 7) ? 16 : 19;  // domingo cierra 16h, resto 19h
-
+  var cierre   = (dia === 7) ? 16 : 19;
   if (horaDecimal >= apertura && horaDecimal < cierre) {
-    return { permitido: true, apertura: apertura, cierre: cierre, dia: dia };
+    return { permitido: true, apertura: apertura, cierre: cierre, dia: dia, fuente: 'fallback' };
   }
   return {
-    permitido: false,
-    apertura:  apertura,
-    cierre:    cierre,
-    dia:       dia,
-    motivo:    horaDecimal < apertura ? 'antes_apertura' : 'despues_cierre'
+    permitido: false, apertura: apertura, cierre: cierre, dia: dia,
+    motivo: horaDecimal < apertura ? 'antes_apertura' : 'despues_cierre',
+    fuente: 'fallback'
   };
+}
+
+// [v2.13.56] Helper para obtener URL del MOS desde Script Properties
+function _getMosGasUrl() {
+  try {
+    return PropertiesService.getScriptProperties().getProperty('MOS_GAS_URL') || '';
+  } catch(_) { return ''; }
 }
 
 // Endpoint público: el frontend lo llama antes de mostrar la pantalla de login
 // y antes de desbloquear sesión, para saber si el operador puede entrar.
 function verificarHorario(params) {
   var rol = String(params.rol || '');
-  var info = _horarioPermitido(rol);
+  var idPersonal = String(params.idPersonal || '');
+  var info = _horarioPermitido(rol, idPersonal);
   return { ok: true, data: info };
 }
 
