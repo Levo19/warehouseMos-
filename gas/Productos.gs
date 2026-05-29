@@ -789,24 +789,97 @@ function getHistorialStock(params) {
   var guiaMap  = {};
   guias.forEach(function(g) { guiaMap[g.idGuia] = g; });
 
+  // [v2.13.54] Pre-cargar LOTES_HISTORIAL para enriquecer cada movimiento
+  // INGRESO → idLote del detalle + fechaVencimiento del detalle
+  // SALIDA  → lotesConsumidos: array de {idLote, cantidad, fechaVenc}
+  //           viene de filas LOTES_HISTORIAL con accion=CONSUMO y mismo idGuia
+  var consumosByGuia = {};
+  try {
+    var lhSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('LOTES_HISTORIAL');
+    if (lhSh && lhSh.getLastRow() > 1) {
+      var lhData = lhSh.getDataRange().getValues();
+      var lhH    = lhData[0];
+      var lhIdxG = lhH.indexOf('idGuia');
+      var lhIdxA = lhH.indexOf('accion');
+      var lhIdxL = lhH.indexOf('idLote');
+      var lhIdxC = lhH.indexOf('cantidad');
+      var lhIdxCB = lhH.indexOf('codigoProducto');
+      // Build map: idGuia → { codigoProducto → [{idLote, cantidad}, ...] }
+      for (var lhi = 1; lhi < lhData.length; lhi++) {
+        if (String(lhData[lhi][lhIdxA] || '') !== 'CONSUMO') continue;
+        var gKey = String(lhData[lhi][lhIdxG] || '');
+        if (!gKey) continue;
+        var cbKey = String(lhData[lhi][lhIdxCB] || '').toUpperCase();
+        if (!consumosByGuia[gKey]) consumosByGuia[gKey] = {};
+        if (!consumosByGuia[gKey][cbKey]) consumosByGuia[gKey][cbKey] = [];
+        consumosByGuia[gKey][cbKey].push({
+          idLote:   String(lhData[lhi][lhIdxL] || ''),
+          cantidad: parseFloat(lhData[lhi][lhIdxC]) || 0
+        });
+      }
+    }
+  } catch(eL) { Logger.log('[getHistorialStock] LOTES_HISTORIAL lookup fail: ' + eL.message); }
+
+  // Pre-cargar lotes por idLote para resolver fechaVencimiento
+  var loteInfoById = {};
+  try {
+    var lvSh = getSheet('LOTES_VENCIMIENTO');
+    if (lvSh && lvSh.getLastRow() > 1) {
+      var lvObjs = _sheetToObjects(lvSh);
+      lvObjs.forEach(function(l) { loteInfoById[String(l.idLote)] = l; });
+    }
+  } catch(_) {}
+
   // Movimientos de guías
   var guiaMovs = detalles
     .filter(function(d) { return codSet[String(d.codigoProducto)]; })
     .map(function(d) {
       var g    = guiaMap[d.idGuia] || {};
       var tipo = String(g.tipo || '').toUpperCase();
-      return {
+      var esIng = tipo.indexOf('INGRESO') >= 0 || tipo.indexOf('ENTRADA') >= 0 ||
+                  (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0);
+      var mov = {
         idGuia:    d.idGuia,
         fecha:     g.fecha  || d.fecha || '',
         tipo:      g.tipo   || '—',
-        esIngreso: tipo.indexOf('INGRESO') >= 0 || tipo.indexOf('ENTRADA') >= 0 ||
-                   (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0),
+        esIngreso: esIng,
         cantidad:  Math.abs(parseFloat(d.cantidadRecibida || d.cantidadReal || d.cantidadEsperada || d.cantidad || 0)),
         usuario:   g.usuario || d.usuario || '—',
         origen:    g.idProveedor || g.destino || '',
         estado:    g.estado || '',
         fuente:    'guia'
       };
+      // Enriquecer con lotes
+      if (esIng) {
+        // INGRESO: el detalle puede llevar idLote + fechaVencimiento directos
+        if (d.idLote) {
+          var lInfo = loteInfoById[String(d.idLote)] || {};
+          mov.lote = {
+            idLote: String(d.idLote),
+            fechaVencimiento: d.fechaVencimiento
+              ? (d.fechaVencimiento instanceof Date ? d.fechaVencimiento.toISOString() : String(d.fechaVencimiento))
+              : (lInfo.fechaVencimiento instanceof Date ? lInfo.fechaVencimiento.toISOString() : String(lInfo.fechaVencimiento || '')),
+            estado: String(lInfo.estado || 'ACTIVO')
+          };
+        }
+      } else {
+        // SALIDA: buscar consumos FIFO registrados en LOTES_HISTORIAL
+        var cbUp = String(d.codigoProducto).toUpperCase();
+        var consumos = (consumosByGuia[d.idGuia] || {})[cbUp] || [];
+        if (consumos.length > 0) {
+          mov.lotesConsumidos = consumos.map(function(co) {
+            var lInfo = loteInfoById[co.idLote] || {};
+            return {
+              idLote:   co.idLote,
+              cantidad: co.cantidad,
+              fechaVencimiento: lInfo.fechaVencimiento instanceof Date
+                ? lInfo.fechaVencimiento.toISOString()
+                : String(lInfo.fechaVencimiento || '')
+            };
+          });
+        }
+      }
+      return mov;
     })
     .filter(function(m){ return m.cantidad > 0; });
 

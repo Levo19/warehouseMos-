@@ -474,6 +474,65 @@
     }
     .hist-empty-icon { font-size:42px;margin-bottom:8px;opacity:.6; }
 
+    /* [v2.13.54] LOTES — chips dentro de cada movimiento + footer resumen */
+    .hist-lotes-wrap {
+      margin-top: 8px;
+      padding: 8px 10px;
+      background: rgba(15,23,42,.55);
+      border-left: 2px solid rgba(34,211,238,.5);
+      border-radius: 8px;
+      display: flex; flex-direction: column; gap: 5px;
+    }
+    .hist-lotes-wrap.is-salida {
+      border-left-color: rgba(251,191,36,.6);
+      background: linear-gradient(90deg, rgba(120,53,15,.18), rgba(15,23,42,.5));
+    }
+    .hist-lote-chip {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 10px;
+      background: rgba(30,41,59,.85);
+      border: 1px solid rgba(148,163,184,.18);
+      border-radius: 7px;
+      font-size: 11px; color: #e2e8f0;
+      animation: histLoteIn .25s cubic-bezier(.34,1.56,.64,1) both;
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .hist-lote-chip:hover { transform: translateY(-1px); box-shadow: 0 4px 12px -4px rgba(0,0,0,.5); }
+    .hist-lote-chip.lote-ok      { border-color: rgba(52,211,153,.45); }
+    .hist-lote-chip.lote-proxim  { border-color: rgba(251,191,36,.55); background: linear-gradient(135deg, rgba(120,53,15,.18), rgba(30,41,59,.85)); }
+    .hist-lote-chip.lote-vencido { border-color: rgba(248,113,113,.55); background: linear-gradient(135deg, rgba(127,29,29,.25), rgba(30,41,59,.85)); animation: histLoteIn .25s cubic-bezier(.34,1.56,.64,1) both, histLotePulse 1.6s ease-in-out infinite; }
+    .hist-lote-chip.lote-sin     { border-color: rgba(148,163,184,.3); opacity: .8; }
+    .hist-lote-id    { font-family: ui-monospace,monospace; font-size: 10px; color: #67e8f9; font-weight: 700; }
+    .hist-lote-fv    { color: #cbd5e1; font-size: 10px; }
+    .hist-lote-badge { margin-left: auto; padding: 2px 7px; border-radius: 999px; font-size: 9px; font-weight: 800; letter-spacing: .3px; background: rgba(15,23,42,.6); color: #cbd5e1; }
+    .hist-lote-chip.lote-ok      .hist-lote-badge { color: #34d399; }
+    .hist-lote-chip.lote-proxim  .hist-lote-badge { color: #fbbf24; }
+    .hist-lote-chip.lote-vencido .hist-lote-badge { color: #f87171; }
+    @keyframes histLoteIn {
+      0%   { opacity: 0; transform: translateX(-8px) scale(.96); }
+      100% { opacity: 1; transform: translateX(0) scale(1); }
+    }
+    @keyframes histLotePulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,0); }
+      50%     { box-shadow: 0 0 0 4px rgba(248,113,113,.25); }
+    }
+
+    /* Footer resumen */
+    #histFooter:not(:empty) {
+      margin-top: 14px;
+      padding: 12px 14px;
+      background: linear-gradient(160deg, rgba(15,23,42,.85), rgba(30,41,59,.6));
+      border: 1px solid rgba(34,211,238,.3);
+      border-radius: 12px;
+      box-shadow: 0 8px 25px -10px rgba(0,0,0,.5);
+    }
+    .hist-footer-ttl {
+      font-size: 11px; color: #67e8f9; font-weight: 800;
+      letter-spacing: .4px; text-transform: uppercase; margin-bottom: 8px;
+    }
+    .hist-footer-grid { display: flex; flex-direction: column; gap: 5px; }
+    .hist-footer-empty { color: #64748b; font-size: 11px; font-style: italic; text-align: center; padding: 6px 0; }
+
     /* Indicador sutil de refresh en background (chip "todos" parpadea suave) */
     .prod-chip.is-refreshing .prod-chip-icon { opacity:.4;animation: prodChipRefreshDot 1s linear infinite; }
     @keyframes prodChipRefreshDot {
@@ -8598,6 +8657,9 @@
   <div id="histList">
     <div class="flex justify-center py-6"><div class="spinner"></div></div>
   </div>
+
+  <!-- [v2.13.54] Footer con lotes activos del producto -->
+  <div id="histFooter"></div>
 </div>
 
 <!-- ════════════════════════════════════════════════

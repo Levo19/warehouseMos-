@@ -718,6 +718,81 @@ function _logMovimientoLote(opts) {
   } catch(e) { Logger.log('[_logMovimientoLote] ' + e.message); }
 }
 
+// [v2.13.54] Consume lotes FIFO real para una SALIDA.
+//
+// Política FIFO (vence primero → sale primero):
+//   1. Carga lotes ACTIVOS con cantidadActual > 0 del producto
+//   2. Ordena ASC por fechaVencimiento (los sin fecha al final = más viejos virtuales)
+//   3. Va descontando hasta cubrir la cantidad pedida
+//   4. Por cada lote consumido: actualiza LOTES_VENCIMIENTO.cantidadActual
+//      + registra en LOTES_HISTORIAL accion=CONSUMO con la cantidad consumida
+//   5. Si el lote queda en 0 → marca estado=AGOTADO (mantiene historial)
+//   6. Si la cantidad pedida > suma de lotes disponibles → devuelve huérfano
+//      (no se registra como lote, queda como "consumo sin lote" del producto)
+//
+// Devuelve: { lotesConsumidos: [{idLote, cantidad, fechaVenc}], huerfano: 0 o N }
+function _consumirLotesFIFO(codigoProducto, cantidadPedida, idGuia, usuario, motivo) {
+  if (cantidadPedida <= 0) return { lotesConsumidos: [], huerfano: 0 };
+  var sheet = getSheet('LOTES_VENCIMIENTO');
+  if (!sheet) return { lotesConsumidos: [], huerfano: cantidadPedida };
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return { lotesConsumidos: [], huerfano: cantidadPedida };
+  var hdrs = data[0];
+  var idxId    = hdrs.indexOf('idLote');
+  var idxCod   = hdrs.indexOf('codigoProducto');
+  var idxVenc  = hdrs.indexOf('fechaVencimiento');
+  var idxQA    = hdrs.indexOf('cantidadActual');
+  var idxEst   = hdrs.indexOf('estado');
+
+  // Recolectar candidatos
+  var candidatos = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxCod]).toUpperCase() !== String(codigoProducto).toUpperCase()) continue;
+    var est = String(data[i][idxEst] || '').toUpperCase();
+    if (est !== 'ACTIVO') continue;
+    var cant = parseFloat(data[i][idxQA]) || 0;
+    if (cant <= 0) continue;
+    var fv = data[i][idxVenc];
+    var fvTime = (fv instanceof Date && !isNaN(fv.getTime())) ? fv.getTime() : Number.MAX_SAFE_INTEGER;
+    candidatos.push({
+      fila:   i + 1,
+      idLote: String(data[i][idxId]),
+      cantidadDisponible: cant,
+      fechaVenc: fv instanceof Date ? fv : null,
+      fvTime: fvTime
+    });
+  }
+  // Orden FIFO real: vence antes → primero. Sin fecha al final.
+  candidatos.sort(function(a, b) { return a.fvTime - b.fvTime; });
+
+  // Consumir
+  var lotesConsumidos = [];
+  var restante = cantidadPedida;
+  for (var c = 0; c < candidatos.length && restante > 0; c++) {
+    var cand = candidatos[c];
+    var consumir = Math.min(cand.cantidadDisponible, restante);
+    var nuevaCantLote = cand.cantidadDisponible - consumir;
+    // Update cantidadActual + estado si queda 0
+    sheet.getRange(cand.fila, idxQA + 1).setValue(nuevaCantLote);
+    if (nuevaCantLote <= 0 && idxEst >= 0) {
+      sheet.getRange(cand.fila, idxEst + 1).setValue('AGOTADO');
+    }
+    // Log
+    _logMovimientoLote({
+      idLote: cand.idLote, codigoProducto: codigoProducto, idGuia: idGuia,
+      accion: 'CONSUMO', cantidad: consumir,
+      motivo: motivo || ('salida FIFO restante=' + restante),
+      usuario: usuario
+    });
+    lotesConsumidos.push({
+      idLote: cand.idLote, cantidad: consumir,
+      fechaVencimiento: cand.fechaVenc ? cand.fechaVenc.toISOString() : null
+    });
+    restante -= consumir;
+  }
+  return { lotesConsumidos: lotesConsumidos, huerfano: restante };
+}
+
 // [v2.13.53] Devuelve lotes ACTIVOS de un producto ordenados por fechaVencimiento ASC.
 // Útil para FIFO real al despachar: el lote que vence primero sale primero.
 // Si cantidadActual > 0 está disponible para consumo.
@@ -1034,6 +1109,25 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
       // Si es ingreso → crear/actualizar lote de vencimiento si tiene fecha
       if (esIngreso && d.idLote && d.idLote !== '') {
         _actualizarLote(d.idLote, d.codigoProducto, cantidad, d.fechaVencimiento || '', idGuia);
+      }
+      // [v2.13.54] Si es SALIDA: consumir lotes FIFO real
+      //   - El lote más viejo sale primero
+      //   - cantidadActual de cada lote baja proporcionalmente
+      //   - Si no hay lotes suficientes, queda como "consumo sin lote"
+      //     (no se registra, refleja la realidad: el producto entró antes
+      //      de que existiera el sistema de lotes)
+      if (!esIngreso) {
+        try {
+          var resFifo = _consumirLotesFIFO(
+            d.codigoProducto, cantidad, idGuia,
+            String(usuario || ''),
+            'cierre_guia tipo=' + tipoGuia
+          );
+          if (resFifo.huerfano > 0) {
+            Logger.log('[FIFO] consumo huerfano ' + resFifo.huerfano + ' de ' +
+                       d.codigoProducto + ' (sin lote disponible) en ' + idGuia);
+          }
+        } catch(eF) { Logger.log('[FIFO] consumo fallo en ' + d.codigoProducto + ': ' + eF.message); }
       }
     });
   }

@@ -1,1 +1,1 @@
-{ "version": "2.13.53", "build": "20260529-lotes-fix-fecha-vencimiento-pn-actualizar-fifo-historial" }
+{ "version": "2.13.54", "build": "20260529-lotes-fifo-real-cierre-guia-historial-unificado-timeline" }

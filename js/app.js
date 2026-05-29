@@ -15548,7 +15548,12 @@ const ProductosView = (() => {
       : codigos[0];
     document.getElementById('histList').innerHTML =
       '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
+    // [v2.13.54] Limpiar footer mientras carga
+    const _ftPrev = document.getElementById('histFooter');
+    if (_ftPrev) _ftPrev.innerHTML = '';
     abrirSheet('sheetHistorial');
+    try { SoundFX.beep && SoundFX.beep(); } catch(_){}
+    vibrate(12);
 
     // KPIs hero
     const stockTotal = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
@@ -15668,11 +15673,56 @@ const ProductosView = (() => {
       return;
     }
 
+    // [v2.13.54] Helper: card de lote — colores semánticos según días para vencer
+    const _diasParaVencer = (fechaIso) => {
+      if (!fechaIso) return null;
+      const fv = new Date(fechaIso);
+      if (isNaN(fv.getTime())) return null;
+      return Math.ceil((fv.getTime() - Date.now()) / 86400000);
+    };
+    const _claseLote = (dias) => {
+      if (dias === null) return 'lote-sin';
+      if (dias < 0)      return 'lote-vencido';
+      if (dias <= 7)     return 'lote-vencido';
+      if (dias <= 30)    return 'lote-proxim';
+      return 'lote-ok';
+    };
+    const _fmtFv = (fechaIso) => {
+      if (!fechaIso) return '—';
+      const d = new Date(fechaIso); if (isNaN(d.getTime())) return String(fechaIso).slice(0, 10);
+      return ('0'+d.getDate()).slice(-2) + '/' + ('0'+(d.getMonth()+1)).slice(-2) + '/' + d.getFullYear();
+    };
+    const _renderLoteChip = (lote, cantidadConsumida) => {
+      if (!lote) return '';
+      const dias = _diasParaVencer(lote.fechaVencimiento);
+      const cls  = _claseLote(dias);
+      let badge;
+      if (dias === null) badge = 'sin fecha';
+      else if (dias < 0)  badge = `🚨 vencido ${Math.abs(dias)}d`;
+      else if (dias <= 7) badge = `⚠ ${dias}d`;
+      else if (dias <= 30) badge = `⏳ ${dias}d`;
+      else                 badge = `✓ ${dias}d`;
+      const cantTxt = (cantidadConsumida != null) ? ` <b style="color:#fbbf24">−${fmt(cantidadConsumida)}u</b>` : '';
+      return `
+        <div class="hist-lote-chip ${cls}">
+          <span class="hist-lote-id">🏷 ${escHtml(lote.idLote)}</span>${cantTxt}
+          <span class="hist-lote-fv">📅 ${_fmtFv(lote.fechaVencimiento)}</span>
+          <span class="hist-lote-badge">${badge}</span>
+        </div>`;
+    };
+
     document.getElementById('histList').innerHTML = filtrados.map(m => {
       const cat = _categoria(m);
       const lbl = _label[cat] || cat;
       const sign = _signo(cat);
       const tipoChip = `<span class="hist-mov-tipo" style="background:rgba(15,23,42,.6);color:#94a3b8">${lbl}</span>`;
+      // [v2.13.54] Render de lotes anidados según tipo de movimiento
+      let lotesHtml = '';
+      if (m.esIngreso && m.lote) {
+        lotesHtml = `<div class="hist-lotes-wrap">${_renderLoteChip(m.lote, null)}</div>`;
+      } else if (!m.esIngreso && Array.isArray(m.lotesConsumidos) && m.lotesConsumidos.length > 0) {
+        lotesHtml = `<div class="hist-lotes-wrap is-salida">${m.lotesConsumidos.map(l => _renderLoteChip(l, l.cantidad)).join('')}</div>`;
+      }
       return `
         <div class="hist-timeline-row is-${cat}">
           <div class="flex-1 min-w-0">
@@ -15684,6 +15734,7 @@ const ProductosView = (() => {
               ${tipoChip}<span style="color:#94a3b8">${escHtml(m.tipo || '')}</span>${m.idGuia ? ` · <span class="font-mono text-[10px]">${escHtml(m.idGuia)}</span>` : ''}
             </p>
             ${m.origen ? `<p class="text-[10px] text-slate-600 truncate mt-0.5">${escHtml(m.origen)}</p>` : ''}
+            ${lotesHtml}
             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
               <span class="hist-mov-saldo">Saldo <strong>${fmt(m.bal)}</strong></span>
               ${m.usuario ? `<span class="text-[10px] text-slate-500">por ${escHtml(m.usuario)}</span>` : ''}
@@ -15691,6 +15742,31 @@ const ProductosView = (() => {
           </div>
         </div>`;
     }).join('');
+
+    // [v2.13.54] Resumen FOOTER de lotes activos del producto
+    try {
+      const codigos = (_histTarget && _histTarget.codigos) || [];
+      if (codigos.length && API && API.getLotesFIFO) {
+        const allLotes = [];
+        Promise.all(codigos.map(cb => API.getLotesFIFO({ codigoProducto: cb }).then(r => (r && r.ok ? (r.data || []) : [])).catch(() => [])))
+          .then(arrs => {
+            arrs.forEach(a => allLotes.push(...a));
+            const cont = document.getElementById('histFooter');
+            if (!cont) return;
+            if (!allLotes.length) {
+              cont.innerHTML = `<div class="hist-footer-empty">Sin lotes activos · stock sin trazabilidad de vencimiento</div>`;
+              return;
+            }
+            cont.innerHTML = `
+              <div class="hist-footer-ttl">📦 Lotes activos · ${allLotes.length}</div>
+              <div class="hist-footer-grid">
+                ${allLotes.map(l => _renderLoteChip({ idLote: l.idLote, fechaVencimiento: l.fechaVencimiento }, l.cantidadActual)).join('')}
+              </div>`;
+            // [v2.13.54] Sonido suave cuando aparecen lotes activos
+            try { SoundFX.done && SoundFX.done(); } catch(_){}
+          });
+      }
+    } catch(_) {}
   }
 
   // ── Imprimir historial ──────────────────────────
