@@ -463,6 +463,34 @@ function registrarProductoNuevo(params) {
       }
     }
 
+    // [v2.13.58 BUG G FIX] Crear/actualizar lote desde el PN — sin esperar aprobación.
+    // Política: el operador en piso ve el lote inmediatamente para trazabilidad.
+    // Cuando el admin apruebe, _sincronizarLoteDesdeDetalle reusa este lote por
+    // (codigoProducto, idGuia, fechaVencimiento) → no se duplica.
+    // Si el PN no tiene idGuia (registro directo), usamos sentinel 'PN:<id>' como ancla.
+    try {
+      if (params.fechaVencimiento && cantNueva > 0 && codigoBarra) {
+        var fvDatePN = params.fechaVencimiento instanceof Date
+          ? params.fechaVencimiento
+          : new Date(String(params.fechaVencimiento).substring(0, 10) + 'T12:00:00');
+        if (fvDatePN && !isNaN(fvDatePN.getTime())) {
+          var idGuiaAncla = idGuia || ('PN:' + id);
+          if (typeof _sincronizarLoteDesdeDetalle === 'function') {
+            _sincronizarLoteDesdeDetalle({
+              idLoteActual:   '',
+              codigoProducto: codigoBarra,
+              cantidad:       cantNueva,
+              fechaVenc:      fvDatePN,
+              idGuia:         idGuiaAncla,
+              idDetalle:      id,
+              usuario:        String(params.usuario || ''),
+              motivo:         idempotente ? 'edit_PN_pendiente' : 'registro_PN'
+            });
+          }
+        }
+      }
+    } catch(eLPN) { Logger.log('registrarProductoNuevo: lote error: ' + eLPN.message); }
+
     // Push solo en INSERT real (no spam en idempotente)
     if (!idempotente) {
       try {
@@ -505,13 +533,15 @@ function editarPNCantidad(params) {
     var idxEstado   = h.indexOf('estado');
     var idxGuia     = h.indexOf('idGuia');
     var idxCb       = h.indexOf('codigoBarra');
+    var idxFv       = h.indexOf('fechaVencimiento');
 
-    var pnRow = -1, codigoBarra = '', idGuia = '';
+    var pnRow = -1, codigoBarra = '', idGuia = '', fechaVencPN = '';
     for (var r = 1; r < data.length; r++) {
       if (String(data[r][idxId]) === idProductoNuevo) {
         pnRow = r + 1;
         codigoBarra = String(data[r][idxCb]);
         idGuia      = String(data[r][idxGuia]);
+        fechaVencPN = idxFv >= 0 ? data[r][idxFv] : '';
         if (String(data[r][idxEstado] || '').toUpperCase() !== 'PENDIENTE') {
           return { ok: false, error: 'PN ya fue procesado (estado != PENDIENTE), no se puede editar la cantidad' };
         }
@@ -522,6 +552,28 @@ function editarPNCantidad(params) {
 
     // Update PN
     sheet.getRange(pnRow, idxCantidad + 1).setValue(nuevaCantidad);
+
+    // [v2.13.58 BUG G FIX] Si el PN tiene fecha → sincronizar cantidad del lote.
+    // Antes el lote del PN quedaba congelado con la cantidad inicial → discrepancia.
+    try {
+      if (fechaVencPN && codigoBarra) {
+        var fvDateEdit = fechaVencPN instanceof Date
+          ? fechaVencPN
+          : new Date(String(fechaVencPN).substring(0, 10) + 'T12:00:00');
+        if (fvDateEdit && !isNaN(fvDateEdit.getTime()) && typeof _sincronizarLoteDesdeDetalle === 'function') {
+          _sincronizarLoteDesdeDetalle({
+            idLoteActual:   '',
+            codigoProducto: codigoBarra,
+            cantidad:       nuevaCantidad,
+            fechaVenc:      fvDateEdit,
+            idGuia:         idGuia || ('PN:' + idProductoNuevo),
+            idDetalle:      idProductoNuevo,
+            usuario:        String(params.usuario || ''),
+            motivo:         'edit_PN_cantidad'
+          });
+        }
+      }
+    } catch(eLE) { Logger.log('editarPNCantidad: lote error: ' + eLE.message); }
 
     // Propagar a GUIA_DETALLE (por idProductoNuevo si la columna existe, sino fallback por codigoBarra+idGuia)
     if (idGuia) {

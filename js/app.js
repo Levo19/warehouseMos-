@@ -6916,9 +6916,14 @@ const GuiasView = (() => {
     const base       = location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '');
     const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
     vibrate(10);
+    // [v2.13.59] fuerzaCopia:true SALTA el dedup de 60s del backend.
+    // Este es el botón manual "🖨 imprimir copia" del historial — el operador
+    // explícitamente quiere otra copia aunque ya se haya impreso al cerrar.
     // PrintHub: admin/master ve el selector de impresora; usuario normal
     // imprime directo en la del almacén.
-    PrintHub.imprimir('imprimirTicketGuia', { idGuia, reporteUrl }, 'Guía ' + idGuia)
+    PrintHub.imprimir('imprimirTicketGuia',
+                      { idGuia, reporteUrl, fuerzaCopia: true, motivo: 'copia_manual' },
+                      'Guía ' + idGuia)
       .then(res => {
         if (res && res.ok === false) toast('Error al imprimir: ' + (res.error || ''), 'warn', 4000);
       })
@@ -6948,29 +6953,62 @@ const GuiasView = (() => {
     try { _renderPrintQueueBadge && _renderPrintQueueBadge(); } catch(_){}
   }
 
-  // Reintento con backoff 1s/3s/8s. Si los 3 fallan, encola.
+  // [v2.13.59] Política revisada: NUNCA reintentar inmediato.
+  // Bug histórico: backoff 1s/3s/8s producía 2-3 copias del mismo ticket porque
+  // cuando el HTTP del navegador timeouteaba, PrintNode ya había aceptado el job
+  // y la impresora había sacado el papel. El reintento mandaba otra copia.
+  //
+  // Ahora:
+  //   - 1 sola llamada al backend (que tiene dedup interno de 60s)
+  //   - Si excepción HTTP/red → asumimos que PrintNode probablemente sí imprimió
+  //     pero no lo sabemos seguro → encolamos UNA vez para que el operador
+  //     verifique visualmente y use el botón "Reintentar" del toast persistente
+  //   - Si r.ok === false con error transitorio (printer offline, apikey, 5xx)
+  //     → un solo reintento tras 3s; si vuelve a fallar, encolar
+  //   - Si r.ya_impresa === true (backend dedupó) → toast informativo, NO encolar
   async function _imprimirConReintento(idGuia, reporteUrl, titulo) {
-    const delays = [1000, 3000, 8000];
+    let resp = null;
     let lastErr = null;
-    for (let i = 0; i < delays.length + 1; i++) {
-      try {
-        const r = await API.imprimirTicketGuia({ idGuia, reporteUrl });
-        if (r && r.ok !== false) {
-          // Éxito — si estaba en cola, sacarlo
-          _removerImpresionPendiente(idGuia);
-          if (i > 0) toast(`🖨 Impresión OK tras ${i} reintento${i === 1 ? '' : 's'}`, 'ok', 3000);
-          return r;
+    try {
+      resp = await API.imprimirTicketGuia({ idGuia, reporteUrl });
+      if (resp && resp.ok !== false) {
+        _removerImpresionPendiente(idGuia);
+        if (resp.ya_impresa) {
+          toast('🖨 Ticket ya impreso · usa "Imprimir copia" en historial si necesitas otra', 'info', 4500);
         }
-        lastErr = (r && r.error) || 'error PrintNode';
-      } catch(e) {
-        lastErr = (e && e.message) || 'sin red';
+        return resp;
       }
-      if (i < delays.length) {
-        toast(`🖨 Reintentando impresión (${i+1}/3) en ${Math.round(delays[i]/1000)}s…`, 'info', delays[i] + 500);
-        await new Promise(r => setTimeout(r, delays[i]));
+      lastErr = (resp && resp.error) || 'error PrintNode';
+    } catch(e) {
+      // Excepción HTTP: timeout, red caída, Apps Script colgado.
+      // PrintNode SUELE imprimir igual → no reintentar inmediato. Encolar para verificación.
+      lastErr = 'timeout: revisa si el ticket salió de la impresora';
+      _encolarImpresionPendiente(idGuia, titulo);
+      _toastImpresionFallida(idGuia, titulo, lastErr);
+      return { ok: false, error: lastErr, posiblementeImpreso: true };
+    }
+
+    // Llegamos acá si el backend respondió ok:false explícito.
+    // Solo reintentamos UNA vez si el error suena recuperable (no si es "guía no existe").
+    const errStr = String(lastErr || '').toLowerCase();
+    const esTransitorio = /printer|offline|503|502|504|apikey|red|network|timeout|fetch/i.test(errStr);
+    if (esTransitorio) {
+      toast('🖨 Error transitorio · reintento único en 3s…', 'info', 3500);
+      await new Promise(r => setTimeout(r, 3000));
+      try {
+        const r2 = await API.imprimirTicketGuia({ idGuia, reporteUrl });
+        if (r2 && r2.ok !== false) {
+          _removerImpresionPendiente(idGuia);
+          toast('🖨 Impresión OK tras 1 reintento', 'ok', 3000);
+          return r2;
+        }
+        lastErr = (r2 && r2.error) || lastErr;
+      } catch(e2) {
+        lastErr = (e2 && e2.message) || 'sin red';
       }
     }
-    // 3 intentos fallidos — encolar + toast persistente con CTA
+
+    // Falló de forma duradera — encolar + toast persistente con CTA
     _encolarImpresionPendiente(idGuia, titulo);
     _toastImpresionFallida(idGuia, titulo, lastErr);
     return { ok: false, error: lastErr };
@@ -7020,7 +7058,10 @@ const GuiasView = (() => {
     if (r && r.ok !== false) toast('🖨 Impresión OK', 'ok', 3000);
   };
 
-  // Drenado de cola al cargar / volver online
+  // Drenado de cola al cargar / volver online.
+  // [v2.13.59] Pasar dedupSiempre:true — el backend chequea si la guía YA fue
+  // impresa en algún momento (no solo últimos 60s). Si sí, devuelve ya_impresa
+  // y limpiamos la entrada de la cola sin disparar otra copia.
   async function _drenarColaImpresion() {
     const q = _getPrintQueue();
     if (!q.length) return;
@@ -7028,10 +7069,19 @@ const GuiasView = (() => {
       const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
       const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(item.idGuia)}`;
       try {
-        const r = await API.imprimirTicketGuia({ idGuia: item.idGuia, reporteUrl });
+        const r = await API.imprimirTicketGuia({
+          idGuia:        item.idGuia,
+          reporteUrl,
+          dedupSiempre:  true   // backend solo imprime si NUNCA se imprimió esta guía
+        });
         if (r && r.ok !== false) {
           _removerImpresionPendiente(item.idGuia);
-          toast(`🖨 ${item.titulo || item.idGuia} · impresión pendiente OK`, 'ok', 4000);
+          if (r.ya_impresa) {
+            // El backend dedupó: la guía ya estaba impresa, no volvemos a sacar papel
+            console.log('[print-queue] dedupado · ya impresa:', item.idGuia);
+          } else {
+            toast(`🖨 ${item.titulo || item.idGuia} · impresión pendiente OK`, 'ok', 4000);
+          }
         }
       } catch(_){}
     }
@@ -10431,6 +10481,12 @@ const DespachoView = (() => {
             esperadoDetalles: esperados,
             sombraSnapshot: sombraSnap
           }).then(r2 => {
+            // [v2.13.59] Si el backend dedupó (ya_impresa) → confianza implícita en
+            // que la 1ra impresión salió bien. NO mostrar warning ni intentar otra copia.
+            if (r2?.ya_impresa) {
+              console.log('[Despacho] dedupado · ticket ya impreso por crearDespachoRapido');
+              return;
+            }
             const impreso = r2?.data?.detallesImpresos || 0;
             if (r2?.ok && impreso >= esperados) {
               console.log('[Despacho] ticket OK · ' + impreso + '/' + esperados + ' items');

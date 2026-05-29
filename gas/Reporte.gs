@@ -213,6 +213,41 @@ function imprimirTicketGuia(params) {
     catch(e) { return { ok: false, error: e.message }; }
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // [v2.13.59] DEDUP DE IMPRESIÓN
+  // Bug histórico: cualquier guía (ingreso/salida/despacho/pickup/sombra/PN)
+  // salía impresa 2-3 veces porque _imprimirConReintento del frontend
+  // reintentaba cuando el HTTP del navegador timeoutaba, aunque PrintNode
+  // ya había aceptado el job y la impresora había sacado el ticket.
+  //
+  // Política:
+  //   - Sin flag → dedupa si misma guía+impresora se imprimió en últimos 60s
+  //   - dedupSiempre:true → dedupa por toda la historia de la guía (cola pendiente)
+  //   - fuerzaCopia:true → SALTA dedup (botón "imprimir copia" del historial)
+  //
+  // Estructura de la hoja TICKETS_IMPRESOS:
+  //   ts | idGuia | printerId | jobId | usuario | motivo
+  // ════════════════════════════════════════════════════════════════════
+  if (!params.fuerzaCopia) {
+    var ventanaMs = params.dedupSiempre ? Infinity : 60 * 1000;
+    var existente = _buscarTicketImpresoReciente(idGuia, printerId, ventanaMs);
+    if (existente) {
+      Logger.log('[imprimirTicket DEDUP] guía=' + idGuia + ' printer=' + printerId +
+                 ' · ya impresa hace ' + Math.round((Date.now() - existente.ts) / 1000) + 's' +
+                 ' · job=' + existente.jobId);
+      return {
+        ok: true,
+        ya_impresa: true,
+        dedupado: true,
+        data: {
+          idGuia:   idGuia,
+          jobId:    existente.jobId,
+          tsAnterior: existente.ts
+        }
+      };
+    }
+  }
+
   // [Fix #1+#3 v2.11.2] Garantizar lectura consistente antes de imprimir.
   // Bug: ticket salía cortado con 2-3 items aunque la guía tenía 22 porque
   // imprimirTicketGuia se ejecutaba antes de que Sheets confirmara todas
@@ -843,12 +878,85 @@ function imprimirTicketGuia(params) {
       // [Fix #5 v2.11.2] Devolver conteo de detalles efectivamente impresos
       // para que el caller (frontend / crearDespachoRapido) pueda validar
       // que el ticket salió completo y disparar reimpresión si no.
-      Logger.log('[imprimirTicket] guía=' + idGuia + ' OK · detallesImpresos=' + dets.length);
-      return { ok: true, data: { detallesImpresos: dets.length, idGuia: idGuia } };
+      // [v2.13.59] Registrar en TICKETS_IMPRESOS para dedup futuro.
+      var jobId = '';
+      try {
+        var bodyResp = JSON.parse(resp.getContentText() || '[]');
+        if (Array.isArray(bodyResp) && bodyResp.length) jobId = String(bodyResp[0]);
+        else if (bodyResp && bodyResp.id) jobId = String(bodyResp.id);
+      } catch(_){ jobId = ''; }
+      _registrarTicketImpreso(idGuia, printerId, jobId, {
+        usuario: String(params.usuario || ''),
+        motivo:  String(params.motivo  || 'auto')
+      });
+      Logger.log('[imprimirTicket] guía=' + idGuia + ' OK · job=' + jobId + ' · detallesImpresos=' + dets.length);
+      return { ok: true, data: { detallesImpresos: dets.length, idGuia: idGuia, jobId: jobId } };
     }
     return { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
   } catch(e) {
     return { ok: false, error: e.message };
+  }
+}
+
+// ============================================================
+// [v2.13.59] Helpers de dedup de impresión
+// ============================================================
+function _getTicketsImpresosSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('TICKETS_IMPRESOS');
+  if (!sh) {
+    sh = ss.insertSheet('TICKETS_IMPRESOS');
+    sh.appendRow(['ts','idGuia','printerId','jobId','usuario','motivo']);
+    sh.getRange(1, 1, 1, 6).setFontWeight('bold').setBackground('#0f172a').setFontColor('#22d3ee');
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function _buscarTicketImpresoReciente(idGuia, printerId, ventanaMs) {
+  try {
+    var sh = _getTicketsImpresosSheet();
+    if (sh.getLastRow() < 2) return null;
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0];
+    var idxTs = hdrs.indexOf('ts');
+    var idxG  = hdrs.indexOf('idGuia');
+    var idxP  = hdrs.indexOf('printerId');
+    var idxJ  = hdrs.indexOf('jobId');
+    var now   = Date.now();
+    // Iterar desde el final (más recientes primero)
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][idxG]) !== String(idGuia)) continue;
+      if (String(data[i][idxP]) !== String(printerId)) continue;
+      var tsVal = data[i][idxTs];
+      var tsMs  = tsVal instanceof Date ? tsVal.getTime() : new Date(tsVal).getTime();
+      if (isNaN(tsMs)) continue;
+      if (ventanaMs !== Infinity && (now - tsMs) > ventanaMs) {
+        // Como las filas más viejas vienen antes, ya no hay más recientes para esta guía
+        return null;
+      }
+      return { ts: tsMs, jobId: String(data[i][idxJ] || '') };
+    }
+    return null;
+  } catch(e) {
+    Logger.log('[_buscarTicketImpresoReciente] ' + e.message);
+    return null;
+  }
+}
+
+function _registrarTicketImpreso(idGuia, printerId, jobId, opts) {
+  try {
+    var sh = _getTicketsImpresosSheet();
+    sh.appendRow([
+      new Date(),
+      String(idGuia),
+      String(printerId),
+      String(jobId || ''),
+      String((opts && opts.usuario)  || ''),
+      String((opts && opts.motivo)   || '')
+    ]);
+  } catch(e) {
+    Logger.log('[_registrarTicketImpreso] ' + e.message);
   }
 }
 

@@ -189,6 +189,44 @@ function _agregarDetalleGuiaImpl(params) {
     var qtyNueva    = qtyAnterior + cantRecibida;
     sheet.getRange(dr + 1, idxRec + 1).setValue(qtyNueva);
 
+    // [v2.13.58 BUG A FIX] AUTO_SUMA debe sincronizar lote también.
+    // Caso típico: 1er tap agrega sin fecha (idLote=''), 2do tap agrega con fecha.
+    // Antes: la fecha se descartaba. Ahora: sync lote con cantidad acumulada.
+    // Lee fecha actual del detalle si el call no la trae (preserva fecha previa).
+    try {
+      var idxLoteRow = hdrs.indexOf('idLote');
+      var idxVencRow = hdrs.indexOf('fechaVencimiento');
+      var fechaParam = params.fechaVencimiento || '';
+      var fechaExist = idxVencRow >= 0 ? detData[dr][idxVencRow] : '';
+      var idLotePrev = idxLoteRow >= 0 ? String(detData[dr][idxLoteRow] || '') : '';
+      // Política: si el call trae fecha, gana; si no, mantiene la fecha existente del detalle
+      var fechaUsar  = fechaParam || fechaExist;
+      var fvDateAS;
+      if (fechaUsar instanceof Date) fvDateAS = fechaUsar;
+      else if (fechaUsar) fvDateAS = new Date(String(fechaUsar).substring(0, 10) + 'T12:00:00');
+      else fvDateAS = '';
+      // Si el call trae fecha distinta, escribirla en el detalle también
+      if (fechaParam && idxVencRow >= 0) {
+        sheet.getRange(dr + 1, idxVencRow + 1).setValue(fvDateAS);
+      }
+      // Sync lote si hay fecha o ya había lote (para actualizar cantidad)
+      if ((fvDateAS && !isNaN(fvDateAS.getTime ? fvDateAS.getTime() : NaN)) || idLotePrev) {
+        var resLoteAS = _sincronizarLoteDesdeDetalle({
+          idLoteActual:   idLotePrev,
+          codigoProducto: cbProd,
+          cantidad:       qtyNueva,
+          fechaVenc:      fvDateAS,
+          idGuia:         params.idGuia,
+          idDetalle:      existingId,
+          usuario:        String(params.usuario || ''),
+          motivo:         'auto_suma_detalle'
+        });
+        if (resLoteAS && resLoteAS.idLote && idxLoteRow >= 0 && resLoteAS.idLote !== idLotePrev) {
+          sheet.getRange(dr + 1, idxLoteRow + 1).setNumberFormat('@').setValue(resLoteAS.idLote);
+        }
+      }
+    } catch(eAS) { Logger.log('[autoSuma] sync lote fallo: ' + eAS.message); }
+
     // [v2.13.55] Política nueva: si guía CERRADA → en vez de AUTO_SUMA silenciosa,
     // crear AJUSTE EXPLÍCITO en hoja AJUSTES. Razones:
     //   1. Visibilidad: la edición queda como movimiento auditable separado
@@ -245,20 +283,33 @@ function _agregarDetalleGuiaImpl(params) {
     };
   }
 
-  // Lote: si viene fechaVencimiento, crear lote inmediatamente
-  var idLote = params.idLote || '';
+  // [v2.13.58 BUG B FIX] Lote desde fecha — usar _sincronizarLoteDesdeDetalle
+  // en vez de appendRow directo. Razones:
+  //   1. Reutiliza lote existente si ya hay uno (cod+guia+fecha) → no duplica
+  //   2. Logea en LOTES_HISTORIAL accion=INSERT
+  //   3. Aplica formato '@' a codigoBarra
+  //   4. Mismo helper que cierre/edición → un solo camino canónico
+  var idLote = String(params.idLote || '');
   var fechaVenc = params.fechaVencimiento || '';
   if (fechaVenc && fechaVenc !== '') {
-    if (!idLote) idLote = _generateId('LOT');
-    var loteSheet = getSheet('LOTES_VENCIMIENTO');
-    if (loteSheet) {
-      var lotNextRow = loteSheet.getLastRow() + 1;
-      loteSheet.appendRow([
-        idLote, cbProd, fechaVenc, cantRecibida, cantRecibida,
-        params.idGuia, 'ACTIVO', new Date()
-      ]);
-      loteSheet.getRange(lotNextRow, 2).setNumberFormat('@').setValue(cbProd);
-    }
+    try {
+      var fvDateNuevo = fechaVenc instanceof Date
+        ? fechaVenc
+        : new Date(String(fechaVenc).substring(0, 10) + 'T12:00:00');
+      if (fvDateNuevo && !isNaN(fvDateNuevo.getTime())) {
+        var resLoteNuevo = _sincronizarLoteDesdeDetalle({
+          idLoteActual:   idLote,
+          codigoProducto: cbProd,
+          cantidad:       cantRecibida,
+          fechaVenc:      fvDateNuevo,
+          idGuia:         params.idGuia,
+          idDetalle:      idDetalle,
+          usuario:        String(params.usuario || ''),
+          motivo:         'agregar_detalle_con_fecha'
+        });
+        if (resLoteNuevo && resLoteNuevo.idLote) idLote = resLoteNuevo.idLote;
+      }
+    } catch(eN) { Logger.log('[agregarDetalle] sync lote fallo: ' + eN.message); }
   }
   // FIX REFORZADO: setValues sobre rango pre-formateado (en vez de appendRow)
   // garantiza que codigoBarra preserve ceros a la izquierda. El LockService
@@ -362,18 +413,30 @@ function _agregarDetallesBatchImpl(idGuia, items, usuario) {
     } catch(_){}
   }
 
-  // 3. Consolidar duplicados del batch (auto-suma in-memory)
-  var consolidado = {};   // cb → { codigoBarra, cantidad }
+  // 3. Consolidar duplicados del batch (auto-suma in-memory).
+  // [v2.13.58 BUG C FIX] Preservar fechaVencimiento. Si varios items del mismo
+  // codigoBarra tienen fechas distintas, gana la PRIMERA (rara vez ocurre; el
+  // operador agrupa por presentación). Se podría fragmentar pero rompería la
+  // política existente de 1 detalle por (idGuia, codigoBarra).
+  var consolidado = {};   // cb → { codigoBarra, cantidad, fechaVencimiento }
   var orden       = [];   // mantener orden de aparición
   items.forEach(function(it) {
     var cb  = String(it.codigoBarra || '').trim().toUpperCase();
     var qty = parseFloat(it.cantidad) || 0;
     if (!cb || qty <= 0) return;
     if (!consolidado[cb]) {
-      consolidado[cb] = { codigoBarra: cb, cantidad: 0 };
+      consolidado[cb] = {
+        codigoBarra: cb,
+        cantidad: 0,
+        fechaVencimiento: it.fechaVencimiento || ''
+      };
       orden.push(cb);
     }
     consolidado[cb].cantidad += qty;
+    // Si el primer item no traía fecha pero un item posterior sí → adoptar
+    if (!consolidado[cb].fechaVencimiento && it.fechaVencimiento) {
+      consolidado[cb].fechaVencimiento = it.fechaVencimiento;
+    }
   });
 
   // 4. Construir filas en memoria
@@ -396,7 +459,8 @@ function _agregarDetallesBatchImpl(idGuia, items, usuario) {
     detalles.push({
       idDetalle: idDetalle, idGuia: idGuia,
       codigoProducto: cb, descripcionProducto: prod.descripcion || prod.nombre || prod.idProducto,
-      cantidadEsperada: c.cantidad, cantidadRecibida: c.cantidad
+      cantidadEsperada: c.cantidad, cantidadRecibida: c.cantidad,
+      fechaVencimiento: c.fechaVencimiento || ''     // [v2.13.58] para sync lote post-batch
     });
   });
 
@@ -414,7 +478,50 @@ function _agregarDetallesBatchImpl(idGuia, items, usuario) {
   // lecturas (cerrarGuia + imprimirTicketGuia) ANTES de continuar.
   try { SpreadsheetApp.flush(); } catch(_){}
 
-  Logger.log('[batch] idGuia=' + idGuia + ' · escribí ' + filas.length + ' detalles · errores=' + errores.length);
+  // 7. [v2.13.58 BUG C FIX] Sincronizar lotes para items que trajeron fecha.
+  // Bulk path = pickup, despacho rápido, devolución zona, aprobaciones masivas.
+  // Antes esto se saltaba completamente y dejaba productos sin trazabilidad.
+  // Solo recorre items con fechaVencimiento → costo cero si nadie trae fecha.
+  var detallesConFecha = detalles.filter(function(d) {
+    return d.fechaVencimiento && String(d.fechaVencimiento).trim() !== '';
+  });
+  if (detallesConFecha.length) {
+    // Map idDetalle → rowSheet para persistir idLote en col 7
+    var detRowMap = {};
+    filas.forEach(function(_, idx) { detRowMap[detalles[idx].idDetalle] = startRow + idx; });
+    detallesConFecha.forEach(function(d) {
+      try {
+        var fvDate = d.fechaVencimiento instanceof Date
+          ? d.fechaVencimiento
+          : new Date(String(d.fechaVencimiento).substring(0, 10) + 'T12:00:00');
+        if (isNaN(fvDate.getTime())) return;
+        var resLoteB = _sincronizarLoteDesdeDetalle({
+          idLoteActual:   '',
+          codigoProducto: d.codigoProducto,
+          cantidad:       d.cantidadRecibida,
+          fechaVenc:      fvDate,
+          idGuia:         idGuia,
+          idDetalle:      d.idDetalle,
+          usuario:        String(usuario || ''),
+          motivo:         'batch_add_con_fecha'
+        });
+        if (resLoteB && resLoteB.idLote) {
+          var rowB = detRowMap[d.idDetalle];
+          if (rowB) {
+            sheet.getRange(rowB, 7).setNumberFormat('@').setValue(resLoteB.idLote);
+            sheet.getRange(rowB, 8 + 0); // no-op para mantener referencias
+          }
+          // Persistir también la fecha en col fechaVencimiento si existe en schema
+          var hdrsFinal = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+          var colFv = hdrsFinal.indexOf('fechaVencimiento');
+          if (colFv >= 0 && rowB) sheet.getRange(rowB, colFv + 1).setValue(fvDate);
+        }
+      } catch(eB) { Logger.log('[batch] sync lote ' + d.codigoProducto + ': ' + eB.message); }
+    });
+  }
+
+  Logger.log('[batch] idGuia=' + idGuia + ' · escribí ' + filas.length + ' detalles · errores=' + errores.length +
+             ' · lotes_sync=' + detallesConFecha.length);
   return { ok: true, data: { agregados: filas.length, errores: errores, detalles: detalles } };
 }
 
@@ -493,6 +600,40 @@ function _actualizarCantidadDetalleImpl(params) {
       }
 
       sheet.getRange(i + 1, idxRec + 1).setValue(cantidad);
+
+      // [v2.13.58 BUG D FIX] Sincronizar cantidad del lote asociado.
+      // Antes: detalle 15u + lote 10u → FIFO rompía + reconciliación marcaba ajuste fantasma.
+      // Ahora: si el detalle tiene idLote o fechaVencimiento, propaga la nueva cantidad.
+      try {
+        var idxLoteRowD = hdrs.indexOf('idLote');
+        var idxVencRowD = hdrs.indexOf('fechaVencimiento');
+        var idLotePrevD = idxLoteRowD >= 0 ? String(data[i][idxLoteRowD] || '') : '';
+        var fechaPrevD  = idxVencRowD >= 0 ? data[i][idxVencRowD] : '';
+        if ((idLotePrevD || fechaPrevD) && codigo) {
+          var fvDateD;
+          if (fechaPrevD instanceof Date) fvDateD = fechaPrevD;
+          else if (fechaPrevD) fvDateD = new Date(String(fechaPrevD).substring(0, 10) + 'T12:00:00');
+          else fvDateD = '';
+          // Si no hay fecha pero sí lote previo, _sincronizarLoteDesdeDetalle CASO C anularía.
+          // Solo sincronizamos cantidad si hay fecha real (preserva lote activo).
+          if (fvDateD && !isNaN(fvDateD.getTime())) {
+            var resLoteD = _sincronizarLoteDesdeDetalle({
+              idLoteActual:   idLotePrevD,
+              codigoProducto: codigo,
+              cantidad:       cantidad,
+              fechaVenc:      fvDateD,
+              idGuia:         idGuia,
+              idDetalle:      idDetalle,
+              usuario:        String(params.usuario || ''),
+              motivo:         'edit_cantidad_detalle ' + cantidadVieja + '→' + cantidad
+            });
+            if (resLoteD && resLoteD.idLote && idxLoteRowD >= 0 && resLoteD.idLote !== idLotePrevD) {
+              sheet.getRange(i + 1, idxLoteRowD + 1).setNumberFormat('@').setValue(resLoteD.idLote);
+            }
+          }
+        }
+      } catch(eD) { Logger.log('[actualizarCantidad] sync lote fallo: ' + eD.message); }
+
       return { ok: true };
     }
   }
@@ -1142,6 +1283,21 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   // Actualizar stock por cada detalle.
   // SALIDA_ENVASADO / INGRESO_ENVASADO: stock ya fue aplicado por Envasados.gs
   // directamente con _actualizarStock — saltarse para no duplicar.
+  //
+  // [v2.13.57] Para sincronizar idLote de vuelta al detalle cuando el cierre
+  // crea el lote desde fecha, necesitamos el rowIndex original en GUIA_DETALLE.
+  // Releemos la hoja una sola vez y armamos un map idDetalle → rowSheet.
+  var detSheetRef = getSheet('GUIA_DETALLE');
+  var detSheetVals = detSheetRef.getDataRange().getValues();
+  var detSheetHdrs = detSheetVals[0];
+  var detIdxId    = detSheetHdrs.indexOf('idDetalle');
+  var detIdxLote  = detSheetHdrs.indexOf('idLote');
+  var detRowByDet = {};
+  for (var dsi = 1; dsi < detSheetVals.length; dsi++) {
+    var detId = String(detSheetVals[dsi][detIdxId] || '');
+    if (detId) detRowByDet[detId] = dsi + 1;
+  }
+
   if (!esEnvasado) {
     detalles.forEach(function(d) {
       var cantidad = parseFloat(d.cantidadRecibida) || 0;
@@ -1153,8 +1309,40 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
         usuario:       String(usuario || ''),
         observacion:   'tipo=' + tipoGuia
       });
-      // Si es ingreso → crear/actualizar lote de vencimiento si tiene fecha
-      if (esIngreso && d.idLote && d.idLote !== '') {
+      // [v2.13.57] Si es INGRESO y el detalle tiene fechaVencimiento → garantizar lote.
+      // ANTES: solo actualizaba si d.idLote ya existía. Esto dejaba detalles con fecha
+      // sin lote (ej: el operador editó fecha inline y actualizarFechaVencimiento falló
+      // silenciosa por .catch del frontend, o el detalle se sumó por AUTO_SUMA sin lote).
+      // AHORA: usa _sincronizarLoteDesdeDetalle (idempotente por cod+guia+fecha) y
+      // persiste el idLote resultante en GUIA_DETALLE si no estaba.
+      if (esIngreso && d.fechaVencimiento && String(d.fechaVencimiento).trim() !== '') {
+        try {
+          var fechaVencDate = d.fechaVencimiento instanceof Date
+            ? d.fechaVencimiento
+            : new Date(String(d.fechaVencimiento).substring(0, 10) + 'T12:00:00');
+          var resLote = _sincronizarLoteDesdeDetalle({
+            idLoteActual:   String(d.idLote || ''),
+            codigoProducto: d.codigoProducto,
+            cantidad:       cantidad,
+            fechaVenc:      fechaVencDate,
+            idGuia:         idGuia,
+            idDetalle:      d.idDetalle,
+            usuario:        String(usuario || ''),
+            motivo:         'cierre_guia tipo=' + tipoGuia
+          });
+          // Persistir idLote en GUIA_DETALLE si era vacío o cambió
+          if (resLote && resLote.idLote && detIdxLote >= 0) {
+            var rowDet = detRowByDet[String(d.idDetalle)];
+            if (rowDet && String(d.idLote || '') !== resLote.idLote) {
+              detSheetRef.getRange(rowDet, detIdxLote + 1)
+                         .setNumberFormat('@')
+                         .setValue(resLote.idLote);
+            }
+          }
+        } catch(eL) { Logger.log('[cierre] sync lote fallo ' + d.codigoProducto + ': ' + eL.message); }
+      } else if (esIngreso && d.idLote && d.idLote !== '') {
+        // Sin fecha pero con idLote → legacy path (mantiene compat con guías
+        // antiguas que crearon idLote sin fecha por _actualizarLote viejo)
         _actualizarLote(d.idLote, d.codigoProducto, cantidad, d.fechaVencimiento || '', idGuia);
       }
       // [v2.13.54] Si es SALIDA: consumir lotes FIFO real
@@ -1849,13 +2037,16 @@ function _cerrarPickupConDespachoImpl(params) {
     // leyendo la hoja PICKUPS. Antes acá se concatenaba la lista completa de
     // "sin despachar" — redundante con la sección NO DESPACHADO del ticket.
     var nota = '[pickup:' + idPickup + ']';
+    // [v2.13.59] Propagar imprimir explícito. Antes: undefined !== false === true
+    // → backend imprimía Y frontend también imprimía → 2 copias mínimo.
+    // Ahora: solo imprimimos si el caller lo pide explícitamente con imprimir:true.
     var guiaRes = crearDespachoRapido({
       tipo:     'SALIDA_ZONA',
       idZona:   pickup.idZona,
       items:    despachoDetalle,    // {codigoBarra, cantidad}
       usuario:  usuario,
       nota:     nota,
-      imprimir: params.imprimir !== false
+      imprimir: params.imprimir === true
     });
     if (!guiaRes.ok) return { ok: false, error: 'Falló GUIA_SALIDA: ' + guiaRes.error };
     idGuia = guiaRes.data && guiaRes.data.idGuia;
