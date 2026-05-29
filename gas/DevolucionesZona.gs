@@ -297,9 +297,10 @@ function confirmarRecepcionDevolucion(params) {
         if (rGuia.ok) {
           idGuia = rGuia.data.idGuia;
           // Agregar detalle item por item
+          var algunDetalleOk = false;
           itemsParaIngreso.forEach(function(it) {
             try {
-              _agregarDetalleGuiaImpl({
+              var rDet = _agregarDetalleGuiaImpl({
                 idGuia: idGuia,
                 codigoProducto: it.codigo,
                 cantidadEsperada: it.cantidadRecibida,
@@ -307,8 +308,22 @@ function confirmarRecepcionDevolucion(params) {
                 precioUnitario: 0,
                 observacion: 'DEVOLUCION_ZONA: ' + (it.comentario || it.notaItem || '')
               });
+              if (rDet && rDet.ok) algunDetalleOk = true;
+              else Logger.log('[confirmarRecepcion] detalle rechazado para ' + it.codigo + ': ' + JSON.stringify(rDet));
             } catch(eD) { Logger.log('[confirmarRecepcion] agregar detalle: ' + eD.message); }
           });
+          // [v2.13.51 fix] CRÍTICO: cerrar la guía para que _cerrarGuiaImpl
+          // llame _actualizarStock y SUME al stock activo. Sin esto, la guía
+          // queda ABIERTA y los items nunca entran al inventario.
+          if (algunDetalleOk) {
+            try {
+              cerrarGuia(idGuia, payloadAlmacen.operador, '');
+            } catch(eC) { Logger.log('[confirmarRecepcion] cerrar guía: ' + eC.message); }
+          } else {
+            Logger.log('[confirmarRecepcion] ningún detalle se pudo agregar, guía ' + idGuia + ' queda vacía');
+          }
+        } else {
+          Logger.log('[confirmarRecepcion] crearGuia rechazó: ' + JSON.stringify(rGuia));
         }
       } catch(eG) { Logger.log('[confirmarRecepcion] crear guía ingreso: ' + eG.message); }
     }
