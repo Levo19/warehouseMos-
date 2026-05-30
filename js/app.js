@@ -2288,17 +2288,38 @@ const Session = (() => {
           pollTimerOferta: null, pollTimerIce: null, pollTimerEstado: null
         };
         try {
-          try {
-            window._espiaCliWH.streams.userMedia = await navigator.mediaDevices.getUserMedia({
-              audio: { echoCancellation: true, noiseSuppression: true },
-              video: { width: { ideal: 640 }, height: { ideal: 480 } }
-            });
-          } catch(e) { console.warn('[espia WH] getUserMedia fallo:', e.message); }
-          try {
-            window._espiaCliWH.streams.display = await navigator.mediaDevices.getDisplayMedia({
-              video: { frameRate: { ideal: 15 } }, audio: false
-            });
-          } catch(e) { console.warn('[espia WH] getDisplayMedia fallo:', e.message); }
+          // [v2.13.63] facingMode fallback cascada (algunas tablets WH no tienen frontal)
+          const _camVariants = [
+            { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+            { facingMode: 'user',        width: { ideal: 640 }, height: { ideal: 480 } },
+            { width: { ideal: 640 }, height: { ideal: 480 } }
+          ];
+          for (const vC of _camVariants) {
+            try {
+              window._espiaCliWH.streams.userMedia = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true },
+                video: vC
+              });
+              break;
+            } catch(e) { console.warn('[espia WH] getUserMedia variant fallo:', JSON.stringify(vC), e.message); }
+          }
+          if (!window._espiaCliWH.streams.userMedia) {
+            try {
+              window._espiaCliWH.streams.userMedia = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true }
+              });
+            } catch(e) { console.warn('[espia WH] solo audio fallo:', e.message); }
+          }
+          // iOS Safari <17 fallback
+          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+            try {
+              window._espiaCliWH.streams.display = await navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: { ideal: 15 } }, audio: false
+              });
+            } catch(e) { console.warn('[espia WH] getDisplayMedia fallo:', e.message); }
+          } else {
+            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
+          }
           if (!window._espiaCliWH.streams.userMedia && !window._espiaCliWH.streams.display) {
             await window._espiaCliWHCerrar('sin_streams');
             return;
@@ -2315,15 +2336,30 @@ const Session = (() => {
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
+          // [v2.13.63] GPS adaptive — solo envía si movió >5m o >30s gap
           if ('geolocation' in navigator) {
+            let _gpsLastWH = { lat: null, lng: null, ts: 0 };
+            const _distMWH = (a, b) => {
+              if (a.lat == null || b.lat == null) return Infinity;
+              const R = 6371000;
+              const φ1 = a.lat * Math.PI/180, φ2 = b.lat * Math.PI/180;
+              const Δφ = (b.lat - a.lat) * Math.PI/180;
+              const Δλ = (b.lng - a.lng) * Math.PI/180;
+              const x = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
+              return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+            };
             window._espiaCliWH.gpsWatch = navigator.geolocation.watchPosition(
               pos => {
                 if (gpsCh.readyState !== 'open') return;
+                const now = Date.now();
+                const cur = { lat: pos.coords.latitude, lng: pos.coords.longitude, ts: now };
+                if ((now - _gpsLastWH.ts) < 30000 && _distMWH(_gpsLastWH, cur) < 5) return;
                 try {
                   gpsCh.send(JSON.stringify({
-                    lat: pos.coords.latitude, lng: pos.coords.longitude,
-                    speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: Date.now()
+                    lat: cur.lat, lng: cur.lng,
+                    speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: now
                   }));
+                  _gpsLastWH = cur;
                 } catch(_){}
               },
               err => console.warn('[espia WH gps]', err.message),
@@ -2397,9 +2433,18 @@ const Session = (() => {
             if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
             if (!MediaRecorder.isTypeSupported(mime)) return;
             const crearRec = () => {
-              const r = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 250000, audioBitsPerSecond: 64000 });
+              // [v2.13.63] Bitrate reducido + memory cap
+              const r = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 128000, audioBitsPerSecond: 32000 });
               const chunks = [];
-              r.ondataavailable = e => { if (e.data?.size > 0) chunks.push(e.data); };
+              const MAX_CHUNKS = 50;
+              r.ondataavailable = e => {
+                if (!e.data || e.data.size === 0) return;
+                chunks.push(e.data);
+                if (chunks.length > MAX_CHUNKS) {
+                  chunks.splice(0, chunks.length - MAX_CHUNKS);
+                  console.warn('[espia WH buffer] chunks capped @', MAX_CHUNKS);
+                }
+              };
               r.onstop = async () => {
                 if (!chunks.length) return;
                 try {
