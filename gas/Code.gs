@@ -227,6 +227,9 @@ function _route(method, e) {
       // ── Lotes ──────────────────────────────────────────────
       case 'getLotesVencimiento': return getLotesVencimiento(params);
 
+      // ── Rotación semanal para Catálogo MOS ─────────────────
+      case 'getRotacionSemanal':  return getRotacionSemanal(params);
+
       // ── Config ─────────────────────────────────────────────
       case 'getConfig':          return getConfigAll();
       case 'setConfigValue':     return setConfigValue(params.clave, params.valor);

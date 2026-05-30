@@ -814,6 +814,133 @@ function aprobarProductoNuevo(params) {
   return { ok: true, data: { idProducto: idProductoCreado, tipo: tipo, guiaCerrada: guiaCerrada } };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.61] Rotación semanal — para Catálogo MOS
+// ────────────────────────────────────────────────────────────────────
+// Agrega salidas (SALIDA_ZONA, SALIDA_ENVASADO, SALIDA_DEVOLUCION_*)
+// por semana ISO últimas 8 semanas, agrupado por codigoProducto.
+//
+// Devuelve un map { codigoProducto: [{semana:'YYYY-Www', unidades:N}, ...] }
+// donde el array tiene SIEMPRE 8 entradas, ordenadas de más vieja a más
+// reciente (la última es la semana actual). Si el producto no tuvo
+// movimientos esa semana, unidades=0.
+//
+// Ventaja: una sola lectura de GUIAS + GUIA_DETALLE, agrupación en memoria.
+// MOS puede pre-cargarlo al iniciar sesión y dárselo todo al catálogo.
+// ════════════════════════════════════════════════════════════════════
+function getRotacionSemanal(params) {
+  params = params || {};
+  var semanas   = parseInt(params.semanas) || 8;
+  var codigosFiltro = null;
+  if (params.codigosProducto) {
+    codigosFiltro = {};
+    String(params.codigosProducto).split(',').forEach(function(c) {
+      var k = c.trim().toUpperCase();
+      if (k) codigosFiltro[k] = true;
+    });
+  }
+
+  // 1) Calcular las N semanas a considerar (cada elemento = lunes 00:00 de esa semana)
+  var hoy = new Date();
+  var lunesEstaSemana = _lunesDeLaSemana(hoy);
+  var ventanaInicio   = new Date(lunesEstaSemana);
+  ventanaInicio.setDate(ventanaInicio.getDate() - 7 * (semanas - 1));
+  var etiquetas = []; // ['YYYY-Www', ...] orden cronológico
+  for (var w = 0; w < semanas; w++) {
+    var d = new Date(ventanaInicio);
+    d.setDate(d.getDate() + 7 * w);
+    etiquetas.push(_isoWeekLabel(d));
+  }
+
+  // 2) Cargar GUIAS y filtrar por tipo SALIDA_* + fecha dentro de la ventana
+  var guiasSh = getSheet('GUIAS');
+  var guiasData = guiasSh.getDataRange().getValues();
+  var gHdrs = guiasData[0];
+  var gIdxId   = gHdrs.indexOf('idGuia');
+  var gIdxTipo = gHdrs.indexOf('tipo');
+  var gIdxFch  = gHdrs.indexOf('fecha');
+  var gIdxEst  = gHdrs.indexOf('estado');
+  // guías cerradas que son SALIDA y caen en la ventana
+  var guiasMap = {}; // idGuia → 'YYYY-Www'
+  for (var i = 1; i < guiasData.length; i++) {
+    var tipo = String(guiasData[i][gIdxTipo] || '');
+    if (tipo.indexOf('SALIDA') !== 0) continue;
+    var est = String(guiasData[i][gIdxEst] || '').toUpperCase();
+    if (est !== 'CERRADA' && est !== 'AUTOCERRADA') continue;
+    var fch = guiasData[i][gIdxFch];
+    var d = fch instanceof Date ? fch : new Date(fch);
+    if (isNaN(d.getTime())) continue;
+    if (d < ventanaInicio) continue;
+    if (d > hoy) continue;
+    var lbl = _isoWeekLabel(d);
+    guiasMap[String(guiasData[i][gIdxId])] = lbl;
+  }
+
+  // 3) Recorrer GUIA_DETALLE y acumular unidades por (codigoProducto, semana)
+  // Acumulador: { codigoProducto: { 'YYYY-Www': unidades } }
+  var acumulado = {};
+  var detSh = getSheet('GUIA_DETALLE');
+  var detData = detSh.getDataRange().getValues();
+  var dHdrs = detData[0];
+  var dIdxIdG = dHdrs.indexOf('idGuia');
+  var dIdxCb  = dHdrs.indexOf('codigoProducto');
+  var dIdxRec = dHdrs.indexOf('cantidadRecibida');
+  var dIdxObs = dHdrs.indexOf('observacion');
+  for (var j = 1; j < detData.length; j++) {
+    var idG = String(detData[j][dIdxIdG] || '');
+    var sem = guiasMap[idG];
+    if (!sem) continue;
+    var obs = String(detData[j][dIdxObs] || '').toUpperCase();
+    if (obs === 'ANULADO') continue;
+    var cb  = String(detData[j][dIdxCb] || '').trim().toUpperCase();
+    if (!cb) continue;
+    if (codigosFiltro && !codigosFiltro[cb]) continue;
+    var cant = parseFloat(detData[j][dIdxRec]) || 0;
+    if (cant <= 0) continue;
+    if (!acumulado[cb]) acumulado[cb] = {};
+    acumulado[cb][sem] = (acumulado[cb][sem] || 0) + cant;
+  }
+
+  // 4) Materializar como array de 8 entradas (semanas faltantes → 0)
+  var resultado = {};
+  Object.keys(acumulado).forEach(function(cb) {
+    var serie = etiquetas.map(function(lbl) {
+      return { semana: lbl, unidades: acumulado[cb][lbl] || 0 };
+    });
+    resultado[cb] = serie;
+  });
+
+  return {
+    ok: true,
+    data: {
+      etiquetas: etiquetas,
+      semanas:   semanas,
+      productos: resultado,
+      generadoEn: new Date().toISOString()
+    }
+  };
+}
+
+// Helpers semana ISO
+function _lunesDeLaSemana(d) {
+  var x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  var dow = x.getDay(); // 0=dom, 1=lun, ..., 6=sab
+  var diff = (dow === 0 ? -6 : 1 - dow);
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+function _isoWeekLabel(d) {
+  // YYYY-Www según ISO 8601
+  var target = new Date(d.valueOf());
+  var dayNr  = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3);
+  var firstThursday = new Date(target.getFullYear(), 0, 4);
+  var diff = target - firstThursday;
+  var weekNum = 1 + Math.round(((diff / 86400000) - 3 + ((firstThursday.getDay() + 6) % 7)) / 7);
+  return target.getFullYear() + '-W' + String(weekNum).padStart(2, '0');
+}
+
 // ── Historial de stock por producto ─────────────────────────
 // Devuelve los movimientos (GUIA_DETALLE JOIN GUIAS) del producto,
 // enriquecidos con balance corriente, ordenados DESC por fecha.
