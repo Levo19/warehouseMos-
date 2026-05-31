@@ -3938,9 +3938,25 @@
           }
         });
       });
+      // [v2.13.70] Cleanup de modales/sesión espía antes del reload
+      window._cleanupWHAntesReload = function() {
+        try { document.getElementById('whEspiaCliIndicator')?.remove(); } catch(_){}
+        try { document.querySelectorAll('.wh-modal-backdrop, .wh-perms-overlay').forEach(b => b.remove()); } catch(_){}
+        try {
+          if (window._espiaCliWH) {
+            // Cerrar streams para liberar cam/mic/pantalla
+            const streams = window._espiaCliWH.streams || {};
+            Object.values(streams).forEach(s => { try { s?.getTracks?.().forEach(t => t.stop()); } catch(_){} });
+            try { window._espiaCliWH.pc?.close(); } catch(_){}
+            window._espiaCliWH = null;
+          }
+        } catch(_){}
+      };
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        window._cleanupWHAntesReload();
         window.location.reload();
       });
+      window.addEventListener('beforeunload', () => window._cleanupWHAntesReload());
       _reg.update().catch(() => {});
       setInterval(() => _reg?.update().catch(() => {}), 5 * 60 * 1000);
     }).catch(e => console.warn('[SW]', e));
