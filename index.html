@@ -4142,6 +4142,10 @@
     async function _refrescarUI() {
       let pendientes = 0;
       let listos = 0;
+      let deniedCriticos = 0;
+      // [v2.13.67] Permisos CRÍTICOS — si están denied bloquean el wizard
+      // (no se puede salir hasta que el user los desbloquee desde browser settings)
+      const CRITICOS = { 'notifications': 1, 'camera': 1, 'microphone': 1 };
       for (const p of PERMS) {
         const raw = await _consultarPerm(p);
         const est = _normEstado(raw);
@@ -4156,7 +4160,19 @@
           if (btn) { btn.className = 'wh-perm-status is-ok'; btn.textContent = '✓ OK'; btn.disabled = true; }
         } else if (est === 'denied') {
           card.classList.add('is-denied');
-          if (btn) { btn.className = 'wh-perm-status is-denied'; btn.textContent = '✗ DENEGADO'; }
+          // [v2.13.67] Críticos en denied = pendiente + botón AYUDA
+          if (CRITICOS[p]) {
+            deniedCriticos++;
+            pendientes++;
+            if (btn) {
+              btn.className = 'wh-perm-status is-denied';
+              btn.textContent = '⚠ DESBLOQUEAR';
+              btn.disabled = false;
+              btn.onclick = () => _mostrarAyudaDesbloquear(p);
+            }
+          } else {
+            if (btn) { btn.className = 'wh-perm-status is-denied'; btn.textContent = '✗ DENEGADO'; }
+          }
         } else if (est === 'unsupported') {
           listos++; // tratamos unsupported como "no hay nada que hacer"
           if (btn) { btn.className = 'wh-perm-status is-ok'; btn.textContent = 'N/A'; btn.disabled = true; }
@@ -4178,6 +4194,43 @@
       // El botón "Listo" se habilita solo cuando NO hay pendientes (forzado, sin saltar)
       if (btn) btn.disabled = pendientes > 0;
       return { pendientes, listos };
+    }
+
+    // [v2.13.67] Modal de ayuda cuando un permiso está denied irreversible
+    // (el browser ya no muestra el prompt nativo otra vez — hay que ir a
+    // settings del sitio manualmente).
+    function _mostrarAyudaDesbloquear(perm) {
+      const labels = { notifications: 'Notificaciones', camera: 'Cámara', microphone: 'Micrófono' };
+      const lbl = labels[perm] || perm;
+      const isAndroid = /Android/i.test(navigator.userAgent);
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      let pasos = '';
+      if (isAndroid) {
+        pasos = '1. Toca el ⓘ o 🔒 (al lado de la URL arriba)\n2. "Permisos del sitio"\n3. ' + lbl + ' → Permitir\n4. Volver a esta página y refrescar';
+      } else if (isIOS) {
+        pasos = '1. Configuración → Safari → Sitios web → ' + lbl + '\n2. Buscar este sitio y permitir\n3. Volver y refrescar la página\n\n(O usar Chrome desktop)';
+      } else {
+        pasos = '1. Click el 🔒 candado al lado de la URL\n2. "Permisos del sitio" o ' + lbl + '\n3. Cambiar a "Permitir"\n4. Refrescar esta página (Ctrl+R)';
+      }
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;backdrop-filter:blur(8px)';
+      overlay.innerHTML = `
+        <div style="background:linear-gradient(180deg,#1e293b,#0f172a);border:2px solid #f59e0b;border-radius:16px;padding:24px;max-width:480px;width:100%;color:#e2e8f0">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+            <span style="font-size:32px">⚠</span>
+            <div>
+              <div style="font-size:16px;font-weight:900;color:#fcd34d">${lbl} bloqueado</div>
+              <div style="font-size:11px;color:#94a3b8;margin-top:2px">Tu browser ya no te puede mostrar el prompt</div>
+            </div>
+          </div>
+          <div style="background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:10px;padding:14px;margin-bottom:14px">
+            <div style="font-size:11px;color:#fcd34d;font-weight:800;margin-bottom:8px">CÓMO DESBLOQUEAR:</div>
+            <pre style="white-space:pre-wrap;font-size:12px;color:#e2e8f0;line-height:1.6;margin:0;font-family:inherit">${pasos}</pre>
+          </div>
+          <button id="whAyudaCerrarBtn" style="width:100%;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;border:none;border-radius:10px;padding:12px;font-weight:900;cursor:pointer;font-size:14px">Entendido</button>
+        </div>`;
+      document.body.appendChild(overlay);
+      overlay.querySelector('#whAyudaCerrarBtn').onclick = () => overlay.remove();
     }
 
     async function _pedirPerm(perm) {
