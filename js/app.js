@@ -2066,11 +2066,37 @@ const Session = (() => {
   }
 
   function _guardarSesion(ses) {
-    localStorage.setItem('wh_sesion', JSON.stringify({
+    // [v2.13.68] Manejo defensivo de QuotaExceededError. localStorage en
+    // PCs muy usadas se llena con cachés viejos (wh_productos, wh_stock,
+    // wh_guia_detalle, etc.). Si no podemos guardar la sesión, hacemos
+    // limpieza emergency de los caches grandes y reintentamos.
+    var payload = JSON.stringify({
       ...ses,
       fechaDia:      _hoy(),
       fechaGuardado: new Date().toISOString()
-    }));
+    });
+    try {
+      localStorage.setItem('wh_sesion', payload);
+    } catch(e) {
+      if (e.name === 'QuotaExceededError' || /quota/i.test(e.message)) {
+        console.warn('[Sesion] localStorage lleno, limpiando caches grandes...');
+        // Borrar los caches MÁS grandes en orden (los que el offline precarga)
+        ['wh_guia_detalle', 'wh_preingresos', 'wh_productos', 'wh_stock',
+         'wh_proveedores', 'wh_ajustes', 'wh_auditorias_c', 'wh_ubicaciones'].forEach(function(k){
+          try { localStorage.removeItem(k); } catch(_){}
+        });
+        // Reintento
+        try {
+          localStorage.setItem('wh_sesion', payload);
+          console.log('[Sesion] ✓ guardada tras cleanup emergency');
+          if (typeof toast === 'function') toast('🧹 Cache limpiada · sesión OK', 'info', 4000);
+        } catch(e2) {
+          console.error('[Sesion] localStorage SIGUE lleno tras cleanup:', e2.message);
+          if (typeof toast === 'function') toast('⚠ Storage lleno · usa DevTools→Application→Clear Storage', 'error', 10000);
+          throw e2;
+        }
+      } else { throw e; }
+    }
   }
 
   function _cargarSesion() {
@@ -16794,7 +16820,10 @@ const ProductosView = (() => {
     // Solo usar diff si la vista de productos está visible y ya hubo render previo
     const list = document.getElementById('listProductos');
     const yaRenderizado = list && list.querySelector('.prod-card');
-    if (yaRenderizado && currentView === 'productos') {
+    // [v2.13.68] Guard contra currentView undefined (cuando se llama desde
+    // offline/precarga antes que la app inicialice la variable global).
+    const _vistaProd = (typeof currentView !== 'undefined' && currentView === 'productos');
+    if (yaRenderizado && _vistaProd) {
       const visibles = _aplicarFiltroChip(
         _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
       );

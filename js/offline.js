@@ -55,7 +55,24 @@ const OfflineManager = (() => {
   // ── Cache helpers ─────────────────────────────────────────
   function guardar(key, data) {
     try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); }
-    catch(e) { console.warn('[Offline] localStorage lleno:', e); }
+    catch(e) {
+      // [v2.13.68] Cleanup emergency cuando localStorage está lleno.
+      // Borrar los caches más grandes que NO seamos nosotros + reintentar.
+      // Si seguimos sin poder, asumimos hoja muerta y tiramos warn (no throw).
+      if (e.name === 'QuotaExceededError' || /quota/i.test(e.message)) {
+        console.warn('[Offline] storage lleno · cleanup emergency para guardar', key);
+        const GRANDES = ['wh_guia_detalle','wh_preingresos','wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c','wh_ubicaciones'];
+        GRANDES.filter(k => k !== key).forEach(k => {
+          try { localStorage.removeItem(k); } catch(_){}
+        });
+        try {
+          localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
+          console.log('[Offline] ✓ guardado tras cleanup:', key);
+        } catch(e2) {
+          console.warn('[Offline] localStorage SIGUE lleno tras cleanup, omitido:', key, e2.message);
+        }
+      } else { console.warn('[Offline] localStorage error:', e); }
+    }
   }
 
   function cargar(key) {
