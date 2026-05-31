@@ -1732,6 +1732,46 @@ const Session = (() => {
             }
           } catch(eFL) { console.error('[WH] forzar_logout fallo:', eFL); }
         }
+        // [v2.13.64] Admin marcó Forzar_Push → re-registrar FCM token YA.
+        // Útil cuando el device aparece sin token en PUSH_TOKENS (espía no
+        // conecta, comandos no llegan). El admin lo dispara desde el panel.
+        if (d.forzar_push) {
+          console.log('[WH] Forzar_Push recibido del admin · re-registrando FCM token');
+          if (typeof toast === 'function') toast('🔄 Re-registrando notificaciones (por admin)', 'info', 4000);
+          // Lanzar re-registro + limpiar flag (no bloquear el flujo principal)
+          setTimeout(() => {
+            try {
+              if (typeof window._pushInitWH === 'function') window._pushInitWH();
+            } catch(eFP) { console.error('[WH] forzar_push init fallo:', eFP); }
+            // Limpiar flag en MOS para no quedar en bucle (delay 3s para dar
+            // tiempo al pushInit de completar getToken+registrar)
+            setTimeout(() => {
+              fetch(mosUrl, {
+                method: 'POST',
+                body: JSON.stringify({
+                  action: 'limpiarFlagDevice',
+                  deviceId: devId,
+                  flag: 'Forzar_Push'
+                })
+              }).catch(() => {});
+            }, 5000);
+          }, 1500);
+        }
+        // [v2.13.64] Admin marcó Forzar_Wizard → resetear flag local del wizard
+        // para que vuelva a aparecer al próximo arranque (o ahora si ya está
+        // en sesión). Limpiar flag en MOS.
+        if (d.forzar_wizard) {
+          console.log('[WH] Forzar_Wizard recibido del admin · reset wizard local');
+          try { localStorage.removeItem('wh_wizard_done'); } catch(_){}
+          fetch(mosUrl, {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'limpiarFlagDevice',
+              deviceId: devId,
+              flag: 'Forzar_Wizard'
+            })
+          }).catch(() => {});
+        }
         // Si veníamos de un estado pendiente/error y el polling detectó ACTIVO,
         // recargar la pestaña para que el resto de init() corra correctamente.
         if (yaTeniaPolling) {
@@ -2562,25 +2602,68 @@ const Session = (() => {
       const permission = Notification.permission === 'default'
         ? await Notification.requestPermission()
         : Notification.permission;
-      if (permission !== 'granted') return;
+      if (permission !== 'granted') {
+        console.warn('[Push WH] permiso denegado:', permission);
+        return;
+      }
 
       const swReg = await navigator.serviceWorker.ready;
       const token = await messaging.getToken({ vapidKey: _PUSH_VAPID, serviceWorkerRegistration: swReg });
-      if (!token) return;
+      if (!token) {
+        console.warn('[Push WH] getToken devolvió vacío');
+        return;
+      }
 
       // Registrar token en MOS GAS asociado al operador + deviceId (targeted exacto)
       const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
       const _devIdToken = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-      fetch(mosUrl, {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'registrarPushToken',
-          token, usuario,
-          appOrigen: 'warehouseMos',
-          deviceId: _devIdToken,
-          dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
-        })
-      }).catch(() => {});
+      // [v2.13.64] Si deviceId vacío, no registres (token sin device = inútil para targeted push)
+      if (!_devIdToken) {
+        console.warn('[Push WH] deviceId vacío — no registro hasta tenerlo');
+        return;
+      }
+      try {
+        await fetch(mosUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'registrarPushToken',
+            token, usuario,
+            appOrigen: 'warehouseMos',
+            deviceId: _devIdToken,
+            dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
+          })
+        });
+        console.log('[Push WH] token registrado en GAS ✅');
+      } catch(eReg) {
+        console.warn('[Push WH] registro POST falló:', eReg?.message);
+      }
+      // [v2.13.64] Auto-verify: 8s después, confirmar que el token está activo
+      // en PUSH_TOKENS. Si no, retry una vez. Resuelve casos donde el registro
+      // se perdió (red intermitente) sin que el user lo note.
+      setTimeout(async () => {
+        try {
+          const verifUrl = mosUrl + '?action=verificarMiTokenRegistrado&deviceId=' + encodeURIComponent(_devIdToken);
+          const vr = await fetch(verifUrl);
+          const vj = await vr.json();
+          const registrado = vj?.data?.registrado || vj?.registrado;
+          if (!registrado) {
+            console.warn('[Push WH] token NO está en backend tras 8s · reintento');
+            if (typeof toast === 'function') toast('⚠ Re-registrando notificaciones…', 'warn', 4000);
+            fetch(mosUrl, {
+              method: 'POST',
+              body: JSON.stringify({
+                action: 'registrarPushToken',
+                token, usuario,
+                appOrigen: 'warehouseMos',
+                deviceId: _devIdToken,
+                dispositivo: 'warehouseMos · retry · ' + (navigator.userAgent || '').substring(0, 60)
+              })
+            }).catch(() => {});
+          } else {
+            console.log('[Push WH] token verificado ✅ (' + (vj?.data?.tokens || 1) + ' activo/s)');
+          }
+        } catch(eV) { console.warn('[Push WH] verify token falló:', eV?.message); }
+      }, 8000);
     } catch(e) {
       console.warn('[Push WH] init error:', e?.message);
     }
