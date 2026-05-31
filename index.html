@@ -4323,8 +4323,21 @@
       try {
         const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
         if (!id) return;
-        const map = { notifications:'notif', camera:'cam', microphone:'mic', geolocation:'geo' };
         const perms = {};
+        // [v2.13.65 FIX] notif: usar Notification.permission DIRECTO. Antes
+        // navigator.permissions.query({name:'notifications'}) tenía race
+        // condition tras requestPermission y devolvía 'prompt' aunque el user
+        // ya hubiera aceptado → el modal admin mostraba "pendiente" siempre.
+        try {
+          if ('Notification' in window) {
+            const np = Notification.permission;
+            perms.notif = (np === 'default') ? 'prompt' : np; // granted | denied | prompt
+          } else {
+            perms.notif = 'unsupported';
+          }
+        } catch(_) { perms.notif = 'unsupported'; }
+        // Resto sí pasa por Permissions API (no tienen el bug del notifications)
+        const map = { camera:'cam', microphone:'mic', geolocation:'geo' };
         for (const [name, key] of Object.entries(map)) {
           try {
             const ps = await navigator.permissions.query({ name });
@@ -4332,7 +4345,12 @@
             if (!_whPermsHooked) ps.onchange = () => _reportarPermisosWH();
           } catch(_) { perms[key] = 'unsupported'; }
         }
-        perms.audio   = (localStorage.getItem('wh_audio_ok') === '1') ? 'granted' : 'prompt';
+        // [v2.13.65 FIX] audio: derivar de mic (no tiene perm propia en browsers).
+        // Antes leía localStorage 'wh_audio_ok' que NADIE seteaba nunca → siempre
+        // quedaba 'prompt'. Código zombie. Ahora: si mic está granted, audio igual.
+        if (perms.mic === 'granted') perms.audio = 'granted';
+        else if (perms.mic === 'denied') perms.audio = 'denied';
+        else perms.audio = 'prompt';
         perms.install = (matchMedia('(display-mode: standalone)').matches) ? 'granted'
                       : (window._WH_INSTALL_PROMPT ? 'prompt' : 'unsupported');
         perms.storage = await _pedirPersistentStorageWH();
