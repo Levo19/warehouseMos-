@@ -2448,7 +2448,12 @@ const Session = (() => {
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
-          // [v2.13.63] GPS adaptive — solo envía si movió >5m o >30s gap
+          gpsCh.onopen  = () => console.log('[espia WH gps] DataChannel abierto');
+          gpsCh.onerror = e => console.warn('[espia WH gps] DataChannel error:', e?.message);
+          // [v2.13.71] GPS strategy: 2-pass. Primero pedir posición rápida (IP/WiFi,
+          // low accuracy) que llega en <2s en PCs sin GPS. Después arrancar watchPosition
+          // con high accuracy. Antes solo watchPosition high accuracy → en PCs desktop
+          // sin GPS hardware podía tardar >30s o nunca llegar.
           if ('geolocation' in navigator) {
             let _gpsLastWH = { lat: null, lng: null, ts: 0 };
             const _distMWH = (a, b) => {
@@ -2460,23 +2465,48 @@ const Session = (() => {
               const x = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
               return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
             };
+            const _enviarGps = (cur, src) => {
+              if (gpsCh.readyState !== 'open') { console.log('[espia WH gps] channel no open, esperando:', gpsCh.readyState); return; }
+              try {
+                gpsCh.send(JSON.stringify(cur));
+                console.log('[espia WH gps] enviado (' + src + '):', cur.lat.toFixed(5), cur.lng.toFixed(5), '±' + Math.round(cur.acc) + 'm');
+                _gpsLastWH = { lat: cur.lat, lng: cur.lng, ts: cur.ts };
+              } catch(eS) { console.warn('[espia WH gps] send fallo:', eS.message); }
+            };
+            // Pass 1: posición rápida aproximada (IP/WiFi, no espera GPS hardware)
+            const _reintentarHasta = (ms) => {
+              const start = Date.now();
+              const intentar = () => {
+                if (gpsCh.readyState === 'open') {
+                  navigator.geolocation.getCurrentPosition(
+                    pos => _enviarGps({
+                      lat: pos.coords.latitude, lng: pos.coords.longitude,
+                      speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: Date.now()
+                    }, 'quick'),
+                    err => console.warn('[espia WH gps quick]', err.code, err.message),
+                    { enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 }
+                  );
+                } else if (Date.now() - start < ms) {
+                  setTimeout(intentar, 500);
+                }
+              };
+              intentar();
+            };
+            _reintentarHasta(15000); // hasta 15s esperando que el channel abra
+            // Pass 2: watchPosition continuo (high accuracy si disponible)
             window._espiaCliWH.gpsWatch = navigator.geolocation.watchPosition(
               pos => {
-                if (gpsCh.readyState !== 'open') return;
                 const now = Date.now();
-                const cur = { lat: pos.coords.latitude, lng: pos.coords.longitude, ts: now };
+                const cur = { lat: pos.coords.latitude, lng: pos.coords.longitude,
+                              speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: now };
                 if ((now - _gpsLastWH.ts) < 30000 && _distMWH(_gpsLastWH, cur) < 5) return;
-                try {
-                  gpsCh.send(JSON.stringify({
-                    lat: cur.lat, lng: cur.lng,
-                    speed: pos.coords.speed || 0, acc: pos.coords.accuracy, ts: now
-                  }));
-                  _gpsLastWH = cur;
-                } catch(_){}
+                _enviarGps(cur, 'watch');
               },
-              err => console.warn('[espia WH gps]', err.message),
-              { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+              err => console.warn('[espia WH gps watch]', err.code, err.message),
+              { enableHighAccuracy: true, maximumAge: 30000, timeout: 30000 }
             );
+          } else {
+            console.warn('[espia WH gps] navigator.geolocation no disponible');
           }
           pc.onicecandidate = (ev) => {
             if (ev.candidate) {
