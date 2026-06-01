@@ -653,25 +653,32 @@ function testImpresoraEtiquetas() {
     L('❌ Error consultando impresora: ' + e.message); return { ok:false, paso:'printer_err' };
   }
 
-  // 4. Enviar test print: 1 etiqueta con TEST + timestamp + barcode
-  L('4. Enviando etiqueta TEST...');
+  // 4. Enviar test print: 1 etiqueta TSPL2 con TEST + timestamp + barcode
+  // [FIX] Antes usaba ZPL (^XA, ^FO, etc.) pero el sistema productivo usa
+  // TSPL2 nativo (SIZE, TEXT, BARCODE, PRINT). La TSC TTP-244CE viene
+  // configurada en TSPL2 por default. El test con ZPL imprimía basura o
+  // nada → daba falso OK. Ahora coincide con producción.
+  L('4. Enviando etiqueta TEST (TSPL2)...');
   var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm:ss');
-  var zpl =
-    '^XA' +
-    '^PW400^LL240' +
-    '^FO20,10^BY2^BCN,60,Y,N,N^FDTEST-WH^FS' +
-    '^FO20,80^A0N,26,26^FDTEST IMPRESORA^FS' +
-    '^FO20,115^A0N,20,20^FDFecha: ' + ts + '^FS' +
-    '^FO20,143^A0N,18,18^FDLevo.dev / warehouseMos^FS' +
-    '^FO20,170^A0N,16,16^FDSi ves esto, funciona OK!^FS' +
-    '^PQ1,0,1,Y' +
-    '^XZ';
+  var tspl =
+    'SIZE 50 mm,25 mm\r\n' +
+    'GAP 2 mm,0 mm\r\n' +
+    'DIRECTION 1\r\n' +
+    'DENSITY 8\r\n' +
+    'SPEED 4\r\n' +
+    'CLS\r\n' +
+    'TEXT 10,10,"4",0,1,1,"TEST IMPRESORA"\r\n' +
+    'TEXT 10,50,"3",0,1,1,"Fecha: ' + ts + '"\r\n' +
+    'TEXT 10,80,"3",0,1,1,"warehouseMos / Levo.dev"\r\n' +
+    'TEXT 10,110,"2",0,1,1,"Si ves esto, funciona OK!"\r\n' +
+    'BARCODE 10,140,"128",50,1,0,2,2,"TEST-WH"\r\n' +
+    'PRINT 1,1\r\n';
 
   var payload = {
     printerId:   parseInt(printerId),
     title:       'TEST WH ' + ts,
     contentType: 'raw_base64',
-    content:     Utilities.base64Encode(zpl),
+    content:     Utilities.base64Encode(tspl),
     source:      'warehouseMos-test'
   };
 
