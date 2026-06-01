@@ -2455,9 +2455,12 @@ const Session = (() => {
           window._espiaCliWH._setupInicialDone = false;
           window._espiaCliWH._renegEnCurso = false;
           window._espiaCliWH._ultimaReneg = 0;
-          // [v2.13.80] ICE recovery + watchdog. Si ICE failed persiste >30s,
-          // cerrar limpio (master verá CERRADA via su sync poll y notificará).
-          // Antes solo restartIce → quedaba en limbo si el problema era NAT.
+          // [v2.13.88] ICE recovery + watchdog SUSPENDIBLE.
+          // Cuando el celular se bloquea (visibilityState='hidden'), el OS
+          // suspende el tab y los keepalives de WebRTC fallan a los 15-30s.
+          // Antes esto disparaba el cierre forzado → al desbloquear, todo perdido.
+          // Ahora el watchdog NO cierra mientras el tab esté oculto. Da chance
+          // a restartIce cuando vuelve.
           pc.oniceconnectionstatechange = () => {
             console.log('[espia WH] ICE state:', pc.iceConnectionState);
             const ref = window._espiaCliWH;
@@ -2470,15 +2473,68 @@ const Session = (() => {
               ref._iceFailedDesde = 0;
             }
           };
-          // Watchdog cada 5s: si ICE failed >30s sin recuperar → cierre graceful
           window._espiaCliWH._iceWatchdogTimer = setInterval(() => {
             const ref = window._espiaCliWH;
             if (!ref || !ref._iceFailedDesde) return;
-            if (Date.now() - ref._iceFailedDesde > 30000) {
-              console.warn('[espia WH] ICE failed >30s · cerrando para forzar reconexión');
+            // [v2.13.88] Si pantalla bloqueada / tab oculto, no cerrar — esperar resume
+            if (document.visibilityState === 'hidden') return;
+            // Tiempo desde failed + tiempo desde último resume (perdón generoso)
+            const desdeReanudacion = ref._ultimaVisible ? (Date.now() - ref._ultimaVisible) : Infinity;
+            const failedHace = Date.now() - ref._iceFailedDesde;
+            // Solo cerrar si: failed hace >30s Y ya pasaron >15s desde que volvió visible
+            if (failedHace > 30000 && desdeReanudacion > 15000) {
+              console.warn('[espia WH] ICE failed >30s post-resume · cerrando');
               window._espiaCliWHCerrar('ice_failed_persistente');
             }
           }, 5000);
+
+          // [v2.13.88] VISIBILITY: cuando vuelve visible, intentar reanimar la conexión
+          // y avisar al master por DataChannel para que ajuste UI.
+          window._espiaCliWH._handlerVisibility = () => {
+            const ref = window._espiaCliWH;
+            if (!ref) return;
+            const ahoraVisible = document.visibilityState === 'visible';
+            if (ahoraVisible) {
+              console.log('[espia WH visibility] visible (pantalla desbloqueada o tab volvió)');
+              ref._ultimaVisible = Date.now();
+              // Avisar al master
+              try {
+                if (ref.gpsCh?.readyState === 'open') {
+                  ref.gpsCh.send(JSON.stringify({ __meta: 'visibility', visible: true }));
+                }
+              } catch(_){}
+              // Si ICE quedó en failed/disconnected durante el lock, despertar
+              if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+                console.log('[espia WH] ICE state post-resume:', pc.iceConnectionState, '· restartIce');
+                try { pc.restartIce(); } catch(_){}
+              }
+              // Si alguno de los tracks de video murió por OS, intentar reabrir
+              const tracksVivos = [];
+              const tracksMuertos = [];
+              [ref.streams.userMedia, ref.streams.userMedia2, ref.streams.display].forEach(s => {
+                if (!s) return;
+                s.getTracks().forEach(t => {
+                  if (t.readyState === 'ended') tracksMuertos.push({stream: s, track: t});
+                  else tracksVivos.push(t);
+                });
+              });
+              if (tracksMuertos.length > 0) {
+                console.warn('[espia WH] ' + tracksMuertos.length + ' track(s) muertos por OS · NO se pueden reabrir sin user gesture');
+                // Por limitación de browsers móviles, getUserMedia post-resume requiere
+                // user gesture. El sync poll ya detectará la sesión muerta y mostrará
+                // mensaje útil al master.
+              }
+            } else {
+              console.log('[espia WH visibility] hidden (pantalla bloqueada o tab oculto)');
+              try {
+                if (ref.gpsCh?.readyState === 'open') {
+                  ref.gpsCh.send(JSON.stringify({ __meta: 'visibility', visible: false }));
+                }
+              } catch(_){}
+            }
+          };
+          document.addEventListener('visibilitychange', window._espiaCliWH._handlerVisibility);
+          window._espiaCliWH._ultimaVisible = Date.now();
           if (window._espiaCliWH.streams.userMedia) {
             // [v2.13.81] contentHint propaga vía SDP (motion=cam, detail=pantalla).
             // Mapping trackId → tipo se envía por gpsCh como fallback robusto.
@@ -2987,6 +3043,10 @@ const Session = (() => {
         try { clearInterval(ref.pollTimerSync); } catch(_){}
         try { clearInterval(ref._iceFlushTimer); } catch(_){}
         try { clearInterval(ref._iceWatchdogTimer); } catch(_){}
+        // [v2.13.88] Quitar listener de visibilitychange para no leakear
+        if (ref._handlerVisibility) {
+          try { document.removeEventListener('visibilitychange', ref._handlerVisibility); } catch(_){}
+        }
         try { clearInterval(ref.pollTimerOferta); } catch(_){}
         try { clearInterval(ref.pollTimerIce); } catch(_){}
         try { clearInterval(ref.pollTimerEstado); } catch(_){}
