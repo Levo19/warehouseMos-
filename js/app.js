@@ -2602,12 +2602,14 @@ const Session = (() => {
             console.warn('[espia WH gps] navigator.geolocation no disponible');
           }
           pc.onicecandidate = (ev) => {
-            if (ev.candidate) {
-              _espiaCliWHPost('espiaAgregarIce', {
-                sesionId, lado: 'device',
-                ice: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate
-              });
-            }
+            // [v2.13.78] Guard contra cierre: si la sesión cerró entre el ICE
+            // gathering y este callback, no spammear al backend con candidates
+            // de un PC ya muerto.
+            if (!window._espiaCliWH || !ev.candidate) return;
+            _espiaCliWHPost('espiaAgregarIce', {
+              sesionId, lado: 'device',
+              ice: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate
+            });
           };
           pc.onconnectionstatechange = () => {
             if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
@@ -2670,14 +2672,23 @@ const Session = (() => {
             } catch(e) { console.warn('[espia WH poll ice]', e?.message); }
             finally { if (window._espiaCliWH) window._espiaCliWH._pollIceEnCurso = false; }
           }, 400);
+          // [v2.13.78 MUTEX] pollTimerEstado sin mutex disparaba doble cierre si
+          // espiaEstadoSesion tardaba >10s y dos polls veían CERRADA simultáneo.
+          // _espiaCliWHCerrar es idempotente pero igual hacía 2 fetches innecesarios
+          // y duplicaba el beacon 'master_cerro' en los logs.
+          window._espiaCliWH._pollEstadoEnCurso = false;
           window._espiaCliWH.pollTimerEstado = setInterval(async () => {
             if (!window._espiaCliWH) return;
+            if (window._espiaCliWH._pollEstadoEnCurso) return;
+            window._espiaCliWH._pollEstadoEnCurso = true;
             try {
               const re = await _espiaCliWHPost('espiaEstadoSesion', { sesionId });
+              if (!window._espiaCliWH) return;
               if (re?.data?.estado === 'CERRADA') {
                 window._espiaCliWHCerrar('master_cerro');
               }
             } catch(e) { console.warn('[espia WH poll estado]', e?.message); }
+            finally { if (window._espiaCliWH) window._espiaCliWH._pollEstadoEnCurso = false; }
           }, 10000);
           // Buffer chunks 5min
           // [v2.13.77 BUG FIX C2] Buffer de pantalla post-reneg. Antes este forEach
