@@ -86,8 +86,66 @@ const OfflineManager = (() => {
   })();
 
   // ── Cache helpers ─────────────────────────────────────────
+  // [v2.13.102] Compresión LZ-String para entradas grandes (>50KB) +
+  // cleanup smart por antigüedad (anti round-robin destructivo).
+  //
+  // CAUSA RAÍZ DEL BUG ORIGINAL:
+  //   Cada precarga guarda 8+ caches secuenciales. Cuando storage está cerca
+  //   al límite (~5MB), cada guardar() entra al cleanup que borra TODO TIER1
+  //   excepto el key actual. El SIGUIENTE guardar() encuentra wh_productos
+  //   recién guardado y lo borra para hacer espacio. Cascada destructiva:
+  //   solo el último cache sobrevive cada ciclo.
+  //
+  // FIX A — Compresión: wh_productos plain ~600KB → comprimido ~150KB (-75%).
+  //   Después del primer guardado todo cabe holgadamente y el cleanup no se
+  //   dispara más. Prefijo 'LZ:' identifica entradas comprimidas (back-compat
+  //   con datos viejos plain).
+  //
+  // FIX B — Cleanup por edad: en vez de barrer TODO TIER1 a la vez, borra
+  //   el más viejo (timestamp ascendente), reintenta. Caches recién guardados
+  //   sobreviven.
+  const _COMPRESS_PREFIX    = 'LZ:';
+  const _COMPRESS_THRESHOLD = 50_000;  // solo comprimir JSON >50KB
+
+  function _serializar(payload) {
+    const json = JSON.stringify(payload);
+    if (json.length < _COMPRESS_THRESHOLD || typeof LZString === 'undefined') {
+      return json;
+    }
+    try {
+      return _COMPRESS_PREFIX + LZString.compressToUTF16(json);
+    } catch(_) { return json; }
+  }
+
+  function _deserializar(raw) {
+    if (!raw) return null;
+    try {
+      if (raw.startsWith(_COMPRESS_PREFIX)) {
+        if (typeof LZString === 'undefined') return null;  // lib no cargada todavía
+        return JSON.parse(LZString.decompressFromUTF16(raw.slice(_COMPRESS_PREFIX.length)));
+      }
+      return JSON.parse(raw);
+    } catch(_) { return null; }
+  }
+
+  // Lee el timestamp de una entrada sin descomprimir el data completo cuando
+  // se puede (heurística: el ts queda al final del JSON envuelto). Si no
+  // podemos extraerlo barato, descomprimimos.
+  function _leerTs(key) {
+    const raw = localStorage.getItem(key);
+    if (!raw) return 0;
+    // Datos plain: regex rápido al final
+    if (!raw.startsWith(_COMPRESS_PREFIX)) {
+      const m = raw.match(/"ts":(\d+)\}\s*$/);
+      if (m) return parseInt(m[1], 10);
+    }
+    // Comprimido o regex fail: descomprimir
+    const obj = _deserializar(raw);
+    return obj?.ts || 0;
+  }
+
   function guardar(key, data) {
-    try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); }
+    try { localStorage.setItem(key, _serializar({ data, ts: Date.now() })); }
     catch(e) {
       // [v2.13.98 BUG CRITICO FIX] Cleanup en 2 fases preserva trabajo en progreso.
       //
@@ -138,43 +196,69 @@ const OfflineManager = (() => {
           'wh_impresoras','wh_pn','wh_config','wh_guias'
         ];
         const TIER2 = ['wh_guia_detalle','wh_preingresos','wh_envasados'];
-        // Pase 1: borrar solo TIER 1 (excepto el key que estamos guardando)
-        let liberados1 = 0;
-        TIER1.filter(k => k !== key).forEach(k => {
-          if (localStorage.getItem(k)) { try { localStorage.removeItem(k); liberados1++; } catch(_){} }
-        });
-        try {
-          localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
-          console.log('[Offline] ✓ guardado tras cleanup TIER1 (' + liberados1 + ' caches puros liberados):', key);
-          return;
-        } catch(e2) {/* sigue lleno · cae a pase 2 */}
-        // Pase 2: borrar TIER 2 (último recurso, podemos perder cambios optimistas)
-        console.warn('[Offline] TIER1 insuficiente · borrando TIER2 (trabajo del usuario en riesgo)');
-        TIER2.filter(k => k !== key).forEach(k => {
-          if (localStorage.getItem(k)) { try { localStorage.removeItem(k); } catch(_){} }
-        });
-        try {
-          localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
-          console.log('[Offline] ✓ guardado tras cleanup TIER2:', key);
-        } catch(e3) {
-          console.warn('[Offline] localStorage IMPOSIBLE · omitido:', key, e3.message);
-          // Notificar al usuario que el storage está crónicamente lleno
-          if (typeof window !== 'undefined' && !window._whStorageWarned) {
-            window._whStorageWarned = true;
-            setTimeout(() => {
-              if (typeof toast === 'function') toast('⚠ Almacenamiento del navegador lleno. Cerrá y reabrí la PWA para limpiar.', 'error', 10000);
-            }, 500);
+
+        // [v2.13.102] Cleanup por antigüedad — anti round-robin destructivo.
+        //
+        // Antes: borrábamos TODO TIER1 de golpe. Si el next guardar() también
+        // fallaba, borraba el recién guardado. Cascada: solo el último cache
+        // sobrevivía.
+        //
+        // Ahora: borramos UNO por UNO, el más viejo primero, reintentando
+        // después de cada borrado. Los caches recién guardados (más recientes)
+        // sobreviven porque el cleanup ataca primero los viejos.
+        const _intentarGuardar = () => {
+          try {
+            localStorage.setItem(key, _serializar({ data, ts: Date.now() }));
+            return true;
+          } catch(_) { return false; }
+        };
+
+        const _ordenarPorEdad = (tier) => {
+          return tier
+            .filter(k => k !== key && localStorage.getItem(k))
+            .map(k => ({ k, ts: _leerTs(k) }))
+            .sort((a, b) => a.ts - b.ts);  // más viejo primero
+        };
+
+        // Fase 1: TIER1 por edad
+        let liberadosT1 = 0;
+        const candidatosT1 = _ordenarPorEdad(TIER1);
+        for (const { k } of candidatosT1) {
+          try { localStorage.removeItem(k); liberadosT1++; } catch(_){}
+          if (_intentarGuardar()) {
+            console.log('[Offline] ✓ guardado tras liberar ' + liberadosT1 + ' TIER1 viejos:', key);
+            return;
           }
+        }
+        // Fase 2: TIER2 por edad (último recurso)
+        console.warn('[Offline] TIER1 insuficiente · borrando TIER2 (trabajo del usuario en riesgo)');
+        let liberadosT2 = 0;
+        const candidatosT2 = _ordenarPorEdad(TIER2);
+        for (const { k } of candidatosT2) {
+          try { localStorage.removeItem(k); liberadosT2++; } catch(_){}
+          if (_intentarGuardar()) {
+            console.log('[Offline] ✓ guardado tras liberar ' + liberadosT2 + ' TIER2:', key);
+            return;
+          }
+        }
+        // Nada funcionó
+        console.warn('[Offline] localStorage IMPOSIBLE · omitido:', key);
+        if (typeof window !== 'undefined' && !window._whStorageWarned) {
+          window._whStorageWarned = true;
+          setTimeout(() => {
+            if (typeof toast === 'function') toast('⚠ Almacenamiento del navegador lleno. Cerrá y reabrí la PWA para limpiar.', 'error', 10000);
+          }, 500);
         }
       } else { console.warn('[Offline] localStorage error:', e); }
     }
   }
 
   function cargar(key) {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw).data : null;
-    } catch { return null; }
+    // [v2.13.102] Lee plain o comprimido transparentemente. Back-compat
+    // con entradas pre-LZ.
+    const raw = localStorage.getItem(key);
+    const obj = _deserializar(raw);
+    return obj ? obj.data : null;
   }
 
   // ── Precarga de datos de referencia ──────────────────────

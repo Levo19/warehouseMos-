@@ -280,9 +280,13 @@ function _normalizeEtq(s) {
 }
 
 function _calcVencimientoEtq(fechaEnvasado) {
+  // [v2.13.101] Formato MM/yy (solo mes + año) — el día no aporta valor
+  // para vencimiento de productos envasados. Más limpio y queda mejor en
+  // la etiqueta angosta. El cálculo sigue siendo +1 año exacto, solo cambia
+  // la representación.
   var d = fechaEnvasado ? new Date(fechaEnvasado) : new Date();
   d.setFullYear(d.getFullYear() + 1);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yy');
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/yy');
 }
 
 // Detecta tokens diferenciadores: comparando con productos que comparten
@@ -543,12 +547,13 @@ function _imprimirEtiquetasEnvasado(data) {
 
   // Si nos pasaron fechaVencimiento explicita la usamos como ENVASADO menos 1 año
   // para que _calcVencimientoEtq la devuelva igual. Mas simple: override _calc.
+  // [v2.13.101] Formato MM/yy — consistente con _calcVencimientoEtq.
   var vtoOverride = null;
   if (data.fechaVencimiento) {
     vtoOverride = Utilities.formatDate(
       new Date(data.fechaVencimiento),
       Session.getScriptTimeZone(),
-      'dd/MM/yy'
+      'MM/yy'
     );
   }
 
