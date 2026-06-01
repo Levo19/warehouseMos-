@@ -2389,7 +2389,11 @@ const Session = (() => {
           _ticksAEsperar: 0,
           // Watchdog de ICE failed para reconnect/cierre graceful
           _iceFailedDesde: 0,
-          _iceWatchdogTimer: null
+          _iceWatchdogTimer: null,
+          // [v2.13.87] State de capabilities reportadas al master. Definido ACÁ
+          // (no abajo en el bloque de gpsCh) para que el IIFE dual-cam pueda
+          // setear dualIntentado/camsHardware sin depender del orden del event loop.
+          _capsState: { camsHardware: 0, dualIntentado: false }
         };
         // [v2.13.80] Handshake auth + config — paralelo para latencia mínima.
         // El device prueba su identidad (deviceId coincide con la sesión) y
@@ -2655,15 +2659,7 @@ const Session = (() => {
             } catch(_){}
           };
           // [v2.13.86] Capabilities con detección honesta.
-          //   camsHardware = enumerateDevices().filter(videoinput).length  (real)
-          //   camsAbiertas = cuántas pudimos getUserMedia              (efectivo)
-          //   dualIntentado = true cuando el IIFE dual-cam ya corrió (con éxito o fallo)
-          // Master usa: si dualIntentado && camsAbiertas<camsHardware → "no permite dual"
-          //             si camsHardware<2 → no muestra card (no hay 2da y punto)
-          window._espiaCliWH._capsState = {
-            camsHardware: 0,
-            dualIntentado: false
-          };
+          // _capsState ya está en el state inicial (v2.13.87 fix orden de init).
           window._espiaCliWH._enviarCapabilities = async () => {
             const ref = window._espiaCliWH;
             if (!ref || !ref.gpsCh || ref.gpsCh.readyState !== 'open') return;
