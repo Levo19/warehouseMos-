@@ -2695,9 +2695,14 @@ const Session = (() => {
               });
             } catch(eF) { console.warn('[espia WH ice flush]', eF?.message); }
           }, 250);
+          // [v2.13.83] NO cerrar en 'failed' inmediato — el watchdog ICE de 30s
+          // espera por restartIce. Cerrar solo en 'closed' (ya somos post-mortem).
+          // Antes: 'failed' transitorio en smartphones con NAT cerraba la sesión
+          // antes de que restartIce/TURN tuvieran chance de recuperar.
           pc.onconnectionstatechange = () => {
-            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-              window._espiaCliWHCerrar('connection_' + pc.connectionState);
+            console.log('[espia WH] connection state:', pc.connectionState);
+            if (pc.connectionState === 'closed') {
+              window._espiaCliWHCerrar('connection_closed');
             }
           };
           // [v2.13.79 REFACTOR] BATCH SYNC — 3 pollers → 1 endpoint único.
