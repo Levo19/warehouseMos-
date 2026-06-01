@@ -107,8 +107,36 @@ const OfflineManager = (() => {
       //   Borra TIER 1 primero, reintenta. Solo si sigue fallando, TIER 2.
       if (e.name === 'QuotaExceededError' || /quota/i.test(e.message)) {
         console.warn('[Offline] storage lleno · cleanup emergency para guardar', key);
-        const TIER1 = ['wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas','wh_impresoras'];
-        const TIER2 = ['wh_guia_detalle','wh_preingresos']; // trabajo del usuario · NO BORRAR salvo último recurso
+        // [v2.13.99 AUDITORÍA SENIOR] Clasificación completa de keys wh_*:
+        //
+        // TIER 1 — CACHE PURO del backend (re-bajable libremente):
+        //   wh_productos, wh_proveedores, wh_ajustes, wh_auditorias_c,
+        //   wh_ubicaciones, wh_equivalencias, wh_zonas, wh_impresoras,
+        //   wh_personal, wh_admin_cache, wh_pn, wh_config, wh_guias, wh_stock
+        //   → wh_stock incluido aunque tenga patchStockCache porque el patch
+        //     siempre va acompañado de una operación al backend (registrarEnvasado
+        //     etc.) que es la fuente de verdad. Patches huérfanos no existen.
+        //
+        // TIER 2 — TRABAJO EN PROGRESO (solo último recurso):
+        //   wh_guia_detalle → addDetalleCache (mods optimistas detalles)
+        //   wh_preingresos  → inyectarPreingreso / patchPreingresosCache
+        //   wh_envasados    → inyectarEnvasadoCache
+        //   → si el backend timeoutea y aún no confirmó, borrar acá pierde el cambio
+        //
+        // NUNCA TOCAR (no incluidas en NINGUNA lista):
+        //   wh_queue        → cola offline de operaciones SIN SINCRONIZAR.
+        //                     Borrarla = operaciones del usuario sin red PERDIDAS.
+        //   wh_sesion, wh_device_id, wh_app_version,
+        //   wh_audio_ok, wh_usuario, wh_perms_*, wh_gas_url,
+        //   wh_lock_inicio, wh_gracia_cierre, wh_printers_cache
+        //                   → identidad/config/sesión del cliente
+        const TIER1 = [
+          'wh_productos','wh_stock','wh_proveedores','wh_ajustes',
+          'wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas',
+          'wh_impresoras','wh_personal','wh_admin_cache','wh_pn',
+          'wh_config','wh_guias'
+        ];
+        const TIER2 = ['wh_guia_detalle','wh_preingresos','wh_envasados'];
         // Pase 1: borrar solo TIER 1 (excepto el key que estamos guardando)
         let liberados1 = 0;
         TIER1.filter(k => k !== key).forEach(k => {

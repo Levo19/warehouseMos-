@@ -5906,32 +5906,34 @@ const GuiasView = (() => {
 
     // [v2.13.98] Antes ambos catch silenciaban errores → user veía 'Ítem guardado'
     // pero el backend había rechazado. Al imprimir, salía la versión vieja.
-    // Ahora: si falla, alertamos al usuario y rollbackeamos el cache local.
+    //
+    // [v2.13.99 senior audit] Manejar 3 casos:
+    //   r.offline=true   → encolado en cola offline (info, no error)
+    //   r.ok=false       → backend rechazó (ERROR visible al user)
+    //   exception .catch → fetch tiró antes del retry interno (raro)
+    function _toastResultado(r, label, e) {
+      if (e) {
+        toast('⚠ Error red al guardar ' + label + ' — verificá conexión', 'error', 6000);
+        console.error('[itemEdit] ' + label + ' network fail:', e?.message);
+      } else if (r && r.offline) {
+        // Cae a wh_queue, se sincronizará cuando vuelva la red.
+        // No es error pero el user debe saber que aún no llegó al backend.
+        toast('📡 Sin red — ' + label + ' guardada en cola', 'warn', 4000);
+        console.log('[itemEdit] ' + label + ' encolada offline · localId=' + (r.localId || '?'));
+      } else if (r && r.ok === false) {
+        toast('⚠ No se pudo guardar ' + label + ': ' + (r.error || 'backend rechazó'), 'error', 6000);
+        console.error('[itemEdit] ' + label + ' rechazado:', r);
+      }
+    }
     if (qtyChanged) {
       API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal })
-        .then(r => {
-          if (r && r.ok === false) {
-            toast('⚠ No se pudo guardar cantidad: ' + (r.error || 'backend rechazó'), 'error', 6000);
-            console.error('[itemEdit] actualizarCantidadDetalle rechazado:', r);
-          }
-        })
-        .catch(e => {
-          toast('⚠ Error red al guardar cantidad — verificá conexión', 'error', 6000);
-          console.error('[itemEdit] actualizarCantidadDetalle network fail:', e?.message);
-        });
+        .then(r => _toastResultado(r, 'cantidad'))
+        .catch(e => _toastResultado(null, 'cantidad', e));
     }
     if (vencChanged) {
       API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc })
-        .then(r => {
-          if (r && r.ok === false) {
-            toast('⚠ No se pudo guardar vencimiento: ' + (r.error || 'backend rechazó'), 'error', 6000);
-            console.error('[itemEdit] actualizarFechaVencimiento rechazado:', r);
-          }
-        })
-        .catch(e => {
-          toast('⚠ Error red al guardar vencimiento — verificá conexión', 'error', 6000);
-          console.error('[itemEdit] actualizarFechaVencimiento network fail:', e?.message);
-        });
+        .then(r => _toastResultado(r, 'vencimiento'))
+        .catch(e => _toastResultado(null, 'vencimiento', e));
     }
     toast('Ítem guardado', 'ok', 1500);
   }
