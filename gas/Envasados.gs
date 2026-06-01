@@ -483,16 +483,30 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
   var barcodeY = 128 + offsetY;
   var barcodeEndX = barcodeX + barcodeWidth;
-  // Flecha izquierda (font 3 = 16w × 24h) — X=5 para margen físico seguro al borde
-  // Solo si la quiet zone izquierda permite tener flecha + 5 dots de gap
-  if (barcodeX - 16 >= 7) {
-    bytes = bytes.concat(_strToBytesEtq('TEXT 5,' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
+  // [v2.13.97 FIX QUIET ZONE] La quiet zone del Code128 = 10 × narrow dots.
+  // Las flechas guía DEBEN estar FUERA de esa zona, sino interfieren con la
+  // lectura del scanner (que es exactamente lo que queremos evitar).
+  //
+  // Quiet zone mínima:
+  //   narrow=2 → 20 dots
+  //   narrow=1 → 10 dots
+  //
+  // Flecha izq ocupa X=5 a X=21 (font 3 = 16 wide). Para estar fuera de la
+  // quiet zone, necesita: barcodeX - 21 ≥ quietZone.
+  // Similar para flecha derecha.
+  var quietZoneMin = 10 * narrowBc;
+  var flechaWidth = 16;
+  var flechaX_izq = 5;
+  var flechaX_der = barcodeEndX + 5;
+  // Flecha izq: cabe si barcodeX ≥ flechaX_izq + flechaWidth + quietZoneMin
+  if (barcodeX >= flechaX_izq + flechaWidth + quietZoneMin) {
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + flechaX_izq + ',' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
   }
-  // Barcode
+  // Barcode (núcleo)
   bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
-  // Flecha derecha — necesita ≥21 dots de espacio (5 gap + 16 width) sin tocar borde
-  if (barcodeEndX + 21 <= 395) {
-    bytes = bytes.concat(_strToBytesEtq('TEXT ' + (barcodeEndX + 5) + ',' + (barcodeY + 10) + ',"3",0,1,1,"<"\r\n'));
+  // Flecha der: cabe si flechaX_der ≥ barcodeEndX + quietZoneMin Y flechaX_der + 16 ≤ 395
+  if ((flechaX_der >= barcodeEndX + quietZoneMin) && (flechaX_der + flechaWidth <= 395)) {
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + flechaX_der + ',' + (barcodeY + 10) + ',"3",0,1,1,"<"\r\n'));
   }
 
   // Print N copias
