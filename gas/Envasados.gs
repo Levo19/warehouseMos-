@@ -461,7 +461,10 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   if (lines.length === 1) {
     var lineHasHl = lines[0].some(function(t) { return t.hl; });
     var lineHeight = lineHasHl ? 32 : 24;  // font4 vs font3
-    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) + offsetY;
+    // [v2.13.107 AUDIT FIX] El loop aplica yAdj = y + 4 para no-hl (baseline
+    // align). Si no compensamos, la línea queda 4 dots abajo del centro real.
+    var baselineOffset = lineHasHl ? 0 : 4;
+    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
   } else {
     startY = DESC_AREA_Y0 + offsetY;
   }
