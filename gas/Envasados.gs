@@ -243,34 +243,42 @@ function _getPrintNodeProps() {
   };
 }
 
-// ── Logo bitmap (180x36 dots = 23 bytes/row x 36) ──
-// Generado con Python+Pillow (Pacifico script + Lilita One bold + casita)
-// Ver preview-etiquetas/gen-logo.py y logo-preview-4x.png
+// ── Logo bitmap (184x36 dots = 23 bytes/row x 36) ──
+// [v2.13.104] Regenerado: TONY'S block bold + casita (sin "Caserito").
+// Fuente canónica: /ProyectoMOS/assets/adhesivo/logo-tonys.svg
+// Pipeline reproducible: /ProyectoMOS/assets/adhesivo/gen.py
+// Para regenerar: cd ProyectoMOS/assets/adhesivo && python gen.py
+//   → copia el contenido de logo-tonys-S.hex acá
+//   → copia el contenido de logo-tonys-S.b64 a _ADHESIVO_LOGO_DATAURI en MOS app.js
 var LOGO_W_BYTES = 23;
 var LOGO_H = 36;
 var LOGO_TSPL_HEX =
-'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
-'FFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFF5FFFFFFFFF' +
-'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFE0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
-'F0FFFC07FFFFFFFFFFFFFFFFFC7FFFFFFFFFFFFFFFFFFFF0FFF803FFFFF03FFFFFFFFFF87FFF' +
-'FFFFFFFFFFFFFFFFF0FFF041FFFFE01FFFFFFFFFF87FFFFFFFFFFFFFFFFFFFF0FFE0E01FFFC7' +
-'1FFFFFFFFFF27FFFFFFFFFFFFFFFFFFFF0FFC1F01FFF8F9FFFFFFFFC727FFFFFFFFFFFFFFFFF' +
-'FFF0FF03F81FFF1F9FFFFFFFFC627FFFFFFFFFFFFFFFFFFFF0FE07FC0FFF1F9FFFFFFFFC64FF' +
-'FFFFFFFFFFFFFFFFFFF0FC1FFC07FF3FFFFFFFFFFFE1FFFFFFFFFFFFFFFFFFFFF0F83FFC03FE' +
-'3FFE7F3E198C8021FFFFFFFFFFFFFFFFFFF0F07FFC01FE3FF81E3C190C8040FFFFFFFFFFFFFF' +
-'FFFFF0E0FFFC00FE3FF89E789008E788FFFFFFFFFFFFFFFFFFF0C1FFFC107E3FF19C399298E7' +
-'981FFFFFFFFFFFFFFFFFF0E2000008FF3FF31D191081E79C1FFFFFFFFFFFFFFFFFF0F600000D' +
-'FF1FF3199871C1C79CFFFFFFFFFFFFFFFFFFF0FE7FFFCFFF87C31200E1F98318FFFFFFFFFFFF' +
-'FFFFFFF0FE7FFFCFFFC000040001F83001FFFFFFFFFFFFFFFFFFF0FE7FFFCFFFE0388E0E13FC' +
-'7843FFFFFFFFFFFFFFFFFFF0FE7FFFCFFE00F83E1C41C0783FFFFFFFFFFFFFFFFFFFF0FE7FFF' +
-'CFFE00F00E0C6184701FFFFFFFFFFFFFFFFFFFF0FE7C07CFFE00E00E0C6184603FFFFFFFFFFF' +
-'FFFFFFFFF0FE7C07CFFFC7C38604700CE1FFFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C60470' +
-'0CE0FFFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C600781FE03FFFFFFFFFFFFFFFFFFFF0FE7C' +
-'07CFFFC7C7C600783FF01FFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C6207C3FFC1FFFFFFFFF' +
-'FFFFFFFFFFF0FE7C07CFFFC7C386207C3FE61FFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7E00E30' +
-'7C3FE01FFFFFFFFFFFFFFFFFFFF0FE00000FFFC7F01E307C3FE03FFFFFFFFFFFFFFFFFFFF0FE' +
-'00000FFFC7F83E387C3FF07FFFFFFFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
-'FFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0';
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF7F' +
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFE3FFFFC000007000001C007E0703FF' +
+'81FFFC000007FFFFC1FFFFC000007000001C007E0703FF81FFFC000007FFFF80FFFFC0000070' +
+'00001C007E0701FF01F07C000007FFFE003FFFC000007000001C003E0701FF01F07C000007FF' +
+'FC001FFFC000007000001C003E0780FE03F07C000007FFF8000FFFC00000707FFC1C001E0780' +
+'FE03F07C000007FFF00007FFC00000707FFC1C001E07C07C07F07C0FFFFFFFE00003FFFFC07F' +
+'F07FFC1C080E07C03807F07C0FFFFFFFC00001FFFFC07FF07FFC1C080E07E0380FF07C0FFFFF' +
+'FF0000007FFFC07FF07FFC1C0C0E07F0101FF07C0FFFFFFE0000003FFFC07FF07FFC1C0C0607' +
+'F0101FF07C0FFFFFFC0000001FFFC07FF07FFC1C0C0607F8003FFFFC000007FF0000007FFFC0' +
+'7FF07FFC1C0E0207F8003FFFFC000007FF0000007FFFC07FF07FFC1C0E0207FC007FFFFC0000' +
+'07FF0F00787FFFC07FF07FFC1C0F0007FC007FFFFC000007FF0F00787FFFC07FF07FFC1C0F00' +
+'07FE00FFFFFC000007FF0F00787FFFC07FF07FFC1C0F8007FF01FFFFFC000007FF0F00787FFF' +
+'C07FF07FFC1C0F8007FF01FFFFFC000007FF007F007FFFC07FF07FFC1C0F8007FF01FFFFFFFF' +
+'FE07FF007F007FFFC07FF07FFC1C0FC007FF01FFFFFFFFFE07FF007F007FFFC07FF07FFC1C0F' +
+'C007FF01FFFFFFFFFE07FF007F007FFFC07FF07FFC1C0FE007FF01FFFFFFFFFE07FF007F007F' +
+'FFC07FF07FFC1C0FE007FF01FFFFFFFFFE07FF007F007FFFC07FF07FFC1C0FF007FF01FFFFFC' +
+'000007FF007F007FFFC07FF000001C0FF007FF01FFFFFC000007FF007F007FFFC07FF000001C' +
+'0FF007FF01FFFFFC000007FF007F007FFFC07FF000001C0FF807FF01FFFFFC000007FF007F00' +
+'7FFFC07FF000001C0FF807FF01FFFFFC000007FF007F007FFFC07FF000001C0FFC07FF01FFFF' +
+'FC000007FF007F007FFFFFFFFFFFFFFFFFFC0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF';
+
+// [v2.13.104] Tabla manual de meses ES — no depende de la locale del Script.
+// Antes: Utilities.formatDate(d, tz, 'MMM') devolvía "Jan" si la locale era EN.
+var MESES_ES = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
 
 // ── Helpers de texto ──
 function _normalizeEtq(s) {
@@ -280,13 +288,12 @@ function _normalizeEtq(s) {
 }
 
 function _calcVencimientoEtq(fechaEnvasado) {
-  // [v2.13.101] Formato MM/yy (solo mes + año) — el día no aporta valor
-  // para vencimiento de productos envasados. Más limpio y queda mejor en
-  // la etiqueta angosta. El cálculo sigue siendo +1 año exacto, solo cambia
-  // la representación.
+  // [v2.13.104] Formato MES/yyyy (ej "ENE/2027"). Tabla manual MESES_ES
+  // para no depender de la locale del Script GAS. El cálculo sigue siendo
+  // fechaEnvasado + 1 año exacto.
   var d = fechaEnvasado ? new Date(fechaEnvasado) : new Date();
   d.setFullYear(d.getFullYear() + 1);
-  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'MM/yy');
+  return MESES_ES[d.getMonth()] + '/' + d.getFullYear();
 }
 
 // Detecta tokens diferenciadores: comparando con productos que comparten
@@ -459,59 +466,37 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
     }
   }
 
-  // [v2.13.96] Cálculo EXACTO del width Code128 + fallback automático a narrow=1
+  // [v2.13.104] Barcode minimalista: angosto + quiet zone amplio + sin flechas.
   //
-  // Fórmula real Code128:
-  //   modules = 11*bcLen + 35  (Start 11 + chars 11×bcLen + Check 11 + Stop 13)
+  // Cambios respecto a versiones anteriores:
+  //   1. Umbral narrow=1: 360 → 300 dots.
+  //      Antes el barcode ocupaba hasta 360 dots (90% del adhesivo).
+  //      Ahora con códigos de 11+ chars usa narrow=1 → barcode mucho más
+  //      angosto. Códigos cortos (<11) mantienen narrow=2.
+  //   2. Quiet zone: 10×narrow → 15×narrow.
+  //      ANSI Code128 mínimo es 10×narrow, pero la práctica recomienda 15
+  //      para reducir lectura parcial cuando el operario escanea rápido.
+  //   3. Sin flechas guía — el quiet zone amplio reemplaza esa función
+  //      visual + es lo que técnicamente importa.
+  //
+  // Fórmula Code128 (Start 11 + chars 11×bcLen + Check 11 + Stop 13):
+  //   modules = 11*bcLen + 35
   //   width   = modules × narrow_dots
-  //   Con narrow=2 → 22*bcLen + 70
-  //   Con narrow=1 → 11*bcLen + 35
-  //
-  // Bug previo (v2.13.95): subestimaba con 22*bcLen+50 → barcode se salía
-  // del adhesivo para bcLen≥15. Aunque pretendía "centrar y dar quiet zones",
-  // la fórmula incorrecta hacía que el cálculo de X estuviera mal.
-  //
-  // Fix: cálculo exacto + si width > 360 dots (no entra cómodo con narrow=2),
-  // bajar automático a narrow=1. Code128 a 203dpi con narrow=1 (0.125mm)
-  // es legible para cualquier scanner razonable (los baratos también).
   var bc = String(producto.codigoBarra || '').replace(/"/g, '');
   var bcLen = bc.length;
   var modules = 11 * bcLen + 35;
   var narrowBc = 2;
   var barcodeWidth = modules * narrowBc;
-  if (barcodeWidth > 360) {
+  if (barcodeWidth > 300) {
     narrowBc = 1;
-    barcodeWidth = modules * narrowBc; // ahora más compacto
+    barcodeWidth = modules * narrowBc;
   }
   var barcodeHeight = 44;
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
   var barcodeY = 128 + offsetY;
-  var barcodeEndX = barcodeX + barcodeWidth;
-  // [v2.13.97 FIX QUIET ZONE] La quiet zone del Code128 = 10 × narrow dots.
-  // Las flechas guía DEBEN estar FUERA de esa zona, sino interfieren con la
-  // lectura del scanner (que es exactamente lo que queremos evitar).
-  //
-  // Quiet zone mínima:
-  //   narrow=2 → 20 dots
-  //   narrow=1 → 10 dots
-  //
-  // Flecha izq ocupa X=5 a X=21 (font 3 = 16 wide). Para estar fuera de la
-  // quiet zone, necesita: barcodeX - 21 ≥ quietZone.
-  // Similar para flecha derecha.
-  var quietZoneMin = 10 * narrowBc;
-  var flechaWidth = 16;
-  var flechaX_izq = 5;
-  var flechaX_der = barcodeEndX + 5;
-  // Flecha izq: cabe si barcodeX ≥ flechaX_izq + flechaWidth + quietZoneMin
-  if (barcodeX >= flechaX_izq + flechaWidth + quietZoneMin) {
-    bytes = bytes.concat(_strToBytesEtq('TEXT ' + flechaX_izq + ',' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
-  }
-  // Barcode (núcleo)
+  // Barcode minimalista — sin flechas, solo quiet zone amplio (15×narrow)
+  // garantizado por el centrado (barcodeX siempre ≥ 20 = más que 15×narrow).
   bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
-  // Flecha der: cabe si flechaX_der ≥ barcodeEndX + quietZoneMin Y flechaX_der + 16 ≤ 395
-  if ((flechaX_der >= barcodeEndX + quietZoneMin) && (flechaX_der + flechaWidth <= 395)) {
-    bytes = bytes.concat(_strToBytesEtq('TEXT ' + flechaX_der + ',' + (barcodeY + 10) + ',"3",0,1,1,"<"\r\n'));
-  }
 
   // Print N copias
   bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
@@ -547,14 +532,11 @@ function _imprimirEtiquetasEnvasado(data) {
 
   // Si nos pasaron fechaVencimiento explicita la usamos como ENVASADO menos 1 año
   // para que _calcVencimientoEtq la devuelva igual. Mas simple: override _calc.
-  // [v2.13.101] Formato MM/yy — consistente con _calcVencimientoEtq.
+  // [v2.13.104] Tabla manual MESES_ES — consistente con _calcVencimientoEtq.
   var vtoOverride = null;
   if (data.fechaVencimiento) {
-    vtoOverride = Utilities.formatDate(
-      new Date(data.fechaVencimiento),
-      Session.getScriptTimeZone(),
-      'MM/yy'
-    );
+    var dOverride = new Date(data.fechaVencimiento);
+    vtoOverride = MESES_ES[dOverride.getMonth()] + '/' + dOverride.getFullYear();
   }
 
   // Si vto override: monkey-patch via wrapper
