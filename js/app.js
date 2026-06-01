@@ -2517,11 +2517,23 @@ const Session = (() => {
                     console.log('[espia WH] user detuvo compartir pantalla · quitando del peer');
                     try {
                       pc.removeTrack(sender);
-                      if (window._espiaCliWH) window._espiaCliWH.streams.display = null;
+                      if (window._espiaCliWH) {
+                        window._espiaCliWH.streams.display = null;
+                        // [v2.13.77] Detener buffer de pantalla también
+                        const r = window._espiaCliWH.bufferRecorders?.display;
+                        if (r && r.state === 'recording') { try { r.stop(); } catch(_){} }
+                        clearInterval(window._espiaCliWH.bufferTimers?.display);
+                        delete window._espiaCliWH.bufferRecorders.display;
+                        delete window._espiaCliWH.bufferTimers.display;
+                      }
                     } catch(eRm) { console.warn('[espia WH] removeTrack fallo:', eRm.message); }
                   };
                 });
                 console.log('[espia WH] pantalla agregada · onnegotiationneeded disparará reneg');
+                // [v2.13.77 FIX C2] Iniciar buffer de pantalla AHORA que el stream existe
+                if (window._espiaCliWH?._crearBufferPara) {
+                  window._espiaCliWH._crearBufferPara('display');
+                }
               } catch(eS) { console.warn('[espia WH] pantalla rechazada o falló:', eS.message); }
             })();
           } else {
@@ -2635,19 +2647,28 @@ const Session = (() => {
             } catch(e) { console.warn('[espia WH poll oferta]', e?.message); }
             finally { if (window._espiaCliWH) window._espiaCliWH._pollOfertaEnCurso = false; }
           }, 800);
+          // [v2.13.77 MUTEX] pollTimerIce con mutex - antes múltiples ticks
+          // procesaban el mismo iceDesde → candidates duplicados.
+          window._espiaCliWH._pollIceEnCurso = false;
           window._espiaCliWH.pollTimerIce = setInterval(async () => {
             if (!window._espiaCliWH) return;
+            if (window._espiaCliWH._pollIceEnCurso) return;
+            window._espiaCliWH._pollIceEnCurso = true;
             try {
               const ri = await _espiaCliWHPost('espiaLeerIce', {
                 sesionId, lado: 'master', desde: window._espiaCliWH.iceDesde
               });
+              if (!window._espiaCliWH) return;
               if (ri?.data?.ice?.length) {
                 for (const c of ri.data.ice) {
-                  try { await pc.addIceCandidate(c.ice); } catch(_){}
+                  // [v2.13.77] Log errores ICE (antes silenciado)
+                  try { await pc.addIceCandidate(c.ice); }
+                  catch(eC) { console.warn('[espia WH] addIceCandidate fallo:', eC?.message); }
                 }
                 window._espiaCliWH.iceDesde = ri.data.tsMax || window._espiaCliWH.iceDesde;
               }
             } catch(e) { console.warn('[espia WH poll ice]', e?.message); }
+            finally { if (window._espiaCliWH) window._espiaCliWH._pollIceEnCurso = false; }
           }, 400);
           window._espiaCliWH.pollTimerEstado = setInterval(async () => {
             if (!window._espiaCliWH) return;
@@ -2659,8 +2680,17 @@ const Session = (() => {
             } catch(e) { console.warn('[espia WH poll estado]', e?.message); }
           }, 10000);
           // Buffer chunks 5min
+          // [v2.13.77 BUG FIX C2] Buffer de pantalla post-reneg. Antes este forEach
+          // se ejecutaba al setup inicial cuando streams.display aún era null
+          // (porque getDisplayMedia es async post-reneg). El bloque returneaba
+          // para 'display' y la pantalla NUNCA se grababa en Drive.
+          // Solución: helper crearBufferPara(key) reutilizable que se llama
+          // tanto en setup inicial como cuando streams.display llega via reneg.
           const CHUNK_MS = 5 * 60 * 1000;
-          ['userMedia', 'display'].forEach(key => {
+          window._espiaCliWH._crearBufferPara = (key) => {
+            if (!window._espiaCliWH) return;
+            // Idempotente: si ya existe recorder para ese key, no recrear
+            if (window._espiaCliWH.bufferRecorders[key]) return;
             const stream = window._espiaCliWH.streams[key];
             if (!stream) return;
             const tipoUpload = key === 'display' ? 'screen' : 'audio_video';
@@ -2709,7 +2739,10 @@ const Session = (() => {
                 rec.start();
               } catch(_){}
             }, CHUNK_MS);
-          });
+            console.log('[espia WH buffer] recorder iniciado para', key);
+          };
+          // Setup inicial — solo userMedia (display puede no estar aún)
+          ['userMedia', 'display'].forEach(k => window._espiaCliWH._crearBufferPara(k));
           _espiaCliWHIndicador();
         } catch(e) {
           console.warn('[espia WH] error iniciando:', e);
