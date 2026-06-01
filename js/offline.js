@@ -89,20 +89,53 @@ const OfflineManager = (() => {
   function guardar(key, data) {
     try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); }
     catch(e) {
-      // [v2.13.68] Cleanup emergency cuando localStorage está lleno.
-      // Borrar los caches más grandes que NO seamos nosotros + reintentar.
-      // Si seguimos sin poder, asumimos hoja muerta y tiramos warn (no throw).
+      // [v2.13.98 BUG CRITICO FIX] Cleanup en 2 fases preserva trabajo en progreso.
+      //
+      // BUG ORIGINAL (v2.13.68 - v2.13.97):
+      //   wh_guia_detalle y wh_preingresos estaban en GRANDES, se borraban
+      //   junto a los caches puros. Si el usuario modificaba un detalle de
+      //   guía cerrada (write optimista al cache local + fire-and-forget
+      //   al backend), el siguiente cleanup borraba wh_guia_detalle ANTES
+      //   de que el backend confirmara. Si el backend timeoutaba, los
+      //   cambios se perdían silenciosamente. Además el round-robin entre
+      //   wh_productos ↔ wh_stock hacía que el catálogo se viera
+      //   constantemente "Sin productos".
+      //
+      // FIX:
+      //   TIER 1 (cache puro): se puede borrar libremente, se redescarga del backend
+      //   TIER 2 (trabajo en progreso): SOLO borrar como último recurso
+      //   Borra TIER 1 primero, reintenta. Solo si sigue fallando, TIER 2.
       if (e.name === 'QuotaExceededError' || /quota/i.test(e.message)) {
         console.warn('[Offline] storage lleno · cleanup emergency para guardar', key);
-        const GRANDES = ['wh_guia_detalle','wh_preingresos','wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c','wh_ubicaciones'];
-        GRANDES.filter(k => k !== key).forEach(k => {
-          try { localStorage.removeItem(k); } catch(_){}
+        const TIER1 = ['wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas','wh_impresoras'];
+        const TIER2 = ['wh_guia_detalle','wh_preingresos']; // trabajo del usuario · NO BORRAR salvo último recurso
+        // Pase 1: borrar solo TIER 1 (excepto el key que estamos guardando)
+        let liberados1 = 0;
+        TIER1.filter(k => k !== key).forEach(k => {
+          if (localStorage.getItem(k)) { try { localStorage.removeItem(k); liberados1++; } catch(_){} }
         });
         try {
           localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
-          console.log('[Offline] ✓ guardado tras cleanup:', key);
-        } catch(e2) {
-          console.warn('[Offline] localStorage SIGUE lleno tras cleanup, omitido:', key, e2.message);
+          console.log('[Offline] ✓ guardado tras cleanup TIER1 (' + liberados1 + ' caches puros liberados):', key);
+          return;
+        } catch(e2) {/* sigue lleno · cae a pase 2 */}
+        // Pase 2: borrar TIER 2 (último recurso, podemos perder cambios optimistas)
+        console.warn('[Offline] TIER1 insuficiente · borrando TIER2 (trabajo del usuario en riesgo)');
+        TIER2.filter(k => k !== key).forEach(k => {
+          if (localStorage.getItem(k)) { try { localStorage.removeItem(k); } catch(_){} }
+        });
+        try {
+          localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() }));
+          console.log('[Offline] ✓ guardado tras cleanup TIER2:', key);
+        } catch(e3) {
+          console.warn('[Offline] localStorage IMPOSIBLE · omitido:', key, e3.message);
+          // Notificar al usuario que el storage está crónicamente lleno
+          if (typeof window !== 'undefined' && !window._whStorageWarned) {
+            window._whStorageWarned = true;
+            setTimeout(() => {
+              if (typeof toast === 'function') toast('⚠ Almacenamiento del navegador lleno. Cerrá y reabrí la PWA para limpiar.', 'error', 10000);
+            }, 500);
+          }
         }
       } else { console.warn('[Offline] localStorage error:', e); }
     }

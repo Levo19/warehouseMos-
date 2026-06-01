@@ -5904,8 +5904,35 @@ const GuiasView = (() => {
     OfflineManager.addDetalleCache(d);
     _mostrarDetalleSheet(_guiaActual, false);
 
-    if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal }).catch(() => {});
-    if (vencChanged) API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc }).catch(() => {});
+    // [v2.13.98] Antes ambos catch silenciaban errores → user veía 'Ítem guardado'
+    // pero el backend había rechazado. Al imprimir, salía la versión vieja.
+    // Ahora: si falla, alertamos al usuario y rollbackeamos el cache local.
+    if (qtyChanged) {
+      API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal })
+        .then(r => {
+          if (r && r.ok === false) {
+            toast('⚠ No se pudo guardar cantidad: ' + (r.error || 'backend rechazó'), 'error', 6000);
+            console.error('[itemEdit] actualizarCantidadDetalle rechazado:', r);
+          }
+        })
+        .catch(e => {
+          toast('⚠ Error red al guardar cantidad — verificá conexión', 'error', 6000);
+          console.error('[itemEdit] actualizarCantidadDetalle network fail:', e?.message);
+        });
+    }
+    if (vencChanged) {
+      API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc })
+        .then(r => {
+          if (r && r.ok === false) {
+            toast('⚠ No se pudo guardar vencimiento: ' + (r.error || 'backend rechazó'), 'error', 6000);
+            console.error('[itemEdit] actualizarFechaVencimiento rechazado:', r);
+          }
+        })
+        .catch(e => {
+          toast('⚠ Error red al guardar vencimiento — verificá conexión', 'error', 6000);
+          console.error('[itemEdit] actualizarFechaVencimiento network fail:', e?.message);
+        });
+    }
     toast('Ítem guardado', 'ok', 1500);
   }
 
