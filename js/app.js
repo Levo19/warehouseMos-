@@ -2408,38 +2408,74 @@ const Session = (() => {
           // Flag para que onnegotiationneeded no dispare en el setup inicial
           window._espiaCliWH._setupInicialDone = false;
           window._espiaCliWH._renegEnCurso = false;
+          window._espiaCliWH._ultimaReneg = 0;
+          // [v2.13.75 BLINDAJE] Recovery automatico ICE failed
+          pc.oniceconnectionstatechange = () => {
+            console.log('[espia WH] ICE state:', pc.iceConnectionState);
+            if (pc.iceConnectionState === 'failed') {
+              console.warn('[espia WH] ICE failed · intentando restart');
+              try { pc.restartIce(); } catch(eR) { console.warn('[espia WH] restartIce fallo:', eR.message); }
+            }
+          };
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
           // Handler de renegotiación — se dispara cuando addTrack post-setup
           pc.onnegotiationneeded = async () => {
-            if (!window._espiaCliWH || !window._espiaCliWH._setupInicialDone) return; // ignorar la inicial
+            if (!window._espiaCliWH || !window._espiaCliWH._setupInicialDone) return;
             if (window._espiaCliWH._renegEnCurso) return;
+            // [v2.13.75 BLINDAJE] Anti-spam — 2s entre renegs consecutivas
+            const ahora = Date.now();
+            if ((ahora - window._espiaCliWH._ultimaReneg) < 2000) {
+              console.log('[espia WH reneg] throttled (anti-spam)');
+              return;
+            }
+            window._espiaCliWH._ultimaReneg = ahora;
             window._espiaCliWH._renegEnCurso = true;
+            let buscarAns = null;
+            const limpiar = async (motivo) => {
+              if (buscarAns) clearInterval(buscarAns);
+              if (!window._espiaCliWH) return;
+              // [v2.13.75 BLINDAJE] Rollback si signalingState quedó atorado
+              if (pc.signalingState === 'have-local-offer') {
+                try {
+                  await pc.setLocalDescription({ type: 'rollback' });
+                  console.log('[espia WH reneg] rollback · vuelta a stable (motivo: ' + motivo + ')');
+                } catch(eRb) { console.warn('[espia WH reneg] rollback fallo:', eRb.message); }
+              }
+              window._espiaCliWH._renegEnCurso = false;
+            };
             try {
-              console.log('[espia WH reneg] generando nueva offer con tracks actualizados');
+              console.log('[espia WH reneg] generando nueva offer');
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               await _espiaCliWHPost('espiaSubirRenegOferta', { sesionId, sdp: JSON.stringify(offer) });
-              // Polling cada 600ms hasta que master conteste
-              const buscarAns = setInterval(async () => {
+              buscarAns = setInterval(async () => {
                 if (!window._espiaCliWH) { clearInterval(buscarAns); return; }
                 try {
                   const r = await _espiaCliWHPost('espiaLeerRenegRespuesta', { sesionId });
-                  if (r?.sdpRenegRespuesta) {
+                  // [v2.13.75 BUG FIX] _espiaCliWHPost devuelve JSON sin desempaquetar,
+                  // hay que acceder r.data.sdpRenegRespuesta (no r.sdpRenegRespuesta)
+                  const sdpResp = r?.data?.sdpRenegRespuesta;
+                  if (sdpResp) {
                     clearInterval(buscarAns);
-                    const ans = JSON.parse(r.sdpRenegRespuesta);
+                    buscarAns = null;
+                    if (pc.signalingState !== 'have-local-offer') {
+                      console.warn('[espia WH reneg] signalingState inesperado:', pc.signalingState, '· descarto respuesta');
+                      window._espiaCliWH._renegEnCurso = false;
+                      return;
+                    }
+                    const ans = JSON.parse(sdpResp);
                     await pc.setRemoteDescription(ans);
-                    console.log('[espia WH reneg] respuesta aplicada · pantalla negociada ✓');
+                    console.log('[espia WH reneg] respuesta aplicada ✓');
                     window._espiaCliWH._renegEnCurso = false;
                   }
                 } catch(e) { console.warn('[espia WH reneg poll]', e?.message); }
               }, 600);
-              // Timeout de seguridad 30s
-              setTimeout(() => { clearInterval(buscarAns); window._espiaCliWH && (window._espiaCliWH._renegEnCurso = false); }, 30000);
+              setTimeout(() => limpiar('timeout 30s'), 30000);
             } catch(eR) {
               console.warn('[espia WH reneg] falló:', eR?.message);
-              window._espiaCliWH && (window._espiaCliWH._renegEnCurso = false);
+              await limpiar('exception');
             }
           };
           // [v2.13.73] Lanzar getDisplayMedia ASYNC sin bloquear el flow.
@@ -2468,8 +2504,16 @@ const Session = (() => {
                 }
                 window._espiaCliWH.streams.display = screen;
                 screen.getTracks().forEach(t => {
-                  pc.addTrack(t, screen);
-                  t.onended = () => console.log('[espia WH] user detuvo compartir pantalla');
+                  const sender = pc.addTrack(t, screen);
+                  // [v2.13.75 BLINDAJE] removeTrack al detener compartir → master
+                  // deja de ver pantalla congelada. Dispara reneg automática.
+                  t.onended = () => {
+                    console.log('[espia WH] user detuvo compartir pantalla · quitando del peer');
+                    try {
+                      pc.removeTrack(sender);
+                      if (window._espiaCliWH) window._espiaCliWH.streams.display = null;
+                    } catch(eRm) { console.warn('[espia WH] removeTrack fallo:', eRm.message); }
+                  };
                 });
                 console.log('[espia WH] pantalla agregada · onnegotiationneeded disparará reneg');
               } catch(eS) { console.warn('[espia WH] pantalla rechazada o falló:', eS.message); }
@@ -2552,16 +2596,25 @@ const Session = (() => {
               window._espiaCliWHCerrar('connection_' + pc.connectionState);
             }
           };
-          // [v2.13.62] Polling diferenciado igual que ME v2.7.16
+          // [v2.13.75 MUTEX] Polling oferta con mutex para evitar que múltiples
+          // ticks corran en paralelo (setInterval no espera al await interno).
+          // Antes: tick1 await setRemoteDescription, tick2 arranca al 800ms con
+          // pc.remoteDescription todavía null → vuelve a llamar setRemoteDescription
+          // → InvalidStateError + setup inicial "completo" repetido 5 veces.
+          window._espiaCliWH._pollOfertaEnCurso = false;
           window._espiaCliWH.pollTimerOferta = setInterval(async () => {
             if (!window._espiaCliWH) return;
+            if (window._espiaCliWH._pollOfertaEnCurso) return; // mutex
+            if (pc.remoteDescription) {
+              clearInterval(window._espiaCliWH.pollTimerOferta);
+              window._espiaCliWH.pollTimerOferta = null;
+              return;
+            }
+            window._espiaCliWH._pollOfertaEnCurso = true;
             try {
-              if (pc.remoteDescription) {
-                clearInterval(window._espiaCliWH.pollTimerOferta);
-                window._espiaCliWH.pollTimerOferta = null;
-                return;
-              }
               const r = await _espiaCliWHPost('espiaLeerOferta', { sesionId });
+              // Re-check después del await
+              if (!window._espiaCliWH || pc.remoteDescription) return;
               if (r?.data?.sdpOferta) {
                 const sdp = JSON.parse(r.data.sdpOferta);
                 await pc.setRemoteDescription(sdp);
@@ -2570,12 +2623,11 @@ const Session = (() => {
                 await _espiaCliWHPost('espiaSubirRespuesta', { sesionId, sdp: JSON.stringify(answer) });
                 clearInterval(window._espiaCliWH.pollTimerOferta);
                 window._espiaCliWH.pollTimerOferta = null;
-                // [v2.13.73] Marcar setup inicial completo. Desde ahora,
-                // cualquier addTrack disparará renegociación.
                 if (window._espiaCliWH) window._espiaCliWH._setupInicialDone = true;
                 console.log('[espia WH] setup inicial completo · onnegotiationneeded activo');
               }
             } catch(e) { console.warn('[espia WH poll oferta]', e?.message); }
+            finally { if (window._espiaCliWH) window._espiaCliWH._pollOfertaEnCurso = false; }
           }, 800);
           window._espiaCliWH.pollTimerIce = setInterval(async () => {
             if (!window._espiaCliWH) return;
