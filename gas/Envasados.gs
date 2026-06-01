@@ -535,6 +535,41 @@ function imprimirEtiqueta(params) {
   return _imprimirEtiquetasEnvasado(params);
 }
 
+// ════════════════════════════════════════════════════════════════════
+// Estado de la impresora ADHESIVO/ALMACEN — para indicador 🟢/🔴 en MOS.
+// Llamado desde el modal de impresión de adhesivos antes de habilitar
+// el botón Imprimir. Si está offline → bloquea con tooltip.
+// ════════════════════════════════════════════════════════════════════
+function estadoImpresoraAdhesivo() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+    if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
+    var printerId;
+    try { printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN'); }
+    catch (e) { return { ok: false, error: 'Sin impresora ADHESIVO/ALMACEN: ' + e.message }; }
+    var auth = 'Basic ' + Utilities.base64Encode(apiKey + ':');
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printers/' + printerId, {
+      headers: { 'Authorization': auth },
+      muteHttpExceptions: true
+    });
+    if (resp.getResponseCode() !== 200) {
+      return { ok: false, error: 'PrintNode HTTP ' + resp.getResponseCode(), printerId: printerId };
+    }
+    var pj = JSON.parse(resp.getContentText());
+    var p = Array.isArray(pj) ? pj[0] : pj;
+    return { ok: true, data: {
+      printerId:    printerId,
+      nombre:       p.name,
+      estado:       p.state,                          // 'online' | 'offline'
+      esOnline:     String(p.state).toLowerCase() === 'online',
+      computadora:  p.computer && p.computer.name,
+      compEstado:   p.computer && p.computer.state
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // ============================================================
 // PREVIEW EN LOG (sin imprimir) — corre desde el editor
 // Uso: cambia el codigoBarra debajo y dale ▶ Run

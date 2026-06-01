@@ -242,6 +242,7 @@ function _route(method, e) {
 
       // ── PrintNode ──────────────────────────────────────────
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
+      case 'estadoImpresoraAdhesivo': return estadoImpresoraAdhesivo();
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
