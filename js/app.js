@@ -2426,62 +2426,45 @@ const Session = (() => {
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
-          // Handler de renegotiación — se dispara cuando addTrack post-setup
+          // [v2.13.79 REFACTOR] Handler de renegociación — solo SUBE la nueva oferta.
+          // El polling de respuesta vive en pollTimerSync (centralizado, sin
+          // setInterval anidado). Más simple, más limpio, sin race condition entre
+          // dos pollers leyendo lo mismo.
           pc.onnegotiationneeded = async () => {
-            if (!window._espiaCliWH || !window._espiaCliWH._setupInicialDone) return;
-            // [v2.13.76] SETEAR flag ANTES del check anti-spam para mutex atómico
-            if (window._espiaCliWH._renegEnCurso) return;
+            const ref = window._espiaCliWH;
+            if (!ref || !ref._setupInicialDone) return;
+            if (ref._renegEnCurso) return;
             const ahora = Date.now();
-            if ((ahora - window._espiaCliWH._ultimaReneg) < 2000) {
+            if ((ahora - ref._ultimaReneg) < 2000) {
               console.log('[espia WH reneg] throttled (anti-spam)');
               return;
             }
-            window._espiaCliWH._renegEnCurso = true; // mutex ANTES de awaits
-            window._espiaCliWH._ultimaReneg = ahora;
-            let buscarAns = null;
-            const limpiar = async (motivo) => {
-              if (buscarAns) clearInterval(buscarAns);
-              if (!window._espiaCliWH) return;
-              // [v2.13.75 BLINDAJE] Rollback si signalingState quedó atorado
-              if (pc.signalingState === 'have-local-offer') {
-                try {
-                  await pc.setLocalDescription({ type: 'rollback' });
-                  console.log('[espia WH reneg] rollback · vuelta a stable (motivo: ' + motivo + ')');
-                } catch(eRb) { console.warn('[espia WH reneg] rollback fallo:', eRb.message); }
-              }
-              window._espiaCliWH._renegEnCurso = false;
-            };
+            ref._renegEnCurso = true; // mutex ANTES de awaits
+            ref._ultimaReneg = ahora;
             try {
               console.log('[espia WH reneg] generando nueva offer');
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               await _espiaCliWHPost('espiaSubirRenegOferta', { sesionId, sdp: JSON.stringify(offer) });
-              buscarAns = setInterval(async () => {
-                if (!window._espiaCliWH) { clearInterval(buscarAns); return; }
-                try {
-                  const r = await _espiaCliWHPost('espiaLeerRenegRespuesta', { sesionId });
-                  // [v2.13.75 BUG FIX] _espiaCliWHPost devuelve JSON sin desempaquetar,
-                  // hay que acceder r.data.sdpRenegRespuesta (no r.sdpRenegRespuesta)
-                  const sdpResp = r?.data?.sdpRenegRespuesta;
-                  if (sdpResp) {
-                    clearInterval(buscarAns);
-                    buscarAns = null;
-                    if (pc.signalingState !== 'have-local-offer') {
-                      console.warn('[espia WH reneg] signalingState inesperado:', pc.signalingState, '· descarto respuesta');
-                      window._espiaCliWH._renegEnCurso = false;
-                      return;
-                    }
-                    const ans = JSON.parse(sdpResp);
-                    await pc.setRemoteDescription(ans);
-                    console.log('[espia WH reneg] respuesta aplicada ✓');
-                    window._espiaCliWH._renegEnCurso = false;
+              // Timeout de seguridad — si en 30s no llega respuesta, rollback
+              if (window._espiaCliWH) {
+                window._espiaCliWH._renegTimeout = setTimeout(async () => {
+                  const r2 = window._espiaCliWH;
+                  if (!r2 || !r2._renegEnCurso) return;
+                  console.warn('[espia WH reneg] timeout 30s · rollback');
+                  if (pc.signalingState === 'have-local-offer') {
+                    try { await pc.setLocalDescription({ type: 'rollback' }); }
+                    catch(eRb) { console.warn('[espia WH reneg] rollback fallo:', eRb.message); }
                   }
-                } catch(e) { console.warn('[espia WH reneg poll]', e?.message); }
-              }, 600);
-              setTimeout(() => limpiar('timeout 30s'), 30000);
+                  if (window._espiaCliWH) window._espiaCliWH._renegEnCurso = false;
+                }, 30000);
+              }
             } catch(eR) {
-              console.warn('[espia WH reneg] falló:', eR?.message);
-              await limpiar('exception');
+              console.warn('[espia WH reneg] subida fallo:', eR?.message);
+              if (pc.signalingState === 'have-local-offer') {
+                try { await pc.setLocalDescription({ type: 'rollback' }); } catch(_){}
+              }
+              if (window._espiaCliWH) window._espiaCliWH._renegEnCurso = false;
             }
           };
           // [v2.13.73] Lanzar getDisplayMedia ASYNC sin bloquear el flow.
@@ -2616,80 +2599,96 @@ const Session = (() => {
               window._espiaCliWHCerrar('connection_' + pc.connectionState);
             }
           };
-          // [v2.13.75 MUTEX] Polling oferta con mutex para evitar que múltiples
-          // ticks corran en paralelo (setInterval no espera al await interno).
-          // Antes: tick1 await setRemoteDescription, tick2 arranca al 800ms con
-          // pc.remoteDescription todavía null → vuelve a llamar setRemoteDescription
-          // → InvalidStateError + setup inicial "completo" repetido 5 veces.
-          window._espiaCliWH._pollOfertaEnCurso = false;
-          window._espiaCliWH.pollTimerOferta = setInterval(async () => {
-            if (!window._espiaCliWH) return;
-            if (window._espiaCliWH._pollOfertaEnCurso) return; // mutex
-            if (pc.remoteDescription) {
-              clearInterval(window._espiaCliWH.pollTimerOferta);
-              window._espiaCliWH.pollTimerOferta = null;
-              return;
-            }
-            window._espiaCliWH._pollOfertaEnCurso = true;
+          // [v2.13.79 REFACTOR] BATCH SYNC — 3 pollers → 1 endpoint único.
+          // Antes: pollTimerOferta(800ms) + pollTimerIce(400ms) + pollTimerEstado(10s) =
+          // ~9000 req/h por device EN_VIVO. Cada tick = 1 round-trip Apps Script (200-2000ms).
+          // Ahora: pollTimerSync(700ms) con espiaSync que devuelve TODO en 1 round-trip.
+          // Reducción ~60% en quota + menos ventanas de race condition entre pollers.
+          // El handler onnegotiationneeded sigue subiendo la oferta de reneg vía
+          // espiaSubirRenegOferta; este sync poll se encarga de leer la respuesta
+          // cuando llega (centralizado, sin setInterval interno enredado).
+          window._espiaCliWH._pollSyncEnCurso = false;
+          window._espiaCliWH.iceDesde = window._espiaCliWH.iceDesde || 0;
+          window._espiaCliWH.pollTimerSync = setInterval(async () => {
+            const ref = window._espiaCliWH;
+            if (!ref || ref._pollSyncEnCurso) return;
+            ref._pollSyncEnCurso = true;
             try {
-              const r = await _espiaCliWHPost('espiaLeerOferta', { sesionId });
-              // Re-check después del await
-              if (!window._espiaCliWH || pc.remoteDescription) return;
-              if (r?.data?.sdpOferta) {
-                const sdp = JSON.parse(r.data.sdpOferta);
-                await pc.setRemoteDescription(sdp);
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await _espiaCliWHPost('espiaSubirRespuesta', { sesionId, sdp: JSON.stringify(answer) });
-                clearInterval(window._espiaCliWH.pollTimerOferta);
-                window._espiaCliWH.pollTimerOferta = null;
-                if (window._espiaCliWH) window._espiaCliWH._setupInicialDone = true;
-                console.log('[espia WH] setup inicial completo · onnegotiationneeded activo');
-              }
-            } catch(e) { console.warn('[espia WH poll oferta]', e?.message); }
-            finally { if (window._espiaCliWH) window._espiaCliWH._pollOfertaEnCurso = false; }
-          }, 800);
-          // [v2.13.77 MUTEX] pollTimerIce con mutex - antes múltiples ticks
-          // procesaban el mismo iceDesde → candidates duplicados.
-          window._espiaCliWH._pollIceEnCurso = false;
-          window._espiaCliWH.pollTimerIce = setInterval(async () => {
-            if (!window._espiaCliWH) return;
-            if (window._espiaCliWH._pollIceEnCurso) return;
-            window._espiaCliWH._pollIceEnCurso = true;
-            try {
-              const ri = await _espiaCliWHPost('espiaLeerIce', {
-                sesionId, lado: 'master', desde: window._espiaCliWH.iceDesde
+              const yaConectado = !!pc.remoteDescription;
+              const esperandoReneg = !!ref._renegEnCurso;
+              const r = await _espiaCliWHPost('espiaSync', {
+                sesionId,
+                lado: 'device',
+                iceDesde: ref.iceDesde,
+                necesito: {
+                  sdpOferta: !yaConectado,
+                  sdpRenegRespuesta: esperandoReneg,
+                  ice: true
+                }
               });
-              if (!window._espiaCliWH) return;
-              if (ri?.data?.ice?.length) {
-                for (const c of ri.data.ice) {
-                  // [v2.13.77] Log errores ICE (antes silenciado)
+              const refAfter = window._espiaCliWH;
+              if (!refAfter) return;
+              const d = r?.data;
+              if (!d) return;
+
+              // (1) Cierre remoto — corto circuito inmediato
+              if (d.estado === 'CERRADA') {
+                window._espiaCliWHCerrar('master_cerro');
+                return;
+              }
+
+              // (2) Oferta inicial → setRemoteDescription + answer
+              if (!yaConectado && d.sdpOferta) {
+                try {
+                  const sdpRemote = JSON.parse(d.sdpOferta);
+                  await pc.setRemoteDescription(sdpRemote);
+                  const answer = await pc.createAnswer();
+                  await pc.setLocalDescription(answer);
+                  await _espiaCliWHPost('espiaSubirRespuesta', { sesionId, sdp: JSON.stringify(answer) });
+                  if (window._espiaCliWH) window._espiaCliWH._setupInicialDone = true;
+                  console.log('[espia WH] setup inicial completo · onnegotiationneeded activo');
+                } catch(eO) {
+                  console.warn('[espia WH sync] oferta inicial fallo:', eO?.message);
+                }
+              }
+
+              // (3) Respuesta de renegociación pendiente
+              if (esperandoReneg && d.sdpRenegRespuesta) {
+                try {
+                  if (pc.signalingState !== 'have-local-offer') {
+                    console.warn('[espia WH reneg] state inesperado:', pc.signalingState, '· descarto');
+                  } else {
+                    const sdpAns = JSON.parse(d.sdpRenegRespuesta);
+                    await pc.setRemoteDescription(sdpAns);
+                    console.log('[espia WH reneg] respuesta aplicada ✓');
+                  }
+                  if (window._espiaCliWH) {
+                    window._espiaCliWH._renegEnCurso = false;
+                    if (window._espiaCliWH._renegTimeout) {
+                      clearTimeout(window._espiaCliWH._renegTimeout);
+                      window._espiaCliWH._renegTimeout = null;
+                    }
+                  }
+                } catch(eR) {
+                  console.warn('[espia WH reneg] aplicar respuesta fallo:', eR?.message);
+                  if (window._espiaCliWH) window._espiaCliWH._renegEnCurso = false;
+                }
+              }
+
+              // (4) ICE candidates del master (batched)
+              if (d.ice?.length) {
+                for (const c of d.ice) {
                   try { await pc.addIceCandidate(c.ice); }
                   catch(eC) { console.warn('[espia WH] addIceCandidate fallo:', eC?.message); }
                 }
-                window._espiaCliWH.iceDesde = ri.data.tsMax || window._espiaCliWH.iceDesde;
+                if (window._espiaCliWH && d.tsMax) window._espiaCliWH.iceDesde = d.tsMax;
               }
-            } catch(e) { console.warn('[espia WH poll ice]', e?.message); }
-            finally { if (window._espiaCliWH) window._espiaCliWH._pollIceEnCurso = false; }
-          }, 400);
-          // [v2.13.78 MUTEX] pollTimerEstado sin mutex disparaba doble cierre si
-          // espiaEstadoSesion tardaba >10s y dos polls veían CERRADA simultáneo.
-          // _espiaCliWHCerrar es idempotente pero igual hacía 2 fetches innecesarios
-          // y duplicaba el beacon 'master_cerro' en los logs.
-          window._espiaCliWH._pollEstadoEnCurso = false;
-          window._espiaCliWH.pollTimerEstado = setInterval(async () => {
-            if (!window._espiaCliWH) return;
-            if (window._espiaCliWH._pollEstadoEnCurso) return;
-            window._espiaCliWH._pollEstadoEnCurso = true;
-            try {
-              const re = await _espiaCliWHPost('espiaEstadoSesion', { sesionId });
-              if (!window._espiaCliWH) return;
-              if (re?.data?.estado === 'CERRADA') {
-                window._espiaCliWHCerrar('master_cerro');
-              }
-            } catch(e) { console.warn('[espia WH poll estado]', e?.message); }
-            finally { if (window._espiaCliWH) window._espiaCliWH._pollEstadoEnCurso = false; }
-          }, 10000);
+            } catch(e) {
+              if (e?.message) console.warn('[espia WH sync]', e.message);
+            } finally {
+              if (window._espiaCliWH) window._espiaCliWH._pollSyncEnCurso = false;
+            }
+          }, 700);
           // Buffer chunks 5min
           // [v2.13.77 BUG FIX C2] Buffer de pantalla post-reneg. Antes este forEach
           // se ejecutaba al setup inicial cuando streams.display aún era null
@@ -2765,9 +2764,13 @@ const Session = (() => {
         console.log('[espia WH] cerrando:', motivo);
         const ref = window._espiaCliWH;
         window._espiaCliWH = null;
+        // [v2.13.79] Limpiar el poller consolidado + timers heredados (defensivo
+        // por si alguna instancia vieja todavía los tiene; idempotente)
+        try { clearInterval(ref.pollTimerSync); } catch(_){}
         try { clearInterval(ref.pollTimerOferta); } catch(_){}
         try { clearInterval(ref.pollTimerIce); } catch(_){}
         try { clearInterval(ref.pollTimerEstado); } catch(_){}
+        try { clearTimeout(ref._renegTimeout); } catch(_){}
         Object.entries(ref.bufferRecorders || {}).forEach(([_, rec]) => {
           try { if (rec.state === 'recording') rec.stop(); } catch(_){}
         });
