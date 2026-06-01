@@ -443,17 +443,28 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   bytes = bytes.concat(_strToBytesEtq('\r\n'));
 
   // [Offset Y aplica a TODO el contenido (texto, separador, barcode)]
-  // [v2.13.105 BUG FIX] Vto se salía del adhesivo.
-  //   Font "2" en TSC TTP-244CE @ 203 DPI = 12 wide × 20 tall dots (NO 8×12).
-  //   "Vto ENE/2027" = 12 chars × 12 = 144 dots wide.
-  //   X=280 → end X = 424. Adhesivo = 400 dots → recortado / no se imprime.
-  //   Fix: X=240 → end = 384, margen 16 dots. Cabe.
-  bytes = bytes.concat(_strToBytesEtq('TEXT 240,' + (12 + offsetY) + ',"2",0,1,1,"Vto ' + vto + '"\r\n'));
+  // [v2.13.106] Vto con margen derecho de 2 letras (~24 dots).
+  //   Font "2" = 12×20 dots. "Vto ENE/2027" = 144 dots wide.
+  //   X=232 → end=376, margen 24 dots = 2 letras de aire (antes era 16 = 1 letra,
+  //   se veía pegado al borde).
+  bytes = bytes.concat(_strToBytesEtq('TEXT 232,' + (12 + offsetY) + ',"2",0,1,1,"Vto ' + vto + '"\r\n'));
   // Separador
   bytes = bytes.concat(_strToBytesEtq('BAR 5,' + (42 + offsetY) + ',390,1\r\n'));
 
-  // Descripcion (1-2 lineas con highlights)
-  var startY = 46 + offsetY, LINE_H = 38, SPACE = 8;
+  // [v2.13.106] Descripción: centrar VERTICAL+HORIZONTAL si es 1 línea.
+  // Área disponible: Y=46 a Y=118 (72 dots), antes del frame del barcode.
+  //   - Si 1 línea: startY ajustado para centrar vertical en esos 72 dots.
+  //   - Si 2 líneas: mantener startY=46 con LINE_H=38 (queda como estaba).
+  var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
+  var LINE_H = 38, SPACE = 8;
+  var startY;
+  if (lines.length === 1) {
+    var lineHasHl = lines[0].some(function(t) { return t.hl; });
+    var lineHeight = lineHasHl ? 32 : 24;  // font4 vs font3
+    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) + offsetY;
+  } else {
+    startY = DESC_AREA_Y0 + offsetY;
+  }
   for (var li = 0; li < lines.length; li++) {
     var line = lines[li];
     var totalW = 0;
@@ -497,10 +508,35 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   }
   var barcodeHeight = 44;
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
-  var barcodeY = 128 + offsetY;
-  // Barcode minimalista — sin flechas, solo quiet zone amplio (15×narrow)
-  // garantizado por el centrado (barcodeX siempre ≥ 20 = más que 15×narrow).
-  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
+  // [v2.13.106] Barcode dentro de frame con corner marks.
+  //   Frame box: X=10..390, Y=118..196 (aprovecha margen inferior antes desperdiciado).
+  //   Corner marks tipo cámara/visor QR — 4 esquinas tipo "L" de 12 dots.
+  //   Barcode Y=124 (6 dots dentro del top del frame).
+  //   Texto código centrado horizontal Y=174 (6 dots después del barcode bottom).
+  var barcodeY = 124 + offsetY;
+  var frameX1 = 10, frameX2 = 389;
+  var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY;
+  var cmL = 12;  // largo de cada corner mark (L-shape)
+  // Top-left corner ┐ (rotated)
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+  // Top-right corner ┌ (rotated)
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+  // Bottom-left corner ┘
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+  // Bottom-right corner └
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+  // Barcode SIN texto auto (5° param = 0). El código va con TEXT centrado abajo.
+  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
+  // Texto código: font 1 (8×12 dots), centrado horizontal en el adhesivo.
+  var codigoFontW = 8;
+  var codigoWidth = bc.length * codigoFontW;
+  var codigoX = Math.max(frameX1 + 4, Math.floor((400 - codigoWidth) / 2));
+  var codigoY = barcodeY + barcodeHeight + 8;  // 8 dots después del barcode (barcodeY ya incluye offsetY)
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + bc + '"\r\n'));
 
   // Print N copias
   bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
