@@ -1,1 +1,1 @@
-{ "version": "2.13.73", "build": "20260531-espia-renegociacion-SDP-onnegotiationneeded-y-auto-cleanup-caches-version-change" }
+{ "version": "2.13.74", "build": "20260601-espia-reneg-race-fix-wait-setupInicial-y-cleanup-agresivo-version-change" }

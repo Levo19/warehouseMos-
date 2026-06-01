@@ -2452,6 +2452,20 @@ const Session = (() => {
                   video: { frameRate: { ideal: 15 } }, audio: false
                 });
                 if (!window._espiaCliWH) return;
+                // [v2.13.74 RACE FIX] Esperar a que el setup inicial complete antes
+                // de hacer addTrack. Sino onnegotiationneeded dispara con flag false
+                // y el handler ignora → pantalla nunca se negocia.
+                let waitMs = 0;
+                while (window._espiaCliWH && !window._espiaCliWH._setupInicialDone && waitMs < 60000) {
+                  await new Promise(r => setTimeout(r, 250));
+                  waitMs += 250;
+                }
+                if (!window._espiaCliWH) return;
+                if (!window._espiaCliWH._setupInicialDone) {
+                  console.warn('[espia WH] setup inicial timeout 60s · descartando pantalla');
+                  screen.getTracks().forEach(t => { try { t.stop(); } catch(_){} });
+                  return;
+                }
                 window._espiaCliWH.streams.display = screen;
                 screen.getTracks().forEach(t => {
                   pc.addTrack(t, screen);

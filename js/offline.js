@@ -52,10 +52,17 @@ const OfflineManager = (() => {
   window.addEventListener('online',  () => { _notificar(); sincronizar(); });
   window.addEventListener('offline', () => _notificar());
 
-  // [v2.13.73] Auto-cleanup de caches viejos al cambio de versión.
-  // Antes el localStorage acumulaba data de versiones previas (estructuras
-  // viejas, datos huérfanos) hasta saturarse. Ahora al detectar nueva versión
-  // se borran caches con timestamp >7d Y se chequea cuota.
+  // [v2.13.74] Auto-cleanup AGRESIVO al cambio de versión. Al actualizar la
+  // app, todos los caches grandes (productos/stock/etc) se regeneran del
+  // backend en la próxima precarga. NO tiene sentido conservarlos viejos —
+  // mejor borrar todos los wh_* excepto los esenciales del usuario:
+  //   - wh_sesion (su login)
+  //   - wh_device_id (UUID del equipo)
+  //   - wh_app_version (control de versión)
+  //   - wh_perms_done_v* (wizard de permisos completado)
+  //   - wh_audio_ok (legacy)
+  // Esto resuelve QuotaExceededError definitivamente — el localStorage
+  // queda casi vacío después de cada actualización.
   (async function _autoCleanup() {
     try {
       const verActual = await fetch('./version.json?t=' + Date.now())
@@ -63,21 +70,16 @@ const OfflineManager = (() => {
       if (!verActual) return;
       const verAnterior = localStorage.getItem('wh_app_version');
       if (verAnterior && verAnterior !== verActual) {
-        console.log('[Offline] cambio versión ' + verAnterior + ' → ' + verActual + ' · cleanup caches viejos');
-        // Borrar caches >7d
-        const ahora = Date.now();
-        const SIETE_D = 7 * 86400000;
+        console.log('[Offline] cambio versión ' + verAnterior + ' → ' + verActual + ' · cleanup agresivo caches');
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*)$/;
+        let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;
-          if (k === 'wh_sesion' || k === 'wh_device_id' || k === 'wh_app_version') return;
-          try {
-            const obj = JSON.parse(localStorage.getItem(k));
-            if (obj?.ts && (ahora - obj.ts) > SIETE_D) {
-              localStorage.removeItem(k);
-              console.log('[Offline cleanup] borrado viejo:', k);
-            }
-          } catch(_){}
+          if (PRESERVAR.test(k)) return;
+          localStorage.removeItem(k);
+          borrados++;
         });
+        console.log('[Offline cleanup] ' + borrados + ' caches borrados · se regeneran en próxima precarga');
       }
       localStorage.setItem('wh_app_version', verActual);
     } catch(_){}
