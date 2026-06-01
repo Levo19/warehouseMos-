@@ -107,34 +107,35 @@ const OfflineManager = (() => {
       //   Borra TIER 1 primero, reintenta. Solo si sigue fallando, TIER 2.
       if (e.name === 'QuotaExceededError' || /quota/i.test(e.message)) {
         console.warn('[Offline] storage lleno · cleanup emergency para guardar', key);
-        // [v2.13.99 AUDITORÍA SENIOR] Clasificación completa de keys wh_*:
+        // [v2.13.100 BUG FIX] wh_personal estaba en TIER1 → cleanup lo borraba →
+        // validarPinLocal devolvía null → "no me deja entrar con mi contraseña".
         //
-        // TIER 1 — CACHE PURO del backend (re-bajable libremente):
-        //   wh_productos, wh_proveedores, wh_ajustes, wh_auditorias_c,
-        //   wh_ubicaciones, wh_equivalencias, wh_zonas, wh_impresoras,
-        //   wh_personal, wh_admin_cache, wh_pn, wh_config, wh_guias, wh_stock
-        //   → wh_stock incluido aunque tenga patchStockCache porque el patch
-        //     siempre va acompañado de una operación al backend (registrarEnvasado
-        //     etc.) que es la fuente de verdad. Patches huérfanos no existen.
+        // Mismo problema con wh_admin_cache (validar clave admin global).
         //
-        // TIER 2 — TRABAJO EN PROGRESO (solo último recurso):
+        // Reorganización en 3 tiers:
+        //
+        // TIER 0 — INTOCABLE (críticos para que la PWA funcione):
+        //   wh_personal       → validarPinLocal (login)
+        //   wh_admin_cache    → clave admin global + tiers
+        //   wh_queue          → operaciones offline sin sincronizar
+        //   wh_sesion         → sesión actual del usuario logueado
+        //   wh_device_id      → identidad de la tablet/PC
+        //   wh_app_version    → tracking de updates
+        //   wh_gas_url        → URL del backend (sin esto no hay nada)
+        //
+        // TIER 1 — CACHE PURO (libre de borrar, redescarga en próxima sync):
+        //   wh_productos, wh_stock, wh_proveedores, wh_ajustes,
+        //   wh_auditorias_c, wh_ubicaciones, wh_equivalencias, wh_zonas,
+        //   wh_impresoras, wh_pn, wh_config, wh_guias
+        //
+        // TIER 2 — TRABAJO EN PROGRESO (último recurso):
         //   wh_guia_detalle → addDetalleCache (mods optimistas detalles)
         //   wh_preingresos  → inyectarPreingreso / patchPreingresosCache
         //   wh_envasados    → inyectarEnvasadoCache
-        //   → si el backend timeoutea y aún no confirmó, borrar acá pierde el cambio
-        //
-        // NUNCA TOCAR (no incluidas en NINGUNA lista):
-        //   wh_queue        → cola offline de operaciones SIN SINCRONIZAR.
-        //                     Borrarla = operaciones del usuario sin red PERDIDAS.
-        //   wh_sesion, wh_device_id, wh_app_version,
-        //   wh_audio_ok, wh_usuario, wh_perms_*, wh_gas_url,
-        //   wh_lock_inicio, wh_gracia_cierre, wh_printers_cache
-        //                   → identidad/config/sesión del cliente
         const TIER1 = [
           'wh_productos','wh_stock','wh_proveedores','wh_ajustes',
           'wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas',
-          'wh_impresoras','wh_personal','wh_admin_cache','wh_pn',
-          'wh_config','wh_guias'
+          'wh_impresoras','wh_pn','wh_config','wh_guias'
         ];
         const TIER2 = ['wh_guia_detalle','wh_preingresos','wh_envasados'];
         // Pase 1: borrar solo TIER 1 (excepto el key que estamos guardando)

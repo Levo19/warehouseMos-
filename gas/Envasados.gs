@@ -610,6 +610,49 @@ function imprimirEtiqueta(params) {
 // la zona del adhesivo (siempre que el SIZE/GAP del TSPL coincida con
 // las medidas reales del rollo).
 // ════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.100] Diagnóstico: devuelve el TSPL2 EXACTO que se enviaría
+// a la impresora para un código dado, SIN imprimir. Útil para verificar
+// que los cambios de v2.13.96-97 (barcode centrado + height 44 + flechas)
+// efectivamente se están aplicando.
+// ════════════════════════════════════════════════════════════════════
+function previsualizarTSPLEtq(params) {
+  try {
+    var codigoBarra = String((params && params.codigoBarra) || 'WHCOLAGO250GR').trim();
+    var all = _getAllEnvasablesTokens();
+    var prod = null;
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].codigoBarra === codigoBarra) { prod = all[i]; break; }
+    }
+    if (!prod) {
+      // fallback: producto sintético para testear sin necesidad de uno real
+      prod = { codigoBarra: codigoBarra, descripcion: codigoBarra };
+    }
+    var bytes = _buildTSPLEtq(prod, new Date(), 1, all);
+    // Convertir bytes a texto (excepto el bitmap binario que dejamos como hex)
+    var txt = '';
+    var i2;
+    for (i2 = 0; i2 < bytes.length; i2++) {
+      var b = bytes[i2];
+      if (b >= 32 && b <= 126) txt += String.fromCharCode(b);
+      else if (b === 13) txt += '\\r';
+      else if (b === 10) txt += '\\n\n';
+      else txt += '<' + b.toString(16).toUpperCase().padStart(2, '0') + '>';
+    }
+    return {
+      ok: true,
+      data: {
+        codigoBarra: prod.codigoBarra,
+        descripcion: prod.descripcion,
+        totalBytes: bytes.length,
+        tsplPreview: txt
+      }
+    };
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 function calibrarImpresoraAdhesivo() {
   try {
     var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';

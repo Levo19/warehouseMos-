@@ -244,6 +244,7 @@ function _route(method, e) {
       case 'imprimirEtiqueta':    return imprimirEtiqueta(params);
       case 'estadoImpresoraAdhesivo': return estadoImpresoraAdhesivo();
       case 'calibrarImpresoraAdhesivo': return calibrarImpresoraAdhesivo();
+      case 'previsualizarTSPLEtq': return previsualizarTSPLEtq(params);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);
