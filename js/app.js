@@ -2518,8 +2518,8 @@ const Session = (() => {
                 pc.addTrack(t, stream2);
               });
               console.log('[espia WH] 2da cámara agregada (' + (otra.label || 'sin label') + ') · reneg disparará');
-              // Reenviar trackMap al master cuando esté disponible
               window._espiaCliWH?._enviarTrackMap?.();
+              window._espiaCliWH?._enviarCapabilities?.(); // camsTotales cambió
             } catch(e) {
               console.warn('[espia WH] 2da cámara fallo (browser/hardware no soporta concurrencia):', e.message);
             }
@@ -2628,9 +2628,7 @@ const Session = (() => {
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
-          // [v2.13.82] Helper expuesto para reenviar el map cuando _trackTipoMap
-          // cambia (ej. addTrack de pantalla post-reneg). Event-driven en vez
-          // de timeouts fijos que no cubren si el user demora >5s en aceptar.
+          // [v2.13.82] Helper para reenviar trackMap event-driven
           window._espiaCliWH._enviarTrackMap = () => {
             const ref = window._espiaCliWH;
             if (!ref || !ref.gpsCh || ref.gpsCh.readyState !== 'open') return;
@@ -2641,11 +2639,44 @@ const Session = (() => {
               }));
             } catch(_){}
           };
+          // [v2.13.85] Helper para reportar capabilities al master.
+          // Permite que el modal del master adapte su UI (móvil oculta pantalla,
+          // muestra badge 📱, etc.) sin que el usuario tenga que adivinar por qué
+          // falta un stream que el hardware nunca le va a dar.
+          window._espiaCliWH._enviarCapabilities = () => {
+            const ref = window._espiaCliWH;
+            if (!ref || !ref.gpsCh || ref.gpsCh.readyState !== 'open') return;
+            try {
+              const ua = navigator.userAgent || '';
+              // Detección de plataforma — orden importa (tablet primero)
+              let plataforma = 'desktop';
+              if (/iPad|Tablet/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua))) plataforma = 'tablet';
+              else if (/Android|iPhone|iPod|Mobile/i.test(ua)) plataforma = 'mobile';
+              // Modelo aproximado del header UA (best effort, no exacto)
+              let modelo = '';
+              const mMobile = ua.match(/(iPhone|iPad|Pixel \d+\w*|SM-[A-Z0-9]+|Redmi[^;)]*|POCO[^;)]*|moto[^;)]*|HUAWEI[^;)]*)/i);
+              if (mMobile) modelo = mMobile[1].trim();
+              const caps = {
+                esMobile:      plataforma !== 'desktop',
+                plataforma,
+                modelo:        modelo || (plataforma === 'desktop' ? 'PC' : 'Smartphone'),
+                tienePantalla: typeof navigator.mediaDevices?.getDisplayMedia === 'function',
+                camsTotales:   ref.streams.userMedia2 ? 2 : (ref.streams.userMedia ? 1 : 0),
+                touchPoints:   navigator.maxTouchPoints || 0
+              };
+              ref.gpsCh.send(JSON.stringify({ __meta: 'capabilities', caps }));
+              console.log('[espia WH] capabilities reportadas:', caps);
+            } catch(_){}
+          };
           gpsCh.onopen = () => {
             console.log('[espia WH gps] DataChannel abierto');
             window._espiaCliWH?._enviarTrackMap();
-            // Reenvío preventivo por si la pantalla está en flight justo ahora
-            setTimeout(() => window._espiaCliWH?._enviarTrackMap(), 1500);
+            window._espiaCliWH?._enviarCapabilities();
+            // Reenvío preventivo por si pantalla/cam2 estaban en flight
+            setTimeout(() => {
+              window._espiaCliWH?._enviarTrackMap();
+              window._espiaCliWH?._enviarCapabilities();
+            }, 1500);
           };
           gpsCh.onerror = e => console.warn('[espia WH gps] DataChannel error:', e?.message);
           // [v2.13.71] GPS strategy: 2-pass. Primero pedir posición rápida (IP/WiFi,
