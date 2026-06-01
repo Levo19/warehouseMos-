@@ -230,8 +230,9 @@ function _registrarEnvasadoImpl(params) {
 }
 
 // ============================================================
-// Impresión de etiquetas adhesivas vía PrintNode (ZPL)
-// Se imprime una etiqueta por unidad producida
+// IMPRESION DE ETIQUETAS ADHESIVAS — TSPL2 para TSC TTP-244CE
+// 50x25mm termica directa · Logo bitmap "Caserito Tony's" +
+// smart highlight de palabras diferenciadoras + word-wrap a 2 lineas
 // ============================================================
 function _getPrintNodeProps() {
   var props = PropertiesService.getScriptProperties();
@@ -242,60 +243,283 @@ function _getPrintNodeProps() {
   };
 }
 
-function _imprimirEtiquetasEnvasado(data) {
-  var pn        = _getPrintNodeProps();
-  var apiKey    = pn.apiKey;
-  var printerId = pn.printerEtiquetas;
-  if (!apiKey || !printerId) {
-    return { ok: false, error: 'PrintNode no configurado (PRINTNODE_API_KEY / PRINTNODE_PRINTER_ID)' };
+// ── Logo bitmap (180x36 dots = 23 bytes/row x 36) ──
+// Generado con Python+Pillow (Pacifico script + Lilita One bold + casita)
+// Ver preview-etiquetas/gen-logo.py y logo-preview-4x.png
+var LOGO_W_BYTES = 23;
+var LOGO_H = 36;
+var LOGO_TSPL_HEX =
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
+'FFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFF5FFFFFFFFF' +
+'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0FFFE0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
+'F0FFFC07FFFFFFFFFFFFFFFFFC7FFFFFFFFFFFFFFFFFFFF0FFF803FFFFF03FFFFFFFFFF87FFF' +
+'FFFFFFFFFFFFFFFFF0FFF041FFFFE01FFFFFFFFFF87FFFFFFFFFFFFFFFFFFFF0FFE0E01FFFC7' +
+'1FFFFFFFFFF27FFFFFFFFFFFFFFFFFFFF0FFC1F01FFF8F9FFFFFFFFC727FFFFFFFFFFFFFFFFF' +
+'FFF0FF03F81FFF1F9FFFFFFFFC627FFFFFFFFFFFFFFFFFFFF0FE07FC0FFF1F9FFFFFFFFC64FF' +
+'FFFFFFFFFFFFFFFFFFF0FC1FFC07FF3FFFFFFFFFFFE1FFFFFFFFFFFFFFFFFFFFF0F83FFC03FE' +
+'3FFE7F3E198C8021FFFFFFFFFFFFFFFFFFF0F07FFC01FE3FF81E3C190C8040FFFFFFFFFFFFFF' +
+'FFFFF0E0FFFC00FE3FF89E789008E788FFFFFFFFFFFFFFFFFFF0C1FFFC107E3FF19C399298E7' +
+'981FFFFFFFFFFFFFFFFFF0E2000008FF3FF31D191081E79C1FFFFFFFFFFFFFFFFFF0F600000D' +
+'FF1FF3199871C1C79CFFFFFFFFFFFFFFFFFFF0FE7FFFCFFF87C31200E1F98318FFFFFFFFFFFF' +
+'FFFFFFF0FE7FFFCFFFC000040001F83001FFFFFFFFFFFFFFFFFFF0FE7FFFCFFFE0388E0E13FC' +
+'7843FFFFFFFFFFFFFFFFFFF0FE7FFFCFFE00F83E1C41C0783FFFFFFFFFFFFFFFFFFFF0FE7FFF' +
+'CFFE00F00E0C6184701FFFFFFFFFFFFFFFFFFFF0FE7C07CFFE00E00E0C6184603FFFFFFFFFFF' +
+'FFFFFFFFF0FE7C07CFFFC7C38604700CE1FFFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C60470' +
+'0CE0FFFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C600781FE03FFFFFFFFFFFFFFFFFFFF0FE7C' +
+'07CFFFC7C7C600783FF01FFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7C7C6207C3FFC1FFFFFFFFF' +
+'FFFFFFFFFFF0FE7C07CFFFC7C386207C3FE61FFFFFFFFFFFFFFFFFFFF0FE7C07CFFFC7E00E30' +
+'7C3FE01FFFFFFFFFFFFFFFFFFFF0FE00000FFFC7F01E307C3FE03FFFFFFFFFFFFFFFFFFFF0FE' +
+'00000FFFC7F83E387C3FF07FFFFFFFFFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF' +
+'FFFFFFFFFFFFF0FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF0';
+
+// ── Helpers de texto ──
+function _normalizeEtq(s) {
+  if (s === null || s === undefined) return '';
+  // NFD + strip diacriticos: "CAÑIHUA" → "CANIHUA", "CAFÉ" → "CAFE"
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function _calcVencimientoEtq(fechaEnvasado) {
+  var d = fechaEnvasado ? new Date(fechaEnvasado) : new Date();
+  d.setFullYear(d.getFullYear() + 1);
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yy');
+}
+
+// Detecta tokens diferenciadores: comparando con productos que comparten
+// el PRIMER token (minPrefix=1). Siempre destaca el ultimo token (peso).
+function _detectHighlightsEtq(targetTokens, allTokenized) {
+  var hl = {};
+  hl[targetTokens.length - 1] = true;
+  for (var i = 0; i < allTokenized.length; i++) {
+    var s = allTokenized[i];
+    if (s === targetTokens) continue;
+    if (s[0] !== targetTokens[0]) continue;
+    for (var pos = 1; pos < targetTokens.length; pos++) {
+      if (hl[pos]) continue;
+      var prior = true;
+      for (var k = 0; k < pos; k++) {
+        if (s[k] !== targetTokens[k]) { prior = false; break; }
+      }
+      if (prior && s[pos] !== undefined && s[pos] !== targetTokens[pos]) {
+        hl[pos] = true;
+        break;
+      }
+    }
+  }
+  var out = [];
+  for (var key in hl) if (hl[key]) out.push(parseInt(key));
+  out.sort(function(a,b){ return a - b; });
+  return out;
+}
+
+// Font 3 normal (16 wide x 24 tall), Font 4 highlight (24 wide x 32 tall)
+function _fontWidthEtq(isHighlight) { return isHighlight ? 24 : 16; }
+
+// Word-wrap a max 2 lineas. Si todo no cabe en 1, intenta cortar ANTES del
+// primer highlight (asi los diferenciadores quedan juntos en linea 2).
+function _wrapTokensEtq(tokens, highlights) {
+  var MAX_W = 370, SPACE = 8;
+  var widths = tokens.map(function(t, i) {
+    return t.length * _fontWidthEtq(highlights.indexOf(i) >= 0);
+  });
+  var isHl = function(i) { return highlights.indexOf(i) >= 0; };
+
+  // Total en 1 linea
+  var total = 0;
+  for (var i = 0; i < widths.length; i++) total += widths[i] + (i > 0 ? SPACE : 0);
+  if (total <= MAX_W) {
+    return [tokens.map(function(t, i) { return { tok: t, hl: isHl(i), w: widths[i] }; })];
   }
 
-  var empresaNombre = _getConfigValue('EMPRESA_NOMBRE') || 'InversionMos';
-  var fechaImpresion = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
-  var fechaVenc = data.fechaVencimiento
-    ? Utilities.formatDate(new Date(data.fechaVencimiento), Session.getScriptTimeZone(), 'dd/MM/yyyy')
-    : 'SIN VENC.';
+  // Intentar wrap antes del primer highlight (preserva el grupo destacado)
+  var firstHl = highlights.length > 0 ? highlights[0] : tokens.length;
+  if (firstHl > 0 && firstHl < tokens.length) {
+    var l1 = [], w1 = 0;
+    for (var a = 0; a < firstHl; a++) {
+      w1 += widths[a] + (l1.length > 0 ? SPACE : 0);
+      l1.push({ tok: tokens[a], hl: false, w: widths[a] });
+    }
+    var l2 = [], w2 = 0;
+    for (var b = firstHl; b < tokens.length; b++) {
+      w2 += widths[b] + (l2.length > 0 ? SPACE : 0);
+      l2.push({ tok: tokens[b], hl: isHl(b), w: widths[b] });
+    }
+    if (w1 <= MAX_W && w2 <= MAX_W) return [l1, l2];
+  }
 
-  // ZPL para etiqueta adhesiva 50mm×30mm (ajustar según impresora)
-  var zpl =
-    '^XA' +
-    '^PW400' +           // ancho en dots (50mm a 8dpi)
-    '^LL240' +           // largo en dots (30mm)
-    // Código de barras (si existe)
-    (data.codigoBarra
-      ? '^FO20,10^BY2^BCN,60,Y,N,N^FD' + data.codigoBarra + '^FS'
-      : '') +
-    // Nombre del producto
-    '^FO20,80^A0N,22,22^FD' + _truncate(data.descripcion, 22) + '^FS' +
-    // Vencimiento
-    '^FO20,110^A0N,20,20^FDVto: ' + fechaVenc + '^FS' +
-    // Lote
-    '^FO20,138^A0N,18,18^FDLote: ' + data.idLote + '^FS' +
-    // Empresa
-    '^FO20,165^A0N,16,16^FD' + empresaNombre + '^FS' +
-    // Cantidad de copias
-    '^PQ' + data.unidades + ',0,1,Y' +
-    '^XZ';
+  // Fallback: greedy por palabra
+  var lines = [[]], curW = 0;
+  for (var c = 0; c < tokens.length; c++) {
+    var sep = lines[lines.length - 1].length === 0 ? 0 : SPACE;
+    if (curW + sep + widths[c] <= MAX_W) {
+      lines[lines.length - 1].push({ tok: tokens[c], hl: isHl(c), w: widths[c] });
+      curW += sep + widths[c];
+    } else if (lines.length === 1) {
+      lines.push([{ tok: tokens[c], hl: isHl(c), w: widths[c] }]);
+      curW = widths[c];
+    } else {
+      lines[1].push({ tok: tokens[c], hl: isHl(c), w: widths[c] });
+      curW += sep + widths[c];
+    }
+  }
+  return lines;
+}
+
+function _hexToBytesEtq(hex) {
+  var arr = [];
+  for (var i = 0; i < hex.length; i += 2) arr.push(parseInt(hex.substr(i, 2), 16));
+  return arr;
+}
+
+function _strToBytesEtq(s) {
+  var arr = [];
+  for (var i = 0; i < s.length; i++) arr.push(s.charCodeAt(i) & 0xFF);
+  return arr;
+}
+
+// Lista de envasables tokenizados (cacheable). Filtro: derivados activos WH.
+function _getAllEnvasablesTokens() {
+  var rows = _sheetToObjects(getProductosSheet());
+  var out = [];
+  for (var i = 0; i < rows.length; i++) {
+    var p = rows[i];
+    var estadoNorm = (p.estado === true) ? '1' : (p.estado === false) ? '0' : String(p.estado);
+    if (estadoNorm !== '1' || !p.codigoProductoBase) continue;
+    var c = String(p.codigoBarra || p.idProducto || '').toUpperCase();
+    if (c.indexOf('WH') !== 0) continue;
+    out.push({
+      codigoBarra: p.codigoBarra || p.idProducto,
+      descripcion: p.descripcion,
+      tokens: _normalizeEtq(p.descripcion).split(/\s+/)
+    });
+  }
+  return out;
+}
+
+// Construye los bytes TSPL2 completos (header + bitmap + texto + barcode + PRINT)
+function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
+  var descNorm = _normalizeEtq(producto.descripcion);
+  var tokens = descNorm.split(/\s+/);
+  var allTok = allEnvasables.map(function(p) { return p.tokens; });
+  var highlights = _detectHighlightsEtq(tokens, allTok);
+  var lines = _wrapTokensEtq(tokens, highlights);
+  var vto = _calcVencimientoEtq(fechaEnvasado);
+
+  var header = [
+    'SIZE 50 mm,25 mm',
+    'GAP 2 mm,0 mm',
+    'DIRECTION 1',
+    'DENSITY 8',
+    'SPEED 4',
+    'CLS',
+    'BITMAP 5,2,' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
+  ].join('\r\n');
+
+  var bytes = _strToBytesEtq(header);
+  bytes = bytes.concat(_hexToBytesEtq(LOGO_TSPL_HEX));
+  bytes = bytes.concat(_strToBytesEtq('\r\n'));
+
+  // Vto top-right
+  bytes = bytes.concat(_strToBytesEtq('TEXT 280,12,"2",0,1,1,"Vto ' + vto + '"\r\n'));
+  // Separador
+  bytes = bytes.concat(_strToBytesEtq('BAR 5,42,390,1\r\n'));
+
+  // Descripcion (1-2 lineas con highlights)
+  var startY = 46, LINE_H = 38, SPACE = 8;
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li];
+    var totalW = 0;
+    for (var ti = 0; ti < line.length; ti++) totalW += line[ti].w + (ti > 0 ? SPACE : 0);
+    var x = Math.max(5, Math.round((400 - totalW) / 2));
+    var y = startY + li * LINE_H;
+    for (var tj = 0; tj < line.length; tj++) {
+      var o = line[tj];
+      var font = o.hl ? '4' : '3';
+      var yAdj = o.hl ? y : y + 4;  // baseline align cuando se mezclan tamaños
+      var safe = String(o.tok).replace(/"/g, "'");
+      bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + yAdj + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
+      x += o.w + SPACE;
+    }
+  }
+
+  // Barcode Code 128 (codigos tipo WHCOLAGO250GR no son EAN-13)
+  var bc = String(producto.codigoBarra || '').replace(/"/g, '');
+  bytes = bytes.concat(_strToBytesEtq('BARCODE 50,128,"128",52,1,0,2,2,"' + bc + '"\r\n'));
+
+  // Print N copias
+  bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
+
+  return bytes;
+}
+
+function _imprimirEtiquetasEnvasado(data) {
+  // API key sigue en Script Properties (igual que todo el ecosistema)
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurado' };
+
+  // PrinterId: si vino override (modal admin/master) se usa, sino se busca
+  // en la hoja IMPRESORAS centralizada de MOS (mismo patrón que imprimirBienvenida,
+  // imprimirTicketGuia, imprimirHistorialStock). Tipo 'ADHESIVO', zona 'ALMACEN'.
+  var printerId;
+  if (data.printerIdOverride) {
+    printerId = String(data.printerIdOverride).trim();
+  } else {
+    try { printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN'); }
+    catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  if (!data.codigoBarra || !data.descripcion) {
+    return { ok: false, error: 'Falta codigoBarra o descripcion' };
+  }
+
+  var allEnv = _getAllEnvasablesTokens();
+  // fechaVencimiento explicita (legacy) tiene prioridad sobre el calculo +1 año
+  var fechaParaCalcular = data.fechaVencimiento
+    ? null  // si vino fechaVenc explicita usaremos esa abajo
+    : (data.fechaEnvasado || data.fechaImpresion || new Date());
+
+  // Si nos pasaron fechaVencimiento explicita la usamos como ENVASADO menos 1 año
+  // para que _calcVencimientoEtq la devuelva igual. Mas simple: override _calc.
+  var vtoOverride = null;
+  if (data.fechaVencimiento) {
+    vtoOverride = Utilities.formatDate(
+      new Date(data.fechaVencimiento),
+      Session.getScriptTimeZone(),
+      'dd/MM/yy'
+    );
+  }
+
+  // Si vto override: monkey-patch via wrapper
+  var bytes;
+  if (vtoOverride) {
+    // Engineamos fechaEnvasado = vto - 1 año para que el calc devuelva el override
+    var d = new Date(data.fechaVencimiento);
+    d.setFullYear(d.getFullYear() - 1);
+    bytes = _buildTSPLEtq(data, d, data.unidades || 1, allEnv);
+  } else {
+    bytes = _buildTSPLEtq(data, fechaParaCalcular, data.unidades || 1, allEnv);
+  }
+
+  var base64 = Utilities.base64Encode(bytes);
 
   var payload = {
     printerId: parseInt(printerId),
-    title:     'Etiquetas ' + data.descripcion,
+    title: 'Etiqueta ' + _normalizeEtq(data.descripcion),
     contentType: 'raw_base64',
-    content:   Utilities.base64Encode(zpl),
-    source:    'warehouseMos'
+    content: base64,
+    source: 'warehouseMos'
   };
 
   try {
     var response = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
-      method:  'post',
+      method: 'post',
       headers: {
         'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':'),
-        'Content-Type':  'application/json'
+        'Content-Type': 'application/json'
       },
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
-
     var code = response.getResponseCode();
     if (code === 201) {
       return { ok: true, jobId: JSON.parse(response.getContentText()), unidades: data.unidades };
@@ -309,6 +533,169 @@ function _imprimirEtiquetasEnvasado(data) {
 
 function imprimirEtiqueta(params) {
   return _imprimirEtiquetasEnvasado(params);
+}
+
+// ============================================================
+// PREVIEW EN LOG (sin imprimir) — corre desde el editor
+// Uso: cambia el codigoBarra debajo y dale ▶ Run
+// ============================================================
+function previsualizarEtiqueta() {
+  // ⚙ Cambia este codigo para previsualizar otro producto
+  var codigoBarra = 'WHCOLAGO250GR';
+
+  var L = function(m) { Logger.log(m); };
+  L('═════ PREVIEW ETIQUETA ' + codigoBarra + ' ═════');
+
+  var all = _getAllEnvasablesTokens();
+  var prod = null;
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].codigoBarra === codigoBarra) { prod = all[i]; break; }
+  }
+  if (!prod) { L('❌ No se encontro envasable con codigo ' + codigoBarra); return { ok:false }; }
+
+  var descNorm = _normalizeEtq(prod.descripcion);
+  var tokens = descNorm.split(/\s+/);
+  var allTok = all.map(function(p) { return p.tokens; });
+  var hl = _detectHighlightsEtq(tokens, allTok);
+  var vto = _calcVencimientoEtq(new Date());
+
+  L('Original:    ' + prod.descripcion);
+  L('Normalizado: ' + descNorm);
+  L('Tokens:      ' + JSON.stringify(tokens));
+  L('Highlights:  ' + JSON.stringify(hl) + ' → ' +
+    tokens.map(function(t, i) { return hl.indexOf(i) >= 0 ? '['+t+']' : t; }).join(' '));
+  L('Vto (hoy+1a): ' + vto);
+
+  var lines = _wrapTokensEtq(tokens, hl);
+  L('Lineas:      ' + lines.length);
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li];
+    var txt = '  L' + (li+1) + ': ';
+    for (var ti = 0; ti < line.length; ti++) {
+      txt += (line[ti].hl ? '**' : '') + line[ti].tok + (line[ti].hl ? '**' : '') + ' ';
+    }
+    L(txt);
+  }
+
+  var bytes = _buildTSPLEtq(prod, new Date(), 1, all);
+  L('TSPL2 total: ' + bytes.length + ' bytes');
+  L('═════ FIN ═════');
+  return { ok: true, producto: prod.descripcion, tokens: tokens, highlights: hl, vto: vto, lineas: lines.length, bytes: bytes.length };
+}
+
+// ============================================================
+// TEST de impresora de etiquetas (run desde el editor)
+// Verifica TODO el chain: Script Properties → API key válida →
+// impresora online → envía 1 etiqueta TEST. Resultados en Logger.
+// ============================================================
+function testImpresoraEtiquetas() {
+  var L = function(msg){ Logger.log(msg); };
+  L('═══════ TEST IMPRESORA ETIQUETAS — ' + new Date().toLocaleString() + ' ═══════');
+
+  // 1. Resolver config: API key (Script Props) + printerId (hoja IMPRESORAS de MOS)
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  L('1. Configuración:');
+  L('   PRINTNODE_API_KEY (Script Props) = ' + (apiKey ? '✓ ('+apiKey.length+' chars)' : '✗ FALTA'));
+  if (!apiKey) { L('❌ Falta PRINTNODE_API_KEY en Script Properties.'); return { ok:false, paso:'apikey' }; }
+
+  var printerId;
+  try {
+    printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN');
+    L('   Impresora ADHESIVO/ALMACEN (hoja IMPRESORAS de MOS) = ' + printerId);
+  } catch (e) {
+    L('❌ No hay impresora ADHESIVO/ALMACEN activa en MOS. ' + e.message);
+    L('   💡 Agrega una fila en la hoja IMPRESORAS de MOS con tipo=ADHESIVO, idZona=ALMACEN, activo=1, printNodeId=<ID>');
+    return { ok:false, paso:'printer_registry' };
+  }
+
+  // 2. API key válida (whoami)
+  L('2. Verificando API key con /whoami...');
+  var auth = { 'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':') };
+  var who;
+  try {
+    who = UrlFetchApp.fetch('https://api.printnode.com/whoami', { headers: auth, muteHttpExceptions: true });
+    var whoCode = who.getResponseCode();
+    if (whoCode !== 200) {
+      L('❌ API key inválida (HTTP '+whoCode+'): ' + who.getContentText());
+      return { ok:false, paso:'auth', httpCode: whoCode };
+    }
+    var whoJson = JSON.parse(who.getContentText());
+    L('   ✓ Cuenta: ' + (whoJson.email || whoJson.firstname || '(sin email)'));
+  } catch(e) {
+    L('❌ Error consultando /whoami: ' + e.message); return { ok:false, paso:'auth_err' };
+  }
+
+  // 3. Estado de la impresora
+  L('3. Verificando estado de la impresora #' + printerId + '...');
+  var printer;
+  try {
+    printer = UrlFetchApp.fetch('https://api.printnode.com/printers/' + printerId, { headers: auth, muteHttpExceptions: true });
+    var prCode = printer.getResponseCode();
+    if (prCode !== 200) {
+      L('❌ Impresora no encontrada o sin acceso (HTTP '+prCode+'): ' + printer.getContentText());
+      L('   💡 Lista de tus impresoras disponibles:');
+      try {
+        var all = UrlFetchApp.fetch('https://api.printnode.com/printers', { headers: auth, muteHttpExceptions: true });
+        var arr = JSON.parse(all.getContentText());
+        arr.forEach(function(p){ L('      • #'+p.id+' — '+p.name+' ('+p.state+') @ '+(p.computer && p.computer.name)); });
+      } catch(_) {}
+      return { ok:false, paso:'printer', httpCode: prCode };
+    }
+    var pj = JSON.parse(printer.getContentText());
+    var p = Array.isArray(pj) ? pj[0] : pj;
+    L('   ✓ Nombre:     ' + p.name);
+    L('   ✓ Estado:     ' + p.state + (p.state==='online' ? ' 🟢' : ' 🔴'));
+    L('   ✓ Computador: ' + (p.computer && p.computer.name) + ' (' + (p.computer && p.computer.state) + ')');
+    if (p.state !== 'online') {
+      L('⚠ Impresora NO está online. Revisa: cable encendido, PrintNode Client corriendo en la PC, drivers instalados.');
+    }
+  } catch(e) {
+    L('❌ Error consultando impresora: ' + e.message); return { ok:false, paso:'printer_err' };
+  }
+
+  // 4. Enviar test print: 1 etiqueta con TEST + timestamp + barcode
+  L('4. Enviando etiqueta TEST...');
+  var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm:ss');
+  var zpl =
+    '^XA' +
+    '^PW400^LL240' +
+    '^FO20,10^BY2^BCN,60,Y,N,N^FDTEST-WH^FS' +
+    '^FO20,80^A0N,26,26^FDTEST IMPRESORA^FS' +
+    '^FO20,115^A0N,20,20^FDFecha: ' + ts + '^FS' +
+    '^FO20,143^A0N,18,18^FDLevo.dev / warehouseMos^FS' +
+    '^FO20,170^A0N,16,16^FDSi ves esto, funciona OK!^FS' +
+    '^PQ1,0,1,Y' +
+    '^XZ';
+
+  var payload = {
+    printerId:   parseInt(printerId),
+    title:       'TEST WH ' + ts,
+    contentType: 'raw_base64',
+    content:     Utilities.base64Encode(zpl),
+    source:      'warehouseMos-test'
+  };
+
+  try {
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method:'post',
+      headers: { 'Authorization': auth.Authorization, 'Content-Type':'application/json' },
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    if (code === 201) {
+      var jobId = JSON.parse(resp.getContentText());
+      L('   ✓ Print job enviado — jobId: ' + jobId);
+      L('═══════ ✅ TEST OK — la etiqueta debería estar saliendo ahora ═══════');
+      return { ok:true, jobId: jobId, printer: printerId };
+    } else {
+      L('❌ PrintNode rechazó el job (HTTP '+code+'): ' + resp.getContentText());
+      return { ok:false, paso:'print', httpCode: code, body: resp.getContentText() };
+    }
+  } catch(e) {
+    L('❌ Error enviando print job: ' + e.message);
+    return { ok:false, paso:'print_err' };
+  }
 }
 
 function _truncate(str, max) {

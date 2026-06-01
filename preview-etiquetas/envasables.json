@@ -1,0 +1,1528 @@
+[
+  {
+    "codigoBarra": "WHACXOVO100GR",
+    "descripcion": "ACHIOTE EN POLVO 100GR",
+    "base": "LEV192",
+    "factor": 0.01,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHACXOVO250GR",
+    "descripcion": "ACHIOTE EN POLVO 250GR",
+    "base": "LEV192",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHACXOVO500GR",
+    "descripcion": "ACHIOTE EN POLVO 500GR",
+    "base": "LEV192",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJCOVO250GR",
+    "descripcion": "AJI PANCA POLVO 250GR",
+    "base": "LEV453",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJCOVO050GR",
+    "descripcion": "AJI PANCA POLVO 50GR",
+    "base": "LEV453",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJNLVO250GR",
+    "descripcion": "AJO EN POLVO 250GR",
+    "base": "LEV319",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJNLVO050GR",
+    "descripcion": "AJO EN POLVO 50GR",
+    "base": "LEV319",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJARUM100GR",
+    "descripcion": "AJONJOLI BLANCO PREMIUM 100GR",
+    "base": "LEV149",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJARUM250GR",
+    "descripcion": "AJONJOLI BLANCO PREMIUM 250GR",
+    "base": "LEV149",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJARUM500GR",
+    "descripcion": "AJONJOLI BLANCO PREMIUM 500GR",
+    "base": "LEV149",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJLGRO100GR",
+    "descripcion": "AJONJOLI NEGRO 100GR",
+    "base": "LEV809",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAJLGRO250GR",
+    "descripcion": "AJONJOLI NEGRO 250GR",
+    "base": "LEV809",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHALRRUM100GR",
+    "descripcion": "ALMENDRA AMERICANA PREMIUM 100GR",
+    "base": "LEV162",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHALRRUM250GR",
+    "descripcion": "ALMENDRA AMERICANA PREMIUM 250GR",
+    "base": "LEV162",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHALRRUM500GR",
+    "descripcion": "ALMENDRA AMERICANA PREMIUM 500GR",
+    "base": "LEV162",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHALXOVO250GR",
+    "descripcion": "ALMENDRA EN POLVO 250GR",
+    "base": "LEV772",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHALXOVO500GR",
+    "descripcion": "ALMENDRA EN POLVO 500GR",
+    "base": "LEV772",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANCOVO100GR",
+    "descripcion": "ANGO CACAO POLVO 100GR",
+    "base": "LEV801",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANCOVO250GR",
+    "descripcion": "ANGO CACAO POLVO 250GR",
+    "base": "LEV801",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANNODO100GR",
+    "descripcion": "ANIS EN GRANO IMPORTADO 100GR",
+    "base": "LEV142",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANNODO250GR",
+    "descripcion": "ANIS EN GRANO IMPORTADO 250GR",
+    "base": "LEV142",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANNODO500GR",
+    "descripcion": "ANIS EN GRANO IMPORTADO 500GR",
+    "base": "LEV142",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANENRO250GR",
+    "descripcion": "ANIS ESTRELLA ENTERO 250GR",
+    "base": "LEV004",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHANENRO050GR",
+    "descripcion": "ANIS ESTRELLA ENTERO 50GR",
+    "base": "LEV004",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAREADO100GR",
+    "descripcion": "ARANDANO DESHIDRATADO 100GR",
+    "base": "LEV258",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAREADO250GR",
+    "descripcion": "ARANDANO DESHIDRATADO 250GR",
+    "base": "LEV258",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHARINRO500GR",
+    "descripcion": "ARROZ GLUTINOSO ENTERO 500GR",
+    "base": "LEV1568",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHARIODO250GR",
+    "descripcion": "ARROZ GLUTINOSO MOLIDO 250GR",
+    "base": "LEV1569",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHARXTDA001KG",
+    "descripcion": "ARVERJA PARTIDA 1KG",
+    "base": "LEV200",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHARXTDA500GR",
+    "descripcion": "ARVERJA PARTIDA 500GR",
+    "base": "LEV200",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAVXUNO001KG",
+    "descripcion": "AVEBE CHUÑO 1KG",
+    "base": "LEV1155",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAVXUNO250GR",
+    "descripcion": "AVEBE CHUÑO 250GR",
+    "base": "LEV1155",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAVXUNO500GR",
+    "descripcion": "AVEBE CHUÑO 500GR",
+    "base": "LEV1155",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAVJRUM001KG",
+    "descripcion": "AVENA EN HOJUELA PREMIUM 1KG",
+    "base": "LEV224",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHAVJRUM500GR",
+    "descripcion": "AVENA EN HOJUELA PREMIUM 500GR",
+    "base": "LEV224",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHBITSIO001KG",
+    "descripcion": "BICARBONATO DE SODIO 1KG",
+    "base": "LEV525",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHBITSIO250GR",
+    "descripcion": "BICARBONATO DE SODIO 250GR",
+    "base": "LEV525",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHBITSIO500GR",
+    "descripcion": "BICARBONATO DE SODIO 500GR",
+    "base": "LEV525",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAXIDA250GR",
+    "descripcion": "CANELA MOLIDA 250GR",
+    "base": "LEV179",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAXIDA050GR",
+    "descripcion": "CANELA MOLIDA 50GR",
+    "base": "LEV179",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCATEUM250GR",
+    "descripcion": "CAÑIHUA ENTERA PREMIUM 250GR",
+    "base": "LEV940",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAABCA001KG",
+    "descripcion": "CASA GRANDE AZUCAR BLANCA 1KG",
+    "base": "LEV287",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAXAAO100GR",
+    "descripcion": "CASCARA DE CACAO 100GR",
+    "base": "LEV394",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAXAAO250GR",
+    "descripcion": "CASCARA DE CACAO 250GR",
+    "base": "LEV394",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAAERA100GR",
+    "descripcion": "CASTAÑA ENTERA 100GR",
+    "base": "LEV261",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAAERA250GR",
+    "descripcion": "CASTAÑA ENTERA 250GR",
+    "base": "LEV261",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCAAERA500GR",
+    "descripcion": "CASTAÑA ENTERA 500GR",
+    "base": "LEV261",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCESCRA250GR",
+    "descripcion": "CEBADA TOSTADA CLARA 250GR",
+    "base": "LEV1297",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCESCRA500GR",
+    "descripcion": "CEBADA TOSTADA CLARA 500GR",
+    "base": "LEV1297",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCETDNA250GR",
+    "descripcion": "CEBADA TOSTADA MEDIANA 250GR",
+    "base": "LEV1296",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCETDNA500GR",
+    "descripcion": "CEBADA TOSTADA MEDIANA 500GR",
+    "base": "LEV1296",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCESNRA250GR",
+    "descripcion": "CEBADA TOSTADA NEGRA 250GR",
+    "base": "LEV144",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCESNRA500GR",
+    "descripcion": "CEBADA TOSTADA NEGRA 500GR",
+    "base": "LEV144",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCEALVO250GR",
+    "descripcion": "CEBOLLA POLVO 250GR",
+    "base": "LEV540",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCEALVO050GR",
+    "descripcion": "CEBOLLA POLVO 50GR",
+    "base": "LEV540",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCHXRRA250GR",
+    "descripcion": "CHIA NEGRA 250GR",
+    "base": "LEV412",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCHXRRA500GR",
+    "descripcion": "CHIA NEGRA 500GR",
+    "base": "LEV412",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOOIO100GR",
+    "descripcion": "CLAVO DE OLOR INDONESIO 100GR",
+    "base": "LEV043",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOOIO250GR",
+    "descripcion": "CLAVO DE OLOR INDONESIO 250GR",
+    "base": "LEV043",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOOIO500GR",
+    "descripcion": "CLAVO DE OLOR INDONESIO 500GR",
+    "base": "LEV043",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOOIO050GR",
+    "descripcion": "CLAVO DE OLOR INDONESIO 50GR",
+    "base": "LEV043",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOPVO250GR",
+    "descripcion": "CLAVO DE OLOR POLVO 250GR",
+    "base": "LEV649",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCLOPVO050GR",
+    "descripcion": "CLAVO DE OLOR POLVO 50GR",
+    "base": "LEV649",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLROZ100GR",
+    "descripcion": "COCO RALLADO ARROZ 100GR",
+    "base": "LEV1646",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLROZ250GR",
+    "descripcion": "COCO RALLADO ARROZ 250GR",
+    "base": "LEV1646",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLROZ500GR",
+    "descripcion": "COCO RALLADO ARROZ 500GR",
+    "base": "LEV1646",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLFNO100GR",
+    "descripcion": "COCO RALLADO FINO 100GR",
+    "base": "LEV154",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLFNO250GR",
+    "descripcion": "COCO RALLADO FINO 250GR",
+    "base": "LEV154",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLFNO500GR",
+    "descripcion": "COCO RALLADO FINO 500GR",
+    "base": "LEV154",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLAGO100GR",
+    "descripcion": "COCO RALLADO LARGO 100GR",
+    "base": "LEV1298",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLAGO250GR",
+    "descripcion": "COCO RALLADO LARGO 250GR",
+    "base": "LEV1298",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOLAGO500GR",
+    "descripcion": "COCO RALLADO LARGO 500GR",
+    "base": "LEV1298",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOZLVO100GR",
+    "descripcion": "COLAPIZ POLVO 100GR",
+    "base": "LEV832",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOZLVO250GR",
+    "descripcion": "COLAPIZ POLVO 250GR",
+    "base": "LEV832",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXERO250GR",
+    "descripcion": "COMINO ENTERO 250GR",
+    "base": "LEV170",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXERO050GR",
+    "descripcion": "COMINO ENTERO 50GR",
+    "base": "LEV170",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXIDO001KG",
+    "descripcion": "COMINO MOLIDO 1KG",
+    "base": "LEV023",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXIDO250GR",
+    "descripcion": "COMINO MOLIDO 250GR",
+    "base": "LEV023",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXIDO500GR",
+    "descripcion": "COMINO MOLIDO 500GR",
+    "base": "LEV023",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCOXIDO050GR",
+    "descripcion": "COMINO MOLIDO 50GR",
+    "base": "LEV023",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCUAPVO100GR",
+    "descripcion": "CURAZAO CACAO POLVO 100GR",
+    "base": "LEV449",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHCUAPVO250GR",
+    "descripcion": "CURAZAO CACAO POLVO 250GR",
+    "base": "LEV449",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHDEIXIZ001KG",
+    "descripcion": "DEMSA HARINA DE MAIZ 1KG",
+    "base": "LEV188",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHDEIXIZ500GR",
+    "descripcion": "DEMSA HARINA DE MAIZ 500GR",
+    "base": "LEV188",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFLCDDO250GR",
+    "descripcion": "FLOR DE JAMAICA DESHIDRATADO 250GR",
+    "base": "LEV266",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFLCDDO050GR",
+    "descripcion": "FLOR DE JAMAICA DESHIDRATADO 50GR",
+    "base": "LEV266",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFRXRIO001KG",
+    "descripcion": "FRIJOL CANARIO 1KG",
+    "base": "LEV018",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFRXRIO500GR",
+    "descripcion": "FRIJOL CANARIO 500GR",
+    "base": "LEV018",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFRGRTA001KG",
+    "descripcion": "FRIJOL NEGRO CARAOTA 1KG",
+    "base": "LEV273",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHFRGRTA500GR",
+    "descripcion": "FRIJOL NEGRO CARAOTA 500GR",
+    "base": "LEV273",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHGAAIDA001KG",
+    "descripcion": "GALLETA MOLIDA 1KG",
+    "base": "LEV637",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHGAXCNO001KG",
+    "descripcion": "GARBANZO AMERICANO 1KG",
+    "base": "LEV017",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHGAXCNO500GR",
+    "descripcion": "GARBANZO AMERICANO 500GR",
+    "base": "LEV017",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHKIXVVO250GR",
+    "descripcion": "KION POLVO 250GR",
+    "base": "LEV320",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHKIXVVO050GR",
+    "descripcion": "KION POLVO 50GR",
+    "base": "LEV320",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHKIHEAL250GR",
+    "descripcion": "KIWICHA REAL 250GR",
+    "base": "LEV413",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHKIHEAL500GR",
+    "descripcion": "KIWICHA REAL 500GR",
+    "base": "LEV413",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLENILA250GR",
+    "descripcion": "LEAL FLAN VAINILLA 250GR",
+    "base": "LEV593",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLENILA500GR",
+    "descripcion": "LEAL FLAN VAINILLA 500GR",
+    "base": "LEV593",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETHLE250GR",
+    "descripcion": "LEAL GELATINA CHICLE 250GR",
+    "base": "LEV1294",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETHLE500GR",
+    "descripcion": "LEAL GELATINA CHICLE 500GR",
+    "base": "LEV1294",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEACCO250GR",
+    "descripcion": "LEAL GELATINA COCO 250GR",
+    "base": "LEV1293",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEACCO500GR",
+    "descripcion": "LEAL GELATINA COCO 500GR",
+    "base": "LEV1293",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETFSA250GR",
+    "descripcion": "LEAL GELATINA FRESA 250GR",
+    "base": "LEV010",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETFSA500GR",
+    "descripcion": "LEAL GELATINA FRESA 500GR",
+    "base": "LEV010",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETLON250GR",
+    "descripcion": "LEAL GELATINA LIMON 250GR",
+    "base": "LEV1292",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETLON500GR",
+    "descripcion": "LEAL GELATINA LIMON 500GR",
+    "base": "LEV1292",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETMTA250GR",
+    "descripcion": "LEAL GELATINA MENTA 250GR",
+    "base": "LEV1291",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLETMTA500GR",
+    "descripcion": "LEAL GELATINA MENTA 500GR",
+    "base": "LEV1291",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEIRJA250GR",
+    "descripcion": "LEAL GELATINA NARANJA 250GR",
+    "base": "LEV1290",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEIRJA500GR",
+    "descripcion": "LEAL GELATINA NARANJA 500GR",
+    "base": "LEV1290",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEAPNA250GR",
+    "descripcion": "LEAL GELATINA PIÑA 250GR",
+    "base": "LEV1289",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEAPNA500GR",
+    "descripcion": "LEAL GELATINA PIÑA 500GR",
+    "base": "LEV1289",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEAXVA250GR",
+    "descripcion": "LEAL GELATINA UVA 250GR",
+    "base": "LEV1295",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEAXVA500GR",
+    "descripcion": "LEAL GELATINA UVA 500GR",
+    "base": "LEV1295",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEIXBE001KG",
+    "descripcion": "LENTEJA SIMPSON BEBÉ 1KG",
+    "base": "LEV034",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLEIXBE500GR",
+    "descripcion": "LENTEJA SIMPSON BEBÉ 500GR",
+    "base": "LEV034",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLENPON001KG",
+    "descripcion": "LENTEJON SIMPSON 1KG",
+    "base": "LEV1164",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLENPON500GR",
+    "descripcion": "LENTEJON SIMPSON 500GR",
+    "base": "LEV1164",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLIXIUM100GR",
+    "descripcion": "LINAZA PREMIUM 100GR",
+    "base": "LEV270",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLIXIUM250GR",
+    "descripcion": "LINAZA PREMIUM 250GR",
+    "base": "LEV270",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHLIXIUM500GR",
+    "descripcion": "LINAZA PREMIUM 500GR",
+    "base": "LEV270",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMANLVO500GR",
+    "descripcion": "MACA EN POLVO 500GR",
+    "base": "LEV173",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMAJTRA100GR",
+    "descripcion": "MANI CAJU ENTERA TOSTADA 100GR",
+    "base": "LEV264",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMAJTRA250GR",
+    "descripcion": "MANI CAJU ENTERA TOSTADA 250GR",
+    "base": "LEV264",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMAJTRA500GR",
+    "descripcion": "MANI CAJU ENTERA TOSTADA 500GR",
+    "base": "LEV264",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMOXERO001KG",
+    "descripcion": "MORON ENTERO 1KG",
+    "base": "LEV145",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMOXERO500GR",
+    "descripcion": "MORON ENTERO 500GR",
+    "base": "LEV145",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMOPIDO001KG",
+    "descripcion": "MORON PARTIDO 1KG",
+    "base": "LEV977",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMOPIDO500GR",
+    "descripcion": "MORON PARTIDO 500GR",
+    "base": "LEV977",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHMOPGEL050GR",
+    "descripcion": "MOSTAZA EN POLVO GRANEL 50GR",
+    "base": "LEV842",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNAXMTO001KG",
+    "descripcion": "NAKAMITO GLUTAMATO 1KG",
+    "base": "LEV015",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNAXMTO250GR",
+    "descripcion": "NAKAMITO GLUTAMATO 250GR",
+    "base": "LEV015",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNAXMTO500GR",
+    "descripcion": "NAKAMITO GLUTAMATO 500GR",
+    "base": "LEV015",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNAXMTO080GR",
+    "descripcion": "NAKAMITO GLUTAMATO 80GR",
+    "base": "LEV015",
+    "factor": 0.08,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNUXARA250GR",
+    "descripcion": "NUEZ ENTERA CON CASCARA 250GR",
+    "base": "LEV260",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNUXARA500GR",
+    "descripcion": "NUEZ ENTERA CON CASCARA 500GR",
+    "base": "LEV260",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNUELDO100GR",
+    "descripcion": "NUEZ ENTERA PELADO 100GR",
+    "base": "LEV259",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNUELDO250GR",
+    "descripcion": "NUEZ ENTERA PELADO 250GR",
+    "base": "LEV259",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHNUELDO500GR",
+    "descripcion": "NUEZ ENTERA PELADO 500GR",
+    "base": "LEV259",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHORLIRO100GR",
+    "descripcion": "OREGANO MOLIDO PIZERO 100GR",
+    "base": "LEV185",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHORLIRO250GR",
+    "descripcion": "OREGANO MOLIDO PIZERO 250GR",
+    "base": "LEV185",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHORLIRO500GR",
+    "descripcion": "OREGANO MOLIDO PIZERO 500GR",
+    "base": "LEV185",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHORLIRO050GR",
+    "descripcion": "OREGANO MOLIDO PIZERO 50GR",
+    "base": "LEV185",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAXOVO100GR",
+    "descripcion": "PALILLO EN POLVO 100GR",
+    "base": "LEV191",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAXOVO250GR",
+    "descripcion": "PALILLO EN POLVO 250GR",
+    "base": "LEV191",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAXOVO500GR",
+    "descripcion": "PALILLO EN POLVO 500GR",
+    "base": "LEV191",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAPOVO500GR",
+    "descripcion": "PALILLO PURO POLVO 500GR",
+    "base": "LEV143",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPACLDO001KG",
+    "descripcion": "PAN BLANCO MOLIDO 1KG",
+    "base": "LEV031",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPADCRO001KG",
+    "descripcion": "PAN MOLIDO OSCURO 1KG",
+    "base": "LEV679",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPADCRO500GR",
+    "descripcion": "PAN MOLIDO OSCURO 500GR",
+    "base": "LEV679",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAATTO001KG",
+    "descripcion": "PANAMITO 1KG",
+    "base": "LEV201",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAATTO500GR",
+    "descripcion": "PANAMITO 500GR",
+    "base": "LEV201",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAALVO250GR",
+    "descripcion": "PAPRICA POLVO 250GR",
+    "base": "LEV490",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAALVO050GR",
+    "descripcion": "PAPRICA POLVO 50GR",
+    "base": "LEV490",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAANPA100GR",
+    "descripcion": "PASA IMPORTADA SIN PEPA 100GR",
+    "base": "LEV155",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAANPA250GR",
+    "descripcion": "PASA IMPORTADA SIN PEPA 250GR",
+    "base": "LEV155",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAANPA500GR",
+    "descripcion": "PASA IMPORTADA SIN PEPA 500GR",
+    "base": "LEV155",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPANXPA100GR",
+    "descripcion": "PASA NACIONAL SIN PEPA 100GR",
+    "base": "LEV498",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPANXPA250GR",
+    "descripcion": "PASA NACIONAL SIN PEPA 250GR",
+    "base": "LEV498",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPANXPA500GR",
+    "descripcion": "PASA NACIONAL SIN PEPA 500GR",
+    "base": "LEV498",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAARDA100GR",
+    "descripcion": "PASA RUBIA IMPORTADA 100GR",
+    "base": "LEV252",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAARDA250GR",
+    "descripcion": "PASA RUBIA IMPORTADA 250GR",
+    "base": "LEV252",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPAARDA500GR",
+    "descripcion": "PASA RUBIA IMPORTADA 500GR",
+    "base": "LEV252",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPILNRA250GR",
+    "descripcion": "PIMIENTA BLANCA ENTERA 250GR",
+    "base": "LEV868",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPILNRA050GR",
+    "descripcion": "PIMIENTA BLANCA ENTERA 50GR",
+    "base": "LEV868",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIAREL050GR",
+    "descripcion": "PIMIENTA CAYENA 50GR",
+    "base": "LEV324",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPITAPA250GR",
+    "descripcion": "PIMIENTA CHAPA 250GR",
+    "base": "LEV378",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPITAPA050GR",
+    "descripcion": "PIMIENTA CHAPA 50GR",
+    "base": "LEV378",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIENRA250GR",
+    "descripcion": "PIMIENTA NEGRA ENTERA 250GR",
+    "base": "LEV005",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIENRA050GR",
+    "descripcion": "PIMIENTA NEGRA ENTERA 50GR",
+    "base": "LEV005",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIEODO001KG",
+    "descripcion": "PIMIENTA NEGRA MOLIDO 1KG",
+    "base": "LEV045",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIEODO250GR",
+    "descripcion": "PIMIENTA NEGRA MOLIDO 250GR",
+    "base": "LEV045",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIEODO500GR",
+    "descripcion": "PIMIENTA NEGRA MOLIDO 500GR",
+    "base": "LEV045",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIEODO050GR",
+    "descripcion": "PIMIENTA NEGRA MOLIDO 50GR",
+    "base": "LEV045",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPINAEL050GR",
+    "descripcion": "PIMIENTA ROJA EN HOJUELA GRANEL 50GR",
+    "base": "LEV503",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIOXAL100GR",
+    "descripcion": "PISTACHO CON SAL 100GR",
+    "base": "LEV262",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIOXAL250GR",
+    "descripcion": "PISTACHO CON SAL 250GR",
+    "base": "LEV262",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPIOXAL500GR",
+    "descripcion": "PISTACHO CON SAL 500GR",
+    "base": "LEV262",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPOENAR100GR",
+    "descripcion": "POLVO DE HORNEAR 100GR",
+    "base": "LEV1195",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHPOENAR250GR",
+    "descripcion": "POLVO DE HORNEAR 250GR",
+    "base": "LEV1195",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUNEUM001KG",
+    "descripcion": "QUINUA BLANCA PREMIUM 1KG",
+    "base": "LEV146",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUNEUM250GR",
+    "descripcion": "QUINUA BLANCA PREMIUM 250GR",
+    "base": "LEV146",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUNEUM500GR",
+    "descripcion": "QUINUA BLANCA PREMIUM 500GR",
+    "base": "LEV146",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUGEUM250GR",
+    "descripcion": "QUINUA NEGRA PREMIUM 250GR",
+    "base": "LEV812",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUJEUM250GR",
+    "descripcion": "QUINUA ROJA PREMIUM 250GR",
+    "base": "LEV549",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHQUORUM250GR",
+    "descripcion": "QUINUA TRICOLOR PREMIUM 250GR",
+    "base": "LEV1551",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHROXERO250GR",
+    "descripcion": "ROMERO ENTERO 250GR",
+    "base": "LEV406",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHROXERO050GR",
+    "descripcion": "ROMERO ENTERO 50GR",
+    "base": "LEV406",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHROXIDO250GR",
+    "descripcion": "ROMERO MOLIDO 250GR",
+    "base": "LEV284",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHROXIDO050GR",
+    "descripcion": "ROMERO MOLIDO 50GR",
+    "base": "LEV284",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAXROZ001KG",
+    "descripcion": "SAMAN ARROZ 1KG",
+    "base": "LEV425",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAXXIA001KG",
+    "descripcion": "SAN JACINTO AZUCAR RUBIA 1KG",
+    "base": "LEV415",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAIXCA001KG",
+    "descripcion": "SANTIS ALMIDON DE YUCA 1KG",
+    "base": "LEV1156",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAIXCA500GR",
+    "descripcion": "SANTIS ALMIDON DE YUCA 500GR",
+    "base": "LEV1156",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSASUNO001KG",
+    "descripcion": "SANTIS CHUÑO 1KG",
+    "base": "LEV1154",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSASUNO250GR",
+    "descripcion": "SANTIS CHUÑO 250GR",
+    "base": "LEV1154",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSASUNO500GR",
+    "descripcion": "SANTIS CHUÑO 500GR",
+    "base": "LEV1154",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAPCRN001KG",
+    "descripcion": "SANTIS POP CORN 1KG",
+    "base": "LEV272",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSAPCRN500GR",
+    "descripcion": "SANTIS POP CORN 500GR",
+    "base": "LEV272",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSEEAZA100GR",
+    "descripcion": "SEMILLA DE CALABAZA 100GR",
+    "base": "LEV265",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSEEAZA250GR",
+    "descripcion": "SEMILLA DE CALABAZA 250GR",
+    "base": "LEV265",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSEDAOL100GR",
+    "descripcion": "SEMILLA DE GIRASOL 100GR",
+    "base": "LEV263",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSEDAOL250GR",
+    "descripcion": "SEMILLA DE GIRASOL 250GR",
+    "base": "LEV263",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSIXOVO100GR",
+    "descripcion": "SIBARITA EN POLVO 100GR",
+    "base": "LEV190",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSIXOVO250GR",
+    "descripcion": "SIBARITA EN POLVO 250GR",
+    "base": "LEV190",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSIXOVO500GR",
+    "descripcion": "SIBARITA EN POLVO 500GR",
+    "base": "LEV190",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHSISLAS500GR",
+    "descripcion": "SIETE SEMILLAS 500GR",
+    "base": "LEV032",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTERGRO100GR",
+    "descripcion": "TE HUYRO NEGRO 100GR",
+    "base": "LEV038",
+    "factor": 0.1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTERGRO250GR",
+    "descripcion": "TE HUYRO NEGRO 250GR",
+    "base": "LEV038",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTERGRO500GR",
+    "descripcion": "TE HUYRO NEGRO 500GR",
+    "base": "LEV038",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTOOERO250GR",
+    "descripcion": "TOMILLO ENTERO 250GR",
+    "base": "LEV623",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTOOERO050GR",
+    "descripcion": "TOMILLO ENTERO 50GR",
+    "base": "LEV623",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTOOIDO250GR",
+    "descripcion": "TOMILLO MOLIDO 250GR",
+    "base": "LEV584",
+    "factor": 0.25,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTOOIDO050GR",
+    "descripcion": "TOMILLO MOLIDO 50GR",
+    "base": "LEV584",
+    "factor": 0.05,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTRXERO001KG",
+    "descripcion": "TRIGO ENTERO 1KG",
+    "base": "LEV147",
+    "factor": 1,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHTRXERO500GR",
+    "descripcion": "TRIGO ENTERO 500GR",
+    "base": "LEV147",
+    "factor": 0.5,
+    "categoria": ""
+  },
+  {
+    "codigoBarra": "WHVAOROZ001KG",
+    "descripcion": "VALLESOL ARROZ 1KG",
+    "base": "LEV150",
+    "factor": 1,
+    "categoria": ""
+  }
+]

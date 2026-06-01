@@ -1,0 +1,134 @@
+[
+  {
+    "codigoBarra": "WHAJNLVO050GR",
+    "desc_original": "AJO EN POLVO 50GR",
+    "desc_norm": "AJO EN POLVO 50GR",
+    "tokens": [
+      "AJO",
+      "EN",
+      "POLVO",
+      "50GR"
+    ],
+    "highlights": [
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHAJCOVO250GR",
+    "desc_original": "AJI PANCA POLVO 250GR",
+    "desc_norm": "AJI PANCA POLVO 250GR",
+    "tokens": [
+      "AJI",
+      "PANCA",
+      "POLVO",
+      "250GR"
+    ],
+    "highlights": [
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHCOLROZ250GR",
+    "desc_original": "COCO RALLADO ARROZ 250GR",
+    "desc_norm": "COCO RALLADO ARROZ 250GR",
+    "tokens": [
+      "COCO",
+      "RALLADO",
+      "ARROZ",
+      "250GR"
+    ],
+    "highlights": [
+      2,
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHCOLFNO250GR",
+    "desc_original": "COCO RALLADO FINO 250GR",
+    "desc_norm": "COCO RALLADO FINO 250GR",
+    "tokens": [
+      "COCO",
+      "RALLADO",
+      "FINO",
+      "250GR"
+    ],
+    "highlights": [
+      2,
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHCOLAGO250GR",
+    "desc_original": "COCO RALLADO LARGO 250GR",
+    "desc_norm": "COCO RALLADO LARGO 250GR",
+    "tokens": [
+      "COCO",
+      "RALLADO",
+      "LARGO",
+      "250GR"
+    ],
+    "highlights": [
+      2,
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHCOLAGO500GR",
+    "desc_original": "COCO RALLADO LARGO 500GR",
+    "desc_norm": "COCO RALLADO LARGO 500GR",
+    "tokens": [
+      "COCO",
+      "RALLADO",
+      "LARGO",
+      "500GR"
+    ],
+    "highlights": [
+      2,
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHCATEUM250GR",
+    "desc_original": "CAÑIHUA ENTERA PREMIUM 250GR",
+    "desc_norm": "CANIHUA ENTERA PREMIUM 250GR",
+    "tokens": [
+      "CANIHUA",
+      "ENTERA",
+      "PREMIUM",
+      "250GR"
+    ],
+    "highlights": [
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHAJARUM500GR",
+    "desc_original": "AJONJOLI BLANCO PREMIUM 500GR",
+    "desc_norm": "AJONJOLI BLANCO PREMIUM 500GR",
+    "tokens": [
+      "AJONJOLI",
+      "BLANCO",
+      "PREMIUM",
+      "500GR"
+    ],
+    "highlights": [
+      3
+    ]
+  },
+  {
+    "codigoBarra": "WHPINAEL050GR",
+    "desc_original": "PIMIENTA ROJA EN HOJUELA GRANEL 50GR",
+    "desc_norm": "PIMIENTA ROJA EN HOJUELA GRANEL 50GR",
+    "tokens": [
+      "PIMIENTA",
+      "ROJA",
+      "EN",
+      "HOJUELA",
+      "GRANEL",
+      "50GR"
+    ],
+    "highlights": [
+      5
+    ]
+  }
+]
