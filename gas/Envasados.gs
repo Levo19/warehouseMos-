@@ -405,27 +405,40 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   var lines = _wrapTokensEtq(tokens, highlights);
   var vto = _calcVencimientoEtq(fechaEnvasado);
 
+  // [Calibración configurable vía Script Properties]
+  //   ADHESIVO_GAP_MM   default 2  (mm de separación entre adhesivos)
+  //   ADHESIVO_DENSITY  default 8  (1-15, sube si sale tenue)
+  //   ADHESIVO_SPEED    default 4  (1-6, baja si sale corrida)
+  //   ADHESIVO_OFFSET_Y default 0  (dots: positivo baja TODO el contenido, negativo lo sube)
+  // Si la impresión sale corrida arriba/abajo del adhesivo, ajustá OFFSET_Y.
+  var props = PropertiesService.getScriptProperties();
+  var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
+  var density  = parseInt(props.getProperty('ADHESIVO_DENSITY'))    || 8;
+  var speed    = parseInt(props.getProperty('ADHESIVO_SPEED'))      || 4;
+  var offsetY  = parseInt(props.getProperty('ADHESIVO_OFFSET_Y'))   || 0;
+
   var header = [
     'SIZE 50 mm,25 mm',
-    'GAP 2 mm,0 mm',
+    'GAP ' + gapMm + ' mm,0 mm',
     'DIRECTION 1',
-    'DENSITY 8',
-    'SPEED 4',
+    'DENSITY ' + density,
+    'SPEED ' + speed,
     'CLS',
-    'BITMAP 5,2,' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
+    'BITMAP 5,' + (2 + offsetY) + ',' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
   ].join('\r\n');
 
   var bytes = _strToBytesEtq(header);
   bytes = bytes.concat(_hexToBytesEtq(LOGO_TSPL_HEX));
   bytes = bytes.concat(_strToBytesEtq('\r\n'));
 
+  // [Offset Y aplica a TODO el contenido (texto, separador, barcode)]
   // Vto top-right
-  bytes = bytes.concat(_strToBytesEtq('TEXT 280,12,"2",0,1,1,"Vto ' + vto + '"\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('TEXT 280,' + (12 + offsetY) + ',"2",0,1,1,"Vto ' + vto + '"\r\n'));
   // Separador
-  bytes = bytes.concat(_strToBytesEtq('BAR 5,42,390,1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR 5,' + (42 + offsetY) + ',390,1\r\n'));
 
   // Descripcion (1-2 lineas con highlights)
-  var startY = 46, LINE_H = 38, SPACE = 8;
+  var startY = 46 + offsetY, LINE_H = 38, SPACE = 8;
   for (var li = 0; li < lines.length; li++) {
     var line = lines[li];
     var totalW = 0;
@@ -444,7 +457,7 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
 
   // Barcode Code 128 (codigos tipo WHCOLAGO250GR no son EAN-13)
   var bc = String(producto.codigoBarra || '').replace(/"/g, '');
-  bytes = bytes.concat(_strToBytesEtq('BARCODE 50,128,"128",52,1,0,2,2,"' + bc + '"\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BARCODE 50,' + (128 + offsetY) + ',"128",52,1,0,2,2,"' + bc + '"\r\n'));
 
   // Print N copias
   bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
@@ -533,6 +546,63 @@ function _imprimirEtiquetasEnvasado(data) {
 
 function imprimirEtiqueta(params) {
   return _imprimirEtiquetasEnvasado(params);
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Calibrar impresora ADHESIVO/ALMACEN — manda GAPDETECT (auto-calibrar
+// sensor de gap al rollo actual) seguido de FORMFEED (alinea al próximo
+// inicio de adhesivo). Recomendado ejecutar:
+//   - Una vez al cambiar el rollo de etiquetas
+//   - Si las impresiones empiezan a salir corridas/desalineadas
+//
+// El GAPDETECT consume ~3 etiquetas en blanco mientras la impresora mide
+// el sensor de gap. Después de eso, cada PRINT siguiente cae perfecto en
+// la zona del adhesivo (siempre que el SIZE/GAP del TSPL coincida con
+// las medidas reales del rollo).
+// ════════════════════════════════════════════════════════════════════
+function calibrarImpresoraAdhesivo() {
+  try {
+    var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+    if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
+    var printerId;
+    try { printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN'); }
+    catch (e) { return { ok: false, error: 'Sin impresora ADHESIVO/ALMACEN: ' + e.message }; }
+
+    // TSPL puro de calibración:
+    //   SIZE/GAP fijan las dimensiones esperadas del rollo
+    //   GAPDETECT manda al sensor a remedir
+    //   CLS limpia el buffer
+    //   FORMFEED avanza al próximo gap (alinea físicamente la próxima impresión)
+    var tspl =
+      'SIZE 50 mm,25 mm\r\n' +
+      'GAP 2 mm,0 mm\r\n' +
+      'DIRECTION 1\r\n' +
+      'CLS\r\n' +
+      'GAPDETECT\r\n' +
+      'FORMFEED\r\n';
+    var b64 = Utilities.base64Encode(tspl);
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method: 'post',
+      headers: { 'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':') },
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        printerId: parseInt(printerId),
+        title: 'Calibrar ADHESIVO (' + new Date().toISOString() + ')',
+        contentType: 'raw_base64',
+        content: b64,
+        source: 'warehouseMos-calibrar'
+      }),
+      muteHttpExceptions: true
+    });
+    var code = resp.getResponseCode();
+    if (code !== 201) return { ok: false, error: 'PrintNode HTTP ' + code + ': ' + resp.getContentText() };
+    return { ok: true, data: {
+      jobId: JSON.parse(resp.getContentText()),
+      mensaje: 'Calibración enviada. La impresora va a avanzar ~3 etiquetas en blanco mientras mide el sensor de gap. Después ya podés imprimir normal.'
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════
