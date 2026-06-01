@@ -455,9 +455,37 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
     }
   }
 
-  // Barcode Code 128 (codigos tipo WHCOLAGO250GR no son EAN-13)
+  // [v2.13.95] Barcode Code 128 CENTRADO con quiet zones simétricas + flechas guía.
+  //
+  // Diagnóstico del bug previo:
+  //   X=50, narrow=2, 13 chars → width≈356, terminaba en X=406 (sale del adhesivo de 400)
+  //   Quiet zone derecha NEGATIVA → scanner a veces no detecta Stop char
+  //   → lecturas parciales intermitentes (síntoma reportado por usuario)
+  //
+  // Fix:
+  //   - Calcular X dinámicamente para centrar
+  //   - Garantizar quiet zone ≥ 20 dots (2.5mm) a cada lado
+  //   - Height 52 → 44 dots (más compacto, igual de legible para scanners modernos)
+  //   - Flechas ASCII '>' '<' como guía visual para el operario (fuera de quiet zone)
   var bc = String(producto.codigoBarra || '').replace(/"/g, '');
-  bytes = bytes.concat(_strToBytesEtq('BARCODE 50,' + (128 + offsetY) + ',"128",52,1,0,2,2,"' + bc + '"\r\n'));
+  var bcLen = bc.length;
+  // Code128: width ≈ narrow_dots * (11 * (chars + start + checksum) + stop)
+  // Aproximación segura con narrow=2: ~22 dots/char + ~50 dots overhead
+  var barcodeWidth  = Math.min(360, 22 * bcLen + 50);
+  var barcodeHeight = 44;
+  var barcodeX      = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
+  var barcodeY      = 128 + offsetY;
+  var barcodeEndX   = barcodeX + barcodeWidth;
+  // Flecha izquierda (font 3 = 16 wide × 24 tall)
+  if (barcodeX >= 18) {
+    bytes = bytes.concat(_strToBytesEtq('TEXT 3,' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
+  }
+  // Barcode
+  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,2,2,"' + bc + '"\r\n'));
+  // Flecha derecha (solo si cabe sin tocar el borde)
+  if (barcodeEndX + 25 <= 397) {
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + (barcodeEndX + 5) + ',' + (barcodeY + 10) + ',"3",0,1,1,"<"\r\n'));
+  }
 
   // Print N copias
   bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
