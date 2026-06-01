@@ -1,1 +1,1 @@
-{ "version": "2.13.75", "build": "20260601-espia-mutex-poll-oferta-fix-rdata-en-poll-reneg-blindaje-completo" }
+{ "version": "2.13.76", "build": "20260601-espia-cliente-deviceId-key-correcta-mutex-reneg-antes-de-await" }

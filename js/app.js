@@ -2363,7 +2363,13 @@ const Session = (() => {
         if (window._espiaCliWH) {
           await window._espiaCliWHCerrar('reinicio');
         }
-        const deviceIdLocal = window.WH_CONFIG?.deviceId || localStorage.getItem('wh_deviceId') || 'unknown';
+        // [v2.13.76] Key correcta es wh_device_id (con underscore), no wh_deviceId.
+        // Helper _getDeviceIdWH usa wh_device_id. Antes el typo dejaba deviceIdLocal='unknown'
+        // y los chunks de buffer se subian con ese fake id.
+        const deviceIdLocal = window.WH_CONFIG?.deviceId
+          || (typeof window._getDeviceIdWH === 'function' ? window._getDeviceIdWH() : null)
+          || localStorage.getItem('wh_device_id')
+          || 'unknown';
         console.log('[espia WH] iniciando sesión', sesionId);
         window._espiaCliWH = {
           sesionId, masterId, deviceId: deviceIdLocal,
@@ -2423,15 +2429,15 @@ const Session = (() => {
           // Handler de renegotiación — se dispara cuando addTrack post-setup
           pc.onnegotiationneeded = async () => {
             if (!window._espiaCliWH || !window._espiaCliWH._setupInicialDone) return;
+            // [v2.13.76] SETEAR flag ANTES del check anti-spam para mutex atómico
             if (window._espiaCliWH._renegEnCurso) return;
-            // [v2.13.75 BLINDAJE] Anti-spam — 2s entre renegs consecutivas
             const ahora = Date.now();
             if ((ahora - window._espiaCliWH._ultimaReneg) < 2000) {
               console.log('[espia WH reneg] throttled (anti-spam)');
               return;
             }
+            window._espiaCliWH._renegEnCurso = true; // mutex ANTES de awaits
             window._espiaCliWH._ultimaReneg = ahora;
-            window._espiaCliWH._renegEnCurso = true;
             let buscarAns = null;
             const limpiar = async (motivo) => {
               if (buscarAns) clearInterval(buscarAns);
