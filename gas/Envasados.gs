@@ -455,35 +455,43 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
     }
   }
 
-  // [v2.13.95] Barcode Code 128 CENTRADO con quiet zones simétricas + flechas guía.
+  // [v2.13.96] Cálculo EXACTO del width Code128 + fallback automático a narrow=1
   //
-  // Diagnóstico del bug previo:
-  //   X=50, narrow=2, 13 chars → width≈356, terminaba en X=406 (sale del adhesivo de 400)
-  //   Quiet zone derecha NEGATIVA → scanner a veces no detecta Stop char
-  //   → lecturas parciales intermitentes (síntoma reportado por usuario)
+  // Fórmula real Code128:
+  //   modules = 11*bcLen + 35  (Start 11 + chars 11×bcLen + Check 11 + Stop 13)
+  //   width   = modules × narrow_dots
+  //   Con narrow=2 → 22*bcLen + 70
+  //   Con narrow=1 → 11*bcLen + 35
   //
-  // Fix:
-  //   - Calcular X dinámicamente para centrar
-  //   - Garantizar quiet zone ≥ 20 dots (2.5mm) a cada lado
-  //   - Height 52 → 44 dots (más compacto, igual de legible para scanners modernos)
-  //   - Flechas ASCII '>' '<' como guía visual para el operario (fuera de quiet zone)
+  // Bug previo (v2.13.95): subestimaba con 22*bcLen+50 → barcode se salía
+  // del adhesivo para bcLen≥15. Aunque pretendía "centrar y dar quiet zones",
+  // la fórmula incorrecta hacía que el cálculo de X estuviera mal.
+  //
+  // Fix: cálculo exacto + si width > 360 dots (no entra cómodo con narrow=2),
+  // bajar automático a narrow=1. Code128 a 203dpi con narrow=1 (0.125mm)
+  // es legible para cualquier scanner razonable (los baratos también).
   var bc = String(producto.codigoBarra || '').replace(/"/g, '');
   var bcLen = bc.length;
-  // Code128: width ≈ narrow_dots * (11 * (chars + start + checksum) + stop)
-  // Aproximación segura con narrow=2: ~22 dots/char + ~50 dots overhead
-  var barcodeWidth  = Math.min(360, 22 * bcLen + 50);
+  var modules = 11 * bcLen + 35;
+  var narrowBc = 2;
+  var barcodeWidth = modules * narrowBc;
+  if (barcodeWidth > 360) {
+    narrowBc = 1;
+    barcodeWidth = modules * narrowBc; // ahora más compacto
+  }
   var barcodeHeight = 44;
-  var barcodeX      = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
-  var barcodeY      = 128 + offsetY;
-  var barcodeEndX   = barcodeX + barcodeWidth;
-  // Flecha izquierda (font 3 = 16 wide × 24 tall)
-  if (barcodeX >= 18) {
-    bytes = bytes.concat(_strToBytesEtq('TEXT 3,' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
+  var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
+  var barcodeY = 128 + offsetY;
+  var barcodeEndX = barcodeX + barcodeWidth;
+  // Flecha izquierda (font 3 = 16w × 24h) — X=5 para margen físico seguro al borde
+  // Solo si la quiet zone izquierda permite tener flecha + 5 dots de gap
+  if (barcodeX - 16 >= 7) {
+    bytes = bytes.concat(_strToBytesEtq('TEXT 5,' + (barcodeY + 10) + ',"3",0,1,1,">"\r\n'));
   }
   // Barcode
-  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,2,2,"' + bc + '"\r\n'));
-  // Flecha derecha (solo si cabe sin tocar el borde)
-  if (barcodeEndX + 25 <= 397) {
+  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',1,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
+  // Flecha derecha — necesita ≥21 dots de espacio (5 gap + 16 width) sin tocar borde
+  if (barcodeEndX + 21 <= 395) {
     bytes = bytes.concat(_strToBytesEtq('TEXT ' + (barcodeEndX + 5) + ',' + (barcodeY + 10) + ',"3",0,1,1,"<"\r\n'));
   }
 
