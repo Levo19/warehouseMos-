@@ -52,6 +52,37 @@ const OfflineManager = (() => {
   window.addEventListener('online',  () => { _notificar(); sincronizar(); });
   window.addEventListener('offline', () => _notificar());
 
+  // [v2.13.73] Auto-cleanup de caches viejos al cambio de versión.
+  // Antes el localStorage acumulaba data de versiones previas (estructuras
+  // viejas, datos huérfanos) hasta saturarse. Ahora al detectar nueva versión
+  // se borran caches con timestamp >7d Y se chequea cuota.
+  (async function _autoCleanup() {
+    try {
+      const verActual = await fetch('./version.json?t=' + Date.now())
+        .then(r => r.json()).then(j => j.version).catch(() => null);
+      if (!verActual) return;
+      const verAnterior = localStorage.getItem('wh_app_version');
+      if (verAnterior && verAnterior !== verActual) {
+        console.log('[Offline] cambio versión ' + verAnterior + ' → ' + verActual + ' · cleanup caches viejos');
+        // Borrar caches >7d
+        const ahora = Date.now();
+        const SIETE_D = 7 * 86400000;
+        Object.keys(localStorage).forEach(k => {
+          if (!k.startsWith('wh_')) return;
+          if (k === 'wh_sesion' || k === 'wh_device_id' || k === 'wh_app_version') return;
+          try {
+            const obj = JSON.parse(localStorage.getItem(k));
+            if (obj?.ts && (ahora - obj.ts) > SIETE_D) {
+              localStorage.removeItem(k);
+              console.log('[Offline cleanup] borrado viejo:', k);
+            }
+          } catch(_){}
+        });
+      }
+      localStorage.setItem('wh_app_version', verActual);
+    } catch(_){}
+  })();
+
   // ── Cache helpers ─────────────────────────────────────────
   function guardar(key, data) {
     try { localStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); }

