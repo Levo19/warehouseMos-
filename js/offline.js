@@ -71,7 +71,12 @@ const OfflineManager = (() => {
       const verAnterior = localStorage.getItem('wh_app_version');
       if (verAnterior && verAnterior !== verActual) {
         console.log('[Offline] cambio versión ' + verAnterior + ' → ' + verActual + ' · cleanup agresivo caches');
-        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*)$/;
+        // [v2.13.103] AUDITORÍA SENIOR — bug pre-existente: TIER0 NO estaba en
+        // PRESERVAR. Cuando se actualizaba la app, wh_personal/wh_admin_cache/
+        // wh_queue se borraban → mismo bug v2.13.99 (login no funciona offline)
+        // pero disparado por el upgrade en vez de quota cleanup.
+        // Ahora se preservan TODOS los TIER0 (críticos para que la PWA funcione).
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url)$/;
         let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;
@@ -206,9 +211,14 @@ const OfflineManager = (() => {
         // Ahora: borramos UNO por UNO, el más viejo primero, reintentando
         // después de cada borrado. Los caches recién guardados (más recientes)
         // sobreviven porque el cleanup ataca primero los viejos.
+        //
+        // [v2.13.103] PERF FIX (auditoría senior): serializamos UNA vez fuera
+        // del loop. Antes cada iteración re-corría JSON.stringify + LZString
+        // compress (~50-100ms × N iteraciones = pause perceptible en wh_productos).
+        const _payloadFinal = _serializar({ data, ts: Date.now() });
         const _intentarGuardar = () => {
           try {
-            localStorage.setItem(key, _serializar({ data, ts: Date.now() }));
+            localStorage.setItem(key, _payloadFinal);
             return true;
           } catch(_) { return false; }
         };
