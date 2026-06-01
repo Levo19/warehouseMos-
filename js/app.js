@@ -2494,15 +2494,25 @@ const Session = (() => {
             try {
               const devs = await navigator.mediaDevices.enumerateDevices();
               const cams = devs.filter(d => d.kind === 'videoinput');
+              // [v2.13.86] Registramos camsHardware aunque skippeemos
+              if (window._espiaCliWH?._capsState) {
+                window._espiaCliWH._capsState.camsHardware = cams.length;
+              }
               if (cams.length < 2) {
-                console.log('[espia WH] dual-cam: solo 1 cámara · skip');
+                console.log('[espia WH] dual-cam: solo 1 cámara hardware · skip');
+                if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
+                window._espiaCliWH?._enviarCapabilities?.();
                 return;
               }
-              // Cuál cámara ya estamos usando
               const tUsado = window._espiaCliWH?.streams?.userMedia?.getVideoTracks?.()[0];
               const idUsado = tUsado?.getSettings?.()?.deviceId;
               const otra = cams.find(c => c.deviceId && c.deviceId !== idUsado);
-              if (!otra) { console.log('[espia WH] dual-cam: no encontré 2da deviceId'); return; }
+              if (!otra) {
+                console.log('[espia WH] dual-cam: no encontré 2da deviceId');
+                if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
+                window._espiaCliWH?._enviarCapabilities?.();
+                return;
+              }
               const stream2 = await navigator.mediaDevices.getUserMedia({
                 video: { deviceId: { exact: otra.deviceId }, width:{ideal:640}, height:{ideal:480} }
               });
@@ -2518,10 +2528,15 @@ const Session = (() => {
                 pc.addTrack(t, stream2);
               });
               console.log('[espia WH] 2da cámara agregada (' + (otra.label || 'sin label') + ') · reneg disparará');
+              if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
               window._espiaCliWH?._enviarTrackMap?.();
-              window._espiaCliWH?._enviarCapabilities?.(); // camsTotales cambió
+              window._espiaCliWH?._enviarCapabilities?.();
             } catch(e) {
               console.warn('[espia WH] 2da cámara fallo (browser/hardware no soporta concurrencia):', e.message);
+              // [v2.13.86] Bug #5: marcamos dualIntentado también en fallo y reenviamos
+              // capabilities para que el master sepa el estado final (no espere flicker).
+              if (window._espiaCliWH?._capsState) window._espiaCliWH._capsState.dualIntentado = true;
+              window._espiaCliWH?._enviarCapabilities?.();
             }
           })();
           // [v2.13.79 REFACTOR] Handler de renegociación — solo SUBE la nueva oferta.
@@ -2639,29 +2654,49 @@ const Session = (() => {
               }));
             } catch(_){}
           };
-          // [v2.13.85] Helper para reportar capabilities al master.
-          // Permite que el modal del master adapte su UI (móvil oculta pantalla,
-          // muestra badge 📱, etc.) sin que el usuario tenga que adivinar por qué
-          // falta un stream que el hardware nunca le va a dar.
-          window._espiaCliWH._enviarCapabilities = () => {
+          // [v2.13.86] Capabilities con detección honesta.
+          //   camsHardware = enumerateDevices().filter(videoinput).length  (real)
+          //   camsAbiertas = cuántas pudimos getUserMedia              (efectivo)
+          //   dualIntentado = true cuando el IIFE dual-cam ya corrió (con éxito o fallo)
+          // Master usa: si dualIntentado && camsAbiertas<camsHardware → "no permite dual"
+          //             si camsHardware<2 → no muestra card (no hay 2da y punto)
+          window._espiaCliWH._capsState = {
+            camsHardware: 0,
+            dualIntentado: false
+          };
+          window._espiaCliWH._enviarCapabilities = async () => {
             const ref = window._espiaCliWH;
             if (!ref || !ref.gpsCh || ref.gpsCh.readyState !== 'open') return;
             try {
               const ua = navigator.userAgent || '';
-              // Detección de plataforma — orden importa (tablet primero)
+              // Plataforma — incluye Android sin "Mobile" como tablet (Bug #1)
               let plataforma = 'desktop';
-              if (/iPad|Tablet/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua))) plataforma = 'tablet';
+              if (/iPad/i.test(ua) || (navigator.maxTouchPoints > 1 && /Macintosh/i.test(ua))) plataforma = 'tablet';
+              else if (/Android/i.test(ua) && !/Mobile/i.test(ua)) plataforma = 'tablet';
+              else if (/Tablet/i.test(ua)) plataforma = 'tablet';
               else if (/Android|iPhone|iPod|Mobile/i.test(ua)) plataforma = 'mobile';
-              // Modelo aproximado del header UA (best effort, no exacto)
+              // Modelo (Bug #4: Pixel "X Pro" captura hasta segunda palabra)
               let modelo = '';
-              const mMobile = ua.match(/(iPhone|iPad|Pixel \d+\w*|SM-[A-Z0-9]+|Redmi[^;)]*|POCO[^;)]*|moto[^;)]*|HUAWEI[^;)]*)/i);
-              if (mMobile) modelo = mMobile[1].trim();
+              const mM = ua.match(/(iPhone|iPad|Pixel \d+\w*(?: Pro)?|SM-[A-Z0-9]+|Redmi[^;)]*|POCO[^;)]*|moto[^;)]*|HUAWEI[^;)]*|OnePlus[^;)]*)/i);
+              if (mM) modelo = mM[1].trim();
+              // Cuántas cámaras tiene el HARDWARE (no las abiertas)
+              let camsHardware = ref._capsState.camsHardware;
+              if (!camsHardware) {
+                try {
+                  const devs = await navigator.mediaDevices.enumerateDevices();
+                  camsHardware = devs.filter(d => d.kind === 'videoinput').length;
+                  ref._capsState.camsHardware = camsHardware;
+                } catch(_){}
+              }
+              const camsAbiertas = ref.streams.userMedia2 ? 2 : (ref.streams.userMedia ? 1 : 0);
               const caps = {
                 esMobile:      plataforma !== 'desktop',
                 plataforma,
                 modelo:        modelo || (plataforma === 'desktop' ? 'PC' : 'Smartphone'),
                 tienePantalla: typeof navigator.mediaDevices?.getDisplayMedia === 'function',
-                camsTotales:   ref.streams.userMedia2 ? 2 : (ref.streams.userMedia ? 1 : 0),
+                camsHardware,                                  // real (de enumerateDevices)
+                camsAbiertas,                                  // efectivas
+                dualIntentado: ref._capsState.dualIntentado,   // ya corrió el async dual-cam
                 touchPoints:   navigator.maxTouchPoints || 0
               };
               ref.gpsCh.send(JSON.stringify({ __meta: 'capabilities', caps }));
