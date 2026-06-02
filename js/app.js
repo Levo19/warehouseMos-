@@ -8684,10 +8684,26 @@ const EnvasadosView = (() => {
       toast('⚠ Envasado revertido · ' + motivo + ' · volvé a intentar', 'danger', 7000);
     }
 
+    // [v2.13.115 OPTIMISTIC PRO] Disparar el modal de LOTE ya mismo, antes
+    // del await de registrarEnvasado. Antes el modal aparecía 15s después
+    // (esperaba a que registrarEnvasado responda). Ahora aparece instantáneo.
+    // El lote se crea en PARALELO al registro del envasado.
+    // Si registrarEnvasado falla, cancelamos el lote en el rollback.
+    if (imprimir) {
+      try {
+        WhLoteAdhesivo.crearYEjecutar({
+          codigoBarra:     String(prod.codigoBarra),
+          descripcion:     prod.descripcion || '',
+          total:           producidas,
+          fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0]
+        });
+      } catch (e) {
+        toast('No se pudo iniciar lote: ' + (e?.message || ''), 'danger', 5000);
+      }
+    }
+
     // [v2.13.108] Si imprimir=true, NO le decimos al backend que imprima
     // directo (el método viejo manda 1 sola request a PrintNode → drift).
-    // En su lugar, después del registrar exitoso, disparamos el sistema
-    // de LOTES con sub-jobs (controla drift + permite cambio de rollo).
     // GAS en segundo plano
     API.registrarEnvasado({
       codigoBarra:        prod.codigoBarra,
@@ -8699,6 +8715,12 @@ const EnvasadosView = (() => {
     }).then(res => {
       if (!res || res.ok === false) {
         _rollbackOptimista(res?.error || 'Error desconocido');
+        // [v2.13.115] Si el envasado falló, cancelar el lote optimista
+        // que disparamos en paralelo, para evitar imprimir etiquetas de
+        // un envasado que no se registró.
+        if (imprimir) {
+          try { WhLoteAdhesivo.cancelar(); } catch(_) {}
+        }
         return;
       }
       // Reemplazar el envasado optimista con el idEnvasado REAL del backend
@@ -8728,21 +8750,8 @@ const EnvasadosView = (() => {
 
       // 🎉 Celebración + banner deshacer
       _celebrarEnvasado(idReal, prod.descripcion || cbDerivado, producidas);
-
-      // [v2.13.108] Si el operador pidió imprimir, disparar lote con
-      // sub-jobs + GAPDETECT condicional + modal de progreso.
-      if (imprimir) {
-        try {
-          WhLoteAdhesivo.crearYEjecutar({
-            codigoBarra:     String(prod.codigoBarra),
-            descripcion:     prod.descripcion || '',
-            total:           producidas,
-            fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0]
-          });
-        } catch (e) {
-          toast('No se pudo iniciar lote de impresión: ' + (e?.message || ''), 'danger', 6000);
-        }
-      }
+      // El lote de impresión ya se disparó ANTES (línea 8688 aprox) — corre
+      // en paralelo y no depende del registro del envasado.
     }).catch((e) => {
       _rollbackOptimista('sin conexión');
     }).finally(() => {
@@ -19861,6 +19870,17 @@ const WhLoteAdhesivo = (() => {
     try { await API.post('cancelarLoteAdhesivo', { idLote: _state.idLote }); } catch(_) {}
     _setStatus('CANCELADO');
     setTimeout(cerrar, 800);
+  }
+
+  // [v2.13.115] Cancelar sin pedir confirm — usado por rollback automático
+  // cuando el envasado paralelo falla y el lote ya estaba en vuelo.
+  async function cancelarSilencioso(motivo) {
+    if (!_state) return;
+    if (_state.idLote) {
+      try { await API.post('cancelarLoteAdhesivo', { idLote: _state.idLote }); } catch(_) {}
+    }
+    _setStatus('CANCELADO', motivo || '');
+    setTimeout(cerrar, 1000);
   }
 
   function cerrar() {

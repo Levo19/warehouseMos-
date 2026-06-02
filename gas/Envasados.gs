@@ -1914,6 +1914,43 @@ function crearLoteAdhesivo(params) {
     if (!codigoBarra) return { ok: false, error: 'codigoBarra requerido' };
     if (total <= 0)   return { ok: false, error: 'total debe ser > 0' };
 
+    // [v2.13.115 BUG FIX CRÍTICO] DEDUPE por idempotencyKey.
+    // El usuario reportó que se imprimieron 2 lotes de 10 etiquetas (20 total)
+    // cuando había pedido solo uno. Causa: si el modal demora y el usuario
+    // reintenta, O si el primer intento falló parcialmente y el segundo
+    // tuvo éxito, se crearon 2 lotes distintos.
+    // Fix: si llega un idempotencyKey que ya existe en la sheet, retornar
+    // el lote existente sin crear duplicado.
+    var idempotencyKey = String(params.idempotencyKey || '').trim();
+    if (idempotencyKey) {
+      var sheetCheck = _getSheetLotesAdhesivo();
+      var allRows = _sheetToObjects(sheetCheck);
+      var dup = allRows.find(function(r) {
+        return String(r.idLote || '').endsWith('_' + idempotencyKey)
+            || String(r.ultimoError || '').indexOf(idempotencyKey) >= 0;
+      });
+      // Más confiable: usar idempotencyKey como SUFIJO del idLote para que
+      // el lookup sea barato. Generamos idLote = LA<timestamp>_<idempotencyKey>.
+      // Buscar lote existente con ese sufijo:
+      var found = allRows.find(function(r) {
+        return String(r.idLote || '').indexOf(idempotencyKey) >= 0;
+      });
+      if (found) {
+        // Lote ya existe — retornarlo en lugar de crear duplicado.
+        return { ok: true, data: {
+          idLote:      String(found.idLote),
+          total:       parseInt(found.totalEtq) || 0,
+          completadas: parseInt(found.completadas) || 0,
+          subJobSize:  parseInt(found.subJobSize) || 10,
+          status:      String(found.status || 'CREADO'),
+          vto:         String(found.vto || ''),
+          descripcion: String(found.descripcion || ''),
+          printerId:   String(found.printerId || ''),
+          deduped:     true
+        }};
+      }
+    }
+
     // Resolver descripción (lookup productos)
     var descripcion = String(params.descripcion || '').trim();
     if (!descripcion) {
@@ -1948,7 +1985,11 @@ function crearLoteAdhesivo(params) {
     ) || 10;
 
     var sheet = _getSheetLotesAdhesivo();
-    var idLote = 'LA' + new Date().getTime() + Math.random().toString(36).substr(2, 4).toUpperCase();
+    // [v2.13.115] idLote incluye idempotencyKey para dedupe efectivo.
+    // Si no hay idempotencyKey, fallback al patrón viejo (más débil).
+    var idLote = idempotencyKey
+      ? ('LA' + new Date().getTime() + '_' + idempotencyKey)
+      : ('LA' + new Date().getTime() + Math.random().toString(36).substr(2, 4).toUpperCase());
     var now = new Date().toISOString();
     var fila = _filaLoteAdhesivo({
       idLote:              idLote,
