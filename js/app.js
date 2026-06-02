@@ -19629,7 +19629,22 @@ const WhLoteAdhesivo = (() => {
       try { toast('Datos de lote inválidos', 'error'); } catch(_) {}
       return;
     }
-    // 1. Crear lote en backend
+
+    // [v2.13.113 OPTIMISTIC] Abrir modal de progreso INMEDIATAMENTE con
+    // estado "Iniciando…" placeholder. El operario ve feedback instantáneo
+    // mientras el backend crea el lote (que puede tardar 1-3s con red lenta).
+    _abrirModalProgreso({
+      idLote:      '',  // se completa cuando responde el backend
+      total:       total,
+      completadas: 0,
+      subJobSize:  10,  // estimación inicial (backend la confirma)
+      descripcion: opts.descripcion || '',
+      codigoBarra: cb,
+      vto:         opts.vto || ''
+    });
+    _setStatus('CREADO');
+
+    // 1. Crear lote en backend (en background, ya con modal abierto)
     let r;
     try {
       r = await API.post('crearLoteAdhesivo', {
@@ -19643,27 +19658,24 @@ const WhLoteAdhesivo = (() => {
         idempotencyKey:   'wh_lote_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
       });
     } catch (e) {
-      try { toast('Error creando lote: ' + (e?.message || ''), 'error', 5000); } catch(_) {}
+      _setStatus('PAUSADO_ERROR', 'Sin conexión al crear el lote: ' + (e?.message || ''));
       return;
     }
     if (r && r.ok === false) {
-      try { toast('Backend rechazó lote: ' + (r.error || ''), 'error', 5000); } catch(_) {}
+      _setStatus('PAUSADO_ERROR', 'Backend rechazó: ' + (r.error || 'desconocido'));
       return;
     }
-    // [v2.13.112 BUG FIX] WH API.post retorna el JSON completo {ok, data}.
-    // NO desempaca data como hace MOS. Antes leía r.idLote (undefined)
-    // → siguientes sub-jobs recibían idLote vacío → "idLote requerido".
+    // WH API.post retorna {ok, data}. NO desempaca como MOS.
     const d = r.data || r;
-    // 2. Abrir modal de progreso
-    _abrirModalProgreso({
-      idLote:      d.idLote,
-      total:       d.total,
-      completadas: 0,
-      subJobSize:  d.subJobSize,
-      descripcion: d.descripcion || opts.descripcion || '',
-      codigoBarra: cb,
-      vto:         d.vto || opts.vto || ''
-    });
+    // Re-check: usuario puede haber cancelado el modal mientras esperaba.
+    if (!_state) return;
+    // 2. Completar metadata del state con la respuesta real
+    _state.idLote      = d.idLote;
+    _state.total       = d.total || total;
+    _state.subJobSize  = d.subJobSize || 10;
+    _state.descripcion = d.descripcion || _state.descripcion;
+    _state.vto         = d.vto || _state.vto;
+    _render();
     // 3. Arrancar orquestación
     _orquestar(d.idLote);
   }
