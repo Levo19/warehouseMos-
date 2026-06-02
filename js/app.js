@@ -14472,6 +14472,8 @@ const PreingresosView = (() => {
       _editItem = { ...p };
       _renderModal(p);
       abrirSheet('sheetDetallePI');
+      // [v2.13.110] Enganchar autoguardado tras render del modal
+      setTimeout(_engancharAutoguardarMeta, 50);
     } else {
       // Aún no está en caché (recién creado) → buscar en GAS
       toast('Cargando...', 'info', 1500);
@@ -14481,6 +14483,7 @@ const PreingresosView = (() => {
           _editItem = { ...item };
           _renderModal(item);
           abrirSheet('sheetDetallePI');
+          setTimeout(_engancharAutoguardarMeta, 50);
         } else {
           toast('Preingreso no encontrado', 'warn');
         }
@@ -14580,14 +14583,175 @@ const PreingresosView = (() => {
     </div>`;
   }
 
-  async function _autoguardarCargadores() {
+  // [v2.13.110 BUG FIX] Autoguardado robusto: debounce + lock + idempotencyKey.
+  //
+  // PROBLEMA PREVIO:
+  //   Cada click en cargadores disparaba 1 API.actualizarPreingreso inmediato.
+  //   Si el operario hacía 5 clicks rápidos = 5 requests en vuelo. Las
+  //   respuestas llegaban fuera de orden → la última en llegar (puede ser
+  //   la 1ra mandada) pisaba las posteriores. Resultado: cargadores se
+  //   "borraban", aparecía el estado de hace 5 saves.
+  //   .catch(()=>{}) silenciaba errores → operario nunca enterado.
+  //
+  // FIX:
+  //   - Debounce 700ms: solo se manda 1 request después de que el operario
+  //     deja de tocar cargadores por 700ms.
+  //   - Lock _saving: si llega otro pedido mientras hay uno en vuelo, queda
+  //     pendiente; al volver el response, se dispara el último.
+  //   - idempotencyKey por sesión de edición → backend SYNC_LOG dedupea.
+  //   - Errores SÍ se muestran con toast (.catch no silencioso).
+  let _autoguardarTimer = null;
+  let _autoguardarSaving = false;
+  let _autoguardarPending = false;
+
+  function _autoguardarCargadores() {
     if (!_editItem) return;
-    const cargadores = JSON.stringify(_cargadoresEdit);
-    _editItem.cargadores = cargadores;
-    await API.actualizarPreingreso({ idPreingreso: _editItem.idPreingreso, cargadores })
-      .catch(() => {});
-    // Persistir en caché local
-    OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { cargadores });
+    clearTimeout(_autoguardarTimer);
+    _autoguardarTimer = setTimeout(_ejecutarAutoguardarCargadores, 700);
+  }
+
+  async function _ejecutarAutoguardarCargadores() {
+    if (!_editItem) return;
+    if (_autoguardarSaving) {
+      _autoguardarPending = true;  // ya hay uno en vuelo → coalescer
+      return;
+    }
+    _autoguardarSaving = true;
+    try {
+      const cargadores = JSON.stringify(_cargadoresEdit);
+      _editItem.cargadores = cargadores;
+      const idempotencyKey = 'ag_carg_' + _editItem.idPreingreso + '_' + Date.now();
+      const r = await API.actualizarPreingreso({
+        idPreingreso: _editItem.idPreingreso,
+        cargadores,
+        idempotencyKey
+      });
+      if (r && r.ok === false) {
+        try { toast('⚠ No se guardaron cargadores: ' + (r.error || ''), 'warn', 4000); } catch(_){}
+      } else {
+        OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { cargadores });
+      }
+    } catch(e) {
+      try { toast('⚠ Sin conexión al guardar cargadores', 'warn', 3500); } catch(_){}
+    } finally {
+      _autoguardarSaving = false;
+      if (_autoguardarPending) {
+        _autoguardarPending = false;
+        // Disparar el siguiente save coalescido (estado posterior del array)
+        setTimeout(_ejecutarAutoguardarCargadores, 0);
+      }
+    }
+  }
+
+  // [v2.13.110] Flush — esperá que termine cualquier autoguardado pendiente
+  // antes de continuar (uso desde guardarEdicion o al cerrar el sheet).
+  async function _flushAutoguardarCargadores() {
+    clearTimeout(_autoguardarTimer);
+    if (_autoguardarSaving || _autoguardarPending) {
+      _autoguardarPending = false;
+      // Forzar un último save con el estado actual
+      await _ejecutarAutoguardarCargadores();
+    }
+  }
+
+  // [v2.13.110 BUG FIX] Autoguardado de comentario + tags + monto.
+  //
+  // PROBLEMA PREVIO:
+  //   El comentario, los tags (Comprobante sí/no, Completo sí/no) y el monto
+  //   solo se persistían cuando el operario apretaba "GUARDAR" en el modal.
+  //   Si solo editaba cargadores (que sí tienen autoguardado) y cerraba el
+  //   sheet, el comentario tipeado se PERDÍA. El operario interpretaba
+  //   "el comentario se borró", cuando en realidad nunca llegó al backend.
+  //
+  // FIX:
+  //   - Listener oninput en textarea/inputs con debounce 1200ms
+  //   - Reconstruye el comentario completo (tags + texto libre) y lo manda
+  //   - Mismo lock/coalescing que cargadores para evitar races
+  //   - NO dispara reimpresión de aviso (eso solo en guardarEdicion explícito)
+  let _autoguardarMetaTimer = null;
+  let _autoguardarMetaSaving = false;
+  let _autoguardarMetaPending = false;
+
+  function _autoguardarMeta() {
+    if (!_editItem) return;
+    clearTimeout(_autoguardarMetaTimer);
+    _autoguardarMetaTimer = setTimeout(_ejecutarAutoguardarMeta, 1200);
+  }
+
+  async function _ejecutarAutoguardarMeta() {
+    if (!_editItem) return;
+    if (_autoguardarMetaSaving) { _autoguardarMetaPending = true; return; }
+    _autoguardarMetaSaving = true;
+    try {
+      const textoExtra = (document.getElementById('piEditComentario')?.value || '').trim();
+      const partes = [];
+      if (_tagsEdit.comp)  partes.push('Comprobante: ' + (_tagsEdit.comp === 'si' ? 'Sí' : 'No'));
+      if (_tagsEdit.compl) partes.push('Completo: ' + (_tagsEdit.compl === 'si' ? 'Sí' : 'No'));
+      if (textoExtra) partes.push(textoExtra);
+      const comentario = partes.join(' | ');
+      const monto = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto')?.value) || 0) : 0;
+      const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
+      const idempotencyKey = 'ag_meta_' + _editItem.idPreingreso + '_' + Date.now();
+      const r = await API.actualizarPreingreso({
+        idPreingreso: _editItem.idPreingreso,
+        idProveedor, monto, comentario,
+        idempotencyKey
+      });
+      if (r && r.ok === false) {
+        try { toast('⚠ No se guardó la edición: ' + (r.error || ''), 'warn', 4000); } catch(_){}
+      } else {
+        _editItem.comentario = comentario;
+        _editItem.monto = monto;
+        _editItem.idProveedor = idProveedor;
+        OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { comentario, monto, idProveedor });
+      }
+    } catch(e) {
+      try { toast('⚠ Sin conexión al autoguardar edición', 'warn', 3500); } catch(_){}
+    } finally {
+      _autoguardarMetaSaving = false;
+      if (_autoguardarMetaPending) {
+        _autoguardarMetaPending = false;
+        setTimeout(_ejecutarAutoguardarMeta, 0);
+      }
+    }
+  }
+
+  async function _flushAutoguardarMeta() {
+    clearTimeout(_autoguardarMetaTimer);
+    if (_autoguardarMetaSaving || _autoguardarMetaPending) {
+      _autoguardarMetaPending = false;
+      await _ejecutarAutoguardarMeta();
+    }
+  }
+
+  // Listeners de input — se enganchan cuando abrimos el sheet de edición.
+  function _engancharAutoguardarMeta() {
+    const com   = document.getElementById('piEditComentario');
+    const monto = document.getElementById('piEditMonto');
+    const prov  = document.getElementById('piEditProv');
+    if (com   && !com._whAuto)   {
+      com.addEventListener('input',  _autoguardarMeta);
+      com.addEventListener('blur',   () => { _flushAutoguardarMeta(); });
+      com._whAuto   = 1;
+    }
+    if (monto && !monto._whAuto) {
+      monto.addEventListener('input', _autoguardarMeta);
+      monto.addEventListener('blur',  () => { _flushAutoguardarMeta(); });
+      monto._whAuto = 1;
+    }
+    if (prov  && !prov._whAuto)  {
+      prov.addEventListener('change', _autoguardarMeta);
+      prov._whAuto  = 1;
+    }
+    // Overlay: si el operario clickea fuera del sheet, flush antes de cerrar.
+    const overlay = document.getElementById('overlayDetallePI');
+    if (overlay && !overlay._whAuto) {
+      overlay.addEventListener('click', () => {
+        _flushAutoguardarMeta();
+        _flushAutoguardarCargadores();
+      });
+      overlay._whAuto = 1;
+    }
   }
 
   // [v2.13.3] LEGACY compat — alias para HTML cacheado viejo
@@ -14802,6 +14966,12 @@ const PreingresosView = (() => {
   // ── Guardar edición (optimista) ──────────────────────────
   async function guardarEdicion() {
     if (!_editItem) return;
+
+    // [v2.13.110] Flush autoguardados pendientes ANTES de guardar.
+    // Garantiza que cualquier debounce en cola se ejecute primero, evitando
+    // que un save manual se contradiga con un autoguardado tardío.
+    try { await _flushAutoguardarMeta(); } catch(_){}
+    try { await _flushAutoguardarCargadores(); } catch(_){}
 
     // Capturar datos y estado antes de cerrar
     const idPreingreso  = _editItem.idPreingreso;

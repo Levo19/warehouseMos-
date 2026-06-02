@@ -150,6 +150,10 @@ const OfflineManager = (() => {
   }
 
   function guardar(key, data) {
+    // [v2.13.110] Invalidar cache de parseo ANTES de escribir — garantiza
+    // que cualquier read concurrente que ocurra entre la invalidación y
+    // el setItem caiga al miss y refresque.
+    _invalidarParseCache(key);
     try { localStorage.setItem(key, _serializar({ data, ts: Date.now() })); }
     catch(e) {
       // [v2.13.98 BUG CRITICO FIX] Cleanup en 2 fases preserva trabajo en progreso.
@@ -263,12 +267,36 @@ const OfflineManager = (() => {
     }
   }
 
+  // [v2.13.110] CACHE de parseo. Antes cada cargar() descomprimía LZ-String
+  // + JSON.parse cada vez → para wh_productos (~150KB comprimido), eso es
+  // 50-150ms por llamada. Si una vista llama getProductosCache() + getStockCache()
+  // + getEquivalenciasCache() varias veces en un cambio de módulo, se acumulan
+  // a >1s + lag visible.
+  //
+  // Estrategia: cachear el resultado parseado con su timestamp. La entrada se
+  // invalida cuando guardar() escribe esa key (writes son monotónicos).
+  // TTL de 15s como seguro adicional contra staleness en edge cases.
+  const _parseCache = new Map();   // key → { data, ts }
+  const _PARSE_TTL_MS = 15000;
+
   function cargar(key) {
-    // [v2.13.102] Lee plain o comprimido transparentemente. Back-compat
-    // con entradas pre-LZ.
+    // 1. Hit en cache de parseo
+    const cached = _parseCache.get(key);
+    if (cached && (Date.now() - cached.ts) < _PARSE_TTL_MS) {
+      return cached.data;
+    }
+    // 2. Miss → descomprimir + parsear
     const raw = localStorage.getItem(key);
     const obj = _deserializar(raw);
-    return obj ? obj.data : null;
+    const data = obj ? obj.data : null;
+    if (data !== null) _parseCache.set(key, { data, ts: Date.now() });
+    return data;
+  }
+
+  // Invalidar cache de parseo cuando guardar() escribe. Esto es el contrato
+  // que garantiza que cargar() después de guardar() vea el dato nuevo.
+  function _invalidarParseCache(key) {
+    _parseCache.delete(key);
   }
 
   // ── Precarga de datos de referencia ──────────────────────
