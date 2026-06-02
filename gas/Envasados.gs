@@ -1868,10 +1868,14 @@ function _filaLoteAdhesivo(patch) {
 }
 
 // Busca el rowIndex (1-based) de un lote por idLote. -1 si no existe.
+// [v2.13.109 AUDIT FIX #4] Protección sheet vacía: getRange('A2:A') falla
+// con "Row 2 invalid" en algunos casos cuando lastRow=1. Verificamos primero.
 function _findLoteRow(sheet, idLote) {
-  var data = sheet.getRange('A2:A').getValues();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return -1;
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
   for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0]) === String(idLote)) return i + 2;  // +2 = header + 0-based
+    if (String(data[i][0]) === String(idLote)) return i + 2;
   }
   return -1;
 }
@@ -2049,18 +2053,19 @@ function imprimirSubLoteAdhesivo(params) {
     var allEnv = _getAllEnvasablesTokens();
     var bytes = _buildTSPLEtqConGapDetect(producto, fechaParaCalc, qty, allEnv, requireGapDetect);
 
-    // Convertir a base64 para PrintNode
-    var binStr = '';
-    for (var i = 0; i < bytes.length; i++) binStr += String.fromCharCode(bytes[i] & 0xFF);
-    var b64 = Utilities.base64Encode(binStr);
-
-    // Mandar a PrintNode
+    // [v2.13.109 AUDIT FIX #1] Pasar byte array DIRECTO a base64Encode.
+    // El intento previo con String.fromCharCode + base64Encode(string)
+    // expandía bytes >127 como UTF-8 (2 bytes), corrompiendo el bitmap.
+    // Utilities.base64Encode(Byte[]) acepta el array crudo. Mismo método
+    // que usa el _imprimirEtiquetasEnvasado legacy que funciona.
     var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
     if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
+    var b64 = Utilities.base64Encode(bytes);
+    var auth = 'Basic ' + Utilities.base64Encode(apiKey + ':');
 
     var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
       method: 'post',
-      headers: { 'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':') },
+      headers: { 'Authorization': auth },
       contentType: 'application/json',
       payload: JSON.stringify({
         printerId: parseInt(lote.printerId),
@@ -2075,17 +2080,50 @@ function imprimirSubLoteAdhesivo(params) {
     var code = resp.getResponseCode();
     if (code !== 201) {
       var errTxt = resp.getContentText();
-      // Detectar OUT_OF_PAPER vs otros errores. PrintNode reporta varios códigos.
-      var lowErr = String(errTxt).toLowerCase();
-      var esOutOfPaper = lowErr.indexOf('paper') >= 0 || lowErr.indexOf('media') >= 0;
       _patchLote(sheet, rowIdx, {
-        status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR',
+        status:      'PAUSADO_ERROR',
         ultimoError: 'PrintNode HTTP ' + code + ': ' + errTxt.substring(0, 200)
       });
-      return { ok: false, error: 'PrintNode HTTP ' + code, detalle: errTxt, status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR' };
+      return { ok: false, error: 'PrintNode HTTP ' + code, detalle: errTxt, status: 'PAUSADO_ERROR' };
     }
 
     var printNodeJobId = JSON.parse(resp.getContentText());
+
+    // [v2.13.109 AUDIT FIX #3] Polling al estado del job para detectar
+    // OUT_OF_PAPER REAL. PrintNode retorna 201 apenas el job entra a la
+    // cola; el OUT_OF_PAPER se descubre cuando la impresora intenta
+    // ejecutar. Sin este polling el backend creía que TODO se imprimió.
+    //
+    // Strategy: polling cada 2s hasta done/error/timeout 25s.
+    // Estados PrintNode: new → downloading → printing → done / error / expired
+    var pollResult = _esperarFinJobPrintNode(printNodeJobId, auth, 25000, 2000);
+
+    if (pollResult.estado === 'error') {
+      var msg = String(pollResult.mensaje || '').toLowerCase();
+      var esOutOfPaper = msg.indexOf('paper') >= 0
+                      || msg.indexOf('media') >= 0
+                      || msg.indexOf('label') >= 0
+                      || msg.indexOf('out of') >= 0;
+      _patchLote(sheet, rowIdx, {
+        status:               esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR',
+        ultimoError:          pollResult.mensaje || 'Error en job ' + printNodeJobId,
+        ultimoPrintNodeJobId: String(printNodeJobId)
+      });
+      return {
+        ok:     false,
+        error:  pollResult.mensaje || 'Error de impresión',
+        status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR'
+      };
+    }
+
+    if (pollResult.estado === 'timeout') {
+      // No tuvimos confirmación en 25s. Asumimos que sigue procesando.
+      // Marcamos como impreso optimista pero registramos warning.
+      // Si el siguiente sub-job falla por OUT_OF_PAPER, el operario reanuda.
+      Logger.log('[Lote ' + idLote + '] timeout polling job ' + printNodeJobId + ', estado: ' + pollResult.ultimoEstado);
+    }
+
+    // Estado = done (o timeout asumido OK) → contar como impreso
     var nuevasCompletadas = lote.completadas + qty;
     var nuevoStatus = nuevasCompletadas >= lote.totalEtq ? 'COMPLETADO' : 'IMPRIMIENDO';
 
@@ -2097,17 +2135,63 @@ function imprimirSubLoteAdhesivo(params) {
     });
 
     return { ok: true, data: {
-      idLote:         idLote,
-      completadas:    nuevasCompletadas,
-      total:          lote.totalEtq,
-      status:         nuevoStatus,
-      qtyImpresa:     qty,
-      printNodeJobId: printNodeJobId,
-      gapDetectAplicado: requireGapDetect
+      idLote:            idLote,
+      completadas:       nuevasCompletadas,
+      total:             lote.totalEtq,
+      status:            nuevoStatus,
+      qtyImpresa:        qty,
+      printNodeJobId:    printNodeJobId,
+      gapDetectAplicado: requireGapDetect,
+      pollEstado:        pollResult.estado
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };
   }
+}
+
+// Helper [v2.13.109] — polling al estado de un job PrintNode.
+// Retorna { estado: 'done'|'error'|'timeout', mensaje, ultimoEstado }
+// 'done'    → impresión confirmada exitosa
+// 'error'   → PrintNode/impresora reportó error (mensaje contiene detalles)
+// 'timeout' → no tuvimos confirmación en maxWaitMs (asumir impresión OK provisional)
+function _esperarFinJobPrintNode(jobId, auth, maxWaitMs, pollIntervalMs) {
+  var startMs = new Date().getTime();
+  var ultimoEstado = 'new';
+  var ultimoMensaje = '';
+  while (new Date().getTime() - startMs < maxWaitMs) {
+    Utilities.sleep(pollIntervalMs);
+    try {
+      var resp = UrlFetchApp.fetch(
+        'https://api.printnode.com/printjobs/' + jobId + '/states',
+        { headers: { 'Authorization': auth }, muteHttpExceptions: true }
+      );
+      if (resp.getResponseCode() !== 200) continue;
+      var body = JSON.parse(resp.getContentText());
+      // El endpoint devuelve array de arrays: [[ { state, message, ... }, ... ]]
+      // o array de objetos según versión. Aplanamos.
+      var events = [];
+      if (Array.isArray(body)) {
+        body.forEach(function(b) {
+          if (Array.isArray(b)) events = events.concat(b);
+          else events.push(b);
+        });
+      }
+      if (events.length === 0) continue;
+      var ultimo = events[events.length - 1];
+      ultimoEstado  = String(ultimo.state || '').toLowerCase();
+      ultimoMensaje = String(ultimo.message || ultimo.data || '');
+      if (ultimoEstado === 'done') {
+        return { estado: 'done', mensaje: '', ultimoEstado: ultimoEstado };
+      }
+      if (ultimoEstado === 'error' || ultimoEstado === 'expired') {
+        return { estado: 'error', mensaje: ultimoMensaje, ultimoEstado: ultimoEstado };
+      }
+      // new/queued/downloading/printing → seguir esperando
+    } catch (e) {
+      Logger.log('[_esperarFinJobPrintNode] error: ' + e.message);
+    }
+  }
+  return { estado: 'timeout', mensaje: 'sin confirmación en ' + maxWaitMs + 'ms', ultimoEstado: ultimoEstado };
 }
 
 // Helper — convierte vto string ("ENE/2027") a Date de envasado (= vto - 1 año)
@@ -2214,6 +2298,106 @@ function cancelarLoteAdhesivo(params) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// diagnosticoLotesAdhesivo — corre desde editor GAS
+// Verifica todo lo que necesita el sistema de lotes. Imprime un informe
+// en Logger con check ✓/✗ para cada componente.
+// ────────────────────────────────────────────────────────────────────
+function diagnosticoLotesAdhesivo() {
+  var L = function(m) { Logger.log(m); };
+  var ok = true;
+  L('═══════ DIAGNOSTICO LOTES ADHESIVO ═══════');
+  L('Fecha: ' + new Date().toLocaleString());
+  L('');
+
+  // 1. Sheet LOTES_ADHESIVO
+  L('1. Sheet LOTES_ADHESIVO');
+  var sheet = getSpreadsheet().getSheetByName('LOTES_ADHESIVO');
+  if (sheet) {
+    var hdrs = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var faltan = LOTES_ADHESIVO_HEADERS.filter(function(h){ return hdrs.indexOf(h) < 0; });
+    if (faltan.length === 0) {
+      L('   [OK] sheet existe con ' + LOTES_ADHESIVO_HEADERS.length + ' headers');
+      L('   filas existentes: ' + Math.max(0, sheet.getLastRow() - 1));
+    } else {
+      L('   [WARN] faltan headers: ' + faltan.join(', '));
+      L('   solucion: ejecutar setupLotesAdhesivo()');
+      ok = false;
+    }
+  } else {
+    L('   [FAIL] sheet no existe');
+    L('   solucion: ejecutar setupLotesAdhesivo()');
+    ok = false;
+  }
+  L('');
+
+  // 2. PRINTNODE_API_KEY
+  L('2. PRINTNODE_API_KEY (Script Properties)');
+  var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+  if (apiKey) {
+    L('   [OK] configurada (' + apiKey.length + ' chars)');
+  } else {
+    L('   [FAIL] no configurada');
+    L('   solucion: Editor GAS > Configuracion del Proyecto > Properties');
+    L('             agregar PRINTNODE_API_KEY con la API key de PrintNode');
+    ok = false;
+  }
+  L('');
+
+  // 3. Printer ADHESIVO/ALMACEN
+  L('3. Printer ADHESIVO/ALMACEN (sheet IMPRESORAS de MOS)');
+  try {
+    var printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN');
+    L('   [OK] printerId = ' + printerId);
+  } catch (e) {
+    L('   [FAIL] no encontrada: ' + e.message);
+    L('   solucion: en hoja IMPRESORAS de MOS, agregar fila con');
+    L('             tipo=ADHESIVO  idZona=ALMACEN  activo=1  printNodeId=<el id>');
+    ok = false;
+  }
+  L('');
+
+  // 4. Properties opcionales con sus valores
+  L('4. Properties opcionales (defaults entre parentesis)');
+  var props = PropertiesService.getScriptProperties();
+  var opcionales = [
+    ['ADHESIVO_SUB_JOB_SIZE', '10'],
+    ['ADHESIVO_GAP_MM',       '2'],
+    ['ADHESIVO_DENSITY',      '8'],
+    ['ADHESIVO_SPEED',        '4'],
+    ['ADHESIVO_OFFSET_Y',     '0']
+  ];
+  opcionales.forEach(function(p) {
+    var v = props.getProperty(p[0]);
+    if (v === null || v === '') {
+      L('   ' + p[0] + ' = (default ' + p[1] + ')');
+    } else {
+      L('   ' + p[0] + ' = ' + v + '   (override del default ' + p[1] + ')');
+    }
+  });
+  L('');
+
+  // 5. Lotes recientes (ultimos 5)
+  L('5. Lotes en sheet (ultimos 5)');
+  try {
+    var rows = _sheetToObjects(_getSheetLotesAdhesivo()).slice(-5).reverse();
+    if (rows.length === 0) {
+      L('   (vacia, no se ha creado ningun lote todavia)');
+    } else {
+      rows.forEach(function(r) {
+        L('   ' + r.idLote + ' | ' + r.status + ' | ' + r.completadas + '/' + r.totalEtq +
+          ' | ' + r.codigoBarra + ' | ' + (r.fechaCreacion || '').substring(0, 16));
+      });
+    }
+  } catch (e) {
+    L('   (sheet vacia o error: ' + e.message + ')');
+  }
+  L('');
+
+  L('═══════ RESULTADO: ' + (ok ? 'TODO OK ✓' : 'HAY ITEMS PENDIENTES — ver arriba') + ' ═══════');
+  return { ok: ok };
 }
 
 // ────────────────────────────────────────────────────────────────────

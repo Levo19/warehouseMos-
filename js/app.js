@@ -19480,11 +19480,14 @@ const WhLoteAdhesivo = (() => {
     if (!_state || _state.idLote !== idLote) return;
     if (_state.orquestando) return;
     _state.orquestando = true;
-    const requireGapDetect = !!(runOpts && runOpts.requireGapDetect);
+    // [v2.13.109 AUDIT FIX #2] requireGapDetect debe consumirse SOLO en el
+    // primer ciclo. Antes era const → todos los sub-jobs subsiguientes
+    // hacían GAPDETECT también, perdiendo ~1 etq por cada 10.
+    let pendingGapDetect = !!(runOpts && runOpts.requireGapDetect);
     try {
       while (_state && _state.idLote === idLote) {
         if (['CANCELADO','COMPLETADO','PAUSADO_USUARIO','PAUSADO_OUT_PAPER','PAUSADO_ERROR'].indexOf(_state.status) >= 0) break;
-        const necesitaCal = requireGapDetect || _state.completadas === 0 || _state.status === 'PAUSADO_OUT_PAPER';
+        const necesitaCal = pendingGapDetect || _state.completadas === 0;
         if (necesitaCal) _setStatus('CALIBRANDO');
         let r;
         try {
@@ -19492,6 +19495,7 @@ const WhLoteAdhesivo = (() => {
             idLote:           idLote,
             requireGapDetect: necesitaCal
           });
+          if (necesitaCal) pendingGapDetect = false;
         } catch (e) {
           _setStatus('PAUSADO_ERROR', 'Sin conexión: ' + (e?.message || ''));
           break;
