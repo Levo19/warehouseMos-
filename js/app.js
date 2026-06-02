@@ -14613,23 +14613,25 @@ const PreingresosView = (() => {
   async function _ejecutarAutoguardarCargadores() {
     if (!_editItem) return;
     if (_autoguardarSaving) {
-      _autoguardarPending = true;  // ya hay uno en vuelo → coalescer
+      _autoguardarPending = true;
       return;
     }
     _autoguardarSaving = true;
+    // [v2.13.111 AUDIT FIX C] Capturar idPreingreso antes del await.
+    const idPreingreso = _editItem.idPreingreso;
     try {
       const cargadores = JSON.stringify(_cargadoresEdit);
-      _editItem.cargadores = cargadores;
-      const idempotencyKey = 'ag_carg_' + _editItem.idPreingreso + '_' + Date.now();
+      const idempotencyKey = 'ag_carg_' + idPreingreso + '_' + Date.now();
       const r = await API.actualizarPreingreso({
-        idPreingreso: _editItem.idPreingreso,
-        cargadores,
-        idempotencyKey
+        idPreingreso, cargadores, idempotencyKey
       });
       if (r && r.ok === false) {
         try { toast('⚠ No se guardaron cargadores: ' + (r.error || ''), 'warn', 4000); } catch(_){}
       } else {
-        OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { cargadores });
+        OfflineManager.patchPreingresosCache(idPreingreso, { cargadores });
+        if (_editItem && _editItem.idPreingreso === idPreingreso) {
+          _editItem.cargadores = cargadores;
+        }
       }
     } catch(e) {
       try { toast('⚠ Sin conexión al guardar cargadores', 'warn', 3500); } catch(_){}
@@ -14637,21 +14639,21 @@ const PreingresosView = (() => {
       _autoguardarSaving = false;
       if (_autoguardarPending) {
         _autoguardarPending = false;
-        // Disparar el siguiente save coalescido (estado posterior del array)
         setTimeout(_ejecutarAutoguardarCargadores, 0);
       }
     }
   }
 
-  // [v2.13.110] Flush — esperá que termine cualquier autoguardado pendiente
-  // antes de continuar (uso desde guardarEdicion o al cerrar el sheet).
+  // [v2.13.111 AUDIT FIX D] Flush REAL — espera al save en curso antes
+  // de lanzar el siguiente con el estado actual.
   async function _flushAutoguardarCargadores() {
     clearTimeout(_autoguardarTimer);
-    if (_autoguardarSaving || _autoguardarPending) {
-      _autoguardarPending = false;
-      // Forzar un último save con el estado actual
-      await _ejecutarAutoguardarCargadores();
+    const MAX_ESPERA_MS = 8000;
+    const ini = Date.now();
+    while (_autoguardarSaving && (Date.now() - ini) < MAX_ESPERA_MS) {
+      await new Promise(res => setTimeout(res, 60));
     }
+    if (_editItem) await _ejecutarAutoguardarCargadores();
   }
 
   // [v2.13.110 BUG FIX] Autoguardado de comentario + tags + monto.
@@ -14682,6 +14684,10 @@ const PreingresosView = (() => {
     if (!_editItem) return;
     if (_autoguardarMetaSaving) { _autoguardarMetaPending = true; return; }
     _autoguardarMetaSaving = true;
+    // [v2.13.111 AUDIT FIX C] Capturar idPreingreso ANTES del await.
+    // Después del await, _editItem puede haber sido nulleado por
+    // cerrarDetalle/abrir otro preingreso → crash 'Cannot read of null'.
+    const idPreingreso = _editItem.idPreingreso;
     try {
       const textoExtra = (document.getElementById('piEditComentario')?.value || '').trim();
       const partes = [];
@@ -14691,19 +14697,23 @@ const PreingresosView = (() => {
       const comentario = partes.join(' | ');
       const monto = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto')?.value) || 0) : 0;
       const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
-      const idempotencyKey = 'ag_meta_' + _editItem.idPreingreso + '_' + Date.now();
+      const idempotencyKey = 'ag_meta_' + idPreingreso + '_' + Date.now();
       const r = await API.actualizarPreingreso({
-        idPreingreso: _editItem.idPreingreso,
-        idProveedor, monto, comentario,
+        idPreingreso, idProveedor, monto, comentario,
         idempotencyKey
       });
       if (r && r.ok === false) {
         try { toast('⚠ No se guardó la edición: ' + (r.error || ''), 'warn', 4000); } catch(_){}
       } else {
-        _editItem.comentario = comentario;
-        _editItem.monto = monto;
-        _editItem.idProveedor = idProveedor;
-        OfflineManager.patchPreingresosCache(_editItem.idPreingreso, { comentario, monto, idProveedor });
+        // Patch del cache local siempre (sobrevive al cierre del modal).
+        OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor });
+        // Sincronizar _editItem solo si SIGUE siendo el mismo preingreso
+        // (el operario puede haber cambiado a otro durante el await).
+        if (_editItem && _editItem.idPreingreso === idPreingreso) {
+          _editItem.comentario = comentario;
+          _editItem.monto = monto;
+          _editItem.idProveedor = idProveedor;
+        }
       }
     } catch(e) {
       try { toast('⚠ Sin conexión al autoguardar edición', 'warn', 3500); } catch(_){}
@@ -14716,12 +14726,20 @@ const PreingresosView = (() => {
     }
   }
 
+  // [v2.13.111 AUDIT FIX D] Flush REAL — espera a que el save en curso
+  // termine antes de lanzar el siguiente con el estado actual. La versión
+  // anterior llamaba _ejecutarAutoguardarMeta que detectaba _saving=true
+  // y volvía sin esperar → guardarEdicion creía haber flusheado pero no.
   async function _flushAutoguardarMeta() {
     clearTimeout(_autoguardarMetaTimer);
-    if (_autoguardarMetaSaving || _autoguardarMetaPending) {
-      _autoguardarMetaPending = false;
-      await _ejecutarAutoguardarMeta();
+    const MAX_ESPERA_MS = 8000;
+    const ini = Date.now();
+    // Esperar a que termine cualquier save en curso (max 8s).
+    while (_autoguardarMetaSaving && (Date.now() - ini) < MAX_ESPERA_MS) {
+      await new Promise(res => setTimeout(res, 60));
     }
+    // Ahora ejecutar UN último save con el estado actual.
+    if (_editItem) await _ejecutarAutoguardarMeta();
   }
 
   // Listeners de input — se enganchan cuando abrimos el sheet de edición.

@@ -237,8 +237,16 @@ const OfflineManager = (() => {
         // Fase 1: TIER1 por edad
         let liberadosT1 = 0;
         const candidatosT1 = _ordenarPorEdad(TIER1);
+        // [v2.13.111 AUDIT FIX A] Invalidar también el cache de parseo
+        // cuando borramos del localStorage en el cleanup. Sin esto las
+        // próximas cargar(k) devolvían dato viejo hasta TTL 15s, aunque
+        // localStorage ya estuviera vacío para esa key.
         for (const { k } of candidatosT1) {
-          try { localStorage.removeItem(k); liberadosT1++; } catch(_){}
+          try {
+            localStorage.removeItem(k);
+            if (typeof _invalidarParseCache === 'function') _invalidarParseCache(k);
+            liberadosT1++;
+          } catch(_){}
           if (_intentarGuardar()) {
             console.log('[Offline] ✓ guardado tras liberar ' + liberadosT1 + ' TIER1 viejos:', key);
             return;
@@ -249,7 +257,11 @@ const OfflineManager = (() => {
         let liberadosT2 = 0;
         const candidatosT2 = _ordenarPorEdad(TIER2);
         for (const { k } of candidatosT2) {
-          try { localStorage.removeItem(k); liberadosT2++; } catch(_){}
+          try {
+            localStorage.removeItem(k);
+            if (typeof _invalidarParseCache === 'function') _invalidarParseCache(k);
+            liberadosT2++;
+          } catch(_){}
           if (_intentarGuardar()) {
             console.log('[Offline] ✓ guardado tras liberar ' + liberadosT2 + ' TIER2:', key);
             return;
@@ -297,6 +309,16 @@ const OfflineManager = (() => {
   // que garantiza que cargar() después de guardar() vea el dato nuevo.
   function _invalidarParseCache(key) {
     _parseCache.delete(key);
+  }
+
+  // [v2.13.111 AUDIT FIX B] Cross-tab invalidation.
+  // Si otra pestaña/ventana de la app escribe localStorage, el `storage` event
+  // dispara en TODAS las demás (no en la que escribió). Invalidamos su cache
+  // para que la próxima cargar() vea el dato nuevo escrito por la otra tab.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (e) => {
+      if (e.key && e.key.startsWith('wh_')) _invalidarParseCache(e.key);
+    });
   }
 
   // ── Precarga de datos de referencia ──────────────────────
