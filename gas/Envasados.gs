@@ -1923,17 +1923,16 @@ function crearLoteAdhesivo(params) {
     // el lote existente sin crear duplicado.
     var idempotencyKey = String(params.idempotencyKey || '').trim();
     if (idempotencyKey) {
+      // [v2.13.117 AUDIT FIX] endsWith en lugar de indexOf para evitar
+      // false positives con idempotencyKeys que coincidan parcialmente
+      // con sufijos aleatorios de otro idLote.
+      // Patrón: idLote = LA<timestamp>_<idempotencyKey>
       var sheetCheck = _getSheetLotesAdhesivo();
       var allRows = _sheetToObjects(sheetCheck);
-      var dup = allRows.find(function(r) {
-        return String(r.idLote || '').endsWith('_' + idempotencyKey)
-            || String(r.ultimoError || '').indexOf(idempotencyKey) >= 0;
-      });
-      // Más confiable: usar idempotencyKey como SUFIJO del idLote para que
-      // el lookup sea barato. Generamos idLote = LA<timestamp>_<idempotencyKey>.
-      // Buscar lote existente con ese sufijo:
+      var sufijo = '_' + idempotencyKey;
       var found = allRows.find(function(r) {
-        return String(r.idLote || '').indexOf(idempotencyKey) >= 0;
+        var id = String(r.idLote || '');
+        return id.length >= sufijo.length && id.substring(id.length - sufijo.length) === sufijo;
       });
       if (found) {
         // Lote ya existe — retornarlo en lugar de crear duplicado.

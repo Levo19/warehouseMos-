@@ -8366,8 +8366,15 @@ function _fmtDiaLabel(yyyymmdd) {
 }
 
 // Hora 'HH:mm' desde un timestamp string o Date.
+// [v2.13.117 AUDIT FIX] Solo mostrar hora si la fecha tiene componente
+// de tiempo. Si es solo "2026-06-02", new Date() la parsea como UTC
+// midnight → en zona horaria local muestra 19:00 (Perú) o 21:00 (AR)
+// — hora basura. Mejor no mostrar nada.
 function _fmtHora(fechaTs) {
   if (!fechaTs) return '';
+  const s = String(fechaTs);
+  // Solo procesar si tiene 'T' (ISO) o ' ' (date+time space-separated) o ':' (HH:MM)
+  if (s.indexOf('T') < 0 && s.indexOf(' ') < 0 && s.indexOf(':') < 0) return '';
   const d = fechaTs instanceof Date ? fechaTs : new Date(fechaTs);
   if (isNaN(d.getTime())) return '';
   const hh = String(d.getHours()).padStart(2, '0');
@@ -8789,11 +8796,12 @@ const EnvasadosView = (() => {
     }).then(res => {
       if (!res || res.ok === false) {
         _rollbackOptimista(res?.error || 'Error desconocido');
-        // [v2.13.115] Si el envasado falló, cancelar el lote optimista
+        // [v2.13.115/117] Si el envasado falló, cancelar el lote optimista
         // que disparamos en paralelo, para evitar imprimir etiquetas de
-        // un envasado que no se registró.
+        // un envasado que no se registró. Usar cancelarSilencioso para
+        // NO mostrar confirm al usuario (rollback automático).
         if (imprimir) {
-          try { WhLoteAdhesivo.cancelar(); } catch(_) {}
+          try { WhLoteAdhesivo.cancelarSilencioso('Envasado no se registró'); } catch(_) {}
         }
         return;
       }
@@ -19990,7 +19998,7 @@ const WhLoteAdhesivo = (() => {
     return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  return { crearYEjecutar, continuar, cancelar, cerrar };
+  return { crearYEjecutar, continuar, cancelar, cancelarSilencioso, cerrar };
 })();
 
 // ════════════════════════════════════════════════
