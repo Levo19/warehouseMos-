@@ -1775,3 +1775,468 @@ function configurarTriggerResumenEnvasados() {
   Logger.log('[Trigger] ' + TRG + ' configurado · diario 20:00');
   return { ok: true };
 }
+
+
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.108] SISTEMA DE LOTES DE IMPRESIÓN DE ADHESIVOS
+// ════════════════════════════════════════════════════════════════════
+//
+// MOTIVACIÓN — Drift acumulativo en impresoras térmicas TSC:
+//   Cuando se imprimen muchos adhesivos seguidos en jobs separados, cada
+//   feed acumula un error de ~0.1mm por la diferencia entre el GAP
+//   configurado y el GAP real del rollo. En 200 prints = ~20mm de drift,
+//   suficiente para que la última etiqueta salga por la mitad.
+//
+// ARQUITECTURA — Lotes con sub-jobs:
+//   Un "lote" representa un pedido del usuario (ej "200 adhesivos de COCO").
+//   Se divide en sub-jobs de N=10 etiquetas cada uno (config en spec.json).
+//   Cada sub-job es un job PrintNode independiente, lo que permite:
+//     1. Tracking exacto de progreso (10/200, 20/200, ...)
+//     2. Detección de OUT_OF_PAPER por error en sub-job
+//     3. Reanudación limpia con GAPDETECT al cambiar rollo
+//     4. Drift entre sub-jobs ~0 (mismo rollo, no se necesita re-cal)
+//
+// GAPDETECT — Cuándo se aplica:
+//   - Al inicio del primer sub-job de cada lote (calibra al rollo actual)
+//   - Al reanudar después de OUT_OF_PAPER (rollo nuevo)
+//   - NO entre sub-jobs del mismo rollo (innecesario, cuesta 1 etiqueta)
+//
+// FRONTEND ORQUESTA — Backend stateless:
+//   El frontend manda 1 sub-job a la vez, espera respuesta, manda el
+//   siguiente. Esto evita los timeouts de GAS (max 6min) y da control
+//   fino del flujo. La sheet LOTES_ADHESIVO actúa como source of truth.
+//
+// SHEET LOTES_ADHESIVO — Columnas:
+//   idLote · fechaCreacion · fechaUltimoUpdate · usuario · origen
+//   codigoBarra · descripcion · vto · totalEtq · completadas · subJobSize
+//   status · ultimoError · ultimoPrintNodeJobId · printerId
+//
+// ESTADOS:
+//   CREADO · CALIBRANDO · IMPRIMIENDO · PAUSADO_USUARIO
+//   PAUSADO_OUT_PAPER · PAUSADO_ERROR · COMPLETADO · CANCELADO
+
+var LOTES_ADHESIVO_HEADERS = [
+  'idLote', 'fechaCreacion', 'fechaUltimoUpdate', 'usuario', 'origen',
+  'codigoBarra', 'descripcion', 'vto', 'totalEtq', 'completadas',
+  'subJobSize', 'status', 'ultimoError', 'ultimoPrintNodeJobId', 'printerId'
+];
+
+// Setup idempotente — crea sheet si no existe, agrega columnas faltantes.
+// Llamar UNA VEZ desde editor GAS o cuando se cambien los headers.
+function setupLotesAdhesivo() {
+  var ss = getSpreadsheet();
+  var sheet = ss.getSheetByName('LOTES_ADHESIVO');
+  if (!sheet) {
+    sheet = ss.insertSheet('LOTES_ADHESIVO');
+    sheet.getRange(1, 1, 1, LOTES_ADHESIVO_HEADERS.length)
+         .setValues([LOTES_ADHESIVO_HEADERS])
+         .setFontWeight('bold').setBackground('#1e293b').setFontColor('#fbbf24');
+    sheet.setFrozenRows(1);
+    // Cols string que deben preservar ceros a la izq (codigoBarra)
+    sheet.getRange('F:F').setNumberFormat('@');  // codigoBarra
+    sheet.getRange('A:A').setNumberFormat('@');  // idLote
+    Logger.log('[setupLotesAdhesivo] sheet creada');
+  } else {
+    // Verificar que tenga todas las columnas; si faltan, agregarlas al final
+    var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    var missing = LOTES_ADHESIVO_HEADERS.filter(function(h) { return existing.indexOf(h) < 0; });
+    if (missing.length) {
+      var startCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, startCol, 1, missing.length).setValues([missing]);
+      Logger.log('[setupLotesAdhesivo] agregadas columnas: ' + missing.join(', '));
+    }
+  }
+  return { ok: true, headers: LOTES_ADHESIVO_HEADERS };
+}
+
+function _getSheetLotesAdhesivo() {
+  var sheet = getSheet('LOTES_ADHESIVO');
+  if (!sheet) {
+    setupLotesAdhesivo();
+    sheet = getSheet('LOTES_ADHESIVO');
+  }
+  return sheet;
+}
+
+// Construye un objeto fila desde un patch + valores existentes, en el
+// orden EXACTO de LOTES_ADHESIVO_HEADERS para evitar columnas desfasadas.
+function _filaLoteAdhesivo(patch) {
+  return LOTES_ADHESIVO_HEADERS.map(function(h) {
+    var v = patch[h];
+    return v === undefined ? '' : v;
+  });
+}
+
+// Busca el rowIndex (1-based) de un lote por idLote. -1 si no existe.
+function _findLoteRow(sheet, idLote) {
+  var data = sheet.getRange('A2:A').getValues();
+  for (var i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === String(idLote)) return i + 2;  // +2 = header + 0-based
+  }
+  return -1;
+}
+
+function _readLote(sheet, rowIndex) {
+  var values = sheet.getRange(rowIndex, 1, 1, LOTES_ADHESIVO_HEADERS.length).getValues()[0];
+  var obj = {};
+  LOTES_ADHESIVO_HEADERS.forEach(function(h, i) { obj[h] = values[i]; });
+  // Numéricos como Number
+  obj.totalEtq    = parseInt(obj.totalEtq) || 0;
+  obj.completadas = parseInt(obj.completadas) || 0;
+  obj.subJobSize  = parseInt(obj.subJobSize) || 10;
+  return obj;
+}
+
+function _patchLote(sheet, rowIndex, patch) {
+  patch.fechaUltimoUpdate = new Date().toISOString();
+  // Actualizar solo las columnas que vienen en patch
+  Object.keys(patch).forEach(function(k) {
+    var colIdx = LOTES_ADHESIVO_HEADERS.indexOf(k);
+    if (colIdx >= 0) sheet.getRange(rowIndex, colIdx + 1).setValue(patch[k]);
+  });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 1) crearLoteAdhesivo
+//    POST { codigoBarra, total, usuario, origen, vto?, idempotencyKey, descripcion? }
+//    → { ok, data: { idLote, total, completadas, subJobSize, status, vto } }
+// ────────────────────────────────────────────────────────────────────
+function crearLoteAdhesivo(params) {
+  try {
+    var codigoBarra = String(params.codigoBarra || '').trim();
+    var total       = parseInt(params.total) || 0;
+    var usuario     = String(params.usuario || '').trim();
+    var origen      = String(params.origen || 'MOS').trim().toUpperCase();
+    if (!codigoBarra) return { ok: false, error: 'codigoBarra requerido' };
+    if (total <= 0)   return { ok: false, error: 'total debe ser > 0' };
+
+    // Resolver descripción (lookup productos)
+    var descripcion = String(params.descripcion || '').trim();
+    if (!descripcion) {
+      try {
+        var prods = _sheetToObjects(getProductosSheet());
+        var p = prods.find(function(x) {
+          return String(x.codigoBarra) === codigoBarra || String(x.idProducto) === codigoBarra;
+        });
+        if (p) descripcion = String(p.descripcion || p.nombre || '');
+      } catch(_) {}
+    }
+
+    // Vto: si vino explícito, formatear; sino calcular auto +1 año
+    var vto;
+    if (params.vto) {
+      vto = String(params.vto);
+    } else if (params.fechaVencimiento) {
+      var d = new Date(params.fechaVencimiento);
+      vto = MESES_ES[d.getMonth()] + '/' + d.getFullYear();
+    } else {
+      vto = _calcVencimientoEtq(new Date());
+    }
+
+    // Resolver printerId
+    var printerId;
+    try { printerId = String(getPrinterNodeId('ADHESIVO', 'ALMACEN')); }
+    catch (e) { return { ok: false, error: 'Sin impresora ADHESIVO/ALMACEN: ' + e.message }; }
+
+    // Cargar config sub-job size desde Script Properties (override) o default 10
+    var subJobSize = parseInt(
+      PropertiesService.getScriptProperties().getProperty('ADHESIVO_SUB_JOB_SIZE')
+    ) || 10;
+
+    var sheet = _getSheetLotesAdhesivo();
+    var idLote = 'LA' + new Date().getTime() + Math.random().toString(36).substr(2, 4).toUpperCase();
+    var now = new Date().toISOString();
+    var fila = _filaLoteAdhesivo({
+      idLote:              idLote,
+      fechaCreacion:       now,
+      fechaUltimoUpdate:   now,
+      usuario:             usuario,
+      origen:              origen,
+      codigoBarra:         codigoBarra,
+      descripcion:         descripcion,
+      vto:                 vto,
+      totalEtq:            total,
+      completadas:         0,
+      subJobSize:          subJobSize,
+      status:              'CREADO',
+      ultimoError:         '',
+      ultimoPrintNodeJobId: '',
+      printerId:           printerId
+    });
+    sheet.appendRow(fila);
+
+    return { ok: true, data: {
+      idLote:      idLote,
+      total:       total,
+      completadas: 0,
+      subJobSize:  subJobSize,
+      status:      'CREADO',
+      vto:         vto,
+      descripcion: descripcion,
+      printerId:   printerId
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message, stack: e.stack };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 2) imprimirSubLoteAdhesivo
+//    POST { idLote, requireGapDetect? }
+//    → { ok, data: { idLote, completadas, total, status, qtyImpresa, printNodeJobId } }
+//
+//    Lógica:
+//      a) Lee lote por idLote
+//      b) Calcula qty = min(subJobSize, total - completadas)
+//      c) Si requireGapDetect O (status==CREADO) O (status==PAUSADO_OUT_PAPER):
+//           agregar GAPDETECT al TSPL2
+//      d) Construye TSPL2 con qty etiquetas
+//      e) Manda a PrintNode
+//      f) Si OK: completadas += qty, status = IMPRIMIENDO (o COMPLETADO si fin)
+//      g) Si error: status = PAUSADO_ERROR / PAUSADO_OUT_PAPER
+// ────────────────────────────────────────────────────────────────────
+function imprimirSubLoteAdhesivo(params) {
+  try {
+    var idLote = String(params.idLote || '').trim();
+    if (!idLote) return { ok: false, error: 'idLote requerido' };
+
+    var sheet = _getSheetLotesAdhesivo();
+    var rowIdx = _findLoteRow(sheet, idLote);
+    if (rowIdx < 0) return { ok: false, error: 'Lote no encontrado: ' + idLote };
+
+    var lote = _readLote(sheet, rowIdx);
+
+    // Validar estado: no se puede imprimir si cancelado/completado
+    if (lote.status === 'CANCELADO')  return { ok: false, error: 'Lote cancelado' };
+    if (lote.status === 'COMPLETADO') return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } };
+
+    var qty = Math.min(lote.subJobSize, lote.totalEtq - lote.completadas);
+    if (qty <= 0) {
+      _patchLote(sheet, rowIdx, { status: 'COMPLETADO' });
+      return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } };
+    }
+
+    // Decidir si necesitamos GAPDETECT
+    var requireGapDetect = params.requireGapDetect === true
+                        || lote.status === 'CREADO'
+                        || lote.status === 'PAUSADO_OUT_PAPER';
+
+    // Construir el producto para el TSPL (cargar tokens y allEnv)
+    var producto;
+    try {
+      var prods = _sheetToObjects(getProductosSheet());
+      var p = prods.find(function(x) {
+        return String(x.codigoBarra) === String(lote.codigoBarra) || String(x.idProducto) === String(lote.codigoBarra);
+      });
+      if (!p) return { ok: false, error: 'Producto no encontrado: ' + lote.codigoBarra };
+      producto = {
+        codigoBarra: String(p.codigoBarra || p.idProducto),
+        descripcion: String(lote.descripcion || p.descripcion || p.nombre || '')
+      };
+    } catch (e) {
+      return { ok: false, error: 'Error cargando producto: ' + e.message };
+    }
+
+    // Marcar como CALIBRANDO si vamos a GAPDETECT, sino IMPRIMIENDO
+    _patchLote(sheet, rowIdx, {
+      status: requireGapDetect ? 'CALIBRANDO' : 'IMPRIMIENDO'
+    });
+
+    // Generar TSPL2 — pasamos la fecha del lote (no recalcular)
+    // Para que _buildTSPLEtq use el vto del lote, hay que pasarle una
+    // fechaEnvasado = vto - 1año.
+    var fechaParaCalc = _vtoStringAFechaEnvasado(lote.vto);
+    var allEnv = _getAllEnvasablesTokens();
+    var bytes = _buildTSPLEtqConGapDetect(producto, fechaParaCalc, qty, allEnv, requireGapDetect);
+
+    // Convertir a base64 para PrintNode
+    var binStr = '';
+    for (var i = 0; i < bytes.length; i++) binStr += String.fromCharCode(bytes[i] & 0xFF);
+    var b64 = Utilities.base64Encode(binStr);
+
+    // Mandar a PrintNode
+    var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+    if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
+
+    var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+      method: 'post',
+      headers: { 'Authorization': 'Basic ' + Utilities.base64Encode(apiKey + ':') },
+      contentType: 'application/json',
+      payload: JSON.stringify({
+        printerId: parseInt(lote.printerId),
+        title: 'Adhesivo ' + producto.codigoBarra + ' (' + qty + ') lote=' + idLote,
+        contentType: 'raw_base64',
+        content: b64,
+        source: 'warehouseMos-lote-' + idLote
+      }),
+      muteHttpExceptions: true
+    });
+
+    var code = resp.getResponseCode();
+    if (code !== 201) {
+      var errTxt = resp.getContentText();
+      // Detectar OUT_OF_PAPER vs otros errores. PrintNode reporta varios códigos.
+      var lowErr = String(errTxt).toLowerCase();
+      var esOutOfPaper = lowErr.indexOf('paper') >= 0 || lowErr.indexOf('media') >= 0;
+      _patchLote(sheet, rowIdx, {
+        status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR',
+        ultimoError: 'PrintNode HTTP ' + code + ': ' + errTxt.substring(0, 200)
+      });
+      return { ok: false, error: 'PrintNode HTTP ' + code, detalle: errTxt, status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR' };
+    }
+
+    var printNodeJobId = JSON.parse(resp.getContentText());
+    var nuevasCompletadas = lote.completadas + qty;
+    var nuevoStatus = nuevasCompletadas >= lote.totalEtq ? 'COMPLETADO' : 'IMPRIMIENDO';
+
+    _patchLote(sheet, rowIdx, {
+      completadas:          nuevasCompletadas,
+      status:               nuevoStatus,
+      ultimoPrintNodeJobId: String(printNodeJobId),
+      ultimoError:          ''
+    });
+
+    return { ok: true, data: {
+      idLote:         idLote,
+      completadas:    nuevasCompletadas,
+      total:          lote.totalEtq,
+      status:         nuevoStatus,
+      qtyImpresa:     qty,
+      printNodeJobId: printNodeJobId,
+      gapDetectAplicado: requireGapDetect
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message, stack: e.stack };
+  }
+}
+
+// Helper — convierte vto string ("ENE/2027") a Date de envasado (= vto - 1 año)
+// para que _buildTSPLEtq lo use directamente.
+function _vtoStringAFechaEnvasado(vtoStr) {
+  if (!vtoStr) return new Date();
+  var parts = String(vtoStr).split('/');
+  if (parts.length !== 2) return new Date();
+  var mesIdx = MESES_ES.indexOf(parts[0].toUpperCase());
+  var anio = parseInt(parts[1]);
+  if (mesIdx < 0 || !anio) return new Date();
+  // vto = primer día del mes N del año Y → fecha envasado = mismo día año - 1
+  var d = new Date(anio - 1, mesIdx, 1);
+  return d;
+}
+
+// Wrapper de _buildTSPLEtq que prepende GAPDETECT al header si corresponde.
+// Igual al _buildTSPLEtq original, pero acepta el flag.
+function _buildTSPLEtqConGapDetect(producto, fechaEnvasado, unidades, allEnvasables, withGapDetect) {
+  var bytes = _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables);
+  if (!withGapDetect) return bytes;
+  // Prepend "GAPDETECT\r\n" al comienzo. Hay que reconstruir desde el header.
+  // _buildTSPLEtq retorna bytes empezando con "SIZE 50 mm,25 mm\r\nGAP...\r\n..."
+  // GAPDETECT debe ir ANTES de CLS (para que el sensor se re-mida en este job).
+  // Insertamos "GAPDETECT\r\n" antes de "CLS\r\n".
+  var prefix = _strToBytesEtq('GAPDETECT\r\n');
+  var clsBytes = _strToBytesEtq('CLS\r\n');
+  // Buscar la posición del CLS en bytes (es secuencia 'C','L','S','\r','\n')
+  for (var i = 0; i < bytes.length - 5; i++) {
+    if (bytes[i] === 67 && bytes[i+1] === 76 && bytes[i+2] === 83
+        && bytes[i+3] === 13 && bytes[i+4] === 10) {
+      return bytes.slice(0, i).concat(prefix).concat(bytes.slice(i));
+    }
+  }
+  // Fallback: prepend al inicio si no encontramos CLS (no debería pasar)
+  return prefix.concat(bytes);
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 3) getEstadoLoteAdhesivo
+//    GET ?idLote=...
+//    → { ok, data: { idLote, total, completadas, status, ultimoError, vto, descripcion, codigoBarra } }
+// ────────────────────────────────────────────────────────────────────
+function getEstadoLoteAdhesivo(params) {
+  try {
+    var idLote = String(params.idLote || '').trim();
+    if (!idLote) return { ok: false, error: 'idLote requerido' };
+    var sheet = _getSheetLotesAdhesivo();
+    var rowIdx = _findLoteRow(sheet, idLote);
+    if (rowIdx < 0) return { ok: false, error: 'Lote no encontrado' };
+    var lote = _readLote(sheet, rowIdx);
+    return { ok: true, data: {
+      idLote:        lote.idLote,
+      total:         lote.totalEtq,
+      completadas:   lote.completadas,
+      status:        lote.status,
+      ultimoError:   lote.ultimoError || '',
+      vto:           lote.vto,
+      descripcion:   lote.descripcion,
+      codigoBarra:   String(lote.codigoBarra || ''),
+      subJobSize:    lote.subJobSize,
+      fechaCreacion: lote.fechaCreacion,
+      fechaUltimoUpdate: lote.fechaUltimoUpdate,
+      usuario:       lote.usuario,
+      origen:        lote.origen
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 4) pausarLoteAdhesivo (manual desde UI)
+//    POST { idLote, motivo? }
+// ────────────────────────────────────────────────────────────────────
+function pausarLoteAdhesivo(params) {
+  try {
+    var idLote = String(params.idLote || '').trim();
+    var sheet = _getSheetLotesAdhesivo();
+    var rowIdx = _findLoteRow(sheet, idLote);
+    if (rowIdx < 0) return { ok: false, error: 'Lote no encontrado' };
+    _patchLote(sheet, rowIdx, {
+      status:      'PAUSADO_USUARIO',
+      ultimoError: String(params.motivo || '')
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 5) cancelarLoteAdhesivo
+//    POST { idLote }
+// ────────────────────────────────────────────────────────────────────
+function cancelarLoteAdhesivo(params) {
+  try {
+    var idLote = String(params.idLote || '').trim();
+    var sheet = _getSheetLotesAdhesivo();
+    var rowIdx = _findLoteRow(sheet, idLote);
+    if (rowIdx < 0) return { ok: false, error: 'Lote no encontrado' };
+    _patchLote(sheet, rowIdx, { status: 'CANCELADO' });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// 6) getLotesAdhesivoPendientes
+//    GET ?usuario=...&limit=20
+//    Devuelve lotes en estado PAUSADO_* o IMPRIMIENDO para reanudar.
+// ────────────────────────────────────────────────────────────────────
+function getLotesAdhesivoPendientes(params) {
+  try {
+    var rows = _sheetToObjects(_getSheetLotesAdhesivo());
+    var pendientes = rows.filter(function(r) {
+      var s = String(r.status || '').toUpperCase();
+      return s === 'IMPRIMIENDO' || s === 'CALIBRANDO' || s.indexOf('PAUSADO') === 0;
+    });
+    if (params.usuario) {
+      pendientes = pendientes.filter(function(r) { return String(r.usuario) === String(params.usuario); });
+    }
+    pendientes.sort(function(a, b) {
+      return String(b.fechaUltimoUpdate || '').localeCompare(String(a.fechaUltimoUpdate || ''));
+    });
+    if (params.limit) pendientes = pendientes.slice(0, parseInt(params.limit));
+    return { ok: true, data: pendientes };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}

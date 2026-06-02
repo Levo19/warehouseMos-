@@ -245,6 +245,13 @@ function _route(method, e) {
       case 'estadoImpresoraAdhesivo': return estadoImpresoraAdhesivo();
       case 'calibrarImpresoraAdhesivo': return calibrarImpresoraAdhesivo();
       case 'previsualizarTSPLEtq': return previsualizarTSPLEtq(params);
+      // [v2.13.108] Sistema de lotes de adhesivos con sub-jobs + tracking
+      case 'crearLoteAdhesivo':              return crearLoteAdhesivo(params);
+      case 'imprimirSubLoteAdhesivo':        return imprimirSubLoteAdhesivo(params);
+      case 'getEstadoLoteAdhesivo':          return getEstadoLoteAdhesivo(params);
+      case 'pausarLoteAdhesivo':             return pausarLoteAdhesivo(params);
+      case 'cancelarLoteAdhesivo':           return cancelarLoteAdhesivo(params);
+      case 'getLotesAdhesivoPendientes':     return getLotesAdhesivoPendientes(params);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);

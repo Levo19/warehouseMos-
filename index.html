@@ -7429,6 +7429,79 @@
   <div id="hidProductList" style="max-height:220px;overflow-y:auto"></div>
 </div>
 
+<!-- ════════════════════════════════════════════════════════════════
+     [v2.13.108] WhLoteAdhesivo — modal de progreso de impresión
+     ════════════════════════════════════════════════════════════════ -->
+<style>
+  .wh-lote-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.72);
+    z-index: 9999;
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    backdrop-filter: blur(8px);
+    animation: whLoteIn .25s ease-out;
+  }
+  @keyframes whLoteIn { from { opacity: 0 } to { opacity: 1 } }
+  .wh-lote-modal {
+    width: 100%; max-width: 540px;
+    background: linear-gradient(180deg, #0a1424, #070d18);
+    border: 1px solid rgba(251,191,36,.35);
+    border-radius: 18px;
+    box-shadow: 0 30px 70px -10px rgba(251,191,36,.25);
+    display: flex; flex-direction: column;
+    max-height: 92vh; overflow: hidden;
+  }
+  .wh-lote-head {
+    padding: 18px 22px;
+    border-bottom: 1px solid #1e293b;
+    background: linear-gradient(135deg, rgba(251,191,36,.10), rgba(245,158,11,.04));
+    display: flex; align-items: center; gap: 14px;
+  }
+  .wh-lote-emoji { font-size: 36px; line-height: 1; }
+  .wh-lote-text  { flex: 1; min-width: 0; }
+  .wh-lote-title { font-size: 14px; font-weight: 900; color: #fbbf24; letter-spacing: .8px; }
+  .wh-lote-sub   { font-size: 11px; color: #94a3b8; margin-top: 3px;
+                   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .wh-lote-body  { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+  .wh-lote-stat  { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .wh-lote-chip  { padding: 5px 12px; border-radius: 9999px; font-size: 12px; font-weight: 800; border: 1px solid; }
+  .wh-lote-chip-info  { color: #94a3b8; border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
+  .wh-lote-chip-warn  { color: #fbbf24; border-color: rgba(251,191,36,.5);   background: rgba(251,191,36,.12); }
+  .wh-lote-chip-ok    { color: #34d399; border-color: rgba(52,211,153,.5);   background: rgba(52,211,153,.12); }
+  .wh-lote-chip-error { color: #f87171; border-color: rgba(248,113,113,.5);  background: rgba(248,113,113,.14); }
+  .wh-lote-counter { font-family: 'Consolas', monospace; font-size: 22px; font-weight: 900;
+                     color: #f1f5f9; letter-spacing: 1px; }
+  .wh-lote-bar { height: 14px; background: rgba(15,23,42,.6); border-radius: 9999px;
+                 overflow: hidden; border: 1px solid rgba(251,191,36,.2); }
+  .wh-lote-fill { height: 100%;
+                  background: linear-gradient(90deg, #fbbf24, #f59e0b);
+                  box-shadow: 0 0 16px rgba(251,191,36,.6);
+                  transition: width .35s ease-out; border-radius: 9999px; }
+  .wh-lote-info { display: flex; justify-content: space-between; font-size: 11px;
+                  color: #64748b; font-family: 'Consolas', monospace; }
+  .wh-lote-err { padding: 8px 12px; background: rgba(248,113,113,.10);
+                 border: 1px solid rgba(248,113,113,.35); border-radius: 8px;
+                 font-size: 12px; color: #fca5a5; }
+  .wh-lote-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+  .wh-lote-btn-primary, .wh-lote-btn-warn {
+    width: 100%; padding: 11px 16px; border-radius: 10px;
+    font-size: 14px; font-weight: 800; border: 1px solid; cursor: pointer; transition: all .15s;
+  }
+  .wh-lote-btn-primary { background: linear-gradient(135deg, #fbbf24, #f59e0b);
+                         color: #0a1424; border-color: #fbbf24; }
+  .wh-lote-btn-warn    { background: rgba(248,113,113,.12);
+                         color: #fca5a5; border-color: rgba(248,113,113,.4); }
+  .wh-lote-btn-primary:hover, .wh-lote-btn-warn:hover { transform: translateY(-1px); }
+  .wh-lote-alert { padding: 14px 16px; background: rgba(248,113,113,.08);
+                   border: 1px solid rgba(248,113,113,.4); border-radius: 12px;
+                   display: flex; flex-direction: column; gap: 10px; }
+  .wh-lote-alert-title { font-size: 15px; font-weight: 900; color: #fca5a5; }
+  .wh-lote-alert-msg   { font-size: 12px; color: #cbd5e1; line-height: 1.55; }
+  .wh-lote-alert-warn  { color: #fbbf24; font-size: 11px; }
+  .wh-lote-alert-btns  { display: flex; flex-direction: column; gap: 8px; }
+</style>
+
 <!-- ════════════════════════════════════════════════
      [v2.13.53] MODAL: LOTES (FIFO + HISTORIAL)
      Diseño dark slate moderno · efectos visuales y sonoros

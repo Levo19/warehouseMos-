@@ -8684,12 +8684,16 @@ const EnvasadosView = (() => {
       toast('⚠ Envasado revertido · ' + motivo + ' · volvé a intentar', 'danger', 7000);
     }
 
+    // [v2.13.108] Si imprimir=true, NO le decimos al backend que imprima
+    // directo (el método viejo manda 1 sola request a PrintNode → drift).
+    // En su lugar, después del registrar exitoso, disparamos el sistema
+    // de LOTES con sub-jobs (controla drift + permite cambio de rollo).
     // GAS en segundo plano
     API.registrarEnvasado({
       codigoBarra:        prod.codigoBarra,
       unidadesProducidas: producidas,
       fechaVencimiento:   fechaVenc,
-      imprimirEtiquetas:  imprimir,
+      imprimirEtiquetas:  false,    // ← el lote se encarga ahora
       usuario:            window.WH_CONFIG.usuario,
       idempotencyKey:     idempotencyKey
     }).then(res => {
@@ -8720,13 +8724,25 @@ const EnvasadosView = (() => {
         });
         _renderDesdeCache();
       }
-      if (imprimir && res.data?.impresion && !res.data.impresion.ok) {
-        toast('Impresora: ' + res.data.impresion.error, 'warn', 5000);
-      }
       OfflineManager.precargarOperacional(true).catch(() => {});
 
       // 🎉 Celebración + banner deshacer
       _celebrarEnvasado(idReal, prod.descripcion || cbDerivado, producidas);
+
+      // [v2.13.108] Si el operador pidió imprimir, disparar lote con
+      // sub-jobs + GAPDETECT condicional + modal de progreso.
+      if (imprimir) {
+        try {
+          WhLoteAdhesivo.crearYEjecutar({
+            codigoBarra:     String(prod.codigoBarra),
+            descripcion:     prod.descripcion || '',
+            total:           producidas,
+            fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0]
+          });
+        } catch (e) {
+          toast('No se pudo iniciar lote de impresión: ' + (e?.message || ''), 'danger', 6000);
+        }
+      }
     }).catch((e) => {
       _rollbackOptimista('sin conexión');
     }).finally(() => {
@@ -19388,6 +19404,267 @@ function _renderLotesHistorial() {
   }).join('');
   cont.innerHTML = html;
 }
+
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.108] WhLoteAdhesivo — orquestación de impresión por lotes
+// ════════════════════════════════════════════════════════════════════
+//
+// Cliente del sistema de lotes del backend (Envasados.gs). Maneja:
+//   - Creación del lote
+//   - Sub-jobs uno a uno con polling
+//   - GAPDETECT condicional (al inicio + post OUT_OF_PAPER)
+//   - Modal de progreso con barra, velocidad, ETA
+//   - Detección de fin de rollo + reanudación
+//
+// API pública:
+//   WhLoteAdhesivo.crearYEjecutar({ codigoBarra, total, descripcion?, vto?, fechaEnvasado? })
+//   WhLoteAdhesivo.continuar()
+//   WhLoteAdhesivo.cancelar()
+//   WhLoteAdhesivo.cerrar()
+//
+// Es un módulo self-contained — no depende de MOS. Reutiliza el mismo
+// backend `crearLoteAdhesivo`/`imprimirSubLoteAdhesivo` que MOS.
+const WhLoteAdhesivo = (() => {
+  'use strict';
+  let _state = null;
+  // _state = { idLote, total, completadas, subJobSize, status, ultimoError,
+  //            descripcion, codigoBarra, vto, tInicio, orquestando }
+
+  async function crearYEjecutar(opts) {
+    if (_state) {
+      try { toast('Ya hay un lote en curso. Termínalo primero.', 'warn'); } catch(_) {}
+      return;
+    }
+    const cb = String(opts.codigoBarra || '').trim();
+    const total = parseInt(opts.total) || 0;
+    if (!cb || total <= 0) {
+      try { toast('Datos de lote inválidos', 'error'); } catch(_) {}
+      return;
+    }
+    // 1. Crear lote en backend
+    let r;
+    try {
+      r = await API.post('crearLoteAdhesivo', {
+        codigoBarra:      cb,
+        descripcion:      opts.descripcion || '',
+        total:            total,
+        usuario:          window.WH_CONFIG?.usuario || '',
+        origen:           'WH',
+        vto:              opts.vto || '',
+        fechaEnvasado:    opts.fechaEnvasado || '',
+        idempotencyKey:   'wh_lote_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+      });
+    } catch (e) {
+      try { toast('Error creando lote: ' + (e?.message || ''), 'error', 5000); } catch(_) {}
+      return;
+    }
+    if (r && r.ok === false) {
+      try { toast('Backend rechazó lote: ' + (r.error || ''), 'error', 5000); } catch(_) {}
+      return;
+    }
+    // 2. Abrir modal de progreso
+    _abrirModalProgreso({
+      idLote:      r.idLote,
+      total:       r.total,
+      completadas: 0,
+      subJobSize:  r.subJobSize,
+      descripcion: r.descripcion || opts.descripcion || '',
+      codigoBarra: cb,
+      vto:         r.vto || opts.vto || ''
+    });
+    // 3. Arrancar orquestación
+    _orquestar(r.idLote);
+  }
+
+  async function _orquestar(idLote, runOpts) {
+    if (!_state || _state.idLote !== idLote) return;
+    if (_state.orquestando) return;
+    _state.orquestando = true;
+    const requireGapDetect = !!(runOpts && runOpts.requireGapDetect);
+    try {
+      while (_state && _state.idLote === idLote) {
+        if (['CANCELADO','COMPLETADO','PAUSADO_USUARIO','PAUSADO_OUT_PAPER','PAUSADO_ERROR'].indexOf(_state.status) >= 0) break;
+        const necesitaCal = requireGapDetect || _state.completadas === 0 || _state.status === 'PAUSADO_OUT_PAPER';
+        if (necesitaCal) _setStatus('CALIBRANDO');
+        let r;
+        try {
+          r = await API.post('imprimirSubLoteAdhesivo', {
+            idLote:           idLote,
+            requireGapDetect: necesitaCal
+          });
+        } catch (e) {
+          _setStatus('PAUSADO_ERROR', 'Sin conexión: ' + (e?.message || ''));
+          break;
+        }
+        if (!_state || _state.idLote !== idLote) break;
+        if (r && r.ok === false) {
+          _setStatus(r.status || 'PAUSADO_ERROR', r.error || 'Error desconocido');
+          if ((r.status || '') === 'PAUSADO_OUT_PAPER') _mostrarRolloAgotado();
+          break;
+        }
+        _state.completadas = r.completadas || _state.completadas;
+        _state.status      = r.status || 'IMPRIMIENDO';
+        _render();
+        if (_state.status === 'COMPLETADO') {
+          _celebrar();
+          break;
+        }
+        await new Promise(res => setTimeout(res, 250));
+      }
+    } finally {
+      if (_state) _state.orquestando = false;
+    }
+  }
+
+  function _setStatus(status, errMsg) {
+    if (!_state) return;
+    _state.status = status;
+    if (errMsg) _state.ultimoError = errMsg;
+    _render();
+  }
+
+  function _abrirModalProgreso(meta) {
+    _state = {
+      idLote:      meta.idLote,
+      total:       meta.total,
+      completadas: 0,
+      subJobSize:  meta.subJobSize || 10,
+      descripcion: meta.descripcion,
+      codigoBarra: meta.codigoBarra,
+      vto:         meta.vto,
+      status:      'CREADO',
+      ultimoError: '',
+      orquestando: false,
+      tInicio:     Date.now()
+    };
+    const html = `
+      <div class="wh-lote-overlay" id="whLoteOverlay">
+        <div class="wh-lote-modal">
+          <div class="wh-lote-head">
+            <div class="wh-lote-emoji">🏭</div>
+            <div class="wh-lote-text">
+              <div class="wh-lote-title">LOTE DE IMPRESIÓN</div>
+              <div class="wh-lote-sub">${_esc(_state.descripcion || _state.codigoBarra)}</div>
+            </div>
+          </div>
+          <div class="wh-lote-body">
+            <div class="wh-lote-stat">
+              <div class="wh-lote-chip" id="whLoteChip">⏳ creado</div>
+              <div class="wh-lote-counter" id="whLoteCounter">0 / ${_state.total}</div>
+            </div>
+            <div class="wh-lote-bar"><div class="wh-lote-fill" id="whLoteFill" style="width:0%"></div></div>
+            <div class="wh-lote-info">
+              <span id="whLoteVel">— etq/min</span>
+              <span id="whLoteEta">estimado: —</span>
+            </div>
+            <div class="wh-lote-err" id="whLoteErr" style="display:none"></div>
+            <div class="wh-lote-actions" id="whLoteActions">
+              <button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cancelar()">⊘ Cancelar lote</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    _render();
+  }
+
+  function _render() {
+    if (!_state) return;
+    const pct = _state.total > 0 ? (_state.completadas / _state.total * 100) : 0;
+    const fill = document.getElementById('whLoteFill');
+    if (fill) fill.style.width = pct.toFixed(1) + '%';
+    const counter = document.getElementById('whLoteCounter');
+    if (counter) counter.textContent = _state.completadas + ' / ' + _state.total;
+    const chip = document.getElementById('whLoteChip');
+    if (chip) {
+      const map = {
+        CREADO:            { cls: 'info',  txt: '⏳ creado' },
+        CALIBRANDO:        { cls: 'warn',  txt: '🔧 calibrando rollo…' },
+        IMPRIMIENDO:       { cls: 'ok',    txt: '🖨 imprimiendo' },
+        PAUSADO_USUARIO:   { cls: 'warn',  txt: '⏸ pausado' },
+        PAUSADO_OUT_PAPER: { cls: 'error', txt: '🛑 rollo agotado' },
+        PAUSADO_ERROR:     { cls: 'error', txt: '❌ error' },
+        COMPLETADO:        { cls: 'ok',    txt: '✅ completado' },
+        CANCELADO:         { cls: 'warn',  txt: '⊘ cancelado' }
+      };
+      const m = map[_state.status] || { cls: 'info', txt: _state.status };
+      chip.className = 'wh-lote-chip wh-lote-chip-' + m.cls;
+      chip.textContent = m.txt;
+    }
+    const elapsedSec = (Date.now() - _state.tInicio) / 1000;
+    if (_state.completadas > 0 && elapsedSec > 1) {
+      const velMin = (_state.completadas / elapsedSec * 60).toFixed(0);
+      const restante = _state.total - _state.completadas;
+      const segRestantes = restante / (_state.completadas / elapsedSec);
+      const elVel = document.getElementById('whLoteVel');
+      const elEta = document.getElementById('whLoteEta');
+      if (elVel) elVel.textContent = velMin + ' etq/min';
+      if (elEta) elEta.textContent = 'estimado: ' + Math.ceil(segRestantes) + ' seg';
+    }
+    const elErr = document.getElementById('whLoteErr');
+    if (elErr) {
+      if (_state.ultimoError) {
+        elErr.style.display = 'block';
+        elErr.textContent = '⚠ ' + _state.ultimoError;
+      } else {
+        elErr.style.display = 'none';
+      }
+    }
+  }
+
+  function _mostrarRolloAgotado() {
+    const actions = document.getElementById('whLoteActions');
+    if (!actions || !_state) return;
+    const restante = _state.total - _state.completadas;
+    actions.innerHTML = `
+      <div class="wh-lote-alert">
+        <div class="wh-lote-alert-title">🛑 Rollo agotado</div>
+        <div class="wh-lote-alert-msg">
+          Se imprimieron ~${_state.completadas} de ${_state.total}.<br>
+          Faltan ${restante}. Cambiá el rollo y dale a Continuar.<br>
+          <span class="wh-lote-alert-warn">⚠ Hasta ${_state.subJobSize} pueden duplicarse del rollo viejo.</span>
+        </div>
+        <div class="wh-lote-alert-btns">
+          <button class="wh-lote-btn-primary" onclick="WhLoteAdhesivo.continuar()">✓ Continuar (rollo nuevo)</button>
+          <button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cancelar()">⊘ Cancelar</button>
+        </div>
+      </div>`;
+  }
+
+  function _celebrar() {
+    try { toast('✅ Lote completado: ' + _state.total + ' adhesivos', 'ok', 6000); } catch(_) {}
+    try { vibrate && vibrate([100, 50, 100]); } catch(_) {}
+    setTimeout(cerrar, 2500);
+  }
+
+  function continuar() {
+    if (!_state) return;
+    _setStatus('CALIBRANDO');
+    const actions = document.getElementById('whLoteActions');
+    if (actions) actions.innerHTML = '<button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cancelar()">⊘ Cancelar lote</button>';
+    _orquestar(_state.idLote, { requireGapDetect: true });
+  }
+
+  async function cancelar() {
+    if (!_state) return;
+    if (!confirm('¿Cancelar el lote?\n\n' + _state.completadas + ' de ' + _state.total + ' ya impresas no se borran del rollo.')) return;
+    try { await API.post('cancelarLoteAdhesivo', { idLote: _state.idLote }); } catch(_) {}
+    _setStatus('CANCELADO');
+    setTimeout(cerrar, 800);
+  }
+
+  function cerrar() {
+    const ov = document.getElementById('whLoteOverlay');
+    if (ov) ov.remove();
+    _state = null;
+  }
+
+  function _esc(s) {
+    return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  return { crearYEjecutar, continuar, cancelar, cerrar };
+})();
 
 // ════════════════════════════════════════════════
 // Init
