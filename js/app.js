@@ -19788,8 +19788,8 @@ const WhLoteAdhesivo = (() => {
     const chip = document.getElementById('whLoteChip');
     if (chip) {
       const map = {
-        CREADO:            { cls: 'info',  txt: '⏳ creado' },
-        CALIBRANDO:        { cls: 'warn',  txt: '🔧 calibrando rollo…' },
+        CREADO:            { cls: 'info',  txt: '<span class="wh-lote-spin">◐</span> preparando lote…' },
+        CALIBRANDO:        { cls: 'warn',  txt: '<span class="wh-lote-spin">◐</span> calibrando rollo…' },
         IMPRIMIENDO:       { cls: 'ok',    txt: '🖨 imprimiendo' },
         PAUSADO_USUARIO:   { cls: 'warn',  txt: '⏸ pausado' },
         PAUSADO_OUT_PAPER: { cls: 'error', txt: '🛑 rollo agotado' },
@@ -19799,7 +19799,7 @@ const WhLoteAdhesivo = (() => {
       };
       const m = map[_state.status] || { cls: 'info', txt: _state.status };
       chip.className = 'wh-lote-chip wh-lote-chip-' + m.cls;
-      chip.textContent = m.txt;
+      chip.innerHTML = m.txt;  // soporta spinner HTML
     }
     const elapsedSec = (Date.now() - _state.tInicio) / 1000;
     if (_state.completadas > 0 && elapsedSec > 1) {

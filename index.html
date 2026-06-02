@@ -7466,6 +7466,11 @@
   .wh-lote-body  { padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
   .wh-lote-stat  { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .wh-lote-chip  { padding: 5px 12px; border-radius: 9999px; font-size: 12px; font-weight: 800; border: 1px solid; }
+  .wh-lote-spin {
+    display: inline-block; animation: whLoteSpin 1s linear infinite;
+    transform-origin: center;
+  }
+  @keyframes whLoteSpin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
   .wh-lote-chip-info  { color: #94a3b8; border-color: rgba(148,163,184,.35); background: rgba(148,163,184,.08); }
   .wh-lote-chip-warn  { color: #fbbf24; border-color: rgba(251,191,36,.5);   background: rgba(251,191,36,.12); }
   .wh-lote-chip-ok    { color: #34d399; border-color: rgba(52,211,153,.5);   background: rgba(52,211,153,.12); }
