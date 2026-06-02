@@ -19650,18 +19650,22 @@ const WhLoteAdhesivo = (() => {
       try { toast('Backend rechazó lote: ' + (r.error || ''), 'error', 5000); } catch(_) {}
       return;
     }
+    // [v2.13.112 BUG FIX] WH API.post retorna el JSON completo {ok, data}.
+    // NO desempaca data como hace MOS. Antes leía r.idLote (undefined)
+    // → siguientes sub-jobs recibían idLote vacío → "idLote requerido".
+    const d = r.data || r;
     // 2. Abrir modal de progreso
     _abrirModalProgreso({
-      idLote:      r.idLote,
-      total:       r.total,
+      idLote:      d.idLote,
+      total:       d.total,
       completadas: 0,
-      subJobSize:  r.subJobSize,
-      descripcion: r.descripcion || opts.descripcion || '',
+      subJobSize:  d.subJobSize,
+      descripcion: d.descripcion || opts.descripcion || '',
       codigoBarra: cb,
-      vto:         r.vto || opts.vto || ''
+      vto:         d.vto || opts.vto || ''
     });
     // 3. Arrancar orquestación
-    _orquestar(r.idLote);
+    _orquestar(d.idLote);
   }
 
   async function _orquestar(idLote, runOpts) {
@@ -19694,8 +19698,10 @@ const WhLoteAdhesivo = (() => {
           if ((r.status || '') === 'PAUSADO_OUT_PAPER') _mostrarRolloAgotado();
           break;
         }
-        _state.completadas = r.completadas || _state.completadas;
-        _state.status      = r.status || 'IMPRIMIENDO';
+        // [v2.13.112 BUG FIX] WH API.post NO desempaca data — leer de r.data.
+        const subRes = r.data || r;
+        _state.completadas = subRes.completadas || _state.completadas;
+        _state.status      = subRes.status || 'IMPRIMIENDO';
         _render();
         if (_state.status === 'COMPLETADO') {
           _celebrar();
