@@ -8176,19 +8176,22 @@ const GuiasView = (() => {
 
 // ════════════════════════════════════════════════
 // Historial de envasados agrupado por día (últimos 7 días, desc), solo del usuario actual
-function _renderEnvasadosPorDia(list, container) {
+function _renderEnvasadosPorDia(list, container, opts) {
   // [v2.10.1] Reglas de visibilidad:
-  //   - Admin / Master: ven TODOS los envasados de HOY (cualquier operador)
-  //   - Operador normal: ve solo SUS envasados de HOY
-  //   - Comparación tolerante (trim + toLowerCase) para evitar mismatches por
-  //     mayúsculas o espacios entre el campo guardado y window.WH_CONFIG.usuario.
-  // [v2.10.2] Cards con descripción legible (no solo códigos): resuelvo
-  // descripcion del derivado y del base contra el maestro de productos para
-  // que el operador y el admin entiendan de un vistazo qué se envasó.
+  //   - Admin / Master: ven TODOS los envasados
+  //   - Operador normal: ve solo SUS envasados
+  //   - Comparación tolerante (trim + toLowerCase).
+  // [v2.13.116] opts permite vista "historial 14d" vs vista "lista de hoy":
+  //   - opts.modo: 'hoy' (default) | 'historial14d'
+  //   - opts.query: filtro de búsqueda por producto+usuario
+  opts = opts || {};
+  const modo  = opts.modo || 'hoy';
+  const query = String(opts.query || '').trim().toLowerCase();
   const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
   const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
   const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
   const hoy           = new Date().toISOString().split('T')[0];
+  const desde14       = (typeof _fechaDesde14Dias === 'function') ? _fechaDesde14Dias() : hoy;
 
   // Mapa codigoBarra → descripcion del maestro (para legibilidad).
   // Fallback en cascada: App.getProductosMaestro (memoria) → OfflineManager
@@ -8210,17 +8213,42 @@ function _renderEnvasadosPorDia(list, container) {
     }
   } catch(_){}
 
-  let visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
+  // [v2.13.116] Filtrar por rango según modo
+  let visible;
+  if (modo === 'historial14d') {
+    visible = list.filter(e => {
+      const f = String(e.fecha || '').substring(0, 10);
+      return f >= desde14 && f <= hoy;
+    });
+  } else {
+    visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
+  }
   if (!esAdminMaster && usuarioActual) {
     visible = visible.filter(e =>
       String(e.usuario || '').trim().toLowerCase() === usuarioActual
     );
   }
+  // [v2.13.116] Buscador: producto (derivado o base) + usuario (solo admin/master)
+  if (query) {
+    visible = visible.filter(e => {
+      const cbDer  = String(e.codigoProductoEnvasado || '');
+      const cbBase = String(e.codigoProductoBase     || '');
+      const descD  = String(e.descripcionProductoEnvasado || prodMap[cbDer]  || cbDer).toLowerCase();
+      const descB  = String(e.descripcionProductoBase     || prodMap[cbBase] || cbBase).toLowerCase();
+      const usr    = String(e.usuario || '').toLowerCase();
+      return descD.indexOf(query) >= 0
+          || descB.indexOf(query) >= 0
+          || cbDer.toLowerCase().indexOf(query) >= 0
+          || cbBase.toLowerCase().indexOf(query) >= 0
+          || usr.indexOf(query) >= 0;
+    });
+  }
 
   if (!visible.length) {
-    const msg = esAdminMaster
-      ? 'Sin envasados registrados hoy'
-      : 'No registraste envasados hoy';
+    const msg = modo === 'historial14d'
+      ? (query ? 'Sin resultados para "' + query + '"' :
+                 (esAdminMaster ? 'Sin envasados en las últimas 2 semanas' : 'No registraste envasados en las últimas 2 semanas'))
+      : (esAdminMaster ? 'Sin envasados registrados hoy' : 'No registraste envasados hoy');
     container.innerHTML = `<p class="text-slate-500 text-center py-8 text-sm">${msg}</p>`;
     return;
   }
@@ -8265,10 +8293,12 @@ function _renderEnvasadosPorDia(list, container) {
       const descBase = e.descripcionProductoBase     || prodMap[cbBase] || cbBase || '—';
       const mermaReal = parseFloat(e.mermaReal) || 0;
 
+      const hora = _fmtHora(e.fechaImpresion || e.fecha);
       return `<div class="card-sm${cardCls}">
         <div class="flex items-start justify-between gap-2 mb-1">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-bold text-slate-100 leading-tight">
+              ${hora ? `<span class="text-[10px] font-mono text-amber-400/80 mr-1">${hora}</span>` : ''}
               ${escHtml(descDer)}
               <span class="text-[10px] font-mono text-slate-500 ml-1 whitespace-nowrap" style="letter-spacing:-.05em">▌${escHtml(cbDer)}</span>
               ${tagAnul}${tagOpt}
@@ -8291,7 +8321,12 @@ function _renderEnvasadosPorDia(list, container) {
         </div>
       </div>`;
     }).join('');
-    return `<p class="text-xs font-semibold text-slate-400 mt-3 mb-1 px-1 uppercase tracking-wide">${fmtFecha(dia)}</p>${items}`;
+    // [v2.13.116] Header de día con formato nombrado + estilo prominente para HOY/AYER
+    const lbl = (typeof _fmtDiaLabel === 'function') ? _fmtDiaLabel(dia) : { texto: fmtFecha(dia), destacado: false };
+    const headerCls = lbl.destacado
+      ? 'text-sm font-bold text-amber-400 mt-4 mb-2 px-1 tracking-wide border-b border-amber-500/20 pb-1'
+      : 'text-xs font-semibold text-slate-400 mt-3 mb-1 px-1 uppercase tracking-wide';
+    return `<p class="${headerCls}">${escHtml(lbl.texto || lbl)}</p>${items}`;
   }).join('');
 }
 
@@ -8299,6 +8334,45 @@ function _fechaDesde7Dias() {
   const d = new Date();
   d.setDate(d.getDate() - 6);
   return d.toISOString().split('T')[0];
+}
+
+// [v2.13.116] Historial de Modo Envasador — 14 días.
+function _fechaDesde14Dias() {
+  const d = new Date();
+  d.setDate(d.getDate() - 13);
+  return d.toISOString().split('T')[0];
+}
+
+// [v2.13.116] Convierte una fecha 'YYYY-MM-DD' a label legible para humanos.
+//   0 días → "HOY · Martes 2 jun"
+//   1 día  → "AYER · Lunes 1 jun"
+//   2-14   → "Sábado 30 may"
+// Marca destacada para HOY/AYER que en el render usa estilo más prominente.
+function _fmtDiaLabel(yyyymmdd) {
+  const partes = String(yyyymmdd).split('-');
+  if (partes.length !== 3) return yyyymmdd;
+  const d = new Date(parseInt(partes[0]), parseInt(partes[1]) - 1, parseInt(partes[2]));
+  d.setHours(0, 0, 0, 0);
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const diffDias = Math.round((hoy.getTime() - d.getTime()) / (24 * 60 * 60 * 1000));
+  const dias  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const diaSem = dias[d.getDay()];
+  const num    = d.getDate();
+  const mes    = meses[d.getMonth()];
+  if (diffDias === 0) return { destacado: true,  texto: 'HOY · ' + diaSem + ' ' + num + ' ' + mes };
+  if (diffDias === 1) return { destacado: true,  texto: 'AYER · ' + diaSem + ' ' + num + ' ' + mes };
+  return                    { destacado: false, texto: diaSem + ' ' + num + ' ' + mes };
+}
+
+// Hora 'HH:mm' desde un timestamp string o Date.
+function _fmtHora(fechaTs) {
+  if (!fechaTs) return '';
+  const d = fechaTs instanceof Date ? fechaTs : new Date(fechaTs);
+  if (isNaN(d.getTime())) return '';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return hh + ':' + mm;
 }
 
 // ENVASADOS VIEW
@@ -9378,7 +9452,11 @@ const EnvasadorView = (() => {
       '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
 
     _catalog = _buildCatalog();
-    if (_catalog.some(b => b.worstUrg)) _filtroUrg = true;
+    // [v2.13.116] NO activar filtro de urgentes por default.
+    // El operador ve TODA la lista al entrar; el rayito en cards de
+    // productos urgentes ya da la señal visual. Si quiere filtrar, hace
+    // toggle manual del botón ⚡.
+    _filtroUrg = false;
     _updateUrgBtn();
     _render();
 
@@ -9389,26 +9467,35 @@ const EnvasadorView = (() => {
     }, 120_000);
   }
 
+  // [v2.13.116] Historial: 14 días, agrupado por día nombrado, con buscador
+  // que filtra por producto + usuario.
+  let _histQuery = '';
+  let _histCacheLista = [];  // cache de la última fusión para re-render rápido al buscar
+
   async function verHistorial() {
     document.getElementById('envCatalogPanel').classList.add('hidden');
     document.getElementById('envHistorialPanel').classList.remove('hidden');
-    const fd        = _fechaDesde7Dias();
+    const fd        = _fechaDesde14Dias();
     const container = document.getElementById('listEnvasadorHistorial');
+
+    // Limpiar buscador al entrar
+    const inp = document.getElementById('envHistSearch');
+    if (inp) inp.value = '';
+    _histQuery = '';
 
     // Optimistic: mostrar caché de inmediato
     const cached = OfflineManager.getEnvasadosCache()
       .filter(e => String(e.fecha || '').substring(0, 10) >= fd);
+    _histCacheLista = cached;
     if (cached.length) {
-      _renderEnvasadosPorDia(cached, container);
+      _renderEnvasadosPorDia(cached, container, { modo: 'historial14d', query: _histQuery });
     } else {
       container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
     }
 
-    // Fondo: actualizar desde servidor
+    // Fondo: actualizar desde servidor con rango de 14 días
     const res = await API.getEnvasados({ fechaDesde: fd }).catch(() => ({ ok: false }));
     if (res.ok) {
-      // [v2.10.4] Mismo merge robusto que EnvasadosView.cargar — preservar
-      // los locales que aún no fueron a backend para evitar parpadeo.
       const cacheLocal = OfflineManager.getEnvasadosCache();
       const idsBackend = new Set(res.data.map(e => String(e.idEnvasado || '')));
       const pendientes = cacheLocal.filter(e =>
@@ -9416,8 +9503,17 @@ const EnvasadorView = (() => {
       );
       const fusionado = pendientes.length ? [...pendientes, ...res.data] : res.data;
       OfflineManager.guardarEnvasadosCache(fusionado);
-      _renderEnvasadosPorDia(fusionado, container);
+      _histCacheLista = fusionado;
+      _renderEnvasadosPorDia(fusionado, container, { modo: 'historial14d', query: _histQuery });
     }
+  }
+
+  // [v2.13.116] Llamado desde el oninput del buscador (HTML envHistSearch)
+  function buscarHistorial(q) {
+    _histQuery = String(q || '').trim();
+    const container = document.getElementById('listEnvasadorHistorial');
+    if (!container) return;
+    _renderEnvasadosPorDia(_histCacheLista, container, { modo: 'historial14d', query: _histQuery });
   }
 
   function verCatalogo() {
@@ -9541,7 +9637,8 @@ const EnvasadorView = (() => {
   }
 
   return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh,
-           searchToggle, searchInput, searchVoice };
+           searchToggle, searchInput, searchVoice,
+           buscarHistorial };
 })();
 
 // ════════════════════════════════════════════════
