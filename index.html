@@ -6653,7 +6653,29 @@
     <!-- ── Herramientas ───────────────────────── -->
     <div class="pre-date-hdr">Herramientas</div>
 
-    <!-- Membretes -->
+    <!-- [v2.13.120] Sistema centralizado de membretes -->
+    <div class="card mb-3">
+      <p class="font-semibold mb-3 flex items-center gap-2">🏷 Sistema de Membretes</p>
+      <div class="flex flex-wrap gap-2">
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirCalibrador()"
+                class="px-3 py-2 rounded-lg text-xs font-semibold"
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
+          🔧 Calibrar impresora
+        </button>
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirCola('MEMBRETE_WH')"
+                class="px-3 py-2 rounded-lg text-xs font-semibold"
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
+          📦 Cola WH
+        </button>
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirCola('MEMBRETE_ME')"
+                class="px-3 py-2 rounded-lg text-xs font-semibold"
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
+          🏪 Cola ME
+        </button>
+      </div>
+    </div>
+
+    <!-- Membretes (sistema viejo, mantiene compat) -->
     <div class="card mb-3">
       <p class="font-semibold mb-3 flex items-center gap-2">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" class="text-slate-400">
@@ -9177,7 +9199,7 @@
 <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
 <!-- [v2.13.118+] Sistema centralizado de membretes/adhesivos (CDN MOS).
      ?v= bump fuerza refresh cuando cambia el módulo. -->
-<script src="https://levo19.github.io/MOS/assets/membrete/membrete-modal.js?v=2.13.119"></script>
+<script src="https://levo19.github.io/MOS/assets/membrete/membrete-modal.js?v=2.13.120"></script>
 <script src="js/offline.js"></script>
 <script src="js/api.js"></script>
 <script src="js/scanner.js"></script>

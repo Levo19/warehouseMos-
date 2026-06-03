@@ -18250,6 +18250,26 @@ const ProductosView = (() => {
       if (typeof toast === 'function') toast('Espera 2s para reimprimir', 'info', 1200);
       return;
     }
+
+    // [v2.13.120] Si el módulo MembreteSystem está cargado, abrir menú
+    // ME|WH para que el operario elija tipo. Multi-código auto-detectado
+    // desde el grupo.children. Sistema nuevo con polling + fire-and-forget.
+    const grupoNew = _grupos.find(gr => gr.skuBase === skuBase);
+    if (window.MembreteSystem && MembreteSystem.abrirMenuProductoCard) {
+      const childrenCodes = grupoNew
+        ? grupoNew.children.map(c => String(c.codigoBarra || '')).filter(Boolean)
+        : [];
+      MembreteSystem.abrirMenuProductoCard({
+        idProducto:  idProducto || skuBase,
+        codigoBarra: childrenCodes[0] || idProducto || skuBase,
+        descripcion: (grupoNew && grupoNew.base && grupoNew.base.descripcion) || skuBase || '',
+        skuBase:     skuBase || '',
+        codigos:     childrenCodes
+      });
+      return;
+    }
+
+    // ── FALLBACK al sistema viejo (PrintHub) si MembreteSystem no cargó ──
     _membLock.add(key);
 
     // Feedback inmediato visual: deshabilitar botón 2s
