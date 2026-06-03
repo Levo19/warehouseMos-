@@ -27,13 +27,26 @@ function procesarLotesPendientes() {
   try {
     var sheet = _getSheetLotesAdhesivo();
     var rows = _sheetToObjects(sheet);
-    // Filtramos lotes ENCOLADO o IMPRIMIENDO con completadas < total.
+    // [AUDIT FIX #3] Filtramos también por fechaUltimoUpdate: si está
+    // IMPRIMIENDO pero el update fue hace <90s, asumimos que otro proceso
+    // lo está manejando AHORA. Si está IMPRIMIENDO con update >90s atrás,
+    // probablemente crasheó — lo re-tomamos.
+    var nowMs = new Date().getTime();
     var pendientes = rows.filter(function(r) {
       var s = String(r.status || '').toUpperCase();
       var completadas = parseInt(r.completadas) || 0;
       var total       = parseInt(r.totalEtq)    || 0;
-      return (s === 'ENCOLADO' || s === 'IMPRIMIENDO')
-          && completadas < total;
+      if (completadas >= total) return false;
+      if (s === 'ENCOLADO') return true;
+      if (s === 'IMPRIMIENDO') {
+        var lastUpd = String(r.fechaUltimoUpdate || '');
+        if (!lastUpd) return true;
+        var lastMs = new Date(lastUpd).getTime();
+        if (isNaN(lastMs)) return true;
+        // Si pasó >90s desde el último update, considerarlo abandonado
+        return (nowMs - lastMs) > 90000;
+      }
+      return false;
     });
     Logger.log('[Trigger] ' + pendientes.length + ' lotes pendientes');
 
