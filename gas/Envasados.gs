@@ -420,13 +420,17 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   //   ADHESIVO_GAP_MM   default 2  (mm de separación entre adhesivos)
   //   ADHESIVO_DENSITY  default 8  (1-15, sube si sale tenue)
   //   ADHESIVO_SPEED    default 4  (1-6, baja si sale corrida)
-  //   ADHESIVO_OFFSET_Y default 0  (dots: positivo baja TODO el contenido, negativo lo sube)
-  // Si la impresión sale corrida arriba/abajo del adhesivo, ajustá OFFSET_Y.
+  //   ADHESIVO_OFFSET_Y default 0  (dots offset manual base)
+  //   ADHESIVO_DRIFT_DOTS_POR_PRINT  drift acumulativo (auto-detect)
+  //   ADHESIVO_PRINTS_DESDE_CAL      contador automático
+  // [v2.13.118] _calcularOffsetEfectivoParaPrint() devuelve offsetBase
+  // MENOS la compensación acumulada de drift, así cada print se va
+  // corriendo "hacia abajo" para compensar el drift natural de la impresora.
   var props = PropertiesService.getScriptProperties();
   var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
   var density  = parseInt(props.getProperty('ADHESIVO_DENSITY'))    || 8;
   var speed    = parseInt(props.getProperty('ADHESIVO_SPEED'))      || 4;
-  var offsetY  = parseInt(props.getProperty('ADHESIVO_OFFSET_Y'))   || 0;
+  var offsetY  = _calcularOffsetEfectivoParaPrint();
 
   var header = [
     'SIZE 50 mm,25 mm',
@@ -684,6 +688,12 @@ function previsualizarTSPLEtq(params) {
 }
 
 function calibrarImpresoraAdhesivo() {
+  // [v2.13.118] Calibración manual al cambiar rollo:
+  //   1. GAPDETECT físico (impresora mide el GAP real)
+  //   2. FORMFEED (avanza una etiqueta limpia)
+  //   3. Reset del contador de prints y drift (rollo nuevo = drift desconocido)
+  //   4. Guardar fecha de calibración
+  // Gasta ~3 etiquetas pero solo se hace UNA VEZ por rollo.
   try {
     var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
     if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
@@ -691,11 +701,6 @@ function calibrarImpresoraAdhesivo() {
     try { printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN'); }
     catch (e) { return { ok: false, error: 'Sin impresora ADHESIVO/ALMACEN: ' + e.message }; }
 
-    // TSPL puro de calibración:
-    //   SIZE/GAP fijan las dimensiones esperadas del rollo
-    //   GAPDETECT manda al sensor a remedir
-    //   CLS limpia el buffer
-    //   FORMFEED avanza al próximo gap (alinea físicamente la próxima impresión)
     var tspl =
       'SIZE 50 mm,25 mm\r\n' +
       'GAP 2 mm,0 mm\r\n' +
@@ -719,10 +724,303 @@ function calibrarImpresoraAdhesivo() {
     });
     var code = resp.getResponseCode();
     if (code !== 201) return { ok: false, error: 'PrintNode HTTP ' + code + ': ' + resp.getContentText() };
+
+    // [v2.13.118] Reset del estado de calibración: rollo nuevo, contador a 0,
+    // drift desconocido (operador puede correr auto-detect después).
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('ADHESIVO_ROLLO_CALIBRADO', 'true');
+    props.setProperty('ADHESIVO_PRINTS_DESDE_CAL', '0');
+    props.setProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT', '0');
+    props.setProperty('ADHESIVO_FECHA_CALIBRADO', new Date().toISOString());
+
     return { ok: true, data: {
       jobId: JSON.parse(resp.getContentText()),
-      mensaje: 'Calibración enviada. La impresora va a avanzar ~3 etiquetas en blanco mientras mide el sensor de gap. Después ya podés imprimir normal.'
+      mensaje: 'Calibración enviada. Después de las ~3 etiquetas blancas, podés ejecutar Auto-detectar drift para fine-tunear, o imprimir directo.',
+      estado: estadoCalibracionRollo().data
     }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// [v2.13.118] CALIBRACIÓN INTELIGENTE — drift compensation por print
+// ════════════════════════════════════════════════════════════════════
+//
+// Properties relevantes:
+//   ADHESIVO_ROLLO_CALIBRADO       "true"/"false"
+//   ADHESIVO_GAP_MM_MEDIDO         "2.05" (informativo, futuro)
+//   ADHESIVO_DRIFT_DOTS_POR_PRINT  "4"     (dots a compensar por print)
+//   ADHESIVO_PRINTS_DESDE_CAL      "0"     (contador automático)
+//   ADHESIVO_FECHA_CALIBRADO       ISO timestamp
+//   ADHESIVO_OFFSET_Y              "0"     (offset manual fino base)
+//
+// Estrategia:
+//   - Cada print incrementa PRINTS_DESDE_CAL
+//   - El offset efectivo = OFFSET_Y_BASE - (DRIFT * PRINTS_DESDE_CAL)
+//     (compensa el drift acumulado moviendo TODO el contenido hacia abajo)
+//   - Cuando supera 500 sin recalibrar, frontend muestra alerta amarilla.
+
+// Lee el offsetY a aplicar para el PRÓXIMO print, incluyendo compensación
+// acumulada de drift. NO incrementa el contador (eso lo hace _incrementarPrintsCount
+// después del print exitoso).
+function _calcularOffsetEfectivoParaPrint() {
+  var props = PropertiesService.getScriptProperties();
+  var offsetBase  = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
+  var driftDots   = parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0;
+  var printsCount = parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0;
+  // Compensación: si drift es positivo (imagen sube), compensamos hacia abajo.
+  var compensacion = Math.round(driftDots * printsCount);
+  return offsetBase - compensacion;
+}
+
+// Incrementa el contador después de un print exitoso. Llamar 1 vez por print.
+function _incrementarPrintsCount(qty) {
+  qty = qty || 1;
+  var props = PropertiesService.getScriptProperties();
+  var actual = parseInt(props.getProperty('ADHESIVO_PRINTS_DESDE_CAL')) || 0;
+  props.setProperty('ADHESIVO_PRINTS_DESDE_CAL', String(actual + qty));
+}
+
+// Estado actual de calibración — para frontend.
+function estadoCalibracionRollo() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var calibrado   = props.getProperty('ADHESIVO_ROLLO_CALIBRADO') === 'true';
+    var driftDots   = parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0;
+    var printsCount = parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0;
+    var offsetBase  = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
+    var fechaCal    = props.getProperty('ADHESIVO_FECHA_CALIBRADO') || '';
+    var compensacionActual = Math.round(driftDots * printsCount);
+    var necesitaRecal = printsCount > 500;
+    return { ok: true, data: {
+      calibrado:              calibrado,
+      driftDotsPorPrint:      driftDots,
+      printsDesdeCal:         printsCount,
+      offsetBase:             offsetBase,
+      compensacionAcumulada:  compensacionActual,
+      offsetEfectivoProximoPrint: offsetBase - compensacionActual,
+      fechaCalibrado:         fechaCal,
+      necesitaRecalibrar:     necesitaRecal,
+      driftMmPorPrint:        +(driftDots / 8).toFixed(3),
+      driftConfigurado:       driftDots > 0
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// imprimirCalibradoresAdhesivo — manda N adhesivos de prueba con
+// regla vertical. El operador después medirá el desvío del print #N
+// y llamará aplicarDriftDetectado.
+//
+// Cada calibrador tiene:
+//   - Regla vertical IZQ y DER con marcas cada 1mm (8 dots)
+//   - Marcas más largas cada 5mm
+//   - Número "CAL #N" centrado para identificarlo
+//   - Borde superior e inferior con "tick" para alinear visualmente
+// ────────────────────────────────────────────────────────────────────
+function imprimirCalibradoresAdhesivo(params) {
+  try {
+    params = params || {};
+    var cantidad = parseInt(params.cantidad) || 10;
+    if (cantidad < 1 || cantidad > 30) {
+      return { ok: false, error: 'cantidad debe estar entre 1 y 30' };
+    }
+    var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+    if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
+    var printerId;
+    try { printerId = getPrinterNodeId('ADHESIVO', 'ALMACEN'); }
+    catch (e) { return { ok: false, error: 'Sin impresora ADHESIVO/ALMACEN: ' + e.message }; }
+
+    var auth = 'Basic ' + Utilities.base64Encode(apiKey + ':');
+    var resultados = [];
+
+    // Mandar 1 job por calibrador (para que el sistema OFFSET acumulativo
+    // los compense correctamente cuando se midan).
+    for (var i = 1; i <= cantidad; i++) {
+      var bytes = _buildTSPLCalibrador(i, cantidad);
+      var b64 = Utilities.base64Encode(bytes);
+      var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
+        method: 'post',
+        headers: { 'Authorization': auth },
+        contentType: 'application/json',
+        payload: JSON.stringify({
+          printerId: parseInt(printerId),
+          title: 'Calibrador #' + i + '/' + cantidad,
+          contentType: 'raw_base64',
+          content: b64,
+          source: 'warehouseMos-calibrador'
+        }),
+        muteHttpExceptions: true
+      });
+      var code = resp.getResponseCode();
+      if (code === 201) {
+        resultados.push({ i: i, ok: true, jobId: JSON.parse(resp.getContentText()) });
+        // [AUDIT FIX] Calibradores NO incrementan contador — están "fuera de cuenta".
+        // El operador después aplicará drift y eso resetea el contador para que
+        // los próximos prints reales arranquen limpios.
+      } else {
+        resultados.push({ i: i, ok: false, error: 'HTTP ' + code });
+      }
+    }
+    var okCount = resultados.filter(function(r) { return r.ok; }).length;
+    return { ok: true, data: {
+      enviados: okCount,
+      total: cantidad,
+      detalle: resultados,
+      mensaje: 'Mirá el calibrador #' + cantidad + '. ¿Cuántos mm se subió la regla? Ingresalo en "Aplicar drift detectado".'
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// Construye el TSPL del calibrador #N con regla vertical en ambos lados.
+// El calibrador NO incluye OFFSET ni drift compensation — es PRECISAMENTE
+// para medir cuánto se mueve sin compensación. Por eso usa offsetBase
+// directo (NO _calcularOffsetEfectivoParaPrint que incluye drift).
+function _buildTSPLCalibrador(numero, total) {
+  var props = PropertiesService.getScriptProperties();
+  var gapMm   = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))  || 2;
+  var density = parseInt  (props.getProperty('ADHESIVO_DENSITY')) || 8;
+  var speed   = parseInt  (props.getProperty('ADHESIVO_SPEED'))   || 4;
+  // [AUDIT FIX] Solo offset manual base. SIN compensación de drift acumulado.
+  var offsetY = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y')) || 0;
+
+  var header = [
+    'SIZE 50 mm,25 mm',
+    'GAP ' + gapMm + ' mm,0 mm',
+    'DIRECTION 1',
+    'DENSITY ' + density,
+    'SPEED ' + speed,
+    'CLS'
+  ].join('\r\n') + '\r\n';
+  var bytes = _strToBytesEtq(header);
+
+  // ── REGLAS VERTICALES (IZQ X=0..8, DER X=392..400) ──
+  // Cada 1mm = 8 dots. Adhesivo 25mm de alto = 200 dots → 25 marcas.
+  // Marca normal: 4 dots ancho, 1 dot alto
+  // Marca cada 5mm: 8 dots ancho
+  // Marca cada 10mm: 12 dots ancho + número
+  for (var mm = 0; mm <= 25; mm++) {
+    var y = 2 + mm * 8;  // y=2 para mm=0 (tope), y=2+200=202 (cerca del fondo)
+    if (y > 198) break;
+    var anchoMarca;
+    if (mm % 10 === 0)      anchoMarca = 12;
+    else if (mm % 5 === 0)  anchoMarca = 8;
+    else                    anchoMarca = 4;
+    // Marca izquierda
+    bytes = bytes.concat(_strToBytesEtq('BAR 0,' + y + ',' + anchoMarca + ',1\r\n'));
+    // Marca derecha
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + (400 - anchoMarca) + ',' + y + ',' + anchoMarca + ',1\r\n'));
+    // Números cada 5mm (font 1 = 8 dots ancho)
+    if (mm % 5 === 0 && mm > 0 && mm < 25) {
+      bytes = bytes.concat(_strToBytesEtq('TEXT 14,' + (y - 4) + ',"1",0,1,1,"' + mm + '"\r\n'));
+      bytes = bytes.concat(_strToBytesEtq('TEXT 370,' + (y - 4) + ',"1",0,1,1,"' + mm + '"\r\n'));
+    }
+  }
+
+  // ── INDICADOR "0mm" en el tope: marca BLANCA prominente ──
+  // Una caja blanca con "0" en el centro arriba para que el operador
+  // sepa que ESE es el punto de referencia "donde debería empezar".
+  bytes = bytes.concat(_strToBytesEtq('BAR 30,2,20,12\r\n'));     // caja negra
+  bytes = bytes.concat(_strToBytesEtq('BAR 32,4,16,8\r\n'));      // hueco blanco
+  bytes = bytes.concat(_strToBytesEtq('TEXT 33,5,"1",0,1,1,"0mm"\r\n'));
+  // Igual al final
+  bytes = bytes.concat(_strToBytesEtq('BAR 350,2,32,12\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR 352,4,28,8\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('TEXT 353,5,"1",0,1,1,"0mm"\r\n'));
+
+  // ── CAJA CENTRAL con "CAL #N/T" ──
+  // Posición centro: X≈120..280, Y≈85..120
+  // Font 3 (16 wide × 24 tall) bien visible.
+  var label = 'CAL #' + numero + '/' + total;
+  var labelW = label.length * 16;
+  var labelX = Math.floor((400 - labelW) / 2);
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + labelX + ',88,"3",0,1,1,"' + label + '"\r\n'));
+
+  var sub = 'mide el desvio mm';
+  var subW = sub.length * 8;
+  var subX = Math.floor((400 - subW) / 2);
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + subX + ',120,"1",0,1,1,"' + sub + '"\r\n'));
+
+  // ── Flecha SUR indicando "abajo es el final del adhesivo" ──
+  // Útil para que el operador sepa por dónde mirar el desvío.
+  bytes = bytes.concat(_strToBytesEtq('TEXT 180,150,"3",0,1,1,"v"\r\n'));
+
+  bytes = bytes.concat(_strToBytesEtq('PRINT 1,1\r\n'));
+  return bytes;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// aplicarDriftDetectado — operador midió el desvío del calibrador #N
+// con la regla vertical. Calculamos drift dots/print y guardamos.
+//
+// params: { mmDesviados: <número>, basadoEnPrints: <número, default 10> }
+// ────────────────────────────────────────────────────────────────────
+function aplicarDriftDetectado(params) {
+  try {
+    params = params || {};
+    var mm     = parseFloat(params.mmDesviados);
+    var prints = parseInt(params.basadoEnPrints) || 10;
+    if (isNaN(mm)) {
+      return { ok: false, error: 'mmDesviados debe ser un número' };
+    }
+    if (prints < 1) {
+      return { ok: false, error: 'basadoEnPrints debe ser >= 1' };
+    }
+    // Convertir mm a dots: 1mm = 8 dots a 203 DPI
+    // Drift por print = (mm / prints) × 8 dots/mm
+    var driftDotsPorPrint = (mm / prints) * 8;
+    // Redondeo: el firmware solo entiende dots enteros. Mantenemos 1 decimal
+    // como aproximación (luego se redondea en la compensación).
+    driftDotsPorPrint = Math.round(driftDotsPorPrint * 10) / 10;
+
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT', String(driftDotsPorPrint));
+    // [AUDIT FIX] Resetear contador. La compensación se aplica DESDE EL
+    // PRÓXIMO print real, no a los calibradores ya impresos.
+    props.setProperty('ADHESIVO_PRINTS_DESDE_CAL', '0');
+
+    return { ok: true, data: {
+      mmDesviados:      mm,
+      basadoEnPrints:   prints,
+      driftDotsPorPrint: driftDotsPorPrint,
+      driftMmPorPrint:  +(driftDotsPorPrint / 8).toFixed(3),
+      mensaje: 'Drift aplicado: ' + driftDotsPorPrint + ' dots/print. Próximos prints se compensan automáticamente.'
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// ajustarDriftManual — operador setea manualmente el drift sin auto-detect
+// ────────────────────────────────────────────────────────────────────
+function ajustarDriftManual(params) {
+  try {
+    params = params || {};
+    var driftDots = parseFloat(params.driftDotsPorPrint);
+    if (isNaN(driftDots)) {
+      return { ok: false, error: 'driftDotsPorPrint debe ser un número' };
+    }
+    PropertiesService.getScriptProperties()
+      .setProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT', String(driftDots));
+    return { ok: true, data: { driftDotsPorPrint: driftDots } };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// resetearContadorPrints — uso administrativo, sin recalibrar.
+// ────────────────────────────────────────────────────────────────────
+function resetearContadorPrints() {
+  try {
+    PropertiesService.getScriptProperties().setProperty('ADHESIVO_PRINTS_DESDE_CAL', '0');
+    return { ok: true, data: { printsDesdeCal: 0 } };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -1815,10 +2113,14 @@ function configurarTriggerResumenEnvasados() {
 //   CREADO · CALIBRANDO · IMPRIMIENDO · PAUSADO_USUARIO
 //   PAUSADO_OUT_PAPER · PAUSADO_ERROR · COMPLETADO · CANCELADO
 
+// [v2.13.118] tipoEtiqueta agregado — sheet ahora soporta ADHESIVO_ENVASADO,
+// MEMBRETE_ME, MEMBRETE_WH, CALIBRADOR. itemsJson permite payloads complejos
+// (cola múltiple, lista de códigos del WH, precio del ME).
 var LOTES_ADHESIVO_HEADERS = [
   'idLote', 'fechaCreacion', 'fechaUltimoUpdate', 'usuario', 'origen',
   'codigoBarra', 'descripcion', 'vto', 'totalEtq', 'completadas',
-  'subJobSize', 'status', 'ultimoError', 'ultimoPrintNodeJobId', 'printerId'
+  'subJobSize', 'status', 'ultimoError', 'ultimoPrintNodeJobId', 'printerId',
+  'tipoEtiqueta', 'itemsJson'
 ];
 
 // Setup idempotente — crea sheet si no existe, agrega columnas faltantes.
@@ -1983,6 +2285,11 @@ function crearLoteAdhesivo(params) {
       PropertiesService.getScriptProperties().getProperty('ADHESIVO_SUB_JOB_SIZE')
     ) || 10;
 
+    // [v2.13.118] tipoEtiqueta para diferenciar adhesivo de envasado vs
+    // membrete ME vs membrete WH. Default ADHESIVO_ENVASADO (back-compat).
+    var tipoEtiqueta = String(params.tipoEtiqueta || 'ADHESIVO_ENVASADO').toUpperCase();
+    var itemsJson    = params.itemsJson ? String(params.itemsJson) : '';
+
     var sheet = _getSheetLotesAdhesivo();
     // [v2.13.115] idLote incluye idempotencyKey para dedupe efectivo.
     // Si no hay idempotencyKey, fallback al patrón viejo (más débil).
@@ -2005,19 +2312,22 @@ function crearLoteAdhesivo(params) {
       status:              'CREADO',
       ultimoError:         '',
       ultimoPrintNodeJobId: '',
-      printerId:           printerId
+      printerId:           printerId,
+      tipoEtiqueta:        tipoEtiqueta,
+      itemsJson:           itemsJson
     });
     sheet.appendRow(fila);
 
     return { ok: true, data: {
-      idLote:      idLote,
-      total:       total,
-      completadas: 0,
-      subJobSize:  subJobSize,
-      status:      'CREADO',
-      vto:         vto,
-      descripcion: descripcion,
-      printerId:   printerId
+      idLote:       idLote,
+      total:        total,
+      completadas:  0,
+      subJobSize:   subJobSize,
+      status:       'CREADO',
+      vto:          vto,
+      descripcion:  descripcion,
+      printerId:    printerId,
+      tipoEtiqueta: tipoEtiqueta
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };
@@ -2173,6 +2483,10 @@ function imprimirSubLoteAdhesivo(params) {
       ultimoPrintNodeJobId: String(printNodeJobId),
       ultimoError:          ''
     });
+
+    // [v2.13.118] Drift compensation: incrementar contador de prints
+    // desde la última calibración. Próximo TSPL aplicará más offset.
+    try { _incrementarPrintsCount(qty); } catch(_) {}
 
     return { ok: true, data: {
       idLote:            idLote,

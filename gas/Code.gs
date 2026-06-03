@@ -252,6 +252,16 @@ function _route(method, e) {
       case 'pausarLoteAdhesivo':             return pausarLoteAdhesivo(params);
       case 'cancelarLoteAdhesivo':           return cancelarLoteAdhesivo(params);
       case 'getLotesAdhesivoPendientes':     return getLotesAdhesivoPendientes(params);
+      // [v2.13.118] Calibración inteligente — drift compensation
+      case 'estadoCalibracionRollo':         return estadoCalibracionRollo();
+      case 'imprimirCalibradoresAdhesivo':   return imprimirCalibradoresAdhesivo(params);
+      case 'aplicarDriftDetectado':          return aplicarDriftDetectado(params);
+      case 'ajustarDriftManual':             return ajustarDriftManual(params);
+      case 'resetearContadorPrints':         return resetearContadorPrints();
+      // [v2.13.118] Membretes ME y WH (reusan sheet LOTES_ADHESIVO con tipoEtiqueta)
+      case 'crearLoteMembrete':              return crearLoteMembrete(params);
+      case 'previsualizarMembreteMe':        return previsualizarMembreteMe(params.codigoBarra);
+      case 'previsualizarMembreteWh':        return previsualizarMembreteWh(params.codigoBarra);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);
       case 'imprimirMembrete':    return imprimirMembrete(params);
       case 'imprimirAvisoCajeros':return imprimirAvisoCajeros(params);

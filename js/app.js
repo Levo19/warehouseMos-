@@ -3751,6 +3751,23 @@ const App = (() => {
     }
     console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
 
+    // [v2.13.118] Inicializar sistema centralizado de membretes/adhesivos.
+    // WH API.post retorna {ok,data} → no desempaca. Llamadas a endpoints
+    // del propio WH no llevan prefijo wh_.
+    try {
+      if (window.MembreteSystem && window.MembreteSystem.iniciar) {
+        window.MembreteSystem.iniciar({
+          apiPost:        function(action, params) {
+            return API.post(Object.assign({ action: action }, params || {}));
+          },
+          usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },
+          origen:         'WH',
+          unwrapData:     false,
+          endpointPrefix: ''
+        });
+      }
+    } catch(_) {}
+
     // ── Verificación de dispositivo BLOQUEANTE (igual que ME) ──
     // El overlay #verifDispScreen ya está visible desde el HTML inicial (z-index
     // 9998), así que la app NUNCA se ve hasta que el dispositivo esté ACTIVO.
