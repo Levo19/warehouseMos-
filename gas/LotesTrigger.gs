@@ -24,13 +24,11 @@ function procesarLotesPendientes() {
     Logger.log('[Trigger] otro proceso en curso, skip');
     return;
   }
+  // [v2.13.140] Logging persistente + procesamiento múltiple + inferencia de tipo + skip robusto
+  var resumen = { intentados: 0, ok: 0, errores: 0, idsConError: [], inicio: new Date().toISOString() };
   try {
     var sheet = _getSheetLotesAdhesivo();
     var rows = _sheetToObjects(sheet);
-    // [AUDIT FIX #3] Filtramos también por fechaUltimoUpdate: si está
-    // IMPRIMIENDO pero el update fue hace <90s, asumimos que otro proceso
-    // lo está manejando AHORA. Si está IMPRIMIENDO con update >90s atrás,
-    // probablemente crasheó — lo re-tomamos.
     var nowMs = new Date().getTime();
     var pendientes = rows.filter(function(r) {
       var s = String(r.status || '').toUpperCase();
@@ -38,54 +36,183 @@ function procesarLotesPendientes() {
       var total       = parseInt(r.totalEtq)    || 0;
       if (completadas >= total) return false;
       if (s === 'ENCOLADO') return true;
-      if (s === 'IMPRIMIENDO') {
+      // [v2.13.140] CREADO también se procesa (membretes y adhesivos abandonados)
+      if (s === 'CREADO') return true;
+      if (s === 'IMPRIMIENDO' || s === 'CALIBRANDO') {
         var lastUpd = String(r.fechaUltimoUpdate || '');
         if (!lastUpd) return true;
         var lastMs = new Date(lastUpd).getTime();
         if (isNaN(lastMs)) return true;
-        // Si pasó >90s desde el último update, considerarlo abandonado
-        return (nowMs - lastMs) > 90000;
+        return (nowMs - lastMs) > 90000;  // abandonado >90s
       }
       return false;
     });
     Logger.log('[Trigger] ' + pendientes.length + ' lotes pendientes');
+    if (pendientes.length === 0) return _persistirResumen(resumen);
 
-    // Por ciclo, procesamos UN sub-job de UN lote.
-    // Razón: el polling state de PrintNode puede tomar 20s; si procesamos
-    // muchos lotes en 1 ciclo, podríamos exceder los 6 min de GAS.
-    // Próximo ciclo de trigger (1 min) toma el siguiente.
-    if (pendientes.length === 0) return;
-
-    // Priorizar lotes más viejos (FIFO)
+    // FIFO (más viejos primero)
     pendientes.sort(function(a, b) {
       return String(a.fechaCreacion).localeCompare(String(b.fechaCreacion));
     });
 
-    // Procesar primero de la cola
-    var lote = pendientes[0];
-    var idLote = String(lote.idLote);
-    var tipo = String(lote.tipoEtiqueta || 'ADHESIVO_ENVASADO').toUpperCase();
+    // [v2.13.140] Procesar hasta MAX_LOTES_POR_CICLO. PrintNode polling ~25s
+    // por lote; con 5 min máximo de ejecución GAS, podemos procesar ~10 lotes
+    // seguros. Saltamos los que fallan para no quedar atorados en uno solo.
+    var MAX_POR_CICLO = parseInt(
+      PropertiesService.getScriptProperties().getProperty('TRIGGER_MAX_LOTES_POR_CICLO')
+    ) || 8;
+    var tiempoLimiteMs = nowMs + 4 * 60 * 1000;  // máx 4 min por ciclo (margen vs 6min GAS)
 
-    Logger.log('[Trigger] procesando ' + idLote + ' tipo=' + tipo + ' completadas=' + lote.completadas + '/' + lote.totalEtq);
-
-    var result;
-    if (tipo === 'MEMBRETE_ME' || tipo === 'MEMBRETE_WH') {
-      result = imprimirSubLoteMembrete(idLote);
-    } else {
-      // ADHESIVO_ENVASADO (legacy)
-      result = imprimirSubLoteAdhesivo({ idLote: idLote });
-    }
-
-    if (result && result.ok === false) {
-      Logger.log('[Trigger] error en ' + idLote + ': ' + result.error);
-    } else {
-      Logger.log('[Trigger] OK: ' + idLote + ' completadas=' + (result.data && result.data.completadas));
+    for (var i = 0; i < pendientes.length && i < MAX_POR_CICLO; i++) {
+      if (new Date().getTime() > tiempoLimiteMs) {
+        Logger.log('[Trigger] tiempo límite alcanzado, parando en ' + i + '/' + pendientes.length);
+        break;
+      }
+      var lote = pendientes[i];
+      var idLote = String(lote.idLote);
+      // [v2.13.140] Inferir tipo desde descripción si está vacío (compat lotes viejos)
+      var tipo = String(lote.tipoEtiqueta || '').toUpperCase();
+      if (!tipo) {
+        var desc = String(lote.descripcion || '');
+        if (desc.indexOf('ME:') === 0)      tipo = 'MEMBRETE_ME';
+        else if (desc.indexOf('WH:') === 0) tipo = 'MEMBRETE_WH';
+        else                                 tipo = 'ADHESIVO_ENVASADO';
+      }
+      resumen.intentados++;
+      Logger.log('[Trigger ' + (i+1) + '/' + Math.min(MAX_POR_CICLO, pendientes.length) + '] procesando ' + idLote + ' tipo=' + tipo);
+      try {
+        var result;
+        if (tipo === 'MEMBRETE_ME' || tipo === 'MEMBRETE_WH') {
+          result = imprimirSubLoteMembrete(idLote);
+        } else {
+          result = imprimirSubLoteAdhesivo({ idLote: idLote });
+        }
+        if (result && result.ok === false) {
+          resumen.errores++;
+          resumen.idsConError.push(idLote + ': ' + (result.error || 'unknown'));
+          Logger.log('[Trigger] error en ' + idLote + ': ' + result.error);
+          // [v2.13.140] Marcar como PAUSADO_ERROR para no re-intentarlo en cada ciclo
+          // (si el error fue solo transitorio el operador puede reanudar manual)
+          try {
+            var rowIdx = _findLoteRow(sheet, idLote);
+            if (rowIdx >= 0) {
+              _patchLote(sheet, rowIdx, {
+                status: 'PAUSADO_ERROR',
+                ultimoError: 'Trigger: ' + String(result.error || '').substring(0, 200)
+              });
+            }
+          } catch(_){}
+        } else {
+          resumen.ok++;
+          Logger.log('[Trigger] OK: ' + idLote + ' completadas=' + ((result.data && result.data.completadas) || '?'));
+        }
+      } catch (eIter) {
+        resumen.errores++;
+        resumen.idsConError.push(idLote + ': EXC ' + eIter.message);
+        Logger.log('[Trigger] EXCEPCIÓN en ' + idLote + ': ' + eIter.message);
+        // Saltar al siguiente — no abortar el ciclo entero
+      }
     }
   } catch(e) {
-    Logger.log('[Trigger] excepción: ' + e.message);
+    Logger.log('[Trigger] excepción global: ' + e.message);
+    resumen.errores++;
+    resumen.idsConError.push('GLOBAL: ' + e.message);
   } finally {
-    lock.releaseLock();
+    try { lock.releaseLock(); } catch(_){}
+    resumen.fin = new Date().toISOString();
+    _persistirResumen(resumen);
   }
+}
+
+// [v2.13.140] Persistir resumen del último ciclo para diagnóstico
+function _persistirResumen(resumen) {
+  try {
+    PropertiesService.getScriptProperties().setProperty(
+      'TRIGGER_ULTIMO_RESUMEN',
+      JSON.stringify(resumen).substring(0, 8000)
+    );
+  } catch(_){}
+}
+
+// [v2.13.140] Diagnóstico PrintNode adhesivo: dice cuál printerId está
+// configurado, su estado en PrintNode y los últimos N jobs enviados.
+// Ayuda a detectar cuando el printerId de IMPRESORAS apunta a la impresora
+// EQUIVOCADA (ej: una ESC/POS de tickets en vez de la TSC de adhesivos).
+function diagnosticoPrintNodeAdhesivo() {
+  var diag = { printerId: '', impresoraInfo: null, jobsRecientes: [], errores: [] };
+  try {
+    var printerId;
+    try { printerId = String(getPrinterNodeId('ADHESIVO', 'ALMACEN')); }
+    catch (e) {
+      diag.errores.push('IMPRESORAS no tiene tipo=ADHESIVO zona=ALMACEN activa: ' + e.message);
+      return { ok: true, data: diag };
+    }
+    diag.printerId = printerId;
+
+    var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
+    if (!apiKey) {
+      diag.errores.push('PRINTNODE_API_KEY no configurada');
+      return { ok: true, data: diag };
+    }
+    var auth = 'Basic ' + Utilities.base64Encode(apiKey + ':');
+
+    // 1) Info de la impresora configurada
+    try {
+      var rImp = UrlFetchApp.fetch('https://api.printnode.com/printers/' + printerId, {
+        headers: { 'Authorization': auth }, muteHttpExceptions: true
+      });
+      if (rImp.getResponseCode() === 200) {
+        var arr = JSON.parse(rImp.getContentText());
+        var p = Array.isArray(arr) ? arr[0] : arr;
+        if (p) {
+          diag.impresoraInfo = {
+            id: p.id,
+            name: p.name || '',
+            description: p.description || '',
+            state: (p.computer && p.computer.state) || p.state || 'unknown',
+            online: (p.computer && p.computer.state === 'connected'),
+            computer: (p.computer && p.computer.name) || ''
+          };
+        }
+      } else {
+        diag.errores.push('PrintNode rechazó getPrinter: HTTP ' + rImp.getResponseCode());
+      }
+    } catch (eP) { diag.errores.push('Error consultando impresora: ' + eP.message); }
+
+    // 2) Últimos 10 jobs enviados a esa impresora
+    try {
+      var rJobs = UrlFetchApp.fetch('https://api.printnode.com/printers/' + printerId + '/printjobs?limit=10', {
+        headers: { 'Authorization': auth }, muteHttpExceptions: true
+      });
+      if (rJobs.getResponseCode() === 200) {
+        var jobs = JSON.parse(rJobs.getContentText());
+        diag.jobsRecientes = (jobs || []).map(function(j) {
+          return {
+            id: j.id,
+            title: String(j.title || '').substring(0, 60),
+            state: j.state || 'unknown',
+            createTimestamp: j.createTimestamp || '',
+            source: String(j.source || '').substring(0, 40)
+          };
+        });
+      } else {
+        diag.errores.push('PrintNode rechazó getJobs: HTTP ' + rJobs.getResponseCode());
+      }
+    } catch (eJ) { diag.errores.push('Error consultando jobs: ' + eJ.message); }
+
+  } catch (e) {
+    diag.errores.push('Excepción global: ' + e.message);
+  }
+  return { ok: true, data: diag };
+}
+
+// [v2.13.140] Endpoint manual: procesar AHORA todos los pendientes desde el panel.
+// Útil cuando hay muchos lotes en cola y el operador no quiere esperar.
+function procesarAhoraTodos() {
+  procesarLotesPendientes();
+  var resumen = {};
+  try { resumen = JSON.parse(PropertiesService.getScriptProperties().getProperty('TRIGGER_ULTIMO_RESUMEN') || '{}'); } catch(_){}
+  return { ok: true, data: resumen };
 }
 
 // [v2.13.130] Lazy installer — chequea si el trigger existe, lo instala si falta.

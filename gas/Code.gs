@@ -257,6 +257,9 @@ function _route(method, e) {
       // [v2.13.130] Diagnóstico + auto-instalación del trigger procesador
       case 'diagnosticoTriggerLotes':        return diagnosticoTriggerLotes();
       case 'asegurarTriggerLotes':           return _asegurarTriggerLotes();
+      // [v2.13.140] Forzar procesamiento manual de TODOS los lotes pendientes
+      case 'procesarAhoraTodos':             return procesarAhoraTodos();
+      case 'diagnosticoPrintNodeAdhesivo':   return diagnosticoPrintNodeAdhesivo();
       // [v2.13.118] Calibración inteligente — drift compensation
       case 'estadoCalibracionRollo':         return estadoCalibracionRollo();
       case 'imprimirCalibradoresAdhesivo':   return imprimirCalibradoresAdhesivo(params);
