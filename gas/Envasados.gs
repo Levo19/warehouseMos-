@@ -2239,14 +2239,65 @@ function _filaLoteAdhesivo(patch, sheet) {
   var realHeaders = LOTES_ADHESIVO_HEADERS;
   if (sheet) {
     try {
-      var hdrRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-      realHeaders = hdrRow.map(function(h) { return String(h || '').trim(); }).filter(Boolean);
-    } catch(_){}
+      // [v2.13.151 FIX CRITICO] Antes leía solo hasta sheet.getLastColumn().
+      // Bug: getLastColumn() retorna la última columna con DATA en CUALQUIER
+      // fila — si las últimas filas no tenían valor en tipoEtiqueta/itemsJson,
+      // retornaba 15 en vez de 17. Resultado: patch.tipoEtiqueta y patch.itemsJson
+      // NO se incluían en la fila → campos vacíos → trigger fallaba con
+      // "Sin item para completar #0".
+      //
+      // Fix: leer SIEMPRE max(getLastColumn(), LOTES_ADHESIVO_HEADERS.length)
+      // columnas. Si la sheet no tiene los headers esperados, ejecutar setup
+      // (idempotente) para agregarlos.
+      var minCols  = LOTES_ADHESIVO_HEADERS.length;
+      var lastCol  = sheet.getLastColumn();
+      var maxCols  = Math.max(lastCol, minCols);
+      var hdrRow   = sheet.getRange(1, 1, 1, maxCols).getValues()[0];
+      var detected = hdrRow.map(function(h) { return String(h || '').trim(); });
+      var missing  = LOTES_ADHESIVO_HEADERS.filter(function(h) { return detected.indexOf(h) < 0; });
+      if (missing.length) {
+        Logger.log('[_filaLoteAdhesivo] sheet faltan columnas: ' + missing.join(',') + ' — ejecutando setup');
+        try { setupLotesAdhesivo(); } catch(_){}
+        // Re-leer headers tras agregar
+        maxCols  = Math.max(sheet.getLastColumn(), minCols);
+        hdrRow   = sheet.getRange(1, 1, 1, maxCols).getValues()[0];
+        detected = hdrRow.map(function(h) { return String(h || '').trim(); });
+      }
+      realHeaders = detected.filter(Boolean);
+    } catch(e) {
+      Logger.log('[_filaLoteAdhesivo] error leyendo headers: ' + e.message);
+    }
   }
   return realHeaders.map(function(h) {
     var v = patch[h];
     return v === undefined ? '' : v;
   });
+}
+
+// [v2.13.151] Diagnóstico — devuelve headers reales de la sheet + comparación
+// con LOTES_ADHESIVO_HEADERS esperados. Útil para identificar drift de schema.
+function inspeccionarSheetLotes() {
+  try {
+    var sheet = _getSheetLotesAdhesivo();
+    var lastCol = sheet.getLastColumn();
+    var lastRow = sheet.getLastRow();
+    var hdrRow = sheet.getRange(1, 1, 1, Math.max(lastCol, 20)).getValues()[0];
+    var detected = hdrRow.map(function(h) { return String(h || '').trim(); });
+    var esperados = LOTES_ADHESIVO_HEADERS;
+    var faltantes = esperados.filter(function(h) { return detected.indexOf(h) < 0; });
+    var extras    = detected.filter(Boolean).filter(function(h) { return esperados.indexOf(h) < 0; });
+    return { ok: true, data: {
+      lastCol:   lastCol,
+      lastRow:   lastRow,
+      headers:   detected,
+      esperados: esperados,
+      faltantes: faltantes,
+      extras:    extras,
+      ok:        faltantes.length === 0
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // Busca el rowIndex (1-based) de un lote por idLote. -1 si no existe.
