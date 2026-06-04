@@ -20258,8 +20258,12 @@ const WhAdhesivoReprint = (() => {
     const cant = Math.max(1, Math.min(999, parseInt(inp && inp.value) || datos.defaultCant));
 
     cerrar();
-    // Delegar a WhLoteAdhesivo (que abre su propio modal de progreso y orquesta)
-    if (window.WhLoteAdhesivo && WhLoteAdhesivo.crearYEjecutar) {
+    // [v2.13.152 FIX] WhLoteAdhesivo se declara con `const` a nivel de archivo.
+    // `const` NO se expone a window automáticamente (solo `var` lo hace). El
+    // check `window.WhLoteAdhesivo` siempre era false → toast 'no disponible'.
+    // Fix: referencia directa al const del scope. Como WhAdhesivoReprint se
+    // declara DESPUÉS de WhLoteAdhesivo, este último ya está definido.
+    if (typeof WhLoteAdhesivo !== 'undefined' && WhLoteAdhesivo.crearYEjecutar) {
       WhLoteAdhesivo.crearYEjecutar({
         codigoBarra:    datos.codigoBarra,
         descripcion:    datos.descripcion,
@@ -20287,6 +20291,9 @@ const WhAdhesivoReprint = (() => {
 
   return { abrir, delta, setCant, imprimir, cerrar };
 })();
+// [v2.13.152] Expongo a window para que los onclick="WhAdhesivoReprint.xxx()"
+// del HTML inline funcionen. `const` NO crea propiedad en window por sí solo.
+window.WhAdhesivoReprint = WhAdhesivoReprint;
 
 // ════════════════════════════════════════════════
 // Init

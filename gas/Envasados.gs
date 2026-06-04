@@ -2313,10 +2313,29 @@ function _findLoteRow(sheet, idLote) {
   return -1;
 }
 
+// [v2.13.152 HELPER] Lee headers REALES de la sheet (no la constante).
+// Bug encontrado: _patchLote/_readLote usaban LOTES_ADHESIVO_HEADERS.indexOf
+// para encontrar columnas, pero si la sheet tiene los headers en OTRO orden
+// (porque setupLotesAdhesivo agregó columnas faltantes al final), los escritos
+// iban a columnas equivocadas. Ej: 'COMPLETADO' caía en columna 'ultimoError'
+// porque el constante decia que status era col 12 pero la sheet lo tenía
+// en col 11 (con tipoEtiqueta al final desplazando todo).
+function _leerHeadersRealesLote(sheet) {
+  try {
+    var maxCols = Math.max(sheet.getLastColumn(), LOTES_ADHESIVO_HEADERS.length);
+    var hdrRow  = sheet.getRange(1, 1, 1, maxCols).getValues()[0];
+    return hdrRow.map(function(h) { return String(h || '').trim(); });
+  } catch (e) {
+    return LOTES_ADHESIVO_HEADERS.slice();  // fallback al constante
+  }
+}
+
 function _readLote(sheet, rowIndex) {
-  var values = sheet.getRange(rowIndex, 1, 1, LOTES_ADHESIVO_HEADERS.length).getValues()[0];
+  // [v2.13.152] Lee headers REALES — no la constante.
+  var headers = _leerHeadersRealesLote(sheet);
+  var values = sheet.getRange(rowIndex, 1, 1, headers.length).getValues()[0];
   var obj = {};
-  LOTES_ADHESIVO_HEADERS.forEach(function(h, i) { obj[h] = values[i]; });
+  headers.forEach(function(h, i) { if (h) obj[h] = values[i]; });
   // Numéricos como Number
   obj.totalEtq    = parseInt(obj.totalEtq) || 0;
   obj.completadas = parseInt(obj.completadas) || 0;
@@ -2326,9 +2345,12 @@ function _readLote(sheet, rowIndex) {
 
 function _patchLote(sheet, rowIndex, patch) {
   patch.fechaUltimoUpdate = new Date().toISOString();
-  // Actualizar solo las columnas que vienen en patch
+  // [v2.13.152] Headers REALES en lugar de la constante.
+  // Sin esto, si la sheet tiene status en col 11 pero el constante en col 12,
+  // los setValue van a celdas equivocadas → bug "ultimoError = COMPLETADO".
+  var headers = _leerHeadersRealesLote(sheet);
   Object.keys(patch).forEach(function(k) {
-    var colIdx = LOTES_ADHESIVO_HEADERS.indexOf(k);
+    var colIdx = headers.indexOf(k);
     if (colIdx >= 0) sheet.getRange(rowIndex, colIdx + 1).setValue(patch[k]);
   });
 }
