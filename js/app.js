@@ -18958,10 +18958,17 @@ const Welcome = (() => {
     // (incluye botones "solicitar extensión" + "notifícame cuando abra")
     try {
       if (window.SeguridadSystem && window.SeguridadSystem.abrirModalFueraHorario) {
-        var _segAp = info && info.apertura ? String(info.apertura) : '07:00';
-        var _segCi = info && info.cierre   ? String(info.cierre)   : '19:00';
-        if (typeof info.apertura === 'number') _segAp = String(info.apertura).padStart(2, '0') + ':00';
-        if (typeof info.cierre   === 'number') _segCi = String(info.cierre).padStart(2, '0') + ':00';
+        // [v2.13.125 FIX] Soportar números decimales (7.5 → "07:30")
+        var _numAHHMM = function(n) {
+          var h = Math.floor(n);
+          var m = Math.round((n - h) * 60);
+          if (m === 60) { h++; m = 0; }
+          return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+        };
+        var _segAp = info && info.apertura != null ? String(info.apertura) : '07:00';
+        var _segCi = info && info.cierre   != null ? String(info.cierre)   : '19:00';
+        if (typeof info.apertura === 'number') _segAp = _numAHHMM(info.apertura);
+        if (typeof info.cierre   === 'number') _segCi = _numAHHMM(info.cierre);
         window.SeguridadSystem.abrirModalFueraHorario(info && info.motivo || 'fuera', _segAp, _segCi);
         try { SoundFX.buzzer(); } catch(_) {}
         return;
