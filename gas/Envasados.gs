@@ -2168,10 +2168,21 @@ function _getSheetLotesAdhesivo() {
   return sheet;
 }
 
-// Construye un objeto fila desde un patch + valores existentes, en el
-// orden EXACTO de LOTES_ADHESIVO_HEADERS para evitar columnas desfasadas.
-function _filaLoteAdhesivo(patch) {
-  return LOTES_ADHESIVO_HEADERS.map(function(h) {
+// Construye un objeto fila desde un patch.
+// [v2.13.136 FIX] Lee los headers REALES de la sheet para respetar el orden
+// real. Antes usaba LOTES_ADHESIVO_HEADERS constante; si la sheet tenía las
+// columnas en otro orden (ej: tipoEtiqueta agregada al final), los valores
+// se escribían en celdas equivocadas. Bug síntoma: lotes MEMBRETE_WH se
+// guardaban con tipoEtiqueta vacía → filtro 'ADHESIVO_ENVASADO' los incluía.
+function _filaLoteAdhesivo(patch, sheet) {
+  var realHeaders = LOTES_ADHESIVO_HEADERS;
+  if (sheet) {
+    try {
+      var hdrRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+      realHeaders = hdrRow.map(function(h) { return String(h || '').trim(); }).filter(Boolean);
+    } catch(_){}
+  }
+  return realHeaders.map(function(h) {
     var v = patch[h];
     return v === undefined ? '' : v;
   });
@@ -2323,7 +2334,7 @@ function crearLoteAdhesivo(params) {
       printerId:           printerId,
       tipoEtiqueta:        tipoEtiqueta,
       itemsJson:           itemsJson
-    });
+    }, sheet);  // [v2.13.136] pasar sheet para respetar orden REAL de columnas
     sheet.appendRow(fila);
 
     // [v2.13.130 FIX] Auto-instalar trigger por si el reanudar lote tarde
@@ -2842,12 +2853,19 @@ function getLotesAdhesivoHistorial(params) {
     var limit = parseInt(params.limit) || 50;
     var rows = _sheetToObjects(_getSheetLotesAdhesivo());
 
+    // [v2.13.136 FIX] Inferir tipoEtiqueta desde la descripción para lotes
+    // viejos que tienen ese campo vacío (antes del fix _filaLoteAdhesivo).
+    var _inferirTipo = function(r) {
+      var t = String(r.tipoEtiqueta || '').toUpperCase();
+      if (t) return t;
+      var d = String(r.descripcion || '');
+      if (d.indexOf('ME: ') === 0 || d.indexOf('ME:') === 0) return 'MEMBRETE_ME';
+      if (d.indexOf('WH: ') === 0 || d.indexOf('WH:') === 0) return 'MEMBRETE_WH';
+      return 'ADHESIVO_ENVASADO';
+    };
     // Filtrar por tipoEtiqueta si viene
     if (tipoFiltro) {
-      rows = rows.filter(function(r) {
-        var t = String(r.tipoEtiqueta || 'ADHESIVO_ENVASADO').toUpperCase();
-        return t === tipoFiltro;
-      });
+      rows = rows.filter(function(r) { return _inferirTipo(r) === tipoFiltro; });
     }
     // Ordenar por fecha desc (más recientes primero)
     rows.sort(function(a, b) {
@@ -2871,7 +2889,7 @@ function getLotesAdhesivoHistorial(params) {
         completadas:       parseInt(r.completadas) || 0,
         status:            s,
         ultimoError:       String(r.ultimoError || ''),
-        tipoEtiqueta:      String(r.tipoEtiqueta || 'ADHESIVO_ENVASADO')
+        tipoEtiqueta:      _inferirTipo(r)  // [v2.13.136] usa el helper que infiere de descripción
       };
       if (s === 'COMPLETADO' || s === 'CANCELADO') completados.push(item);
       else pendientes.push(item);

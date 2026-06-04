@@ -428,7 +428,7 @@ function crearLoteMembrete(params) {
       printerId:           printerId,
       tipoEtiqueta:        tipo,
       itemsJson:           JSON.stringify(expandidos)
-    });
+    }, sheet);  // [v2.13.136] pasar sheet para respetar orden REAL de columnas
     sheet.appendRow(fila);
     // [v2.13.130 FIX] Auto-instalar trigger si falta. Sin trigger, los lotes
     // ENCOLADO nunca se procesan → membretes se quedan en cola para siempre.

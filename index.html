@@ -6665,22 +6665,33 @@
                 style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
           🔧 Calibrar impresora
         </button>
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirCola('MEMBRETE_WH')"
+        <!-- [v2.13.137] Botones rediseñados: FILTROS del historial. Antes los
+             botones "Cola WH/ME" abrían una cola local que siempre estaba vacía
+             salvo que agregaras productos a mano. Más útil ver los lotes ya
+             creados con su estado actual. -->
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('MEMBRETE_ME')"
                 class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
-          📦 Cola WH
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24"
+                title="Lotes membretes ME (góndola) — pendientes + historial">
+          🏪 Lotes ME
         </button>
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirCola('MEMBRETE_ME')"
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('MEMBRETE_WH')"
                 class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
-          🏪 Cola ME
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24"
+                title="Lotes membretes WH (andamio) — pendientes + historial">
+          📦 Lotes WH
         </button>
-        <!-- [v2.13.129] Botón nuevo: ver lotes de adhesivos de envasados -->
         <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('ADHESIVO_ENVASADO')"
                 class="px-3 py-2 rounded-lg text-xs font-semibold"
                 style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(192,132,252,.4);color:#c084fc"
-                title="Lotes de adhesivos de envasados (pendientes + historial)">
+                title="Lotes adhesivos de envasados — pendientes + historial">
           🏭 Lotes Envasados
+        </button>
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('')"
+                class="px-3 py-2 rounded-lg text-xs font-semibold"
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(148,163,184,.4);color:#cbd5e1"
+                title="Ver TODOS los lotes (sin filtrar)">
+          📋 Todos
         </button>
       </div>
     </div>
