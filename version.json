@@ -1,1 +1,1 @@
-{ "version": "2.13.143", "build": "20260604-no-mas-gapdetect-automatico-solo-calibracion-manual" }
+{ "version": "2.13.144", "build": "20260604-fix-signo-drift-compensation-amplificaba-bug" }

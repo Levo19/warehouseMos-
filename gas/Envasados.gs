@@ -769,9 +769,25 @@ function _calcularOffsetEfectivoParaPrint() {
   var offsetBase  = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
   var driftDots   = parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0;
   var printsCount = parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0;
-  // Compensación: si drift es positivo (imagen sube), compensamos hacia abajo.
+  // [v2.13.144 BUGFIX SIGNO INVERTIDO]
+  // En TSPL2 Y=0 = TOPE del label y Y aumenta hacia abajo. Para compensar un
+  // drift que SUBE el contenido cada print (caso típico, lo más común), hay
+  // que AUMENTAR Y → SUMAR compensación, no restarla.
+  // Convención: driftDots > 0 = "imagen sube cada print" (operador ingresa mm
+  // positivos en el modal de drift cuando observa subida en CAL #10).
+  // Antes la función restaba → amplificaba el drift en lugar de cancelarlo,
+  // y cuando offsetY se volvía muy negativo elementos con Y baseline chico
+  // (BITMAP Y=2, Vto Y=12, etc.) caían en Y<0 y el firmware los wrappeaba
+  // al fondo del label — efecto "unos suben otros bajan" reportado.
   var compensacion = Math.round(driftDots * printsCount);
-  return offsetBase - compensacion;
+  var offset = offsetBase + compensacion;
+  // Clamp defensivo: nunca permitir que offset+Y baseline mínima (=2 del BITMAP)
+  // caiga bajo 0. Si la compensación es tan agresiva que rompería el layout
+  // hacia abajo (Y > 200 = fondo del label), se trunca a 50 dots (~6mm) máximo —
+  // a partir de ahí hay que recalibrar el rollo en serio.
+  if (offset < -1) offset = -1;
+  if (offset > 50) offset = 50;
+  return offset;
 }
 
 // Incrementa el contador después de un print exitoso. Llamar 1 vez por print.
@@ -804,7 +820,7 @@ function estadoCalibracionRollo() {
       printsDesdeCal:         printsCount,
       offsetBase:             offsetBase,
       compensacionAcumulada:  compensacionActual,
-      offsetEfectivoProximoPrint: offsetBase - compensacionActual,
+      offsetEfectivoProximoPrint: offsetBase + compensacionActual,  // [v2.13.144] suma, no resta
       fechaCalibrado:         fechaCal,
       necesitaRecalibrar:     necesitaRecal,
       rolloCasiAgotado:       rolloCasiAgotado,
@@ -973,6 +989,9 @@ function aplicarDriftDetectado(params) {
     params = params || {};
     var mm     = parseFloat(params.mmDesviados);
     var prints = parseInt(params.basadoEnPrints) || 10;
+    // [v2.13.144] Aceptar parámetro `direccion` ('arriba'|'abajo') para que la
+    // UI guíe al operador en qué signo aplicar. Default 'arriba' = caso típico.
+    var direccion = String(params.direccion || 'arriba').toLowerCase();
     if (isNaN(mm)) {
       return { ok: false, error: 'mmDesviados debe ser un número' };
     }
@@ -980,10 +999,13 @@ function aplicarDriftDetectado(params) {
       return { ok: false, error: 'basadoEnPrints debe ser >= 1' };
     }
     // Convertir mm a dots: 1mm = 8 dots a 203 DPI
-    // Drift por print = (mm / prints) × 8 dots/mm
-    var driftDotsPorPrint = (mm / prints) * 8;
-    // Redondeo: el firmware solo entiende dots enteros. Mantenemos 1 decimal
-    // como aproximación (luego se redondea en la compensación).
+    // mm SIEMPRE positivo (operador ingresa magnitud, no signo).
+    // El SENTIDO lo marca `direccion`:
+    //   - 'arriba' = drift natural sube → driftDots POSITIVO → compensación SUMA a Y (baja)
+    //   - 'abajo'  = drift natural baja → driftDots NEGATIVO → compensación RESTA a Y (sube)
+    var mmAbs = Math.abs(mm);
+    var driftDotsPorPrint = (mmAbs / prints) * 8;
+    if (direccion === 'abajo') driftDotsPorPrint = -driftDotsPorPrint;
     driftDotsPorPrint = Math.round(driftDotsPorPrint * 10) / 10;
 
     var props = PropertiesService.getScriptProperties();
@@ -993,11 +1015,39 @@ function aplicarDriftDetectado(params) {
     props.setProperty('ADHESIVO_PRINTS_DESDE_CAL', '0');
 
     return { ok: true, data: {
-      mmDesviados:      mm,
+      mmDesviados:      mmAbs,
+      direccion:        direccion,
       basadoEnPrints:   prints,
       driftDotsPorPrint: driftDotsPorPrint,
       driftMmPorPrint:  +(driftDotsPorPrint / 8).toFixed(3),
-      mensaje: 'Drift aplicado: ' + driftDotsPorPrint + ' dots/print. Próximos prints se compensan automáticamente.'
+      mensaje: 'Drift ' + direccion + ' aplicado: ' + driftDotsPorPrint
+               + ' dots/print. Próximos prints se compensan automáticamente.'
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// [v2.13.144] Reset de emergencia — limpia drift, offset y contador.
+// Útil cuando el drift quedó configurado mal (ej. signo invertido) y los
+// adhesivos salen completamente fuera de lugar. NO hace GAPDETECT — solo
+// resetea las properties del software.
+function resetearDriftEmergencia() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var antes = {
+      drift:   parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0,
+      offset:  parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0,
+      prints:  parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0
+    };
+    props.setProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT', '0');
+    props.setProperty('ADHESIVO_OFFSET_Y',             '0');
+    props.setProperty('ADHESIVO_PRINTS_DESDE_CAL',     '0');
+    return { ok: true, data: {
+      antes: antes,
+      ahora: { drift: 0, offset: 0, prints: 0 },
+      mensaje: 'Drift y offset reseteados a 0. Próximos prints saldrán sin compensación. '
+             + 'Si querés re-detectar drift correctamente: imprimí 10 calibradores y aplicá la dirección correcta.'
     }};
   } catch (e) {
     return { ok: false, error: e.message };
