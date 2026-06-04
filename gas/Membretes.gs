@@ -97,6 +97,13 @@ function _getLogoHexParaTipo(tipo) {
 //   esSkuBase=true → muestra skuBase con icono ⬢, no codigoBarra
 // ────────────────────────────────────────────────────────────────────
 function _buildTSPLMembreteMe(producto, allEnvasables) {
+  // [v2.13.142] REDISEÑO completo según feedback:
+  // a) Barcode tamaño ESTÁNDAR (44 dots height, igual que adhesivo envasado).
+  // b) Defensa codigoBarra undefined → fallback skuBase → idProducto → 'SIN-CODIGO'
+  //    (antes salía literalmente "undefined" en el adhesivo).
+  // c) Precio en esquina sup. derecha en NEGRITA (no mega central).
+  //    Hace lugar para descripción 2 líneas sin sobre-escribir el barcode.
+  // d) Mismo layout que adhesivo envasado: logo + desc + frame con corner marks + barcode.
   var descNorm = _normalizeEtq(producto.descripcion || '');
   var tokens = descNorm.split(/\s+/);
   var allTok = (allEnvasables || []).map(function(p) { return p.tokens; });
@@ -125,8 +132,29 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
   bytes = bytes.concat(_hexToBytesEtq(logoHex));
   bytes = bytes.concat(_strToBytesEtq('\r\n'));
 
-  // ── Descripción 1-2 líneas centrada Y=42-66 ──
-  var startY = 42 + offsetY, LINE_H = 28, SPACE = 8;
+  // [v2.13.142] PRECIO en esquina sup. derecha — negrita compacta.
+  // Font 4 = 16×24 dots. Ej: "S/ 8.50" = 7 chars × 16 = 112 dots wide.
+  var precioStr = 'S/ ' + (parseFloat(producto.precio) || 0).toFixed(2);
+  var precioFontW = 16;
+  var precioWidth = precioStr.length * precioFontW;
+  var precioX = 400 - precioWidth - 4;
+  var precioY = 4 + offsetY;
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + precioX + ',' + precioY + ',"4",0,1,1,"' + precioStr + '"\r\n'));
+  // Línea decorativa debajo del precio
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + precioX + ',' + (precioY + 28) + ',' + precioWidth + ',2\r\n'));
+
+  // [v2.13.142] Descripción centrada en área Y=46-118 (mismo layout que envasado)
+  var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
+  var LINE_H = 38, SPACE = 8;
+  var startY;
+  if (lines.length === 1) {
+    var lineHasHl = lines[0].some(function(t) { return t.hl; });
+    var lineHeight = lineHasHl ? 32 : 24;
+    var baselineOffset = lineHasHl ? 0 : 4;
+    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
+  } else {
+    startY = DESC_AREA_Y0 + offsetY;
+  }
   for (var li = 0; li < Math.min(lines.length, 2); li++) {
     var line = lines[li];
     var totalW = 0;
@@ -135,50 +163,50 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
     var y = startY + li * LINE_H;
     for (var tj = 0; tj < line.length; tj++) {
       var o = line[tj];
-      var font = o.hl ? '3' : '2';  // un poco más chico que el adhesivo (precio es el actor)
+      var font = o.hl ? '4' : '3';
+      var yAdj = o.hl ? y : y + 4;
       var safe = String(o.tok).replace(/"/g, "'");
-      bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + y + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
+      bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + yAdj + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
       x += o.w + SPACE;
     }
   }
 
-  // ── Código de barra / SKU con corner marks Y=72-110 ──
-  var codigo = String(producto.esSkuBase ? (producto.skuBase || producto.codigoBarra) : producto.codigoBarra).replace(/"/g, '');
+  // [v2.13.142] Código de barras — fallback robusto contra undefined
+  var codigo = String(
+    (producto.esSkuBase ? producto.skuBase : producto.codigoBarra)
+    || producto.codigoBarra
+    || producto.skuBase
+    || producto.idProducto
+    || ''
+  ).replace(/"/g, '');
+  if (!codigo) codigo = 'SIN-CODIGO';
   var bcLen = codigo.length;
   var modules = 11 * bcLen + 35;
   var narrowBc = 2;
   var barcodeWidth = modules * narrowBc;
   if (barcodeWidth > 300) { narrowBc = 1; barcodeWidth = modules * narrowBc; }
-  var barcodeHeight = 32;
+  var barcodeHeight = 44;  // [v2.13.142] mismo tamaño que adhesivo envasado
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
-  var barcodeY = 72 + offsetY;
-  // Sin texto auto (5° param = 0)
+  var barcodeY = 124 + offsetY;
+  // Frame con corner marks (igual que envasado y WH)
+  var frameX1 = 10, frameX2 = 389;
+  var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY, cmL = 12;
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + codigo + '"\r\n'));
-  // Texto del código + icono indicador
-  var iconoCodigo = producto.esSkuBase ? '* ' : '> ';  // ⬢ y ▌ no entran en font interno
-  var sufijo      = producto.esSkuBase ? ' (SKU)' : '';
-  var textoCodigo = iconoCodigo + codigo + sufijo;
-  var codigoFontW = 8;
-  var codigoWidth = textoCodigo.length * codigoFontW;
-  var codigoX = Math.max(10, Math.floor((400 - codigoWidth) / 2));
-  var codigoY = barcodeY + barcodeHeight + 4;
-  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + textoCodigo + '"\r\n'));
 
-  // ── PRECIO MEGA Y=125-180 ──
-  // Caja con bordes para resaltarlo + texto Font 5 (32×48 dots)
-  var precioStr = 'S/ ' + (parseFloat(producto.precio) || 0).toFixed(2);
-  var precioFontW = 32;
-  var precioWidth = precioStr.length * precioFontW;
-  var precioX = Math.floor((400 - precioWidth) / 2);
-  var precioY = 125 + offsetY;
-  // Caja decorativa: barras horizontales arriba y abajo del precio
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + Math.max(20, precioX - 15) + ',' + (precioY - 4) + ',' + Math.min(360, precioWidth + 30) + ',2\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + Math.max(20, precioX - 15) + ',' + (precioY + 52) + ',' + Math.min(360, precioWidth + 30) + ',2\r\n'));
-  // Pipes laterales decorativos
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + Math.max(20, precioX - 15) + ',' + precioY + ',2,52\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + Math.min(378, precioX + precioWidth + 13) + ',' + precioY + ',2,52\r\n'));
-  // PRECIO Font 5
-  bytes = bytes.concat(_strToBytesEtq('TEXT ' + precioX + ',' + (precioY + 2) + ',"5",0,1,1,"' + precioStr + '"\r\n'));
+  // [v2.13.142] Texto del código LIMPIO (sin ícono ">", "*", "(SKU)" — son sucios)
+  var codigoFontW = 8;
+  var codigoWidth = codigo.length * codigoFontW;
+  var codigoX = Math.max(frameX1 + 4, Math.floor((400 - codigoWidth) / 2));
+  var codigoY = barcodeY + barcodeHeight + 8;
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + codigo + '"\r\n'));
 
   bytes = bytes.concat(_strToBytesEtq('PRINT 1,1\r\n'));
   return bytes;
@@ -203,6 +231,11 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
 //   total: total de adhesivos en la serie (para "1/4", "2/4", etc)
 // ────────────────────────────────────────────────────────────────────
 function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables) {
+  // [v2.13.142] REDISEÑO completo según feedback:
+  // a) Barcode tamaño ESTÁNDAR (44 dots height, igual que adhesivo envasado).
+  // b) NO mostrar SKU si solo hay un código (info inútil). Si es parte de
+  //    grupo multi-código, mostrar "1/5" o "CABECERA" en esquina sup. der.
+  // c) Sin íconos "> " "*"  — se ven sucios. Solo el código limpio.
   var descNorm = _normalizeEtq(producto.descripcion || '');
   var tokens = descNorm.split(/\s+/);
   var allTok = (allEnvasables || []).map(function(p) { return p.tokens; });
@@ -231,17 +264,26 @@ function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables
   bytes = bytes.concat(_hexToBytesEtq(logoHex));
   bytes = bytes.concat(_strToBytesEtq('\r\n'));
 
-  // ── Indicador esquina superior derecha: "(N/T)" o "CABECERA" ──
+  // [v2.13.142] Indicador esquina sup. derecha SOLO si es serie multi-código.
+  // Para producto con 1 solo código: nada (ocultar info inútil).
   if (total > 1) {
-    var tagTexto = esCabecera ? 'CABECERA' : ('(' + indice + '/' + total + ')');
-    var tagX = 400 - tagTexto.length * 8 - 5;
-    bytes = bytes.concat(_strToBytesEtq('TEXT ' + tagX + ',16,"1",0,1,1,"' + tagTexto + '"\r\n'));
+    var tagTexto = esCabecera ? 'CAB' : (indice + '/' + total);
+    var tagX = 400 - tagTexto.length * 8 - 8;
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + tagX + ',' + (4 + offsetY) + ',"2",0,1,1,"' + tagTexto + '"\r\n'));
   }
 
-  // ── NOMBRE PRODUCTO grande Y=46-90 ──
-  // En WH el actor principal es el nombre. Usamos font 3 con highlights
-  // (font 4) para los tokens distinguidores. Mismo wrap que adhesivo.
-  var startY = 46 + offsetY, LINE_H = 34, SPACE = 8;
+  // [v2.13.142] Descripción en área Y=46 a Y=118 (centrada igual que envasado)
+  var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
+  var LINE_H = 38, SPACE = 8;
+  var startY;
+  if (lines.length === 1) {
+    var lineHasHl = lines[0].some(function(t) { return t.hl; });
+    var lineHeight = lineHasHl ? 32 : 24;
+    var baselineOffset = lineHasHl ? 0 : 4;
+    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
+  } else {
+    startY = DESC_AREA_Y0 + offsetY;
+  }
   for (var li = 0; li < Math.min(lines.length, 2); li++) {
     var line = lines[li];
     var totalW = 0;
@@ -258,24 +300,21 @@ function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables
     }
   }
 
-  // ── Separador horizontal ──
-  bytes = bytes.concat(_strToBytesEtq('BAR 20,' + (120 + offsetY) + ',360,1\r\n'));
-
-  // ── Barcode + corner marks Y=128-172 ──
-  var codigo = String(producto.codigo || producto.codigoBarra || '').replace(/"/g, '');
+  // [v2.13.142] Barcode ESTÁNDAR (44 dots height, igual que adhesivo envasado)
+  // Defensa contra codigo undefined: fallback skuBase → idProducto → ''
+  var codigo = String(producto.codigo || producto.codigoBarra || producto.skuBase || producto.idProducto || '').replace(/"/g, '');
+  if (!codigo) codigo = 'SIN-CODIGO';
   var bcLen = codigo.length;
   var modules = 11 * bcLen + 35;
   var narrowBc = 2;
   var barcodeWidth = modules * narrowBc;
   if (barcodeWidth > 300) { narrowBc = 1; barcodeWidth = modules * narrowBc; }
-  var barcodeHeight = 32;
+  var barcodeHeight = 44;  // [v2.13.142] mismo tamaño que adhesivo envasado
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
-  var barcodeY = 128 + offsetY;
-  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + codigo + '"\r\n'));
-
-  // Corner marks
+  var barcodeY = 124 + offsetY;
+  // Frame con corner marks (igual que envasado)
   var frameX1 = 10, frameX2 = 389;
-  var frameY1 = 124 + offsetY, frameY2 = 178 + offsetY, cmL = 10;
+  var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY, cmL = 12;
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
@@ -284,23 +323,14 @@ function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY2 + ',' + cmL + ',1\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + codigo + '"\r\n'));
 
-  // Texto del código con icono
-  var iconoCodigo = esCabecera ? '* ' : '> ';
-  var sufijo      = esCabecera ? ' (SKU)' : '';
-  var textoCodigo = iconoCodigo + codigo + sufijo;
+  // [v2.13.142] Texto del código SIN íconos sucios — solo el código limpio
   var codigoFontW = 8;
-  var codigoWidth = textoCodigo.length * codigoFontW;
-  var codigoX = Math.max(15, Math.floor((400 - codigoWidth) / 2));
-  var codigoY = barcodeY + barcodeHeight + 4;
-  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + textoCodigo + '"\r\n'));
-
-  // ── SKU base info abajo (si no es la cabecera misma) ──
-  if (!esCabecera && producto.skuBase) {
-    var skuLabel = 'SKU: ' + String(producto.skuBase);
-    var skuX = Math.max(10, Math.floor((400 - skuLabel.length * 8) / 2));
-    bytes = bytes.concat(_strToBytesEtq('TEXT ' + skuX + ',' + (180 + offsetY) + ',"1",0,1,1,"' + skuLabel + '"\r\n'));
-  }
+  var codigoWidth = codigo.length * codigoFontW;
+  var codigoX = Math.max(frameX1 + 4, Math.floor((400 - codigoWidth) / 2));
+  var codigoY = barcodeY + barcodeHeight + 8;
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + codigo + '"\r\n'));
 
   bytes = bytes.concat(_strToBytesEtq('PRINT 1,1\r\n'));
   return bytes;
