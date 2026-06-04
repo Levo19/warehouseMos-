@@ -63,6 +63,11 @@ function procesarLotesPendientes() {
     ) || 8;
     var tiempoLimiteMs = nowMs + 4 * 60 * 1000;  // máx 4 min por ciclo (margen vs 6min GAS)
 
+    // [v2.13.141] FIRE-AND-FORGET COMPLETO: cada lote se procesa HASTA
+    // TERMINAR (todos los sub-jobs en serie) en lugar de 1 sub-job por
+    // ciclo. Así un lote de 100 etiquetas se imprime en ~5 min en 1 ciclo,
+    // no en 10 ciclos = 10 min. El operador puede cerrar la app después
+    // de crear el lote y el backend completa todo solo.
     for (var i = 0; i < pendientes.length && i < MAX_POR_CICLO; i++) {
       if (new Date().getTime() > tiempoLimiteMs) {
         Logger.log('[Trigger] tiempo límite alcanzado, parando en ' + i + '/' + pendientes.length);
@@ -70,7 +75,6 @@ function procesarLotesPendientes() {
       }
       var lote = pendientes[i];
       var idLote = String(lote.idLote);
-      // [v2.13.140] Inferir tipo desde descripción si está vacío (compat lotes viejos)
       var tipo = String(lote.tipoEtiqueta || '').toUpperCase();
       if (!tipo) {
         var desc = String(lote.descripcion || '');
@@ -80,38 +84,63 @@ function procesarLotesPendientes() {
       }
       resumen.intentados++;
       Logger.log('[Trigger ' + (i+1) + '/' + Math.min(MAX_POR_CICLO, pendientes.length) + '] procesando ' + idLote + ' tipo=' + tipo);
-      try {
-        var result;
-        if (tipo === 'MEMBRETE_ME' || tipo === 'MEMBRETE_WH') {
-          result = imprimirSubLoteMembrete(idLote);
-        } else {
-          result = imprimirSubLoteAdhesivo({ idLote: idLote });
+
+      // [v2.13.141] Loop interno: procesar TODOS los sub-jobs del lote hasta
+      // que termine (COMPLETADO), falle (PAUSADO_*) o se agote tiempo del ciclo.
+      var subJobsHechos = 0;
+      var MAX_SUBJOBS_POR_LOTE = 30;  // hard cap por defensa (300 etiquetas máx por lote por ciclo)
+      var loteOk = true;
+      var ultimoResult = null;
+      while (loteOk && subJobsHechos < MAX_SUBJOBS_POR_LOTE) {
+        if (new Date().getTime() > tiempoLimiteMs) {
+          Logger.log('[Trigger] tiempo agotado dentro de lote ' + idLote + ' tras ' + subJobsHechos + ' sub-jobs');
+          break;
         }
-        if (result && result.ok === false) {
+        try {
+          if (tipo === 'MEMBRETE_ME' || tipo === 'MEMBRETE_WH') {
+            ultimoResult = imprimirSubLoteMembrete(idLote);
+          } else {
+            ultimoResult = imprimirSubLoteAdhesivo({ idLote: idLote });
+          }
+          subJobsHechos++;
+          // Si falló → marcar PAUSADO_ERROR y romper
+          if (ultimoResult && ultimoResult.ok === false) {
+            loteOk = false;
+            resumen.errores++;
+            resumen.idsConError.push(idLote + ': ' + (ultimoResult.error || 'unknown'));
+            Logger.log('[Trigger] error en sub-job de ' + idLote + ': ' + ultimoResult.error);
+            try {
+              var rowIdx = _findLoteRow(sheet, idLote);
+              if (rowIdx >= 0) {
+                _patchLote(sheet, rowIdx, {
+                  status: 'PAUSADO_ERROR',
+                  ultimoError: 'Trigger: ' + String(ultimoResult.error || '').substring(0, 200)
+                });
+              }
+            } catch(_){}
+            break;
+          }
+          // Si terminó el lote → break
+          var st = ultimoResult && ultimoResult.data && String(ultimoResult.data.status || '').toUpperCase();
+          if (st === 'COMPLETADO' || st === 'CANCELADO' || (st && st.indexOf('PAUSADO') === 0)) {
+            Logger.log('[Trigger] lote ' + idLote + ' finalizó con status=' + st + ' (' + subJobsHechos + ' sub-jobs)');
+            if (st === 'COMPLETADO') resumen.ok++;
+            break;
+          }
+          // Si qtyImpresa=0 (nada que hacer) → break para no loopear infinito
+          if (ultimoResult && ultimoResult.data && ultimoResult.data.qtyImpresa === 0) {
+            Logger.log('[Trigger] lote ' + idLote + ' devolvió qtyImpresa=0, parando');
+            break;
+          }
+        } catch (eIter) {
+          loteOk = false;
           resumen.errores++;
-          resumen.idsConError.push(idLote + ': ' + (result.error || 'unknown'));
-          Logger.log('[Trigger] error en ' + idLote + ': ' + result.error);
-          // [v2.13.140] Marcar como PAUSADO_ERROR para no re-intentarlo en cada ciclo
-          // (si el error fue solo transitorio el operador puede reanudar manual)
-          try {
-            var rowIdx = _findLoteRow(sheet, idLote);
-            if (rowIdx >= 0) {
-              _patchLote(sheet, rowIdx, {
-                status: 'PAUSADO_ERROR',
-                ultimoError: 'Trigger: ' + String(result.error || '').substring(0, 200)
-              });
-            }
-          } catch(_){}
-        } else {
-          resumen.ok++;
-          Logger.log('[Trigger] OK: ' + idLote + ' completadas=' + ((result.data && result.data.completadas) || '?'));
+          resumen.idsConError.push(idLote + ': EXC ' + eIter.message);
+          Logger.log('[Trigger] EXCEPCIÓN en sub-job de ' + idLote + ': ' + eIter.message);
+          break;
         }
-      } catch (eIter) {
-        resumen.errores++;
-        resumen.idsConError.push(idLote + ': EXC ' + eIter.message);
-        Logger.log('[Trigger] EXCEPCIÓN en ' + idLote + ': ' + eIter.message);
-        // Saltar al siguiente — no abortar el ciclo entero
       }
+      if (loteOk && subJobsHechos > 0 && !resumen.ok) resumen.ok++;
     }
   } catch(e) {
     Logger.log('[Trigger] excepción global: ' + e.message);

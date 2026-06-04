@@ -2328,7 +2328,11 @@ function crearLoteAdhesivo(params) {
       totalEtq:            total,
       completadas:         0,
       subJobSize:          subJobSize,
-      status:              'CREADO',
+      // [v2.13.141] FIRE-AND-FORGET: nace ENCOLADO para que el trigger backend
+      // procese todo solo. Antes era CREADO y dependía del frontend orquestando
+      // (WhLoteAdhesivo._orquestar) — si el operador cerraba la app, quedaba
+      // a medio imprimir. Ahora la app puede cerrarse sin perder nada.
+      status:              'ENCOLADO',
       ultimoError:         '',
       ultimoPrintNodeJobId: '',
       printerId:           printerId,
@@ -2337,9 +2341,8 @@ function crearLoteAdhesivo(params) {
     }, sheet);  // [v2.13.136] pasar sheet para respetar orden REAL de columnas
     sheet.appendRow(fila);
 
-    // [v2.13.130 FIX] Auto-instalar trigger por si el reanudar lote tarde
-    // (lote CREADO → frontend lo orquesta normalmente, pero si quedó
-    // PAUSADO_ERROR, el trigger lo retoma a los >90s).
+    // [v2.13.141] Auto-instalar trigger es crítico ahora — sin trigger los
+    // lotes se quedan en ENCOLADO infinitos.
     try { _asegurarTriggerLotes(); } catch(_){}
 
     return { ok: true, data: {
@@ -2347,7 +2350,7 @@ function crearLoteAdhesivo(params) {
       total:        total,
       completadas:  0,
       subJobSize:   subJobSize,
-      status:       'CREADO',
+      status:       'ENCOLADO',  // [v2.13.141] cambio: era CREADO
       vto:          vto,
       descripcion:  descripcion,
       printerId:    printerId,
