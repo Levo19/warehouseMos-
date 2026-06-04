@@ -268,6 +268,8 @@ function _route(method, e) {
       case 'resetearContadorPrints':         return resetearContadorPrints();
       case 'resetearDriftEmergencia':        return resetearDriftEmergencia();  // [v2.13.149]
       case 'inspeccionarSheetLotes':         return inspeccionarSheetLotes();    // [v2.13.151]
+      case 'repararOrdenSheetLotes':         return repararOrdenSheetLotes();    // [v2.13.153]
+      case 'diagnosticarBackendLotes':       return diagnosticarBackendLotes();  // [v2.13.153]
       // [v2.13.118] Membretes ME y WH (reusan sheet LOTES_ADHESIVO con tipoEtiqueta)
       case 'crearLoteMembrete':              return crearLoteMembrete(params);
       case 'previsualizarMembreteMe':        return previsualizarMembreteMe(params.codigoBarra);

@@ -2274,6 +2274,83 @@ function _filaLoteAdhesivo(patch, sheet) {
   });
 }
 
+// [v2.13.153] REPARACION DEFINITIVA — realinea la sheet al orden canónico de
+// LOTES_ADHESIVO_HEADERS, moviendo TODOS los datos por NOMBRE de columna.
+// Después de esto, _readLote/_patchLote/_filaLoteAdhesivo funcionan correctamente
+// incluso con la versión vieja del backend (que usa indexOf en la constante),
+// porque el orden de la sheet coincide con el constante.
+//
+// SEGURO: lee todas las filas como objetos {idLote, status, ...}, después
+// reconstruye y reescribe las celdas en orden canónico. No pierde datos.
+//
+// Reportar: { ok, data: { filas, headersAntes, headersAhora, ejemploFila } }
+function repararOrdenSheetLotes() {
+  try {
+    var sheet = _getSheetLotesAdhesivo();
+    var lastRow = sheet.getLastRow();
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 1) return { ok: false, error: 'sheet vacía' };
+
+    // 1. Leer todos los datos como matriz
+    var allData = sheet.getRange(1, 1, lastRow, Math.max(lastCol, LOTES_ADHESIVO_HEADERS.length)).getValues();
+    var headersActuales = allData[0].map(function(h) { return String(h || '').trim(); });
+
+    // 2. Convertir cada fila a objeto {nombre: valor} usando los headers actuales
+    var filasObj = [];
+    for (var r = 1; r < allData.length; r++) {
+      var obj = {};
+      headersActuales.forEach(function(h, i) {
+        if (h) obj[h] = allData[r][i];
+      });
+      filasObj.push(obj);
+    }
+
+    // 3. Reescribir headers en orden canónico
+    sheet.getRange(1, 1, 1, LOTES_ADHESIVO_HEADERS.length)
+         .setValues([LOTES_ADHESIVO_HEADERS])
+         .setFontWeight('bold').setBackground('#1e293b').setFontColor('#fbbf24');
+
+    // 4. Reescribir cada fila en orden canónico
+    if (filasObj.length > 0) {
+      var nuevasFilas = filasObj.map(function(obj) {
+        return LOTES_ADHESIVO_HEADERS.map(function(h) {
+          var v = obj[h];
+          return v === undefined ? '' : v;
+        });
+      });
+      sheet.getRange(2, 1, nuevasFilas.length, LOTES_ADHESIVO_HEADERS.length).setValues(nuevasFilas);
+    }
+
+    // 5. Si la sheet tenía MÁS columnas que las canónicas (extras al final), limpiarlas
+    if (lastCol > LOTES_ADHESIVO_HEADERS.length) {
+      sheet.deleteColumns(LOTES_ADHESIVO_HEADERS.length + 1, lastCol - LOTES_ADHESIVO_HEADERS.length);
+    }
+
+    // 6. Format col idLote y codigoBarra como texto
+    sheet.getRange('A:A').setNumberFormat('@');
+    sheet.getRange('F:F').setNumberFormat('@');
+
+    return { ok: true, data: {
+      filas: filasObj.length,
+      headersAntes: headersActuales,
+      headersAhora: LOTES_ADHESIVO_HEADERS,
+      version: 'v2.13.153',
+      ejemploFila: filasObj.length > 0 ? filasObj[filasObj.length - 1] : null
+    }};
+  } catch (e) {
+    return { ok: false, error: e.message, stack: e.stack };
+  }
+}
+
+// [v2.13.153] Diagnóstico mejorado — confirma que el deployment activo ES v2.13.153
+function diagnosticarBackendLotes() {
+  return { ok: true, data: {
+    version: 'v2.13.153',
+    timestamp: new Date().toISOString(),
+    headersEsperados: LOTES_ADHESIVO_HEADERS
+  }};
+}
+
 // [v2.13.151] Diagnóstico — devuelve headers reales de la sheet + comparación
 // con LOTES_ADHESIVO_HEADERS esperados. Útil para identificar drift de schema.
 function inspeccionarSheetLotes() {
