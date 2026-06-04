@@ -3764,6 +3764,13 @@ const App = (() => {
             // [v2.13.126 FIX] API.post espera (action_string, params_object) como
             // 2 args separados. Antes pasaba 1 objeto → backend recibía
             // action=[object Object] → "Acción no reconocida".
+            // [v2.13.154 DEFENSA] Validar que action no esté vacía antes de llamar.
+            // Si llega vacía, log + rechazar — el endpoint vacío genera el error
+            // "Acción no reconocida: " (sin nombre) en backend.
+            if (!action || typeof action !== 'string') {
+              console.warn('[WH apiPost] action inválida:', action, 'params:', params);
+              return Promise.reject(new Error('action vacía pasada a apiPost'));
+            }
             return API.post(action, params || {});
           },
           usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },

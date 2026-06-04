@@ -2351,6 +2351,46 @@ function diagnosticarBackendLotes() {
   }};
 }
 
+// [v2.13.154] Wrapper que IMPRIME en el Logger el resultado de repararOrdenSheetLotes
+// para que el operador vea qué pasó al ejecutar desde el editor (que NO muestra
+// el return de las funciones, solo el log).
+function repararOrdenSheetLotesConLog() {
+  Logger.log('═════════════════════════════════════════════════');
+  Logger.log('REPARANDO SHEET LOTES_ADHESIVO — orden canónico');
+  Logger.log('═════════════════════════════════════════════════');
+  var resultado = repararOrdenSheetLotes();
+  if (!resultado.ok) {
+    Logger.log('❌ ERROR: ' + resultado.error);
+    if (resultado.stack) Logger.log(resultado.stack);
+    return resultado;
+  }
+  var d = resultado.data;
+  Logger.log('✅ Reparación exitosa');
+  Logger.log('   Versión backend: ' + d.version);
+  Logger.log('   Filas reordenadas: ' + d.filas);
+  Logger.log('');
+  Logger.log('── HEADERS ANTES (orden roto):');
+  d.headersAntes.forEach(function(h, i) {
+    Logger.log('   col ' + (i+1) + ': ' + h);
+  });
+  Logger.log('');
+  Logger.log('── HEADERS AHORA (orden canónico):');
+  d.headersAhora.forEach(function(h, i) {
+    Logger.log('   col ' + (i+1) + ': ' + h);
+  });
+  Logger.log('');
+  if (d.ejemploFila) {
+    Logger.log('── ÚLTIMA FILA (verificación):');
+    Logger.log('   idLote: ' + d.ejemploFila.idLote);
+    Logger.log('   fechaCreacion: ' + d.ejemploFila.fechaCreacion);
+    Logger.log('   usuario: ' + d.ejemploFila.usuario);
+    Logger.log('   status: ' + d.ejemploFila.status);
+    Logger.log('   tipoEtiqueta: ' + d.ejemploFila.tipoEtiqueta);
+  }
+  Logger.log('═════════════════════════════════════════════════');
+  return resultado;
+}
+
 // [v2.13.151] Diagnóstico — devuelve headers reales de la sheet + comparación
 // con LOTES_ADHESIVO_HEADERS esperados. Útil para identificar drift de schema.
 function inspeccionarSheetLotes() {
