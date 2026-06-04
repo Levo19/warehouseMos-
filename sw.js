@@ -27,14 +27,14 @@ _fcmMsg.onBackgroundMessage(payload => {
   const body  = payload.notification?.body  || '';
   self.registration.showNotification(title, {
     body,
-    icon:    'https://levo19.github.io/MOS/icon-192.png',
-    badge:   'https://levo19.github.io/MOS/icon-192.png',
+    icon:    'https://levo19.github.io/MOS/icons/icon-192.png',
+    badge:   'https://levo19.github.io/MOS/icons/icon-192.png',
     tag:     'wh-push',
     vibrate: [200, 100, 200]
   });
 });
 
-const VERSION = '2.13.125';
+const VERSION = '2.13.126';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso

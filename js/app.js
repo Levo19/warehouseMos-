@@ -3224,8 +3224,8 @@ const Session = (() => {
             const reg = await navigator.serviceWorker.ready;
             reg.showNotification(t, {
               body: b,
-              icon:  'https://levo19.github.io/MOS/icon-192.png',
-              badge: 'https://levo19.github.io/MOS/icon-192.png',
+              icon:  'https://levo19.github.io/MOS/icons/icon-192.png',
+              badge: 'https://levo19.github.io/MOS/icons/icon-192.png',
               vibrate: [200, 100, 200],
               tag: 'wh-push-fg'
             });
@@ -3758,7 +3758,10 @@ const App = (() => {
       if (window.MembreteSystem && window.MembreteSystem.iniciar) {
         window.MembreteSystem.iniciar({
           apiPost:        function(action, params) {
-            return API.post(Object.assign({ action: action }, params || {}));
+            // [v2.13.126 FIX] API.post espera (action_string, params_object) como
+            // 2 args separados. Antes pasaba 1 objeto → backend recibía
+            // action=[object Object] → "Acción no reconocida".
+            return API.post(action, params || {});
           },
           usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },
           origen:         'WH',
@@ -3774,7 +3777,8 @@ const App = (() => {
       if (window.SeguridadSystem && window.SeguridadSystem.iniciar) {
         window.SeguridadSystem.iniciar({
           apiPost: function(action, params) {
-            return API.post(Object.assign({ action: action }, params || {}))
+            // [v2.13.126 FIX] API.post espera 2 args separados, no 1 objeto.
+            return API.post(action, params || {})
               .then(function(r) { return r && r.data !== undefined ? r.data : r; });
           },
           usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },
