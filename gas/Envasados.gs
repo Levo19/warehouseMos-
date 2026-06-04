@@ -792,7 +792,12 @@ function estadoCalibracionRollo() {
     var offsetBase  = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
     var fechaCal    = props.getProperty('ADHESIVO_FECHA_CALIBRADO') || '';
     var compensacionActual = Math.round(driftDots * printsCount);
-    var necesitaRecal = printsCount > 500;
+    // [v2.13.129] Umbrales ajustados según uso real:
+    //   Rollo = 1000 adhesivos, consumo ~400/día → rollo dura ~2.5 días.
+    //   Aviso al 80% (800) = "rollo casi terminándose, cambia pronto"
+    //   Alerta al 95% (950) = "rollo a punto de acabarse"
+    var necesitaRecal      = printsCount > 800;
+    var rolloCasiAgotado   = printsCount > 950;
     return { ok: true, data: {
       calibrado:              calibrado,
       driftDotsPorPrint:      driftDots,
@@ -802,8 +807,11 @@ function estadoCalibracionRollo() {
       offsetEfectivoProximoPrint: offsetBase - compensacionActual,
       fechaCalibrado:         fechaCal,
       necesitaRecalibrar:     necesitaRecal,
+      rolloCasiAgotado:       rolloCasiAgotado,
       driftMmPorPrint:        +(driftDots / 8).toFixed(3),
-      driftConfigurado:       driftDots > 0
+      driftConfigurado:       driftDots > 0,
+      capacidadRollo:         1000,
+      umbralCasiAgotado:      950
     }};
   } catch (e) {
     return { ok: false, error: e.message };
@@ -2354,19 +2362,45 @@ function imprimirSubLoteAdhesivo(params) {
     var idLote = String(params.idLote || '').trim();
     if (!idLote) return { ok: false, error: 'idLote requerido' };
 
+    // [v2.13.129 FIX CRÍTICO] LockService para evitar doble sub-job concurrente.
+    // Bug previo: 2 llamadas concurrentes (timeout+retry o 2 instancias WH) leían
+    // el mismo `completadas`, ambas enviaban un sub-job de qty=10 a PrintNode,
+    // y ambas actualizaban completadas al mismo valor. Resultado: 20 etiquetas
+    // físicas pero el sheet solo registra 10. Cliente reportó "22 piden, salen 34"
+    // = duplicación del último sub-job.
+    var _lock = LockService.getScriptLock();
+    try { _lock.waitLock(8000); } catch(e) { return { ok: false, error: 'Sistema ocupado, reintenta en 5s' }; }
+
     var sheet = _getSheetLotesAdhesivo();
     var rowIdx = _findLoteRow(sheet, idLote);
-    if (rowIdx < 0) return { ok: false, error: 'Lote no encontrado: ' + idLote };
+    if (rowIdx < 0) { try { _lock.releaseLock(); } catch(_){} return { ok: false, error: 'Lote no encontrado: ' + idLote }; }
 
     var lote = _readLote(sheet, rowIdx);
 
     // Validar estado: no se puede imprimir si cancelado/completado
-    if (lote.status === 'CANCELADO')  return { ok: false, error: 'Lote cancelado' };
-    if (lote.status === 'COMPLETADO') return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } };
+    if (lote.status === 'CANCELADO')  { try { _lock.releaseLock(); } catch(_){} return { ok: false, error: 'Lote cancelado' }; }
+    if (lote.status === 'COMPLETADO') { try { _lock.releaseLock(); } catch(_){} return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } }; }
+
+    // [v2.13.129 FIX] Si el lote está IMPRIMIENDO/CALIBRANDO con update reciente
+    // (<35s), otro proceso lo está manejando. Rechazar para no duplicar.
+    if (lote.status === 'IMPRIMIENDO' || lote.status === 'CALIBRANDO') {
+      var lastUpdMs = 0;
+      try { lastUpdMs = new Date(lote.fechaUltimoUpdate || '').getTime(); } catch(_){}
+      var ageS = (Date.now() - lastUpdMs) / 1000;
+      if (lastUpdMs && ageS < 35) {
+        try { _lock.releaseLock(); } catch(_){}
+        return { ok: true, data: {
+          idLote: idLote, completadas: lote.completadas, total: lote.totalEtq,
+          status: lote.status, qtyImpresa: 0,
+          skipped: 'sub_job_concurrente_en_curso_' + Math.round(ageS) + 's'
+        }};
+      }
+    }
 
     var qty = Math.min(lote.subJobSize, lote.totalEtq - lote.completadas);
     if (qty <= 0) {
       _patchLote(sheet, rowIdx, { status: 'COMPLETADO' });
+      try { _lock.releaseLock(); } catch(_){}
       return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } };
     }
 
@@ -2500,6 +2534,9 @@ function imprimirSubLoteAdhesivo(params) {
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };
+  } finally {
+    // [v2.13.129 FIX] Asegurar liberación del lock aunque haya throw
+    try { _lock.releaseLock(); } catch(_){}
   }
 }
 
@@ -2774,6 +2811,65 @@ function getLotesAdhesivoPendientes(params) {
     });
     if (params.limit) pendientes = pendientes.slice(0, parseInt(params.limit));
     return { ok: true, data: pendientes };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// [v2.13.129] Historial de lotes por tipoEtiqueta — para botones "Cola WH/ME/Envasados".
+// Devuelve últimos N lotes ordenados por fechaCreacion desc, separados en
+// pendientes (en curso/pausados) e historial (completados/cancelados).
+function getLotesAdhesivoHistorial(params) {
+  try {
+    params = params || {};
+    var tipoFiltro = String(params.tipoEtiqueta || '').toUpperCase();
+    var limit = parseInt(params.limit) || 50;
+    var rows = _sheetToObjects(_getSheetLotesAdhesivo());
+
+    // Filtrar por tipoEtiqueta si viene
+    if (tipoFiltro) {
+      rows = rows.filter(function(r) {
+        var t = String(r.tipoEtiqueta || 'ADHESIVO_ENVASADO').toUpperCase();
+        return t === tipoFiltro;
+      });
+    }
+    // Ordenar por fecha desc (más recientes primero)
+    rows.sort(function(a, b) {
+      return String(b.fechaCreacion || '').localeCompare(String(a.fechaCreacion || ''));
+    });
+
+    // Separar pendientes vs historial
+    var pendientes = [], completados = [];
+    rows.forEach(function(r) {
+      var s = String(r.status || '').toUpperCase();
+      var item = {
+        idLote:            String(r.idLote || ''),
+        fechaCreacion:     String(r.fechaCreacion || ''),
+        fechaUltimoUpdate: String(r.fechaUltimoUpdate || ''),
+        usuario:           String(r.usuario || ''),
+        origen:            String(r.origen || ''),
+        codigoBarra:       String(r.codigoBarra || ''),
+        descripcion:       String(r.descripcion || ''),
+        vto:               String(r.vto || ''),
+        totalEtq:          parseInt(r.totalEtq) || 0,
+        completadas:       parseInt(r.completadas) || 0,
+        status:            s,
+        ultimoError:       String(r.ultimoError || ''),
+        tipoEtiqueta:      String(r.tipoEtiqueta || 'ADHESIVO_ENVASADO')
+      };
+      if (s === 'COMPLETADO' || s === 'CANCELADO') completados.push(item);
+      else pendientes.push(item);
+    });
+
+    // Aplicar limit al historial (pendientes siempre se muestran todos)
+    completados = completados.slice(0, limit);
+
+    return { ok: true, data: {
+      pendientes: pendientes,
+      historial:  completados,
+      totalPendientes: pendientes.length,
+      totalHistorial:  completados.length
+    }};
   } catch (e) {
     return { ok: false, error: e.message };
   }
