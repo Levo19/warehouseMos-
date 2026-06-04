@@ -6665,33 +6665,19 @@
                 style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
           🔧 Calibrar impresora
         </button>
-        <!-- [v2.13.137] Botones rediseñados: FILTROS del historial. Antes los
-             botones "Cola WH/ME" abrían una cola local que siempre estaba vacía
-             salvo que agregaras productos a mano. Más útil ver los lotes ya
-             creados con su estado actual. -->
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('MEMBRETE_ME')"
-                class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24"
-                title="Lotes membretes ME (góndola) — pendientes + historial">
-          🏪 Lotes ME
-        </button>
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('MEMBRETE_WH')"
-                class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24"
-                title="Lotes membretes WH (andamio) — pendientes + historial">
-          📦 Lotes WH
-        </button>
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('ADHESIVO_ENVASADO')"
-                class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(192,132,252,.4);color:#c084fc"
-                title="Lotes adhesivos de envasados — pendientes + historial">
-          🏭 Lotes Envasados
+        <!-- [v2.13.138] Tools simplificado a 2 botones: alertas + lotes globales.
+             El filtrado por tipo se hace DENTRO del modal con tabs. -->
+        <button onclick="window.MembreteSystem && MembreteSystem.abrirAlertasPrecio && MembreteSystem.abrirAlertasPrecio()"
+                class="px-3 py-2 rounded-lg text-xs font-semibold active:scale-95 transition-transform"
+                style="background:linear-gradient(135deg,#7f1d1d,#450a0a);border:1px solid rgba(248,113,113,.5);color:#fca5a5"
+                title="Productos cuyo precio cambió y necesitan reimpresión">
+          🚨 Alertas precio
         </button>
         <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('')"
-                class="px-3 py-2 rounded-lg text-xs font-semibold"
-                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(148,163,184,.4);color:#cbd5e1"
-                title="Ver TODOS los lotes (sin filtrar)">
-          📋 Todos
+                class="px-3 py-2 rounded-lg text-xs font-semibold active:scale-95 transition-transform"
+                style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.45);color:#fbbf24"
+                title="Todos los lotes — filtra por tipo con tabs dentro del modal">
+          📋 Lotes de impresión
         </button>
       </div>
     </div>
@@ -9180,7 +9166,7 @@
 <script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
 <!-- [v2.13.118+] Sistema centralizado de membretes/adhesivos (CDN MOS).
      ?v= bump fuerza refresh cuando cambia el módulo. -->
-<script src="https://levo19.github.io/MOS/assets/membrete/membrete-modal.js?v=2.13.135"></script>
+<script src="https://levo19.github.io/MOS/assets/membrete/membrete-modal.js?v=2.13.138"></script>
 <!-- [v2.13.121] Sistema centralizado de seguridad (CDN MOS) -->
 <script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=2.13.126"></script>
 <script src="js/offline.js"></script>
