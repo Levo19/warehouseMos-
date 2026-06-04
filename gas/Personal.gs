@@ -480,9 +480,20 @@ function _horarioPermitido(rol, idPersonal) {
   try {
     var cache = CacheService.getScriptCache();
     var ckey = 'mos_horario_' + (idPersonal || '_anon') + '_' + (rol || '');
+    // [SF2] Si hay invalidación global activa después de la fecha del cache,
+    // saltamos el hit y refrescamos del backend MOS.
+    var invalidoDesde = parseInt(
+      PropertiesService.getScriptProperties().getProperty('HORARIO_CACHE_INVALIDO_DESDE') || '0'
+    ) || 0;
     var cached = cache.get(ckey);
     if (cached) {
-      try { return JSON.parse(cached); } catch(_){}
+      try {
+        var parsed = JSON.parse(cached);
+        // Si el cache es posterior al timestamp de invalidación, sirve
+        if (!invalidoDesde || (parsed && parsed._cachedAt && parsed._cachedAt >= invalidoDesde)) {
+          return parsed;
+        }
+      } catch(_){}
     }
     var mosUrl = _getMosGasUrl();
     if (mosUrl) {
@@ -498,29 +509,28 @@ function _horarioPermitido(rol, idPersonal) {
       });
       var jr = JSON.parse(res.getContentText());
       if (jr && jr.ok && jr.data) {
+        // [SF2] Agregar _cachedAt para detectar invalidaciones posteriores.
+        jr.data._cachedAt = Date.now();
         cache.put(ckey, JSON.stringify(jr.data), 300);  // 5 min
         return jr.data;
       }
     }
   } catch(e) { Logger.log('[_horarioPermitido] MOS fallo: ' + e.message); }
-  // ─── Fallback hardcoded (compat) ───────────────────────────────
+  // [SF1 SECURITY FIX] Si MOS no responde, política R13: DENEGAR (no permitir).
+  // Antes el fallback aplicaba un horario hardcoded permisivo (7-19/16)
+  // que IGNORABA horarios custom. Eso causaba que un envasador con horario
+  // 14-23 fuera rechazado cuando MOS_GAS_URL no estaba configurado en WH.
+  // Excepción: MASTER+ADMINISTRADOR siguen pasando (defensa: nunca dejarlos
+  // afuera por mantenimiento del backend MOS).
   var rolUp = String(rol || '').toUpperCase();
-  if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') return { permitido: true, motivo: 'rol_admin' };
-  var tz = Session.getScriptTimeZone();
-  var ahora = new Date();
-  var dia  = parseInt(Utilities.formatDate(ahora, tz, 'u'), 10);
-  var hora = parseInt(Utilities.formatDate(ahora, tz, 'H'), 10);
-  var min  = parseInt(Utilities.formatDate(ahora, tz, 'm'), 10);
-  var horaDecimal = hora + (min / 60);
-  var apertura = 7;
-  var cierre   = (dia === 7) ? 16 : 19;
-  if (horaDecimal >= apertura && horaDecimal < cierre) {
-    return { permitido: true, apertura: apertura, cierre: cierre, dia: dia, fuente: 'fallback' };
+  if (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR') {
+    return { permitido: true, motivo: 'rol_admin_fallback', fuente: 'fallback_admin' };
   }
   return {
-    permitido: false, apertura: apertura, cierre: cierre, dia: dia,
-    motivo: horaDecimal < apertura ? 'antes_apertura' : 'despues_cierre',
-    fuente: 'fallback'
+    permitido: false,
+    motivo: 'mos_no_disponible',
+    fuente: 'fallback_denegado',
+    mensaje: 'No se pudo verificar horario con MOS. Pedile al admin que apruebe in-situ con su clave.'
   };
 }
 
@@ -538,6 +548,41 @@ function verificarHorario(params) {
   var idPersonal = String(params.idPersonal || '');
   var info = _horarioPermitido(rol, idPersonal);
   return { ok: true, data: info };
+}
+
+// [SF2] Invalidación del cache de horario.
+// Cuando admin cambia horario en MOS, MOS llama a este endpoint en WH para
+// borrar el cache local. Así el próximo verificarHorario ve el cambio
+// INMEDIATO en lugar de esperar 5 min al expiry del cache.
+//
+// params: { idPersonal? }
+//   - si idPersonal viene: invalida solo ese usuario
+//   - sin params: invalida TODOS los caches (cambio de horario de app)
+function invalidarCacheHorario(params) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var idPersonal = String((params && params.idPersonal) || '').trim();
+    if (idPersonal) {
+      // Borrar solo las keys de este usuario (admin/master/operador)
+      ['mos_horario_' + idPersonal + '_',
+       'mos_horario_' + idPersonal + '_MASTER',
+       'mos_horario_' + idPersonal + '_ADMINISTRADOR',
+       'mos_horario_' + idPersonal + '_OPERADOR',
+       'mos_horario_' + idPersonal + '_ENVASADOR',
+       'mos_horario_' + idPersonal + '_VENDEDOR'
+      ].forEach(function(k) { try { cache.remove(k); } catch(_) {} });
+      return { ok: true, data: { invalidado: idPersonal, scope: 'usuario' } };
+    }
+    // Sin idPersonal: invalidar todo. Por las dudas, borramos por nombres
+    // conocidos hasta donde el cache permite (Script Cache no soporta wipe).
+    // Estrategia: marcar timestamp en Properties y _horarioPermitido lo lee
+    // para descartar caches anteriores a ese timestamp.
+    var props = PropertiesService.getScriptProperties();
+    props.setProperty('HORARIO_CACHE_INVALIDO_DESDE', String(Date.now()));
+    return { ok: true, data: { scope: 'global', invalidoDesde: Date.now() } };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 // Cierra todas las SESIONES ACTIVAS de operadores/envasadores. MASTER/ADMINISTRADOR

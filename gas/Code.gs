@@ -276,6 +276,7 @@ function _route(method, e) {
       case 'getResultadosDiagnostico': return getResultadosDiagnostico();
       case 'runInternalTests':         return runInternalTests(params);
       case 'verificarHorario':    return verificarHorario(params);
+      case 'invalidarCacheHorario':  return invalidarCacheHorario(params);  // [SF2]
       case 'forzarCierreSesionesNocturno': return forzarCierreSesionesNocturno();
       case 'auditarStockGlobal':       return auditarStockGlobal();
       // [v2.13.55] Reconciliación stock

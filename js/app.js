@@ -3768,6 +3768,25 @@ const App = (() => {
       }
     } catch(_) {}
 
+    // [v2.13.121] Sistema centralizado de seguridad: widget + modal acceso/horario.
+    // SeguridadSystem espera apiPost que devuelva data desempaquetada (unwrap=true).
+    try {
+      if (window.SeguridadSystem && window.SeguridadSystem.iniciar) {
+        window.SeguridadSystem.iniciar({
+          apiPost: function(action, params) {
+            return API.post(Object.assign({ action: action }, params || {}))
+              .then(function(r) { return r && r.data !== undefined ? r.data : r; });
+          },
+          usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },
+          rol:            function() { return (window.WH_CONFIG && WH_CONFIG.rol) || ''; },
+          idPersonal:     function() { return (window.WH_CONFIG && WH_CONFIG.idPersonal) || ''; },
+          app:            'warehouseMos',
+          unwrapData:     true,
+          endpointPrefix: ''
+        });
+      }
+    } catch(_) {}
+
     // ── Verificación de dispositivo BLOQUEANTE (igual que ME) ──
     // El overlay #verifDispScreen ya está visible desde el HTML inicial (z-index
     // 9998), así que la app NUNCA se ve hasta que el dispositivo esté ACTIVO.
@@ -4062,6 +4081,13 @@ const App = (() => {
   function renderDashboard(d) {
     if (!d) return;
     const { alertas = {}, kpis = {}, contadores = {} } = d;
+
+    // [v2.13.121] Widget "Mi horario" — pulse glow + countdown
+    try {
+      if (window.SeguridadSystem && window.SeguridadSystem.arrancarWidgetMiHorario) {
+        window.SeguridadSystem.arrancarWidgetMiHorario('segWidgetHorario');
+      }
+    } catch(_) {}
 
     const criticos = alertas.vencimientosCriticos || [];
     const enAlerta = alertas.vencimientosAlertas || [];
