@@ -1243,6 +1243,9 @@ const Session = (() => {
     if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';   // logs: admin + master
     const sideDiag = document.getElementById('sideRowDiag');
     if (sideDiag) sideDiag.style.display = esMaster ? '' : 'none';  // diagnóstico: solo MASTER
+    // [v2.13.126 FIX] Tools (Calibrar impresora + Colas): visible para admin/master
+    const sideTools = document.getElementById('sideRowTools');
+    if (sideTools) sideTools.style.display = esAdmin ? '' : 'none';
 
     _mostrarApp();
     _iniciarTimerBloqueo();
