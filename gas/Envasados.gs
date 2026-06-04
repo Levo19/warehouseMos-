@@ -2373,6 +2373,8 @@ function imprimirSubLoteAdhesivo(params) {
     // y ambas actualizaban completadas al mismo valor. Resultado: 20 etiquetas
     // físicas pero el sheet solo registra 10. Cliente reportó "22 piden, salen 34"
     // = duplicación del último sub-job.
+    // [v2.13.131] _lock reasignable a null cuando se libera anticipadamente
+    // antes del polling PrintNode (para no bloquear toda la app 25s).
     var _lock = LockService.getScriptLock();
     try { _lock.waitLock(8000); } catch(e) { return { ok: false, error: 'Sistema ocupado, reintenta en 5s' }; }
 
@@ -2478,6 +2480,14 @@ function imprimirSubLoteAdhesivo(params) {
 
     var printNodeJobId = JSON.parse(resp.getContentText());
 
+    // [v2.13.131 FIX CRÍTICO] Liberar lock ANTES del polling PrintNode (25s).
+    // Antes el lock se mantenía durante todo el polling → bloqueaba TODOS los
+    // endpoints WH durante 25-33s por cada sub-job. Operarios reportaban "app
+    // congelada" durante impresiones. La protección anti-concurrencia ya hizo
+    // su trabajo (marcamos IMPRIMIENDO + check 35s); el polling no necesita lock.
+    try { _lock.releaseLock(); } catch(_){}
+    _lock = null;  // flag para que finally no la libere de nuevo
+
     // [v2.13.109 AUDIT FIX #3] Polling al estado del job para detectar
     // OUT_OF_PAPER REAL. PrintNode retorna 201 apenas el job entra a la
     // cola; el OUT_OF_PAPER se descubre cuando la impresora intenta
@@ -2540,8 +2550,9 @@ function imprimirSubLoteAdhesivo(params) {
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };
   } finally {
-    // [v2.13.129 FIX] Asegurar liberación del lock aunque haya throw
-    try { _lock.releaseLock(); } catch(_){}
+    // [v2.13.131] Solo liberar si aún tenemos el lock (puede haberse liberado
+    // antes del polling). _lock=null indica que ya fue liberado.
+    if (_lock) { try { _lock.releaseLock(); } catch(_){} }
   }
 }
 

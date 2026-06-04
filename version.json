@@ -1,1 +1,1 @@
-{ "version": "2.13.130", "build": "20260604-trigger-auto-install-diagnostico-membretes-cola" }
+{ "version": "2.13.131", "build": "20260604-fix-scope-scriptapp-lock-release-pre-polling" }
