@@ -18954,6 +18954,20 @@ const Welcome = (() => {
 
   // ── Almacén cerrado por horario ─────────────────────
   function mostrarAlmacenCerrado(info) {
+    // [v2.13.122] Usar modal moderno SeguridadSystem si está cargado
+    // (incluye botones "solicitar extensión" + "notifícame cuando abra")
+    try {
+      if (window.SeguridadSystem && window.SeguridadSystem.abrirModalFueraHorario) {
+        var _segAp = info && info.apertura ? String(info.apertura) : '07:00';
+        var _segCi = info && info.cierre   ? String(info.cierre)   : '19:00';
+        if (typeof info.apertura === 'number') _segAp = String(info.apertura).padStart(2, '0') + ':00';
+        if (typeof info.cierre   === 'number') _segCi = String(info.cierre).padStart(2, '0') + ':00';
+        window.SeguridadSystem.abrirModalFueraHorario(info && info.motivo || 'fuera', _segAp, _segCi);
+        try { SoundFX.buzzer(); } catch(_) {}
+        return;
+      }
+    } catch(_) {}
+    // Fallback: overlay viejo
     const overlay = document.getElementById('almacenCerradoOverlay');
     if (!overlay) return;
     const dia = info.dia || 1;
