@@ -266,6 +266,7 @@ function _route(method, e) {
       case 'aplicarDriftDetectado':          return aplicarDriftDetectado(params);
       case 'ajustarDriftManual':             return ajustarDriftManual(params);
       case 'resetearContadorPrints':         return resetearContadorPrints();
+      case 'resetearDriftEmergencia':        return resetearDriftEmergencia();  // [v2.13.149]
       // [v2.13.118] Membretes ME y WH (reusan sheet LOTES_ADHESIVO con tipoEtiqueta)
       case 'crearLoteMembrete':              return crearLoteMembrete(params);
       case 'previsualizarMembreteMe':        return previsualizarMembreteMe(params.codigoBarra);
