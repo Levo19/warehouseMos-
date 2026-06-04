@@ -1,0 +1,41 @@
+[v2.13.146] FIX membrete WH "Sin item para completar #0" — codigos:[] silenciado
+
+Bug reportado: desde 2026-06-04 15:30 todos los membretes WH llegan al
+backend pero quedan totalEtq=1/completadas=0 COMPLETADO o PAUSADO_ERROR
+"Trigger: Sin item para completar #0". Nunca alcanzan PrintNode.
+
+Causa raíz: array vacío vs Array.isArray.
+
+  Frontend (membrete-modal.js _menuImprimir):
+    var codigosDelGrupo = Array.isArray(p.codigos) ? p.codigos.slice() : null;
+    // p.codigos = [] → Array.isArray = TRUE → codigosDelGrupo = []
+    // !codigosDelGrupo === false → no entra al fallback de equivalentes
+    var item = { codigoBarra: "...", codigos: [] };
+
+  Backend (Membretes.gs crearLoteMembrete):
+    var codigos = Array.isArray(item.codigos) ? item.codigos : [item.codigoBarra];
+    // item.codigos = [] → Array.isArray = TRUE → codigos = []
+    // codigos.forEach → 0 iteraciones → expandidos = []
+    // total = 0, itemsJson = "[]"
+    // trigger procesa lote, ve items.length=0 ≤ completadas=0 → COMPLETADO bogus
+
+El bug se manifestó cuando los productos WH sin equivalentes empezaron a
+llegar (grupo.children = []) — el frontend WH (app.js:18293) mapea children a
+childrenCodes, que queda [] cuando no hay equivalentes.
+
+Fix (defensa en 3 capas):
+
+  1) Backend Membretes.gs:407
+     codigos = (Array.isArray && length>0) ? item.codigos : [codigoBarra]
+     + skip item si codigos sigue vacío (no rompe el resto del lote)
+
+  2) Backend Membretes.gs:438
+     if (total === 0) return error — antes se creaba lote bogus
+
+  3) Frontend membrete-modal.js:1083
+     codigosDelGrupo = (Array.isArray && length>0) ? slice : null
+     + fallback al codigoBarra cuando no hay catálogo (WH/ME)
+     + filter(Boolean) defensivo final
+     + toast de error si NADA imprimible (en vez de fallar silencioso)
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

@@ -410,7 +410,18 @@ function crearLoteMembrete(params) {
         });
       } else {
         // MEMBRETE_WH
-        var codigos = Array.isArray(item.codigos) ? item.codigos : [item.codigoBarra];
+        // [v2.13.146 FIX] Si item.codigos = [] (array vacío) el Array.isArray
+        // pasaba TRUE pero codigos quedaba vacío → forEach 0 veces → expandidos
+        // = [] → lote con totalEtq=0 que el trigger marca COMPLETADO sin imprimir.
+        // Bug reportado tras 2026-06-04 15:30 cuando productos WH sin equivalentes
+        // empezaron a llegar con `codigos:[]` desde el frontend.
+        // Defensa: si array vacío, caer al fallback codigoBarra.
+        var codigos = (Array.isArray(item.codigos) && item.codigos.length > 0)
+          ? item.codigos
+          : (item.codigoBarra ? [item.codigoBarra] : []);
+        if (codigos.length === 0) {
+          return;  // skipear este item — nada que imprimir
+        }
         if (codigos.length > 1 && item.skuBase) {
           // Cabecera
           expandidos.push({
@@ -434,6 +445,12 @@ function crearLoteMembrete(params) {
     });
 
     var total = expandidos.length;
+    // [v2.13.146] Validación HARD: si expandidos quedó vacío (todos los items
+    // sin codigoBarra ni codigos válidos) → rechazar. Antes se creaba lote
+    // con totalEtq=0 que el trigger marcaba COMPLETADO sin imprimir nada.
+    if (total === 0) {
+      return { ok: false, error: 'Sin items válidos para imprimir — cada item debe traer codigoBarra o codigos no vacío' };
+    }
     var subJobSize = 1;  // membretes siempre PRINT 1,1
     var sheet = _getSheetLotesAdhesivo();
     var idLote = idempotencyKey
