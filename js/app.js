@@ -8325,6 +8325,16 @@ function _renderEnvasadosPorDia(list, container, opts) {
         : '';
       // Botones editar/anular: solo si NO está anulado y NO es optimista (esperá que confirme).
       // Ambos requieren clave admin (8 dígitos de ESTACIONES.ALMACEN.adminPin en MOS).
+      // [v2.13.150] Botón "🖨 Adhesivo" — reimprime adhesivos del envasado.
+      // Aparece SIEMPRE que haya codigoProductoEnvasado (incluso si anulado, ya
+      // que el operador puede necesitar reimprimir un anulado para reusar el
+      // batch físico). No requiere clave admin — es operación no destructiva.
+      const btnAdhesivo = (e.idEnvasado && e.codigoProductoEnvasado)
+        ? `<button onclick="event.stopPropagation();WhAdhesivoReprint.abrir('${escAttr(e.idEnvasado)}')"
+                   class="text-[10px] px-2 py-1 rounded"
+                   style="background:rgba(34,197,94,.12);color:#86efac;border:1px solid rgba(34,197,94,.35)"
+                   title="Reimprimir adhesivos de este envasado">🖨 Adhesivo</button>`
+        : '';
       const acciones = (!anulado && !optimista && e.idEnvasado)
         ? `<button onclick="event.stopPropagation();EnvasadosView.pedirAuthEditar('${escAttr(e.idEnvasado)}')"
                    class="text-[10px] px-2 py-1 rounded ml-auto"
@@ -8333,8 +8343,9 @@ function _renderEnvasadosPorDia(list, container, opts) {
            <button onclick="event.stopPropagation();EnvasadosView.pedirAuthAnular('${escAttr(e.idEnvasado)}')"
                    class="text-[10px] px-2 py-1 rounded"
                    style="background:rgba(239,68,68,.12);color:#fca5a5;border:1px solid rgba(239,68,68,.35)"
-                   title="Anular este envasado · requiere clave admin">🚫 Anular</button>`
-        : '';
+                   title="Anular este envasado · requiere clave admin">🚫 Anular</button>
+           ${btnAdhesivo}`
+        : btnAdhesivo;  // [v2.13.150] anulados: solo botón adhesivo
       const cbDer  = String(e.codigoProductoEnvasado || '');
       const cbBase = String(e.codigoProductoBase || '');
       // [v2.10.5] Prioridad: campo del backend (siempre resuelve) → prodMap
@@ -20095,6 +20106,186 @@ const WhLoteAdhesivo = (() => {
   }
 
   return { crearYEjecutar, continuar, cancelar, cancelarSilencioso, cerrar };
+})();
+
+// ════════════════════════════════════════════════════════════════════
+// WhAdhesivoReprint — [v2.13.150]
+// ════════════════════════════════════════════════════════════════════
+// Mini-modal de "reimprimir adhesivos" para el historial del Envasador.
+// Pedido del usuario 2026-06-04: que el envasador pueda re-imprimir
+// adhesivos de un envasado anterior sin pasar por MOS.
+//
+// Flujo:
+//   1. Click "🖨 Adhesivo" en una card del historial
+//   2. Modal pide cantidad (default = unidadesProducidas del envasado)
+//   3. Botón "Imprimir" → llama WhLoteAdhesivo.crearYEjecutar(...) que
+//      abre el modal de progreso ya existente y orquesta los sub-jobs.
+//
+// Reutiliza la infra de WhLoteAdhesivo (modal progreso, polling, etc.).
+// ════════════════════════════════════════════════════════════════════
+const WhAdhesivoReprint = (() => {
+  'use strict';
+
+  function abrir(idEnvasado) {
+    // 1. Buscar el envasado en el cache offline
+    let env = null;
+    try {
+      const cache = OfflineManager.getEnvasadosCache ? OfflineManager.getEnvasadosCache() : [];
+      env = cache.find(x => String(x.idEnvasado) === String(idEnvasado));
+    } catch (e) {}
+    if (!env) {
+      try { toast('Envasado no encontrado en cache', 'error'); } catch(_) {}
+      return;
+    }
+    const codigoBarra = String(env.codigoProductoEnvasado || '').trim();
+    if (!codigoBarra) {
+      try { toast('Sin código envasado para imprimir adhesivos', 'warn'); } catch(_) {}
+      return;
+    }
+    // descripcion: priorizar campo backend, fallback al mapa local
+    const descripcion = env.descripcionProductoEnvasado
+                     || (window._prodMap && window._prodMap[codigoBarra])
+                     || codigoBarra;
+    const defaultCantidad = Math.max(1, parseInt(env.unidadesProducidas) || 1);
+    const fechaEnvasado = env.fecha || env.fechaImpresion || '';
+
+    _abrirModal({
+      idEnvasado:   idEnvasado,
+      codigoBarra:  codigoBarra,
+      descripcion:  descripcion,
+      defaultCant:  defaultCantidad,
+      fechaEnvasado: fechaEnvasado
+    });
+  }
+
+  function _abrirModal(datos) {
+    if (document.getElementById('whAdhReprintOverlay')) return;
+    const html = `
+      <div id="whAdhReprintOverlay"
+           class="fixed inset-0 z-[99996] flex items-center justify-center p-4"
+           style="background:rgba(2,6,23,.78);backdrop-filter:blur(12px)"
+           onclick="if(event.target===this) WhAdhesivoReprint.cerrar()">
+        <div class="w-full max-w-md rounded-2xl border overflow-hidden shadow-2xl"
+             style="background:linear-gradient(180deg,#0a1424,#070d18);border-color:rgba(34,197,94,.4)"
+             onclick="event.stopPropagation()">
+          <header class="p-5 border-b border-slate-800 flex items-center gap-3"
+                  style="background:linear-gradient(135deg,rgba(34,197,94,.10),rgba(22,163,74,.04))">
+            <div class="text-4xl">🏷</div>
+            <div class="flex-1 min-w-0">
+              <div class="text-sm font-black text-emerald-400 tracking-wider">REIMPRIMIR ADHESIVO</div>
+              <div class="text-xs text-slate-400 mt-1 truncate">${_esc(datos.descripcion)}</div>
+              <div class="text-[10px] font-mono text-slate-500 mt-0.5">▌${_esc(datos.codigoBarra)}</div>
+            </div>
+            <button onclick="WhAdhesivoReprint.cerrar()"
+                    class="text-slate-400 hover:text-slate-200 text-xl px-2"
+                    title="Cerrar">✕</button>
+          </header>
+
+          <section class="p-5 space-y-4">
+            <div>
+              <label class="text-xs font-bold text-slate-300 uppercase tracking-wider">Cantidad a imprimir</label>
+              <div class="flex items-center gap-2 mt-2">
+                <button onclick="WhAdhesivoReprint.delta(-1)"
+                        class="w-12 h-12 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-2xl font-bold">−</button>
+                <input id="whAdhReprintCant" type="number"
+                       value="${datos.defaultCant}" min="1" max="999"
+                       oninput="WhAdhesivoReprint.setCant(this.value)"
+                       class="flex-1 h-12 px-4 text-center text-2xl font-bold rounded-lg bg-slate-900 border border-slate-700 text-slate-100">
+                <button onclick="WhAdhesivoReprint.delta(1)"
+                        class="w-12 h-12 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-2xl font-bold">+</button>
+              </div>
+              <div class="text-[11px] text-slate-500 mt-2">
+                Por defecto = ${datos.defaultCant} (unidades envasadas)
+              </div>
+            </div>
+
+            <div class="text-[11px] text-slate-400 bg-slate-900/60 rounded-lg p-3 border border-slate-800">
+              <div class="flex items-start gap-2">
+                <span class="text-amber-400 mt-0.5">💡</span>
+                <span>El adhesivo lleva la fecha de envasado original (vto +1 año). Reimprimir NO altera stock ni crea nuevo envasado.</span>
+              </div>
+            </div>
+          </section>
+
+          <footer class="p-4 border-t border-slate-800 flex gap-2">
+            <button onclick="WhAdhesivoReprint.cerrar()"
+                    class="flex-1 h-12 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 font-bold">
+              Cancelar
+            </button>
+            <button id="whAdhReprintBtnOk"
+                    onclick="WhAdhesivoReprint.imprimir()"
+                    class="flex-1 h-12 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-900 font-black">
+              🖨 Imprimir
+            </button>
+          </footer>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    window._whAdhReprintDatos = datos;
+    document.addEventListener('keydown', _keydown);
+    setTimeout(() => {
+      const inp = document.getElementById('whAdhReprintCant');
+      if (inp) { inp.focus(); inp.select(); }
+    }, 100);
+  }
+
+  function _keydown(e) {
+    if (e.key === 'Escape') cerrar();
+    if (e.key === 'Enter' && document.getElementById('whAdhReprintOverlay')) {
+      e.preventDefault();
+      imprimir();
+    }
+  }
+
+  function delta(d) {
+    const inp = document.getElementById('whAdhReprintCant');
+    if (!inp) return;
+    const nuevo = Math.max(1, Math.min(999, (parseInt(inp.value) || 1) + d));
+    inp.value = nuevo;
+  }
+
+  function setCant(v) {
+    // sanitiza pero no bloquea — el max se aplica al imprimir
+    const n = parseInt(v) || 1;
+    if (n < 1) { const inp = document.getElementById('whAdhReprintCant'); if (inp) inp.value = 1; }
+    if (n > 999) { const inp = document.getElementById('whAdhReprintCant'); if (inp) inp.value = 999; }
+  }
+
+  function imprimir() {
+    const datos = window._whAdhReprintDatos;
+    if (!datos) return;
+    const inp = document.getElementById('whAdhReprintCant');
+    const cant = Math.max(1, Math.min(999, parseInt(inp && inp.value) || datos.defaultCant));
+
+    cerrar();
+    // Delegar a WhLoteAdhesivo (que abre su propio modal de progreso y orquesta)
+    if (window.WhLoteAdhesivo && WhLoteAdhesivo.crearYEjecutar) {
+      WhLoteAdhesivo.crearYEjecutar({
+        codigoBarra:    datos.codigoBarra,
+        descripcion:    datos.descripcion,
+        total:          cant,
+        vto:            '',  // backend lo recalcula desde fechaEnvasado
+        fechaEnvasado:  datos.fechaEnvasado
+      });
+    } else {
+      try { toast('Sistema de lotes no disponible', 'error'); } catch(_) {}
+    }
+  }
+
+  function cerrar() {
+    document.removeEventListener('keydown', _keydown);
+    const ov = document.getElementById('whAdhReprintOverlay');
+    if (ov) ov.remove();
+    try { delete window._whAdhReprintDatos; } catch(_) { window._whAdhReprintDatos = null; }
+  }
+
+  function _esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])
+    );
+  }
+
+  return { abrir, delta, setCant, imprimir, cerrar };
 })();
 
 // ════════════════════════════════════════════════
