@@ -88,6 +88,50 @@ function procesarLotesPendientes() {
   }
 }
 
+// [v2.13.130] Lazy installer — chequea si el trigger existe, lo instala si falta.
+// Llamado automáticamente desde crearLoteMembrete y crearLoteAdhesivo para
+// garantizar que los lotes ENCOLADO se procesen sin requerir setup manual.
+function _asegurarTriggerLotes() {
+  try {
+    var TRG = 'procesarLotesPendientes';
+    var existe = ScriptApp.getProjectTriggers().some(function(t) {
+      return t.getHandlerFunction() === TRG;
+    });
+    if (existe) return { ok: true, yaExistia: true };
+    // Auto-instalar
+    ScriptApp.newTrigger(TRG).timeBased().everyMinutes(1).create();
+    Logger.log('[_asegurarTriggerLotes] AUTO-INSTALADO ' + TRG);
+    return { ok: true, instaladoAhora: true };
+  } catch(e) {
+    Logger.log('[_asegurarTriggerLotes] error: ' + e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+// [v2.13.130] Diagnóstico del trigger — endpoint público para el frontend.
+function diagnosticoTriggerLotes() {
+  try {
+    var TRG = 'procesarLotesPendientes';
+    var triggers = ScriptApp.getProjectTriggers().filter(function(t) {
+      return t.getHandlerFunction() === TRG;
+    });
+    var sheet = _getSheetLotesAdhesivo();
+    var rows = _sheetToObjects(sheet);
+    var encolados = rows.filter(function(r) { return String(r.status||'').toUpperCase() === 'ENCOLADO'; });
+    var imprimiendo = rows.filter(function(r) { return String(r.status||'').toUpperCase() === 'IMPRIMIENDO'; });
+    return { ok: true, data: {
+      triggerInstalado: triggers.length > 0,
+      cantidadTriggers: triggers.length,
+      lotesEncolados: encolados.length,
+      lotesImprimiendo: imprimiendo.length,
+      idLotesEncolados: encolados.map(function(r){ return String(r.idLote); }).slice(0, 10),
+      mensaje: triggers.length === 0
+        ? '⚠ TRIGGER NO INSTALADO — los lotes ENCOLADO no se procesan. Llamá auto-fix o instalarTriggerLotesEtiqueta() manualmente.'
+        : '✅ Trigger activo — ' + encolados.length + ' lotes en cola se procesarán en próximo minuto.'
+    }};
+  } catch(e) { return { ok: false, error: e.message }; }
+}
+
 // ────────────────────────────────────────────────────────────────────
 // instalarTriggerLotesEtiqueta — UNA VEZ desde editor GAS
 // ────────────────────────────────────────────────────────────────────

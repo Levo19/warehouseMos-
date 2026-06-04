@@ -430,6 +430,10 @@ function crearLoteMembrete(params) {
       itemsJson:           JSON.stringify(expandidos)
     });
     sheet.appendRow(fila);
+    // [v2.13.130 FIX] Auto-instalar trigger si falta. Sin trigger, los lotes
+    // ENCOLADO nunca se procesan → membretes se quedan en cola para siempre.
+    var triggerCheck = { ok: true };
+    try { triggerCheck = _asegurarTriggerLotes(); } catch(_){}
     return { ok: true, data: {
       idLote:       idLote,
       total:        total,
@@ -437,7 +441,8 @@ function crearLoteMembrete(params) {
       subJobSize:   subJobSize,
       status:       'ENCOLADO',
       tipoEtiqueta: tipo,
-      itemsExpandidos: expandidos.length
+      itemsExpandidos: expandidos.length,
+      triggerAutoInstalado: !!triggerCheck.instaladoAhora
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };

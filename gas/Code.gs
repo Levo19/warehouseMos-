@@ -254,6 +254,9 @@ function _route(method, e) {
       case 'getLotesAdhesivoPendientes':     return getLotesAdhesivoPendientes(params);
       // [v2.13.129] Historial por tipoEtiqueta (botón Cola Envasados/WH/ME)
       case 'getLotesAdhesivoHistorial':      return getLotesAdhesivoHistorial(params);
+      // [v2.13.130] Diagnóstico + auto-instalación del trigger procesador
+      case 'diagnosticoTriggerLotes':        return diagnosticoTriggerLotes();
+      case 'asegurarTriggerLotes':           return _asegurarTriggerLotes();
       // [v2.13.118] Calibración inteligente — drift compensation
       case 'estadoCalibracionRollo':         return estadoCalibracionRollo();
       case 'imprimirCalibradoresAdhesivo':   return imprimirCalibradoresAdhesivo(params);

@@ -2326,6 +2326,11 @@ function crearLoteAdhesivo(params) {
     });
     sheet.appendRow(fila);
 
+    // [v2.13.130 FIX] Auto-instalar trigger por si el reanudar lote tarde
+    // (lote CREADO → frontend lo orquesta normalmente, pero si quedó
+    // PAUSADO_ERROR, el trigger lo retoma a los >90s).
+    try { _asegurarTriggerLotes(); } catch(_){}
+
     return { ok: true, data: {
       idLote:       idLote,
       total:        total,
