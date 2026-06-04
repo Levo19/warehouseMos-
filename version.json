@@ -1,1 +1,1 @@
-{ "version": "2.13.146", "build": "20260604-fix-membrete-sin-items-array-vacio" }
+{ "version": "2.13.147", "build": "20260604-clamp-drift-ajustado-16dots-no-rompe-layout" }

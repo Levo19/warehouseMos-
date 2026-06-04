@@ -446,8 +446,12 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   function _offsetParaEtiqueta(iEnSubJob) {
     var comp = Math.round(driftDots * (printsBase + iEnSubJob));
     var off  = offsetBase + comp;
+    // [v2.13.147] Mismo clamp que _calcularOffsetEfectivoParaPrint: [-1, 16].
+    // Techo 16 (=2mm) evita que el frame inferior Y=196 se salga del label
+    // (200 dots de alto). Si el drift medido es agresivo, el clamp se activa
+    // y el banner UI alerta — recalibrar es la solución.
     if (off < -1) off = -1;
-    if (off > 50) off = 50;
+    if (off > 16) off = 16;
     return off;
   }
 
@@ -772,12 +776,20 @@ function _calcularOffsetEfectivoParaPrint() {
   // al fondo del label — efecto "unos suben otros bajan" reportado.
   var compensacion = Math.round(driftDots * printsCount);
   var offset = offsetBase + compensacion;
-  // Clamp defensivo: nunca permitir que offset+Y baseline mínima (=2 del BITMAP)
-  // caiga bajo 0. Si la compensación es tan agresiva que rompería el layout
-  // hacia abajo (Y > 200 = fondo del label), se trunca a 50 dots (~6mm) máximo —
-  // a partir de ahí hay que recalibrar el rollo en serio.
+  // [v2.13.147 CLAMP AJUSTADO] Antes el techo era +50 dots (6mm) — demasiado.
+  // El label es 200 dots de alto y el frame inferior está en Y=196. Cualquier
+  // offsetY > 4 hace que el frame se salga del label.
+  //
+  // Nuevo techo: +16 dots (2mm). Suficiente para drift razonable (<0.5mm/100
+  // prints) y NO rompe el layout: frame inferior Y=196+16=212, queda apenas
+  // afuera pero el contenido principal (barcode Y=124, texto código Y=176)
+  // sigue dentro del label.
+  //
+  // Si el clamp se activa = drift mal medido o rollo a punto de agotarse →
+  // estadoCalibracionRollo lo expone como `clampActivo:true` para que el
+  // banner alerte al operador.
   if (offset < -1) offset = -1;
-  if (offset > 50) offset = 50;
+  if (offset > 16) offset = 16;
   return offset;
 }
 
@@ -805,13 +817,21 @@ function estadoCalibracionRollo() {
     //   Alerta al 95% (950) = "rollo a punto de acabarse"
     var necesitaRecal      = printsCount > 800;
     var rolloCasiAgotado   = printsCount > 950;
+    // [v2.13.147] Detectar si el clamp del offset está activo (offsetEfectivo
+    // sería >16 sin clamp). Eso indica drift mal medido o muchos prints sin
+    // recalibrar. El banner UI puede alertar al operador.
+    var offsetSinClamp = offsetBase + compensacionActual;
+    var clampActivo    = offsetSinClamp > 16 || offsetSinClamp < -1;
+    var offsetEfectivo = Math.max(-1, Math.min(16, offsetSinClamp));
     return { ok: true, data: {
       calibrado:              calibrado,
       driftDotsPorPrint:      driftDots,
       printsDesdeCal:         printsCount,
       offsetBase:             offsetBase,
       compensacionAcumulada:  compensacionActual,
-      offsetEfectivoProximoPrint: offsetBase + compensacionActual,  // [v2.13.144] suma, no resta
+      offsetEfectivoProximoPrint: offsetEfectivo,
+      offsetSinClamp:         offsetSinClamp,
+      clampActivo:            clampActivo,
       fechaCalibrado:         fechaCal,
       necesitaRecalibrar:     necesitaRecal,
       rolloCasiAgotado:       rolloCasiAgotado,
