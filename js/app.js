@@ -19892,11 +19892,16 @@ const WhLoteAdhesivo = (() => {
     // [v2.13.109 AUDIT FIX #2] requireGapDetect debe consumirse SOLO en el
     // primer ciclo. Antes era const → todos los sub-jobs subsiguientes
     // hacían GAPDETECT también, perdiendo ~1 etq por cada 10.
+    // [v2.13.143] QUITADO el `_state.completadas === 0` que forzaba GAPDETECT
+    // automático en el primer sub-job de CADA lote. Eso consumía 3 etiquetas
+    // gratis por lote, contradiciendo la estrategia 1-calibración-por-rollo.
+    // Ahora SOLO se hace GAPDETECT si el caller lo pidió explícitamente
+    // (botón "🔧 Calibrar rollo nuevo" del modal calibrador).
     let pendingGapDetect = !!(runOpts && runOpts.requireGapDetect);
     try {
       while (_state && _state.idLote === idLote) {
         if (['CANCELADO','COMPLETADO','PAUSADO_USUARIO','PAUSADO_OUT_PAPER','PAUSADO_ERROR'].indexOf(_state.status) >= 0) break;
-        const necesitaCal = pendingGapDetect || _state.completadas === 0;
+        const necesitaCal = pendingGapDetect;
         if (necesitaCal) _setStatus('CALIBRANDO');
         let r;
         try {

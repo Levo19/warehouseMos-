@@ -2425,10 +2425,13 @@ function imprimirSubLoteAdhesivo(params) {
       return { ok: true, data: { idLote: idLote, completadas: lote.completadas, total: lote.totalEtq, status: 'COMPLETADO', qtyImpresa: 0 } };
     }
 
-    // Decidir si necesitamos GAPDETECT
-    var requireGapDetect = params.requireGapDetect === true
-                        || lote.status === 'CREADO'
-                        || lote.status === 'PAUSADO_OUT_PAPER';
+    // [v2.13.143] GAPDETECT solo cuando se pide EXPLÍCITAMENTE.
+    // Antes se hacía automático al primer sub-job (status=CREADO) o al
+    // reanudar OUT_OF_PAPER → consumía 3 etiquetas blancas inútiles cada vez.
+    // Según la estrategia acordada: calibrar UNA VEZ al cambiar rollo via
+    // botón "🔧 Calibrar rollo nuevo" del modal calibrador → drift compensa
+    // automático en cada print posterior. Sin más GAPDETECTs gratis.
+    var requireGapDetect = params.requireGapDetect === true;
 
     // Construir el producto para el TSPL (cargar tokens y allEnv)
     var producto;
