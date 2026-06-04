@@ -407,7 +407,20 @@ function _getAllEnvasablesTokens() {
   return out;
 }
 
-// Construye los bytes TSPL2 completos (header + bitmap + texto + barcode + PRINT)
+// [v2.13.145] Construye los bytes TSPL2 — multi-etiqueta con drift por print.
+//
+// ANTES (≤v2.13.144): 1 CLS + contenido(offsetY_único) + PRINT N,1 → todas las
+// N etiquetas del sub-job compartían el MISMO offsetY (calculado al inicio).
+// Resultado: dentro de un sub-job de 10, la #1 quedaba bien centrada pero la
+// #10 desfasada ~2mm (drift acumulado 10 × 0.2 mm/print no compensado).
+//
+// AHORA: loop interno emite N veces (CLS + contenido(offsetY_i) + PRINT 1,1),
+// donde offsetY_i = clamp(offsetBase + driftDots × (printsBase + i)). Cada
+// etiqueta tiene su offsetY EXACTO según su posición en el rollo.
+//
+// Esto permite sub-jobs grandes (50, 100, "todo el lote") sin acumular error.
+// El header (SIZE/GAP/DENSITY/SPEED) sí queda fuera del loop — solo se manda
+// una vez al inicio del job y la impresora lo mantiene.
 function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   var descNorm = _normalizeEtq(producto.descripcion);
   var tokens = descNorm.split(/\s+/);
@@ -416,137 +429,115 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   var lines = _wrapTokensEtq(tokens, highlights);
   var vto = _calcVencimientoEtq(fechaEnvasado);
 
-  // [Calibración configurable vía Script Properties]
-  //   ADHESIVO_GAP_MM   default 2  (mm de separación entre adhesivos)
-  //   ADHESIVO_DENSITY  default 8  (1-15, sube si sale tenue)
-  //   ADHESIVO_SPEED    default 4  (1-6, baja si sale corrida)
-  //   ADHESIVO_OFFSET_Y default 0  (dots offset manual base)
-  //   ADHESIVO_DRIFT_DOTS_POR_PRINT  drift acumulativo (auto-detect)
-  //   ADHESIVO_PRINTS_DESDE_CAL      contador automático
-  // [v2.13.118] _calcularOffsetEfectivoParaPrint() devuelve offsetBase
-  // MENOS la compensación acumulada de drift, así cada print se va
-  // corriendo "hacia abajo" para compensar el drift natural de la impresora.
   var props = PropertiesService.getScriptProperties();
   var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
   var density  = parseInt(props.getProperty('ADHESIVO_DENSITY'))    || 8;
   var speed    = parseInt(props.getProperty('ADHESIVO_SPEED'))      || 4;
-  var offsetY  = _calcularOffsetEfectivoParaPrint();
 
-  var header = [
+  // Lectura ÚNICA de los properties de drift — usados en el loop para calcular
+  // offsetY_i sin tocar Properties N veces (Properties.getProperty tiene costo).
+  var offsetBase = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
+  var driftDots  = parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0;
+  var printsBase = parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0;
+
+  // Helper inline — calcula offsetY para la etiqueta `iEnSubJob` del sub-job
+  // actual. Coincide con la fórmula de _calcularOffsetEfectivoParaPrint() pero
+  // con offset = printsBase + iEnSubJob (en vez de solo printsBase).
+  function _offsetParaEtiqueta(iEnSubJob) {
+    var comp = Math.round(driftDots * (printsBase + iEnSubJob));
+    var off  = offsetBase + comp;
+    if (off < -1) off = -1;
+    if (off > 50) off = 50;
+    return off;
+  }
+
+  // ── Header GLOBAL del job (una sola vez, antes del loop de etiquetas) ──
+  var headerGlobal = [
     'SIZE 50 mm,25 mm',
     'GAP ' + gapMm + ' mm,0 mm',
     'DIRECTION 1',
     'DENSITY ' + density,
     'SPEED ' + speed,
-    'CLS',
-    'BITMAP 5,' + (2 + offsetY) + ',' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
+    ''
   ].join('\r\n');
+  var bytes = _strToBytesEtq(headerGlobal);
 
-  var bytes = _strToBytesEtq(header);
-  bytes = bytes.concat(_hexToBytesEtq(LOGO_TSPL_HEX));
-  bytes = bytes.concat(_strToBytesEtq('\r\n'));
-
-  // [Offset Y aplica a TODO el contenido (texto, separador, barcode)]
-  // [v2.13.106] Vto con margen derecho de 2 letras (~24 dots).
-  //   Font "2" = 12×20 dots. "Vto ENE/2027" = 144 dots wide.
-  //   X=232 → end=376, margen 24 dots = 2 letras de aire (antes era 16 = 1 letra,
-  //   se veía pegado al borde).
-  bytes = bytes.concat(_strToBytesEtq('TEXT 232,' + (12 + offsetY) + ',"2",0,1,1,"Vto ' + vto + '"\r\n'));
-  // Separador
-  bytes = bytes.concat(_strToBytesEtq('BAR 5,' + (42 + offsetY) + ',390,1\r\n'));
-
-  // [v2.13.106] Descripción: centrar VERTICAL+HORIZONTAL si es 1 línea.
-  // Área disponible: Y=46 a Y=118 (72 dots), antes del frame del barcode.
-  //   - Si 1 línea: startY ajustado para centrar vertical en esos 72 dots.
-  //   - Si 2 líneas: mantener startY=46 con LINE_H=38 (queda como estaba).
-  var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
-  var LINE_H = 38, SPACE = 8;
-  var startY;
-  if (lines.length === 1) {
-    var lineHasHl = lines[0].some(function(t) { return t.hl; });
-    var lineHeight = lineHasHl ? 32 : 24;  // font4 vs font3
-    // [v2.13.107 AUDIT FIX] El loop aplica yAdj = y + 4 para no-hl (baseline
-    // align). Si no compensamos, la línea queda 4 dots abajo del centro real.
-    var baselineOffset = lineHasHl ? 0 : 4;
-    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
-  } else {
-    startY = DESC_AREA_Y0 + offsetY;
-  }
-  for (var li = 0; li < lines.length; li++) {
-    var line = lines[li];
-    var totalW = 0;
-    for (var ti = 0; ti < line.length; ti++) totalW += line[ti].w + (ti > 0 ? SPACE : 0);
-    var x = Math.max(5, Math.round((400 - totalW) / 2));
-    var y = startY + li * LINE_H;
-    for (var tj = 0; tj < line.length; tj++) {
-      var o = line[tj];
-      var font = o.hl ? '4' : '3';
-      var yAdj = o.hl ? y : y + 4;  // baseline align cuando se mezclan tamaños
-      var safe = String(o.tok).replace(/"/g, "'");
-      bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + yAdj + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
-      x += o.w + SPACE;
-    }
-  }
-
-  // [v2.13.104] Barcode minimalista: angosto + quiet zone amplio + sin flechas.
-  //
-  // Cambios respecto a versiones anteriores:
-  //   1. Umbral narrow=1: 360 → 300 dots.
-  //      Antes el barcode ocupaba hasta 360 dots (90% del adhesivo).
-  //      Ahora con códigos de 11+ chars usa narrow=1 → barcode mucho más
-  //      angosto. Códigos cortos (<11) mantienen narrow=2.
-  //   2. Quiet zone: 10×narrow → 15×narrow.
-  //      ANSI Code128 mínimo es 10×narrow, pero la práctica recomienda 15
-  //      para reducir lectura parcial cuando el operario escanea rápido.
-  //   3. Sin flechas guía — el quiet zone amplio reemplaza esa función
-  //      visual + es lo que técnicamente importa.
-  //
-  // Fórmula Code128 (Start 11 + chars 11×bcLen + Check 11 + Stop 13):
-  //   modules = 11*bcLen + 35
-  //   width   = modules × narrow_dots
   var bc = String(producto.codigoBarra || '').replace(/"/g, '');
   var bcLen = bc.length;
   var modules = 11 * bcLen + 35;
   var narrowBc = 2;
   var barcodeWidth = modules * narrowBc;
-  if (barcodeWidth > 300) {
-    narrowBc = 1;
-    barcodeWidth = modules * narrowBc;
-  }
+  if (barcodeWidth > 300) { narrowBc = 1; barcodeWidth = modules * narrowBc; }
   var barcodeHeight = 44;
   var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
-  // [v2.13.106] Barcode dentro de frame con corner marks.
-  //   Frame box: X=10..390, Y=118..196 (aprovecha margen inferior antes desperdiciado).
-  //   Corner marks tipo cámara/visor QR — 4 esquinas tipo "L" de 12 dots.
-  //   Barcode Y=124 (6 dots dentro del top del frame).
-  //   Texto código centrado horizontal Y=174 (6 dots después del barcode bottom).
-  var barcodeY = 124 + offsetY;
   var frameX1 = 10, frameX2 = 389;
-  var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY;
-  var cmL = 12;  // largo de cada corner mark (L-shape)
-  // Top-left corner ┐ (rotated)
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
-  // Top-right corner ┌ (rotated)
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
-  // Bottom-left corner ┘
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY2 + ',' + cmL + ',1\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
-  // Bottom-right corner └
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY2 + ',' + cmL + ',1\r\n'));
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
-  // Barcode SIN texto auto (5° param = 0). El código va con TEXT centrado abajo.
-  bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
-  // Texto código: font 1 (8×12 dots), centrado horizontal en el adhesivo.
+  var cmL = 12;
   var codigoFontW = 8;
   var codigoWidth = bc.length * codigoFontW;
   var codigoX = Math.max(frameX1 + 4, Math.floor((400 - codigoWidth) / 2));
-  var codigoY = barcodeY + barcodeHeight + 8;  // 8 dots después del barcode (barcodeY ya incluye offsetY)
-  bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + bc + '"\r\n'));
 
-  // Print N copias
-  bytes = bytes.concat(_strToBytesEtq('PRINT ' + (unidades || 1) + ',1\r\n'));
+  var N = unidades || 1;
+  for (var iEtq = 0; iEtq < N; iEtq++) {
+    var offsetY = _offsetParaEtiqueta(iEtq);
+
+    // ── CLS + LOGO ──
+    bytes = bytes.concat(_strToBytesEtq(
+      'CLS\r\n' +
+      'BITMAP 5,' + (2 + offsetY) + ',' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
+    ));
+    bytes = bytes.concat(_hexToBytesEtq(LOGO_TSPL_HEX));
+    bytes = bytes.concat(_strToBytesEtq('\r\n'));
+
+    // ── Vto + separador ──
+    bytes = bytes.concat(_strToBytesEtq('TEXT 232,' + (12 + offsetY) + ',"2",0,1,1,"Vto ' + vto + '"\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR 5,' + (42 + offsetY) + ',390,1\r\n'));
+
+    // ── Descripción con centrado vertical ──
+    var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
+    var LINE_H = 38, SPACE = 8;
+    var startY;
+    if (lines.length === 1) {
+      var lineHasHl = lines[0].some(function(t) { return t.hl; });
+      var lineHeight = lineHasHl ? 32 : 24;
+      var baselineOffset = lineHasHl ? 0 : 4;
+      startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
+    } else {
+      startY = DESC_AREA_Y0 + offsetY;
+    }
+    for (var li = 0; li < lines.length; li++) {
+      var line = lines[li];
+      var totalW = 0;
+      for (var ti = 0; ti < line.length; ti++) totalW += line[ti].w + (ti > 0 ? SPACE : 0);
+      var x = Math.max(5, Math.round((400 - totalW) / 2));
+      var y = startY + li * LINE_H;
+      for (var tj = 0; tj < line.length; tj++) {
+        var o = line[tj];
+        var font = o.hl ? '4' : '3';
+        var yAdj = o.hl ? y : y + 4;
+        var safe = String(o.tok).replace(/"/g, "'");
+        bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + yAdj + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
+        x += o.w + SPACE;
+      }
+    }
+
+    // ── Frame corner marks + barcode + código ──
+    var barcodeY = 124 + offsetY;
+    var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY;
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY2 + ',' + cmL + ',1\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
+    bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + bc + '"\r\n'));
+    var codigoY = barcodeY + barcodeHeight + 8;
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + bc + '"\r\n'));
+
+    // ── PRINT esta etiqueta ──
+    bytes = bytes.concat(_strToBytesEtq('PRINT 1,1\r\n'));
+  }
 
   return bytes;
 }
@@ -2258,7 +2249,7 @@ function _readLote(sheet, rowIndex) {
   // Numéricos como Number
   obj.totalEtq    = parseInt(obj.totalEtq) || 0;
   obj.completadas = parseInt(obj.completadas) || 0;
-  obj.subJobSize  = parseInt(obj.subJobSize) || 10;
+  obj.subJobSize  = parseInt(obj.subJobSize) || 25;  // [v2.13.145] default subido
   return obj;
 }
 
@@ -2311,7 +2302,7 @@ function crearLoteAdhesivo(params) {
           idLote:      String(found.idLote),
           total:       parseInt(found.totalEtq) || 0,
           completadas: parseInt(found.completadas) || 0,
-          subJobSize:  parseInt(found.subJobSize) || 10,
+          subJobSize:  parseInt(found.subJobSize) || 25,  // [v2.13.145]
           status:      String(found.status || 'CREADO'),
           vto:         String(found.vto || ''),
           descripcion: String(found.descripcion || ''),
@@ -2352,7 +2343,7 @@ function crearLoteAdhesivo(params) {
     // Cargar config sub-job size desde Script Properties (override) o default 10
     var subJobSize = parseInt(
       PropertiesService.getScriptProperties().getProperty('ADHESIVO_SUB_JOB_SIZE')
-    ) || 10;
+    ) || 25;  // [v2.13.145] default subido 10 → 25 — drift perfecto por etiqueta ya no exige sub-jobs chicos
 
     // [v2.13.118] tipoEtiqueta para diferenciar adhesivo de envasado vs
     // membrete ME vs membrete WH. Default ADHESIVO_ENVASADO (back-compat).
@@ -2837,7 +2828,7 @@ function diagnosticoLotesAdhesivo() {
   L('4. Properties opcionales (defaults entre parentesis)');
   var props = PropertiesService.getScriptProperties();
   var opcionales = [
-    ['ADHESIVO_SUB_JOB_SIZE', '10'],
+    ['ADHESIVO_SUB_JOB_SIZE', '25'],  // [v2.13.145] subido de 10 → 25 — drift ahora es perfecto por etiqueta
     ['ADHESIVO_GAP_MM',       '2'],
     ['ADHESIVO_DENSITY',      '8'],
     ['ADHESIVO_SPEED',        '4'],
