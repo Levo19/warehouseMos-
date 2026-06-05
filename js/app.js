@@ -19108,72 +19108,56 @@ const Welcome = (() => {
     if (loginScr) loginScr.style.display = 'flex';
   }
 
-  // ── Desbloqueo temporal de 1 hora (admin/master con clave 8 dig) ──
-  // Permite a un admin habilitar el almacén pasado el horario para que
-  // los operadores entren sin que el monitor los expulse. Se guarda
-  // localStorage('wh_desbloqueo_hasta', ts) y _checkCierreInminente lo
-  // respeta. Expira automático a las 1h.
-  const _WH_DESBLOQUEO_KEY = 'wh_desbloqueo_hasta';
+  // ── Extensión de horario in-situ (admin/master con clave 8 dig) ────
+  // [v2.13.163] DELEGADO al módulo compartido ExtensorHorario. Antes esta
+  // sección manejaba su propio modal y flow con 1h FIJA. Ahora se unifica
+  // con ME — mismo modal, mismas opciones (20m/1h/2h), mismo backend.
+  // Auditoría tier 2 vía verificarClaveAdmin('EXTENDER_HORARIO_DISPOSITIVO').
+  const _WH_DESBLOQUEO_KEY_LEGACY = 'wh_desbloqueo_hasta';   // legacy (1h fija)
 
   function _desbloqueoVigente() {
+    // Source of truth: módulo compartido (ext_horario_hasta).
+    // Compat con clave legacy si operador hizo extensión antes de v2.13.163.
     try {
-      const hasta = parseInt(localStorage.getItem(_WH_DESBLOQUEO_KEY) || '0', 10);
-      return hasta && Date.now() < hasta ? hasta : 0;
+      if (window.ExtensorHorario) {
+        const ms = ExtensorHorario.vigente();
+        if (ms > 0) return Date.now() + ms;
+      }
+      const legacy = parseInt(localStorage.getItem(_WH_DESBLOQUEO_KEY_LEGACY) || '0', 10);
+      return legacy && Date.now() < legacy ? legacy : 0;
     } catch(_) { return 0; }
   }
 
   function abrirDesbloqueoTemporal() {
-    const m = document.getElementById('whDesbloqueoModal');
-    const inp = document.getElementById('whDesbloqueoClave');
-    const err = document.getElementById('whDesbloqueoErr');
-    if (inp) inp.value = '';
-    if (err) err.textContent = '';
-    if (m) m.style.display = 'flex';
-    setTimeout(() => { if (inp) inp.focus(); }, 60);
-  }
-
-  function cerrarDesbloqueoTemporal() {
-    const m = document.getElementById('whDesbloqueoModal');
-    if (m) m.style.display = 'none';
-  }
-
-  async function confirmarDesbloqueoTemporal() {
-    const inp = document.getElementById('whDesbloqueoClave');
-    const err = document.getElementById('whDesbloqueoErr');
-    const btn = document.getElementById('whDesbloqueoBtn');
-    const clave = String(inp?.value || '').trim();
-    if (err) err.textContent = '';
-    if (!/^\d{8}$/.test(clave)) {
-      if (err) err.textContent = 'La clave debe ser de 8 dígitos numéricos';
+    if (!window.ExtensorHorario) {
+      // Fallback fail-soft: módulo no cargó (CDN caído)
+      toast('Módulo de extensión no disponible. Recarga la app.', 'error', 5000);
       return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = 'Validando...'; }
-    try {
-      const r = await API.post('verificarClaveAdmin', {
-        clave: clave,
-        accion: 'DESBLOQUEO_HORARIO_WH',
-        appOrigen: 'warehouseMos',
-        detalle: 'Habilitación operativa 1 hora pasado el horario'
-      });
-      if (!r || !r.data || !r.data.autorizado) {
-        if (err) err.textContent = (r && r.data && r.data.error) || 'Clave incorrecta';
-        return;
-      }
-      // OK → setear flag de 1h
-      const hasta = Date.now() + 60 * 60 * 1000;
-      try { localStorage.setItem(_WH_DESBLOQUEO_KEY, String(hasta)); } catch(_){}
-      cerrarDesbloqueoTemporal();
-      cerrarAlmacenCerrado();
-      toast(`🔓 Desbloqueo OK · ${r.data.nombre || 'admin'} · 1 hora`, 'ok', 5000);
-      // Volver al login para que el operador entre
-      const loginScr = document.getElementById('loginScreen');
-      if (loginScr) loginScr.style.display = 'flex';
-    } catch(e) {
-      if (err) err.textContent = 'Error de red: ' + (e?.message || 'reintenta');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '🔓 Desbloquear 1h'; }
+    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
+    const devId  = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+    if (!mosUrl || !devId) {
+      toast('Configuración incompleta — recarga la app.', 'error', 4000);
+      return;
     }
+    ExtensorHorario.abrir({
+      mosGasUrl: mosUrl,
+      app:       'warehouseMos',
+      deviceId:  devId,
+      onSuccess: function(d) {
+        // Extensión activada → cerrar overlay de almacén cerrado + volver al login
+        cerrarAlmacenCerrado();
+        toast(`🔓 Extensión activa · +${d.minutos} min · ${d.aprobadoPor || 'admin'}`, 'ok', 5500);
+        const loginScr = document.getElementById('loginScreen');
+        if (loginScr) loginScr.style.display = 'flex';
+      }
+    });
   }
+
+  // Stubs legacy — el modal viejo (whDesbloqueoModal) ya no se usa. Se mantienen
+  // exportados como no-op por compat con eventuales botones HTML residuales.
+  function cerrarDesbloqueoTemporal() { if (window.ExtensorHorario) ExtensorHorario.cerrar(); }
+  function confirmarDesbloqueoTemporal() { /* delegado al módulo */ }
 
   // ── Aviso 5 min antes del cierre + verificación periódica ──
   let _avisoMostrado = false;
