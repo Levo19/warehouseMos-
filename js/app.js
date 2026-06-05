@@ -20046,24 +20046,73 @@ const WhAdhesivoReprint = (() => {
     const defaultCantidad = Math.max(1, parseInt(env.unidadesProducidas) || 1);
     const fechaEnvasado = env.fecha || env.fechaImpresion || '';
 
+    // [v2.13.165 PREVIEW] Construir lista de siblings (otros productos envasables)
+    // para que AdhesivoPreview detecte highlights diferenciales. Sin esto, solo
+    // el último token (peso) queda destacado — funcional pero menos contextual.
+    let siblings = [];
+    try {
+      const stockArr = (window.todosProductos || []) || [];
+      const norm = window.AdhesivoPreview ? AdhesivoPreview.normalize : (s => String(s||''));
+      stockArr.forEach(p => {
+        const c = String(p.codigoBarra || p.idProducto || '').toUpperCase();
+        if (c.indexOf('WH') !== 0) return;
+        const desc = p.descripcion || '';
+        if (!desc) return;
+        siblings.push(norm(desc).toUpperCase().split(/\s+/).filter(Boolean));
+      });
+    } catch(_) {}
+
     _abrirModal({
       idEnvasado:   idEnvasado,
       codigoBarra:  codigoBarra,
       descripcion:  descripcion,
       defaultCant:  defaultCantidad,
-      fechaEnvasado: fechaEnvasado
+      fechaEnvasado: fechaEnvasado,
+      siblings:     siblings
     });
   }
 
   function _abrirModal(datos) {
     if (document.getElementById('whAdhReprintOverlay')) return;
+
+    // [v2.13.165 PREVIEW] Procesar datos con AdhesivoPreview para render
+    // pixel-perfect del adhesivo. Si el módulo no está cargado (CDN caído),
+    // omitir el preview y mostrar solo el modal de cantidad como fallback.
+    let previewHtml = '';
+    let svgIdPreview = null;
+    if (window.AdhesivoPreview) {
+      AdhesivoPreview.inyectarCss();
+      const proc = AdhesivoPreview.procesar({
+        codigoBarra:   datos.codigoBarra,
+        descripcion:   datos.descripcion,
+        fechaEnvasado: datos.fechaEnvasado,
+        siblings:      datos.siblings || []
+      });
+      if (proc) {
+        svgIdPreview = 'whAdhReprintSvg_' + Date.now();
+        const cardHtml = AdhesivoPreview.renderHtml(proc, {
+          cantidad: datos.defaultCant,
+          svgId:    svgIdPreview
+        });
+        // Scale 0.5 para que el adhesivo de 600px quepa cómodo en el modal
+        previewHtml = '<div style="display:flex;justify-content:center;padding:14px 0;overflow:hidden">'
+                    +   '<div style="transform:scale(.55);transform-origin:top center;height:165px">'
+                    +     cardHtml
+                    +   '</div>'
+                    + '</div>';
+        // Guardamos los datos procesados para el dibujo del barcode tras insertar
+        window._whAdhReprintProc = proc;
+        window._whAdhReprintSvgId = svgIdPreview;
+      }
+    }
+
     const html = `
       <div id="whAdhReprintOverlay"
            class="fixed inset-0 z-[99996] flex items-center justify-center p-4"
            style="background:rgba(2,6,23,.78);backdrop-filter:blur(12px)"
            onclick="if(event.target===this) WhAdhesivoReprint.cerrar()">
         <div class="w-full max-w-md rounded-2xl border overflow-hidden shadow-2xl"
-             style="background:linear-gradient(180deg,#0a1424,#070d18);border-color:rgba(34,197,94,.4)"
+             style="background:linear-gradient(180deg,#0a1424,#070d18);border-color:rgba(34,197,94,.4);max-height:92vh;display:flex;flex-direction:column"
              onclick="event.stopPropagation()">
           <header class="p-5 border-b border-slate-800 flex items-center gap-3"
                   style="background:linear-gradient(135deg,rgba(34,197,94,.10),rgba(22,163,74,.04))">
@@ -20078,7 +20127,9 @@ const WhAdhesivoReprint = (() => {
                     title="Cerrar">✕</button>
           </header>
 
-          <section class="p-5 space-y-4">
+          ${previewHtml}
+
+          <section class="p-5 space-y-4" style="overflow-y:auto">
             <div>
               <label class="text-xs font-bold text-slate-300 uppercase tracking-wider">Cantidad a imprimir</label>
               <div class="flex items-center gap-2 mt-2">
@@ -20121,6 +20172,13 @@ const WhAdhesivoReprint = (() => {
     window._whAdhReprintDatos = datos;
     document.addEventListener('keydown', _keydown);
     setTimeout(() => {
+      // [v2.13.165] Dibujar el barcode SVG tras insertar al DOM
+      try {
+        if (window.AdhesivoPreview && window._whAdhReprintProc && window._whAdhReprintSvgId) {
+          const svgEl = document.getElementById(window._whAdhReprintSvgId);
+          if (svgEl) AdhesivoPreview.dibujarBarcode(svgEl, window._whAdhReprintProc.codigoBarra);
+        }
+      } catch(eBC) { console.warn('[WhAdhReprint] preview barcode fail:', eBC && eBC.message); }
       const inp = document.getElementById('whAdhReprintCant');
       if (inp) { inp.focus(); inp.select(); }
     }, 100);
@@ -20134,18 +20192,27 @@ const WhAdhesivoReprint = (() => {
     }
   }
 
+  function _actualizarCantTag(n) {
+    // [v2.13.165] Sincronizar la "×cantidad" del preview con el input
+    const tag = document.querySelector('#whAdhReprintOverlay .adhesivo-cantidad-tag');
+    if (tag) tag.textContent = '×' + n;
+  }
+
   function delta(d) {
     const inp = document.getElementById('whAdhReprintCant');
     if (!inp) return;
     const nuevo = Math.max(1, Math.min(999, (parseInt(inp.value) || 1) + d));
     inp.value = nuevo;
+    _actualizarCantTag(nuevo);
   }
 
   function setCant(v) {
     // sanitiza pero no bloquea — el max se aplica al imprimir
-    const n = parseInt(v) || 1;
-    if (n < 1) { const inp = document.getElementById('whAdhReprintCant'); if (inp) inp.value = 1; }
-    if (n > 999) { const inp = document.getElementById('whAdhReprintCant'); if (inp) inp.value = 999; }
+    let n = parseInt(v) || 1;
+    const inp = document.getElementById('whAdhReprintCant');
+    if (n < 1)   { n = 1;   if (inp) inp.value = 1; }
+    if (n > 999) { n = 999; if (inp) inp.value = 999; }
+    _actualizarCantTag(n);
   }
 
   function imprimir() {
@@ -20177,7 +20244,10 @@ const WhAdhesivoReprint = (() => {
     document.removeEventListener('keydown', _keydown);
     const ov = document.getElementById('whAdhReprintOverlay');
     if (ov) ov.remove();
-    try { delete window._whAdhReprintDatos; } catch(_) { window._whAdhReprintDatos = null; }
+    // [v2.13.165] Limpieza completa de globals del preview
+    try { delete window._whAdhReprintDatos; }   catch(_) { window._whAdhReprintDatos = null; }
+    try { delete window._whAdhReprintProc; }    catch(_) { window._whAdhReprintProc = null; }
+    try { delete window._whAdhReprintSvgId; }   catch(_) { window._whAdhReprintSvgId = null; }
   }
 
   function _esc(s) {
