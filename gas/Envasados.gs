@@ -4,6 +4,52 @@
 // + integración PrintNode para etiquetas adhesivas
 // ============================================================
 
+// ════════════════════════════════════════════════════════════════════
+// HELPER COMPARTIDO: cálculo adaptativo de parámetros del barcode TSPL2.
+// Usado por Envasados.gs (envasado) y Membretes.gs (ME góndola + WH andamio)
+// para garantizar lectura confiable en TODOS los scanners (incluido pistola
+// CCD barata). Single source of truth — evita drift entre módulos.
+//
+// Impresora TSC TTP-244CE 203 DPI: 1 dot = 0.125 mm. Etiqueta 50mm = 400 dots.
+//   narrow=1 (0.125 mm) → INACEPTABLE: mitad del mínimo Code128. Scanner
+//                          láser reintenta 10× hasta acertar. NUNCA usar.
+//   narrow=2 (0.250 mm) → MÍNIMO estándar (10 mils). Marginal pero legible.
+//   narrow=3 (0.375 mm) → LEGIBILIDAD ÓPTIMA en cualquier scanner barato.
+//
+// Retorna: { narrowBc, barcodeWidth, barcodeHeight, quietZoneMin, barcodeX }
+// donde barcodeX es la coordenada izquierda centrada respecto al ancho 400.
+// ════════════════════════════════════════════════════════════════════
+function _calcBarcodeAdaptativo(codigo) {
+  var bc = String(codigo || '').replace(/"/g, '');
+  var bcLen = bc.length;
+  var modules = 11 * bcLen + 35;
+  var narrowBc, quietZoneMin;
+  if (modules * 3 <= 340) {
+    narrowBc = 3; quietZoneMin = 30;  // bcLen <= 7  ÓPTIMO
+  } else if (modules * 2 <= 360) {
+    narrowBc = 2; quietZoneMin = 20;  // bcLen <= 13 estándar legible
+  } else if (modules * 2 <= 376) {
+    narrowBc = 2; quietZoneMin = 12;  // bcLen = 14  apretado pero legible
+    try { Logger.log('[WARN barcode] codigo largo (' + bcLen + ' chars) — quiet zone reducida (12). Considera etiqueta 75mm.'); } catch(_){}
+  } else {
+    narrowBc = 2; quietZoneMin = 8;   // bcLen > 14  al límite físico
+    try { Logger.log('[ERROR barcode] codigo DEMASIADO LARGO (' + bcLen + ' chars). Posible ilegible. Usar etiqueta 75mm.'); } catch(_){}
+  }
+  var barcodeWidth = modules * narrowBc;
+  // Altura 48 dots (6.0mm) — mejor lectura que 44 (5.5mm) sin pisar frame inferior.
+  var barcodeHeight = 48;
+  var barcodeX = Math.max(quietZoneMin, Math.floor((400 - barcodeWidth) / 2));
+  return {
+    bc:            bc,
+    bcLen:         bcLen,
+    narrowBc:      narrowBc,
+    barcodeWidth:  barcodeWidth,
+    barcodeHeight: barcodeHeight,
+    quietZoneMin:  quietZoneMin,
+    barcodeX:      barcodeX
+  };
+}
+
 function getEnvasados(params) {
   var rows = _sheetToObjects(getSheet('ENVASADOS'));
   if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
@@ -466,61 +512,15 @@ function _buildTSPLEtq(producto, fechaEnvasado, unidades, allEnvasables) {
   ].join('\r\n');
   var bytes = _strToBytesEtq(headerGlobal);
 
-  var bc = String(producto.codigoBarra || '').replace(/"/g, '');
-  var bcLen = bc.length;
-  var modules = 11 * bcLen + 35;
-  // [v2026-06-05 FIX CRÍTICO LECTURA SCANNER] Algoritmo adaptativo para
-  // garantizar lectura confiable en TODOS los scanners (incl. pistola CCD barata).
-  //
-  // Impresora TSC TTP-244CE a 203 DPI: 1 dot = 0.125 mm.
-  //   narrow=1 (0.125 mm) → INACEPTABLE: mitad del mínimo estándar Code128.
-  //                          Scanner láser reintenta 10× hasta acertar.
-  //   narrow=2 (0.250 mm) → MÍNIMO absoluto del estándar (10 mils). Marginal.
-  //   narrow=3 (0.375 mm) → LEGIBILIDAD ÓPTIMA en todos los scanners económicos.
-  //
-  // Etiqueta 50mm = 400 dots. Quiet zones (estándar Code128 = 10× narrow):
-  //   narrow=3 → 30 dots cada lado (60 total) → barcode útil 340 dots → bcLen máx 7
-  //   narrow=2 → 20 dots cada lado (40 total) → barcode útil 360 dots → bcLen máx 13
-  //   narrow=2 quiet reducido (12 dots cada lado) → útil 376 dots → bcLen máx 14
-  //
-  // Prioridad del usuario: barcode #1 (legibilidad SIEMPRE > densidad).
-  // NUNCA bajar a narrow=1 (era el bug que causaba "10 intentos para leer").
-  var narrowBc, quietZoneMin;
-  if (modules * 3 <= 340) {
-    // Códigos cortos (bcLen <= 7) → narrow=3 (ÓPTIMO scanner pistola)
-    narrowBc = 3;
-    quietZoneMin = 30;
-  } else if (modules * 2 <= 360) {
-    // Códigos medianos (bcLen <= 13) → narrow=2 (mínimo estándar, legible)
-    narrowBc = 2;
-    quietZoneMin = 20;
-  } else if (modules * 2 <= 376) {
-    // Códigos largos (bcLen = 14) → narrow=2 con quiet zone reducida
-    // El estándar exige 20 dots con narrow=2; reducir a 12 es marginal pero
-    // mejor que narrow=1. Operador debe acercar más el scanner.
-    narrowBc = 2;
-    quietZoneMin = 12;
-    // Logger asíncrono para que admin sepa que estos códigos están al límite
-    try { Logger.log('[WARN etiqueta] codigoBarra largo (' + bcLen + ' chars) — narrow=2 con quiet zone reducida (12). Considera etiqueta 75mm.'); } catch(_){}
-  } else {
-    // Códigos >14 chars: NO CABE legible en 50mm. Forzamos narrow=2 (no =1) y
-    // recortamos quiet zones al límite físico. Lectura no garantizada — el
-    // sistema debería rechazar códigos tan largos en validación previa.
-    narrowBc = 2;
-    quietZoneMin = 8;
-    try { Logger.log('[ERROR etiqueta] codigoBarra DEMASIADO LARGO (' + bcLen + ' chars). Posible ilegible. Reducir codigo o usar etiqueta 75mm.'); } catch(_){}
-  }
-  var barcodeWidth = modules * narrowBc;
-  // [v2026-06-05] Altura del barcode: 48 dots (= 6.0mm). Era 44 (5.5mm).
-  // Verificación de layout vertical:
-  //   barcodeY=124 + height=48 = fin barcode Y=172
-  //   codigoY = 124 + 48 + 8 = 180 (texto del código debajo)
-  //   Texto font "1" ~12 dots de alto → fin Y=192
-  //   Frame inferior Y=196 → margen seguro 4 dots
-  //   NO toca DESC_AREA (Y=46..118) ni Logo ni Vto.
-  // Smart highlight (font "4") y descripción multilínea quedan intactos.
-  var barcodeHeight = 48;
-  var barcodeX = Math.max(quietZoneMin, Math.floor((400 - barcodeWidth) / 2));
+  // [REFACTOR] Cálculo adaptativo del barcode → helper _calcBarcodeAdaptativo
+  // (definido al inicio del archivo). Usado también por Membretes.gs.
+  var _bcCalc = _calcBarcodeAdaptativo(producto.codigoBarra);
+  var bc = _bcCalc.bc;
+  var bcLen = _bcCalc.bcLen;
+  var narrowBc = _bcCalc.narrowBc;
+  var barcodeWidth = _bcCalc.barcodeWidth;
+  var barcodeHeight = _bcCalc.barcodeHeight;
+  var barcodeX = _bcCalc.barcodeX;
   var frameX1 = 10, frameX2 = 389;
   var cmL = 12;
   var codigoFontW = 8;

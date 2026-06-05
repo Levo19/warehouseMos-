@@ -171,7 +171,9 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
     }
   }
 
-  // [v2.13.142] Código de barras — fallback robusto contra undefined
+  // [v2026-06-05 FIX scanner pistola] Cálculo adaptativo del barcode →
+  // helper _calcBarcodeAdaptativo (Envasados.gs). ANTES: narrowBc=1 si código
+  // largo → ilegible para scanner pistola CCD. AHORA: nunca <=2, altura 48.
   var codigo = String(
     (producto.esSkuBase ? producto.skuBase : producto.codigoBarra)
     || producto.codigoBarra
@@ -180,13 +182,11 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
     || ''
   ).replace(/"/g, '');
   if (!codigo) codigo = 'SIN-CODIGO';
-  var bcLen = codigo.length;
-  var modules = 11 * bcLen + 35;
-  var narrowBc = 2;
-  var barcodeWidth = modules * narrowBc;
-  if (barcodeWidth > 300) { narrowBc = 1; barcodeWidth = modules * narrowBc; }
-  var barcodeHeight = 44;  // [v2.13.142] mismo tamaño que adhesivo envasado
-  var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
+  var _bcCalc = _calcBarcodeAdaptativo(codigo);
+  var narrowBc = _bcCalc.narrowBc;
+  var barcodeWidth = _bcCalc.barcodeWidth;
+  var barcodeHeight = _bcCalc.barcodeHeight;
+  var barcodeX = _bcCalc.barcodeX;
   var barcodeY = 124 + offsetY;
   // Frame con corner marks (igual que envasado y WH)
   var frameX1 = 10, frameX2 = 389;
@@ -300,17 +300,16 @@ function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables
     }
   }
 
-  // [v2.13.142] Barcode ESTÁNDAR (44 dots height, igual que adhesivo envasado)
-  // Defensa contra codigo undefined: fallback skuBase → idProducto → ''
+  // [v2026-06-05 FIX scanner pistola] Cálculo adaptativo del barcode →
+  // helper _calcBarcodeAdaptativo (Envasados.gs). ANTES: narrowBc=1 si código
+  // largo → ilegible para scanner pistola CCD. AHORA: nunca <=2, altura 48.
   var codigo = String(producto.codigo || producto.codigoBarra || producto.skuBase || producto.idProducto || '').replace(/"/g, '');
   if (!codigo) codigo = 'SIN-CODIGO';
-  var bcLen = codigo.length;
-  var modules = 11 * bcLen + 35;
-  var narrowBc = 2;
-  var barcodeWidth = modules * narrowBc;
-  if (barcodeWidth > 300) { narrowBc = 1; barcodeWidth = modules * narrowBc; }
-  var barcodeHeight = 44;  // [v2.13.142] mismo tamaño que adhesivo envasado
-  var barcodeX = Math.max(20, Math.floor((400 - barcodeWidth) / 2));
+  var _bcCalc = _calcBarcodeAdaptativo(codigo);
+  var narrowBc = _bcCalc.narrowBc;
+  var barcodeWidth = _bcCalc.barcodeWidth;
+  var barcodeHeight = _bcCalc.barcodeHeight;
+  var barcodeX = _bcCalc.barcodeX;
   var barcodeY = 124 + offsetY;
   // Frame con corner marks (igual que envasado)
   var frameX1 = 10, frameX2 = 389;
