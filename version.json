@@ -1,1 +1,1 @@
-{ "version": "2.13.160", "build": "20260604-unificacion-deviceId-con-DeviceAuth-single-source-of-truth" }
+{ "version": "2.13.161", "build": "20260604-BUG-CRITICO-verificarDispositivoWH-debe-esperar-DeviceAuth-async" }

@@ -1674,20 +1674,42 @@ const Session = (() => {
     // overlay (verifDispScreen). Ahora el módulo lo hace global y uniforme.
     // Si DeviceAuth dice ACTIVO, retornamos ACTIVO. Si no, el módulo ya muestra
     // su overlay (con da-pre-block bloqueando el resto).
-    if (window.DeviceAuth) {
+    //
+    // [v2.13.161 BUG CRÍTICO FIX] ESPERAR a que DeviceAuth resuelva antes de
+    // retornar. Antes leíamos el estado síncrono inmediato — si DeviceAuth aún
+    // estaba en VERIFICANDO (fetch al server pendiente 200-500ms), retornábamos
+    // VERIFICANDO y el caller hacía return temprano. Resultado: app quedaba
+    // visible SIN llegar a llamar Session.init() → operador entraba como
+    // "usuario fantasma" sin login, con WH_CONFIG.usuario = 'operador' default.
+    // Síntoma reportado por el usuario 2026-06-04: WH permite ingresar
+    // sin pedir login operador.
+    if (!window.DeviceAuth) {
+      _verifEstado = 'ERROR_RED';
+      return 'ERROR_RED';
+    }
+    // Polling cada 100ms hasta que DeviceAuth tenga veredicto terminal.
+    // Safety: 15s máximo (en cualquier caso ya cubre cache válido + fetch).
+    var maxIntentos = 150;  // 150 × 100ms = 15s
+    for (var i = 0; i < maxIntentos; i++) {
       var est = DeviceAuth.estado();
-      if (est && est.estado === 'ACTIVO') {
+      var e = est && est.estado;
+      if (e === 'ACTIVO') {
         _verifEstado = 'ACTIVO';
         _ocultarPantallaVerif();
         return 'ACTIVO';
       }
-      // No autorizado → el módulo bloquea con su overlay. No competir con UI propia.
-      _verifEstado = est && est.estado || 'VERIFICANDO';
-      return _verifEstado;
+      // Estados terminales NO autorizados — el módulo ya muestra su overlay
+      if (e === 'PENDIENTE_APROBACION' || e === 'INACTIVO' || e === 'SUSPENDIDO' ||
+          e === 'NO_REGISTRADO' || e === 'SIN_VERIFICAR') {
+        _verifEstado = e;
+        return e;
+      }
+      // Estados intermedios (INIT, VERIFICANDO) → esperar
+      await new Promise(function(r) { setTimeout(r, 100); });
     }
-    // Fallback fail-CLOSED si el módulo no cargó (CDN caído)
-    _verifEstado = 'ERROR_RED';
-    return 'ERROR_RED';
+    // Timeout — el módulo nunca resolvió. Tratar como SIN_VERIFICAR (fail-CLOSED).
+    _verifEstado = 'SIN_VERIFICAR';
+    return 'SIN_VERIFICAR';
   }
 
   // [v2.13.155] _verificarDispositivoWH_LEGACY — código histórico, no llamado.
