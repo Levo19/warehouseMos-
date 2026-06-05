@@ -1685,9 +1685,11 @@ const Session = (() => {
   //      consultarEstadoDispositivo: en una sola llamada registra el dispositivo
   //      como PENDIENTE_APROBACION si es nuevo Y devuelve el estado. Antes
   //      requería 2 round-trips.
+  // [v2.13.164 cleanup] _AUTH_CACHE_KEY/_ID_KEY se mantienen escritos por
+  // DeviceAuth.onAuth() en index.html (compat con código que pudiera leerlos).
+  // No los leemos desde aquí — el cache del módulo es la fuente de verdad.
   const _AUTH_CACHE_KEY    = 'wh_device_auth_date';
   const _AUTH_CACHE_ID_KEY = 'wh_device_auth_id';
-  const _AUTH_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas — stale-while-revalidate: la app abre instant si verificó hace <12h y refresca en background. Si master suspende el dispositivo, el polling de 15s en pendiente o el _verificarDispositivoSilencioso() en background lo cazan.
 
   async function _verificarDispositivoWH() {
     // [v2.13.155] DELEGAR a DeviceAuth (módulo compartido).
@@ -1733,178 +1735,8 @@ const Session = (() => {
     return 'SIN_VERIFICAR';
   }
 
-  // [v2.13.155] _verificarDispositivoWH_LEGACY — código histórico, no llamado.
-  async function _verificarDispositivoWH_LEGACY() {
-    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
-    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-    if (!mosUrl || !devId) {
-      _verifEstado = 'ACTIVO';
-      _ocultarPantallaVerif();
-      return 'ACTIVO';
-    }
-
-    // ── Cache hit: si verificó hace <12h y el deviceId coincide, autorizar al instante.
-    try {
-      const ts = parseInt(localStorage.getItem(_AUTH_CACHE_KEY) || '0', 10);
-      const cachedId = localStorage.getItem(_AUTH_CACHE_ID_KEY);
-      if (ts && cachedId === devId && (Date.now() - ts) < _AUTH_CACHE_TTL_MS) {
-        _verifEstado = 'ACTIVO';
-        _ocultarPantallaVerif();
-        // Refresh silencioso en background (no bloquea init)
-        _verificarDispositivoSilencioso().catch(() => {});
-        return 'ACTIVO';
-      }
-    } catch(_) {}
-
-    try {
-      const ua = (navigator.userAgent || '').substring(0, 200);
-      const url = mosUrl + '?action=registrarSesionDispositivo'
-                + '&ID_Dispositivo=' + encodeURIComponent(devId)
-                + '&app=warehouseMos'
-                + '&userAgent=' + encodeURIComponent(ua);
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 6000);
-      const r = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(tid);
-      const j = await r.json();
-      if (!j || j.ok === false) {
-        _verifEstado = 'ERROR_RED';
-        _mostrarPantallaVerif('error_red', j && j.error);
-        return 'ERROR_RED';
-      }
-      const d = j.data || {};
-      if (d.estado === 'ACTIVO' || d.autorizado === true) {
-        const yaTeniaPolling = !!_verifPollTimer;
-        _verifEstado = 'ACTIVO';
-        _ocultarPantallaVerif();
-        if (_verifPollTimer) { clearInterval(_verifPollTimer); _verifPollTimer = null; }
-        // Persistir cache 12h
-        try {
-          localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
-          localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
-        } catch(_) {}
-        // [v2.13.34] Si el cron 23h marcó Forzar_Logout, cerrar la sesión
-        // local y volver al login. Limpiar el flag en MOS para no quedar
-        // en bucle.
-        if (d.forzar_logout) {
-          try {
-            const ses = (typeof _cargarSesion === 'function') ? _cargarSesion() : null;
-            if (ses) {
-              console.log('[WH] Forzar_Logout recibido del cron 23h · cerrando sesión');
-              if (typeof clearTimeout === 'function' && typeof lockTimer !== 'undefined') try { clearTimeout(lockTimer); } catch(_){}
-              if (typeof clearInterval === 'function' && typeof lockInterval !== 'undefined') try { clearInterval(lockInterval); } catch(_){}
-              if (typeof _liberarWakeLock === 'function') try { _liberarWakeLock(); } catch(_){}
-              if (typeof _limpiarSesion === 'function') _limpiarSesion();
-              try { sesionActual = null; } catch(_){}
-              try { document.getElementById('lockScreen').style.display = 'none'; } catch(_){}
-              if (typeof _ocultarApp === 'function') try { _ocultarApp(); } catch(_){}
-              if (typeof mostrarLogin === 'function') try { mostrarLogin(); } catch(_){}
-              // Fire-and-forget: limpiar flag en MOS
-              fetch(mosUrl + '?action=marcarLogoutHonrado&deviceId=' + encodeURIComponent(devId))
-                .catch(() => {});
-              return 'ACTIVO';
-            }
-          } catch(eFL) { console.error('[WH] forzar_logout fallo:', eFL); }
-        }
-        // [v2.13.64] Admin marcó Forzar_Push → re-registrar FCM token YA.
-        // Útil cuando el device aparece sin token en PUSH_TOKENS (espía no
-        // conecta, comandos no llegan). El admin lo dispara desde el panel.
-        if (d.forzar_push) {
-          console.log('[WH] Forzar_Push recibido del admin · re-registrando FCM token');
-          if (typeof toast === 'function') toast('🔄 Re-registrando notificaciones (por admin)', 'info', 4000);
-          // Lanzar re-registro + limpiar flag (no bloquear el flujo principal)
-          setTimeout(() => {
-            try {
-              if (typeof window._pushInitWH === 'function') window._pushInitWH();
-            } catch(eFP) { console.error('[WH] forzar_push init fallo:', eFP); }
-            // Limpiar flag en MOS para no quedar en bucle (delay 3s para dar
-            // tiempo al pushInit de completar getToken+registrar)
-            setTimeout(() => {
-              fetch(mosUrl, {
-                method: 'POST',
-                body: JSON.stringify({
-                  action: 'limpiarFlagDevice',
-                  deviceId: devId,
-                  flag: 'Forzar_Push'
-                })
-              }).catch(() => {});
-            }, 5000);
-          }, 1500);
-        }
-        // [v2.13.64] Admin marcó Forzar_Wizard → resetear flag local del wizard
-        // para que vuelva a aparecer al próximo arranque (o ahora si ya está
-        // en sesión). Limpiar flag en MOS.
-        if (d.forzar_wizard) {
-          console.log('[WH] Forzar_Wizard recibido del admin · reset wizard local');
-          try { localStorage.removeItem('wh_wizard_done'); } catch(_){}
-          fetch(mosUrl, {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'limpiarFlagDevice',
-              deviceId: devId,
-              flag: 'Forzar_Wizard'
-            })
-          }).catch(() => {});
-        }
-        // Si veníamos de un estado pendiente/error y el polling detectó ACTIVO,
-        // recargar la pestaña para que el resto de init() corra correctamente.
-        if (yaTeniaPolling) {
-          setTimeout(() => location.reload(), 600);
-        }
-        return 'ACTIVO';
-      }
-      if (d.estado === 'INACTIVO') {
-        _verifEstado = 'INACTIVO';
-        _mostrarPantallaVerif('inactivo', d.nombre);
-        return 'INACTIVO';
-      }
-      if (d.estado === 'PENDIENTE_APROBACION') {
-        // El backend ya creó el row PENDIENTE en esta misma llamada (no requiere
-        // botón "Solicitar acceso" extra — solo esperar aprobación del admin).
-        _verifEstado = 'PENDIENTE';
-        _mostrarPantallaVerif('pendiente', d.nombre);
-        if (!_verifPollTimer) _verifPollTimer = setInterval(_verificarDispositivoWH, 15 * 1000);
-        return 'PENDIENTE';
-      }
-      // Estado desconocido: tratar como no_registrado por defensa.
-      _verifEstado = 'NO_REGISTRADO';
-      _mostrarPantallaVerif('no_registrado');
-      return 'NO_REGISTRADO';
-    } catch(e) {
-      // Error de red / timeout / CORS / GAS caído. Mostrar candado reintentable.
-      _verifEstado = 'ERROR_RED';
-      _mostrarPantallaVerif('error_red', e && e.message);
-      return 'ERROR_RED';
-    }
-  }
-
-  // Verificación silenciosa para refrescar cache (no muestra candado, no bloquea).
-  async function _verificarDispositivoSilencioso() {
-    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
-    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-    if (!mosUrl || !devId) return;
-    try {
-      const url = mosUrl + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(devId);
-      const ctrl = new AbortController();
-      const tid  = setTimeout(() => ctrl.abort(), 8000);
-      const r = await fetch(url, { signal: ctrl.signal });
-      clearTimeout(tid);
-      const j = await r.json();
-      if (j?.ok && j.data?.estado === 'ACTIVO') {
-        try {
-          localStorage.setItem(_AUTH_CACHE_KEY, String(Date.now()));
-          localStorage.setItem(_AUTH_CACHE_ID_KEY, devId);
-        } catch(_) {}
-      } else if (j?.ok && j.data?.estado === 'INACTIVO') {
-        // El admin desactivó el dispositivo: invalidar cache y recargar.
-        try {
-          localStorage.removeItem(_AUTH_CACHE_KEY);
-          localStorage.removeItem(_AUTH_CACHE_ID_KEY);
-        } catch(_) {}
-        location.reload();
-      }
-    } catch(_) {}
-  }
+  // [v2.13.164 cleanup] _verificarDispositivoWH_LEGACY y _verificarDispositivoSilencioso
+  // eliminados (~170 LOC). DeviceAuth maneja todo el flow desde v2.13.155.
 
   function _ocultarPantallaVerif() {
     const el = document.getElementById('verifDispScreen');
@@ -19154,10 +18986,9 @@ const Welcome = (() => {
     });
   }
 
-  // Stubs legacy — el modal viejo (whDesbloqueoModal) ya no se usa. Se mantienen
-  // exportados como no-op por compat con eventuales botones HTML residuales.
-  function cerrarDesbloqueoTemporal() { if (window.ExtensorHorario) ExtensorHorario.cerrar(); }
-  function confirmarDesbloqueoTemporal() { /* delegado al módulo */ }
+  // [v2.13.164] Stubs cerrarDesbloqueoTemporal/confirmarDesbloqueoTemporal
+  // removidos junto con whDesbloqueoModal en index.html. Ningún call site
+  // queda activo en el HTML actual ni en el resto del JS.
 
   // ── Aviso 5 min antes del cierre + verificación periódica ──
   let _avisoMostrado = false;
@@ -19210,7 +19041,7 @@ const Welcome = (() => {
   }
 
   return { mostrar, cerrar, mostrarAlmacenCerrado, cerrarAlmacenCerrado, intentarAccesoAdmin, iniciarMonitorHorario,
-           abrirDesbloqueoTemporal, cerrarDesbloqueoTemporal, confirmarDesbloqueoTemporal };
+           abrirDesbloqueoTemporal };
 })();
 
 const LogsView = (() => {
