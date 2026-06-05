@@ -994,7 +994,13 @@ const Session = (() => {
   let lockTimer = null;
   let lockInterval = null;
   let cierreReporte = null;
-  const MIN_INACTIVIDAD = 5; // minutos (se sobreescribe desde config)
+  // [v2.13.162 UX] Inactividad escalonada:
+  //   - Primera vez de la sesión: 15 min (operador recién entra, se acomoda)
+  //   - Después: 5 min (ya operando activamente, bloqueo estricto)
+  // El flag _yaSeBloqueoUnaVez es de memoria — reset al reload de pestaña.
+  const MIN_INACTIVIDAD         = 5;   // minutos — bloqueo subsecuente
+  const MIN_INACTIVIDAD_PRIMERA = 15;  // minutos — primer bloqueo de la sesión
+  let _yaSeBloqueoUnaVez = false;
 
   function _hoy() {
     return new Date().toISOString().split('T')[0];
@@ -1118,6 +1124,9 @@ const Session = (() => {
       sesionActual = res.data;
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
+      // [v2.13.162 UX] Reset del contador de bloqueos — login nuevo merece
+      // los 15 min de gracia para acomodarse antes del primer bloqueo.
+      _yaSeBloqueoUnaVez = false;
       _aplicarSesion();
       // Notificar a master+admin que ingresó este operador (push). Idempotente.
       try {
@@ -1163,6 +1172,9 @@ const Session = (() => {
     };
     _guardarSesion(sesionActual);
     document.getElementById('loginScreen').style.display = 'none';
+    // [v2.13.162 UX] Reset del contador de bloqueos — login optimista offline
+    // también merece los 15 min de gracia.
+    _yaSeBloqueoUnaVez = false;
     _aplicarSesion();
     _postLogin(null, true); // ticket se decide solo tras respuesta GAS
 
@@ -1357,12 +1369,21 @@ const Session = (() => {
 
   function _resetTimerBloqueo() {
     clearTimeout(lockTimer);
-    const min = parseInt(localStorage.getItem('wh_min_inactividad')) || MIN_INACTIVIDAD;
+    // [v2.13.162 UX] Si admin sobreescribió, prioridad a su config. Sino:
+    //   - Primer bloqueo de la sesión: 15 min (más relajado)
+    //   - Bloqueos siguientes: 5 min (más estricto)
+    const override = parseInt(localStorage.getItem('wh_min_inactividad'));
+    const min = (override && override > 0)
+      ? override
+      : (_yaSeBloqueoUnaVez ? MIN_INACTIVIDAD : MIN_INACTIVIDAD_PRIMERA);
     lockTimer = setTimeout(() => bloquear(), min * 60 * 1000);
   }
 
   function bloquear() {
     if (!sesionActual) return;
+    // [v2.13.162 UX] Marcar que ya se bloqueó al menos una vez — próximos
+    // bloqueos usarán 5 min en lugar de 15 min.
+    _yaSeBloqueoUnaVez = true;
     lockPinBuffer = '';
     _actualizarPuntos('lpin', 0);
     document.getElementById('lockError').textContent = '';

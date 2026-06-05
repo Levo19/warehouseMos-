@@ -1,1 +1,1 @@
-{ "version": "2.13.161", "build": "20260604-BUG-CRITICO-verificarDispositivoWH-debe-esperar-DeviceAuth-async" }
+{ "version": "2.13.162", "build": "20260605-device-auth-1.0.10-inactividad-escalonada-15min-primera-5min-resto" }
