@@ -1669,10 +1669,32 @@ const Session = (() => {
   const _AUTH_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 horas — stale-while-revalidate: la app abre instant si verificó hace <12h y refresca en background. Si master suspende el dispositivo, el polling de 15s en pendiente o el _verificarDispositivoSilencioso() en background lo cazan.
 
   async function _verificarDispositivoWH() {
+    // [v2.13.155] DELEGAR a DeviceAuth (módulo compartido).
+    // Antes esta función hacía el flow completo de verificación con su propio
+    // overlay (verifDispScreen). Ahora el módulo lo hace global y uniforme.
+    // Si DeviceAuth dice ACTIVO, retornamos ACTIVO. Si no, el módulo ya muestra
+    // su overlay (con da-pre-block bloqueando el resto).
+    if (window.DeviceAuth) {
+      var est = DeviceAuth.estado();
+      if (est && est.estado === 'ACTIVO') {
+        _verifEstado = 'ACTIVO';
+        _ocultarPantallaVerif();
+        return 'ACTIVO';
+      }
+      // No autorizado → el módulo bloquea con su overlay. No competir con UI propia.
+      _verifEstado = est && est.estado || 'VERIFICANDO';
+      return _verifEstado;
+    }
+    // Fallback fail-CLOSED si el módulo no cargó (CDN caído)
+    _verifEstado = 'ERROR_RED';
+    return 'ERROR_RED';
+  }
+
+  // [v2.13.155] _verificarDispositivoWH_LEGACY — código histórico, no llamado.
+  async function _verificarDispositivoWH_LEGACY() {
     const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
     const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
     if (!mosUrl || !devId) {
-      // Sin MOS configurado o sin deviceId: NO bloqueamos (modo legacy / dev).
       _verifEstado = 'ACTIVO';
       _ocultarPantallaVerif();
       return 'ACTIVO';

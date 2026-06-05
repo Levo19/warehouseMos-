@@ -4525,6 +4525,61 @@
       40%        { opacity:1;transform:scale(1.2); }
     }
   </style>
+
+  <!-- [v2.13.155 SEC R1-R6] Modulo compartido DeviceAuth — uniforma WH con MOS y ME.
+       Reemplaza Session.verificarDispositivo legacy. Cumple R1-R6:
+         R1 sin autorizacion = no ingresa  · R4 cache fecha Lima
+         R2 sin internet = no ingresa      · R5 expiracion 7d/2d
+         R3a admin O master in-situ        · R6 auto-cancel pendientes >20h -->
+  <style>
+  html.da-pre-block { visibility: hidden !important; overflow: hidden !important; }
+  html.da-pre-block #deviceAuthOverlay,
+  html.da-pre-block .da-insitu-overlay,
+  html.da-pre-block #daApproveToast,
+  html.da-pre-block #da-fatal-fallback { visibility: visible !important; }
+  </style>
+  <script>
+  (function(){
+    document.documentElement.classList.add('da-pre-block');
+    setTimeout(function(){
+      if (!window.DeviceAuth) {
+        var fatal = document.createElement('div');
+        fatal.id = 'da-fatal-fallback';
+        fatal.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#0c1426;color:#f1f5f9;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;font-family:system-ui,-apple-system,sans-serif';
+        fatal.innerHTML = '<div style="font-size:64px;margin-bottom:18px">🔒</div><h2 style="font-size:20px;margin:0 0 8px">Módulo de seguridad no cargado</h2><p style="font-size:14px;color:#94a3b8;max-width:420px;margin:0 0 24px">Revisa tu conexión.</p><button onclick="location.reload()" style="padding:12px 22px;border-radius:10px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:800;border:0;cursor:pointer">🔄 Reintentar</button>';
+        document.documentElement.appendChild(fatal);
+      }
+    }, 10000);
+  })();
+  </script>
+  <script src="https://levo19.github.io/MOS/assets/auth/device-auth.js?v=1.0.5"></script>
+  <script>
+  (function(){
+    var MOS_URL = (window.WH_CONFIG && window.WH_CONFIG.mosGasUrl) ||
+                  'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
+    if (!window.DeviceAuth) return;
+    DeviceAuth.init({
+      mosGasUrl: MOS_URL,
+      app: 'warehouseMos',
+      isMaster: false,  // WH acepta admin O master in-situ
+      storageKeys: {
+        deviceId:           'wh_device_id',
+        lastVerifyDate:     'wh_device_auth_date_lima',
+        verifyVersion:      'wh_device_verify_version',
+        lastVerifyDeviceId: 'wh_device_auth_devid'
+      },
+      onAuth: function() {
+        // Compat con cache viejo basado en TS
+        try { localStorage.setItem('wh_device_auth_date', String(Date.now())); } catch(_){}
+        try { localStorage.setItem('wh_device_auth_id', DeviceAuth.deviceId()); } catch(_){}
+      },
+      onAprobado: function() {
+        // Reload tras detectar aprobacion remota (in-situ ya hace reload propio)
+        setTimeout(function(){ location.reload(); }, 800);
+      }
+    });
+  })();
+  </script>
 </head>
 <body class="pb-20">
 
@@ -4670,8 +4725,10 @@
      Tapa toda la app hasta que MOS confirme que el dispositivo está ACTIVO.
      Estados manejados por _verificarDispositivoWH(): cargando → activo |
      no_registrado | pendiente | inactivo | error_red. -->
+<!-- [v2.13.155] Legacy verifDispScreen — DESACTIVADO. DeviceAuth maneja todo el flow.
+     Lo dejamos en DOM como hidden por si código viejo lo referencia. -->
 <div id="verifDispScreen"
-     style="position:fixed;inset:0;z-index:9998;background:linear-gradient(135deg,#0c1426,#1e293b);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;">
+     style="display:none !important;position:fixed;inset:0;z-index:9998;background:linear-gradient(135deg,#0c1426,#1e293b);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;">
   <div style="text-align:center;max-width:400px;">
     <div style="font-size:64px;margin-bottom:16px;">🔄</div>
     <h2 style="font-size:20px;font-weight:800;margin-bottom:8px;color:#f8fafc;">Verificando dispositivo</h2>
