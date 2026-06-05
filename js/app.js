@@ -2162,7 +2162,17 @@ const Session = (() => {
   function getSesion() { return sesionActual; }
 
   // ── DEVICE ID estable para tracking GPS y audio ──────────
+  // [v2.13.160 ESTANDARIZACIÓN] Unificar deviceId con DeviceAuth (single
+  // source of truth). Aunque WH y el módulo usan la MISMA clave
+  // 'wh_device_id' por coincidencia, conviene delegar al módulo para evitar
+  // drift futuro y race conditions (si app.js corriera antes de DeviceAuth).
   function _getDeviceIdWH() {
+    // Source of truth: módulo DeviceAuth si está cargado
+    if (window.DeviceAuth && typeof window.DeviceAuth.deviceId === 'function') {
+      const daId = window.DeviceAuth.deviceId();
+      if (daId) return daId;
+    }
+    // Fallback: lógica local (idéntica clave que el módulo)
     let id = localStorage.getItem('wh_device_id');
     if (!id) {
       try { id = crypto.randomUUID ? crypto.randomUUID() : ('WH' + Date.now() + Math.random().toString(36).slice(2)); }
