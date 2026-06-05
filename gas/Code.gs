@@ -272,6 +272,9 @@ function _route(method, e) {
       case 'diagnosticarBackendLotes':       return diagnosticarBackendLotes();  // [v2.13.153]
       // [v2.13.118] Membretes ME y WH (reusan sheet LOTES_ADHESIVO con tipoEtiqueta)
       case 'crearLoteMembrete':              return crearLoteMembrete(params);
+      // [v2026-06-05] Frontend dispara impresión INMEDIATA del lote (en lugar
+      // de esperar al trigger backend de cada 1 min). Reduce latencia perceptible.
+      case 'imprimirSubLoteMembrete':        return imprimirSubLoteMembrete(params.idLote);
       case 'previsualizarMembreteMe':        return previsualizarMembreteMe(params.codigoBarra);
       case 'previsualizarMembreteWh':        return previsualizarMembreteWh(params.codigoBarra);
       case 'imprimirBienvenida':  return imprimirBienvenida(params);

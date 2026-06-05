@@ -96,7 +96,9 @@ function _getLogoHexParaTipo(tipo) {
 //   { codigoBarra, descripcion, precio, skuBase?, esSkuBase? }
 //   esSkuBase=true → muestra skuBase con icono ⬢, no codigoBarra
 // ────────────────────────────────────────────────────────────────────
-function _buildTSPLMembreteMe(producto, allEnvasables) {
+// [v2026-06-05] Acepta offsetOverride opcional para batch de N etiquetas
+// en un solo job (cada una con su drift compensado incremental).
+function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
   // [v2.13.142] REDISEÑO completo según feedback:
   // a) Barcode tamaño ESTÁNDAR (44 dots height, igual que adhesivo envasado).
   // b) Defensa codigoBarra undefined → fallback skuBase → idProducto → 'SIN-CODIGO'
@@ -114,7 +116,10 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
   var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
   var density  = parseInt  (props.getProperty('ADHESIVO_DENSITY'))  || 8;
   var speed    = parseInt  (props.getProperty('ADHESIVO_SPEED'))    || 4;
-  var offsetY  = _calcularOffsetEfectivoParaPrint();
+  // [v2026-06-05] Si vino offsetOverride (batch), usarlo. Sino calcular.
+  var offsetY  = (typeof offsetOverride === 'number')
+    ? offsetOverride
+    : _calcularOffsetEfectivoParaPrint();
 
   var logoHex = _getLogoHexParaTipo('MEMBRETE_ME');
 
@@ -230,7 +235,9 @@ function _buildTSPLMembreteMe(producto, allEnvasables) {
 //   indice: número del adhesivo en la serie (1, 2, 3...)
 //   total: total de adhesivos en la serie (para "1/4", "2/4", etc)
 // ────────────────────────────────────────────────────────────────────
-function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables) {
+// [v2026-06-05] Acepta offsetOverride opcional para batch de N etiquetas
+// en un solo job (cada una con su drift compensado incremental).
+function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables, offsetOverride) {
   // [v2.13.142] REDISEÑO completo según feedback:
   // a) Barcode tamaño ESTÁNDAR (44 dots height, igual que adhesivo envasado).
   // b) NO mostrar SKU si solo hay un código (info inútil). Si es parte de
@@ -246,7 +253,10 @@ function _buildTSPLMembreteWh(producto, esCabecera, indice, total, allEnvasables
   var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
   var density  = parseInt  (props.getProperty('ADHESIVO_DENSITY'))  || 8;
   var speed    = parseInt  (props.getProperty('ADHESIVO_SPEED'))    || 4;
-  var offsetY  = _calcularOffsetEfectivoParaPrint();
+  // [v2026-06-05] Si vino offsetOverride (batch), usarlo. Sino calcular.
+  var offsetY  = (typeof offsetOverride === 'number')
+    ? offsetOverride
+    : _calcularOffsetEfectivoParaPrint();
 
   var logoHex = _getLogoHexParaTipo('MEMBRETE_WH');
 
@@ -523,27 +533,44 @@ function imprimirSubLoteMembrete(idLote) {
       return { ok: false, error: 'Sin item para completar #' + lote.completadas };
     }
 
-    var item = items[lote.completadas];
+    // [v2026-06-05 BATCH] Procesar TODOS los items restantes en UN solo TSPL
+    // + UN solo job PrintNode. Antes: 1 item por job → 4 adhesivos = 4 calls
+    // PrintNode con 20s polling cada uno (60-80s total). Ahora: 1 call con
+    // todos los TSPL concatenados (5-10s total).
+    //
+    // Drift incremental: cada etiqueta DENTRO del lote usa su propio offsetY
+    // calculado via _calcularOffsetParaIndiceDentroDeLote(i). El contador
+    // de prints se incrementa por N al final (no 1×N veces).
     var tipo = String(lote.tipoEtiqueta || 'MEMBRETE_ME').toUpperCase();
+    var indiceInicio = lote.completadas;
+    var qtyEnBatch = items.length - indiceInicio;
 
     // Marcar IMPRIMIENDO
     _patchLote(sheet, rowIdx, { status: 'IMPRIMIENDO' });
 
-    // Construir TSPL según tipo
+    // Construir TSPL para CADA item con drift incremental
     var allEnv = [];
     try { allEnv = _getAllEnvasablesTokens(); } catch(_) {}
-    var bytes;
-    if (tipo === 'MEMBRETE_ME') {
-      bytes = _buildTSPLMembreteMe(item, allEnv);
-    } else if (tipo === 'MEMBRETE_WH') {
-      bytes = _buildTSPLMembreteWh(item, !!item.esCabecera, lote.completadas + 1, items.length, allEnv);
-    } else {
-      return { ok: false, error: 'Tipo de etiqueta no soportado en imprimirSubLoteMembrete: ' + tipo };
+    var bytesTotal = [];
+    for (var i = indiceInicio; i < items.length; i++) {
+      var itemActual = items[i];
+      // Offset incremental: la primera del batch usa drift actual + 0,
+      // la siguiente + 1*driftDots, etc.
+      var offsetParaEste = _calcularOffsetParaIndiceDentroDeLote(i - indiceInicio);
+      var bytesItem;
+      if (tipo === 'MEMBRETE_ME') {
+        bytesItem = _buildTSPLMembreteMe(itemActual, allEnv, offsetParaEste);
+      } else if (tipo === 'MEMBRETE_WH') {
+        bytesItem = _buildTSPLMembreteWh(itemActual, !!itemActual.esCabecera, i + 1, items.length, allEnv, offsetParaEste);
+      } else {
+        return { ok: false, error: 'Tipo no soportado: ' + tipo };
+      }
+      bytesTotal = bytesTotal.concat(bytesItem);
     }
 
     var apiKey = PropertiesService.getScriptProperties().getProperty('PRINTNODE_API_KEY') || '';
     if (!apiKey) return { ok: false, error: 'PRINTNODE_API_KEY no configurada' };
-    var b64 = Utilities.base64Encode(bytes);
+    var b64 = Utilities.base64Encode(bytesTotal);
     var auth = 'Basic ' + Utilities.base64Encode(apiKey + ':');
 
     var resp = UrlFetchApp.fetch('https://api.printnode.com/printjobs', {
@@ -552,10 +579,10 @@ function imprimirSubLoteMembrete(idLote) {
       contentType: 'application/json',
       payload: JSON.stringify({
         printerId: parseInt(lote.printerId),
-        title: tipo + ' #' + (lote.completadas + 1) + '/' + items.length + ' lote=' + idLote,
+        title: tipo + ' lote ' + qtyEnBatch + ' adh · ' + idLote,
         contentType: 'raw_base64',
         content: b64,
-        source: 'warehouseMos-membrete-' + idLote
+        source: 'warehouseMos-membrete-batch-' + idLote
       }),
       muteHttpExceptions: true
     });
@@ -570,8 +597,8 @@ function imprimirSubLoteMembrete(idLote) {
     }
     var printNodeJobId = JSON.parse(resp.getContentText());
 
-    // Polling state (reuso del helper)
-    var pollResult = _esperarFinJobPrintNode(printNodeJobId, auth, 20000, 1500);
+    // Polling de UN solo job (en lugar de N). Timeout proporcional al batch.
+    var pollResult = _esperarFinJobPrintNode(printNodeJobId, auth, 30000 + qtyEnBatch * 5000, 1500);
     if (pollResult.estado === 'error') {
       var msg = String(pollResult.mensaje || '').toLowerCase();
       var esOutOfPaper = msg.indexOf('paper') >= 0 || msg.indexOf('media') >= 0 || msg.indexOf('label') >= 0;
@@ -583,24 +610,24 @@ function imprimirSubLoteMembrete(idLote) {
       return { ok: false, error: pollResult.mensaje, status: esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR' };
     }
 
-    // OK — incrementar completadas + contador de drift
-    var nuevasCompletadas = lote.completadas + 1;
-    var nuevoStatus = nuevasCompletadas >= lote.totalEtq ? 'COMPLETADO' : 'ENCOLADO';
+    // OK — incrementar completadas POR N + contador de drift POR N
+    var nuevasCompletadas = lote.completadas + qtyEnBatch;
     _patchLote(sheet, rowIdx, {
       completadas:          nuevasCompletadas,
-      status:               nuevoStatus,
+      status:               'COMPLETADO',
       ultimoPrintNodeJobId: String(printNodeJobId),
       ultimoError:          ''
     });
-    try { _incrementarPrintsCount(1); } catch(_) {}
+    try { _incrementarPrintsCount(qtyEnBatch); } catch(_) {}
 
     return { ok: true, data: {
       idLote:         idLote,
       completadas:    nuevasCompletadas,
       total:          items.length,
-      status:         nuevoStatus,
+      status:         'COMPLETADO',
       printNodeJobId: printNodeJobId,
-      pollEstado:     pollResult.estado
+      pollEstado:     pollResult.estado,
+      qtyEnBatch:     qtyEnBatch
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };

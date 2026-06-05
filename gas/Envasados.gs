@@ -848,6 +848,28 @@ function _incrementarPrintsCount(qty) {
   props.setProperty('ADHESIVO_PRINTS_DESDE_CAL', String(actual + qty));
 }
 
+// [v2026-06-05 BATCH MEMBRETES] Helper para calcular offsetY de una etiqueta
+// DENTRO de un lote que se manda en UN solo job PrintNode. Como las etiquetas
+// se imprimen pegadas (sin reposicionamiento de sensor entre ellas), cada una
+// necesita su propia compensación incremental del drift.
+//
+// Uso: en un lote de N etiquetas que sale en un solo TSPL,
+//   offsetItem_i = _calcularOffsetParaIndiceDentroDeLote(i)  // i = 0..N-1
+//
+// Donde printsCount al inicio del lote ya está fijado y NO se incrementa
+// hasta que el job PrintNode termine OK (entonces se incrementa por N).
+function _calcularOffsetParaIndiceDentroDeLote(indiceEnLote) {
+  var props = PropertiesService.getScriptProperties();
+  var offsetBase  = parseFloat(props.getProperty('ADHESIVO_OFFSET_Y'))             || 0;
+  var driftDots   = parseFloat(props.getProperty('ADHESIVO_DRIFT_DOTS_POR_PRINT')) || 0;
+  var printsCount = parseInt  (props.getProperty('ADHESIVO_PRINTS_DESDE_CAL'))     || 0;
+  var compensacion = Math.round(driftDots * (printsCount + (indiceEnLote || 0)));
+  var offset = offsetBase + compensacion;
+  if (offset < -1) offset = -1;
+  if (offset > 16) offset = 16;
+  return offset;
+}
+
 // Estado actual de calibración — para frontend.
 function estadoCalibracionRollo() {
   try {
