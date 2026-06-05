@@ -513,6 +513,15 @@ function crearLoteMembrete(params) {
 // Lee itemsJson del lote, toma item[completadas], lo imprime.
 // ────────────────────────────────────────────────────────────────────
 function imprimirSubLoteMembrete(idLote) {
+  // [v2026-06-05 SENIOR AUDIT FIX] LockService para evitar doble impresión.
+  // Sin esto: si el frontend dispara fire-and-forget Y el trigger backend
+  // se ejecuta a los pocos segundos, AMBAS calls procesarían el mismo lote
+  // → mismo TSPL mandado a PrintNode dos veces → adhesivos duplicados.
+  // Lock de 15s suficiente para que la 1era termine antes que la 2da pase.
+  var _lock = LockService.getScriptLock();
+  try { _lock.waitLock(15000); } catch(eLock) {
+    return { ok: true, data: { skipped: 'lock_no_obtenido_otro_proceso_en_curso', idLote: idLote } };
+  }
   try {
     var sheet = _getSheetLotesAdhesivo();
     var rowIdx = _findLoteRow(sheet, idLote);
@@ -523,6 +532,24 @@ function imprimirSubLoteMembrete(idLote) {
     if (lote.completadas >= lote.totalEtq) {
       _patchLote(sheet, rowIdx, { status: 'COMPLETADO' });
       return { ok: true, data: { idLote: idLote, completadas: lote.completadas, status: 'COMPLETADO' } };
+    }
+
+    // [v2026-06-05 SENIOR AUDIT FIX] Skipear si otro proceso lo está manejando
+    // ahora mismo (status=IMPRIMIENDO con lastUpdate <90s). Mismo patrón que
+    // imprimirSubLoteAdhesivo en Envasados.gs línea 2705.
+    if (lote.status === 'IMPRIMIENDO' || lote.status === 'CALIBRANDO') {
+      var lastUpdMs = 0;
+      try { lastUpdMs = new Date(lote.fechaUltimoUpdate || '').getTime(); } catch(_){}
+      var ageS = (Date.now() - lastUpdMs) / 1000;
+      if (lastUpdMs && ageS < 90) {
+        return { ok: true, data: {
+          idLote: idLote, completadas: lote.completadas, total: lote.totalEtq,
+          status: lote.status,
+          skipped: 'sub_job_concurrente_en_curso_' + Math.round(ageS) + 's'
+        }};
+      }
+      // Si han pasado >90s, asumimos que el proceso anterior se colgó y
+      // este puede retomarlo. La sheet sigue siendo source of truth.
     }
 
     // Decodificar items
@@ -631,6 +658,9 @@ function imprimirSubLoteMembrete(idLote) {
     }};
   } catch (e) {
     return { ok: false, error: e.message, stack: e.stack };
+  } finally {
+    // [v2026-06-05 SENIOR AUDIT FIX] Liberar lock SIEMPRE
+    try { _lock.releaseLock(); } catch(_){}
   }
 }
 
