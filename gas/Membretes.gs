@@ -86,26 +86,38 @@ function _getLogoHexParaTipo(tipo) {
 // ────────────────────────────────────────────────────────────────────
 // _buildTSPLMembreteMe — adhesivo para góndola tienda
 //
+// [v2.13.171 REDISEÑO SENIOR] Jerarquía visual = jerarquía de negocio:
+//   1º PRECIO    (es lo que el cliente busca en góndola)
+//   2º CÓDIGO    (escaneable por cajero)
+//   3º NOMBRE    (referencia, NO protagonista)
+//
 // Layout 50×25mm = 400×200 dots:
-//   Y=2-38     logo TIENDA (184×36)
-//   Y=42-66    descripción (Font 3 → 24 dots alto)
-//   Y=70-114   barcode con corner marks + código texto
-//   Y=120-184  PRECIO Font 5 MEGA (S/ XX.XX, 48 dots alto + caja)
+//   Y=2-26    descripción Font 3 (1 línea forzada, centrada, truncada)
+//   Y=30-78   PRECIO MEGA Font 5 (32×48) centrado     ← PROTAGONISTA
+//   Y=82-85   línea decorativa gruesa bajo precio
+//   Y=88-148  frame + barcode altura 48 + corner marks
+//   Y=152-164 texto código Font 1 chiquito centrado
+//   Y=168-200 reserva drift (sin contenido crítico)
+//
+// CAMBIOS vs v2.13.142:
+//   ✗ Logo eliminado: en góndola la marca tienda no es prioridad
+//                     (ya está en el ticket de venta).
+//   ✗ Precio en esquina sup-der Font 4: se mochaba por borde derecho
+//                     (zona muerta impresora) y por borde superior
+//                     (Y=4 muy pegado al tope). Cliente reportó:
+//                     "S/ 14.50 se ve 14", "0.95 se ve 95 con 9 mochado".
+//   ✓ Precio Font 5 MEGA centrado: 70+ dots de margen izq/der
+//                     → IMPOSIBLE que se moche. Y=30 lejos del tope
+//                     → drift jamás lo afecta.
+//   ✓ Descripción 1 línea Font 3 chica arriba: informativa, no estorba.
 //
 // params del producto:
 //   { codigoBarra, descripcion, precio, skuBase?, esSkuBase? }
-//   esSkuBase=true → muestra skuBase con icono ⬢, no codigoBarra
+//   esSkuBase=true → muestra skuBase como código principal
 // ────────────────────────────────────────────────────────────────────
 // [v2026-06-05] Acepta offsetOverride opcional para batch de N etiquetas
 // en un solo job (cada una con su drift compensado incremental).
 function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
-  // [v2.13.142] REDISEÑO completo según feedback:
-  // a) Barcode tamaño ESTÁNDAR (44 dots height, igual que adhesivo envasado).
-  // b) Defensa codigoBarra undefined → fallback skuBase → idProducto → 'SIN-CODIGO'
-  //    (antes salía literalmente "undefined" en el adhesivo).
-  // c) Precio en esquina sup. derecha en NEGRITA (no mega central).
-  //    Hace lugar para descripción 2 líneas sin sobre-escribir el barcode.
-  // d) Mismo layout que adhesivo envasado: logo + desc + frame con corner marks + barcode.
   var descNorm = _normalizeEtq(producto.descripcion || '');
   var tokens = descNorm.split(/\s+/);
   var allTok = (allEnvasables || []).map(function(p) { return p.tokens; });
@@ -116,12 +128,9 @@ function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
   var gapMm    = parseFloat(props.getProperty('ADHESIVO_GAP_MM'))   || 2;
   var density  = parseInt  (props.getProperty('ADHESIVO_DENSITY'))  || 8;
   var speed    = parseInt  (props.getProperty('ADHESIVO_SPEED'))    || 4;
-  // [v2026-06-05] Si vino offsetOverride (batch), usarlo. Sino calcular.
   var offsetY  = (typeof offsetOverride === 'number')
     ? offsetOverride
     : _calcularOffsetEfectivoParaPrint();
-
-  var logoHex = _getLogoHexParaTipo('MEMBRETE_ME');
 
   var header = [
     'SIZE 50 mm,25 mm',
@@ -129,56 +138,71 @@ function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
     'DIRECTION 1',
     'DENSITY ' + density,
     'SPEED ' + speed,
-    'CLS',
-    'BITMAP 5,' + (2 + offsetY) + ',' + LOGO_W_BYTES + ',' + LOGO_H + ',0,'
-  ].join('\r\n');
-
+    'CLS'
+  ].join('\r\n') + '\r\n';
   var bytes = _strToBytesEtq(header);
-  bytes = bytes.concat(_hexToBytesEtq(logoHex));
-  bytes = bytes.concat(_strToBytesEtq('\r\n'));
 
-  // [v2.13.142] PRECIO en esquina sup. derecha — negrita compacta.
-  // Font 4 = 16×24 dots. Ej: "S/ 8.50" = 7 chars × 16 = 112 dots wide.
-  var precioStr = 'S/ ' + (parseFloat(producto.precio) || 0).toFixed(2);
-  var precioFontW = 16;
-  var precioWidth = precioStr.length * precioFontW;
-  var precioX = 400 - precioWidth - 4;
-  var precioY = 4 + offsetY;
-  bytes = bytes.concat(_strToBytesEtq('TEXT ' + precioX + ',' + precioY + ',"4",0,1,1,"' + precioStr + '"\r\n'));
-  // Línea decorativa debajo del precio
-  bytes = bytes.concat(_strToBytesEtq('BAR ' + precioX + ',' + (precioY + 28) + ',' + precioWidth + ',2\r\n'));
-
-  // [v2.13.142] Descripción centrada en área Y=46-118 (mismo layout que envasado)
-  var DESC_AREA_Y0 = 46, DESC_AREA_H = 72;
-  var LINE_H = 38, SPACE = 8;
-  var startY;
-  if (lines.length === 1) {
-    var lineHasHl = lines[0].some(function(t) { return t.hl; });
-    var lineHeight = lineHasHl ? 32 : 24;
-    var baselineOffset = lineHasHl ? 0 : 4;
-    startY = DESC_AREA_Y0 + Math.floor((DESC_AREA_H - lineHeight) / 2) - baselineOffset + offsetY;
-  } else {
-    startY = DESC_AREA_Y0 + offsetY;
+  // ─── 1) DESCRIPCIÓN Font 3 (16×24), 1 LÍNEA centrada, área Y=2-26 ───
+  // Tomamos primera línea del wrap. Si hay segunda → trunca con "..".
+  // Si la primera línea excede 380 dots → quita tokens del final hasta que entre.
+  var SPACE = 8;
+  var primeraLinea = (lines[0] || []).map(function(t) {
+    // Clonar para no mutar el wrap original (puede usarse en otro buildxxx)
+    return { tok: t.tok, w: t.w, hl: t.hl };
+  });
+  if (lines.length > 1 && primeraLinea.length > 0) {
+    var ultimo = primeraLinea[primeraLinea.length - 1];
+    ultimo.tok = ultimo.tok.replace(/[\.,]+$/, '') + '..';
+    // Ancho aproximado (Font 3 = 16 dots por char)
+    ultimo.w = ultimo.tok.length * 16;
   }
-  for (var li = 0; li < Math.min(lines.length, 2); li++) {
-    var line = lines[li];
-    var totalW = 0;
-    for (var ti = 0; ti < line.length; ti++) totalW += line[ti].w + (ti > 0 ? SPACE : 0);
-    var x = Math.max(5, Math.round((400 - totalW) / 2));
-    var y = startY + li * LINE_H;
-    for (var tj = 0; tj < line.length; tj++) {
-      var o = line[tj];
-      var font = o.hl ? '4' : '3';
-      var yAdj = o.hl ? y : y + 4;
-      var safe = String(o.tok).replace(/"/g, "'");
-      bytes = bytes.concat(_strToBytesEtq('TEXT ' + x + ',' + yAdj + ',"' + font + '",0,1,1,"' + safe + '"\r\n'));
-      x += o.w + SPACE;
+  var lineW = 0;
+  for (var ti = 0; ti < primeraLinea.length; ti++) {
+    lineW += primeraLinea[ti].w + (ti > 0 ? SPACE : 0);
+  }
+  while (lineW > 380 && primeraLinea.length > 1) {
+    var quitado = primeraLinea.pop();
+    lineW -= quitado.w + SPACE;
+    // Reagregar ".." al nuevo último token si no lo tiene
+    var nuevoUlt = primeraLinea[primeraLinea.length - 1];
+    if (nuevoUlt.tok.slice(-2) !== '..') {
+      lineW -= nuevoUlt.w;
+      nuevoUlt.tok = nuevoUlt.tok.replace(/[\.,]+$/, '') + '..';
+      nuevoUlt.w = nuevoUlt.tok.length * 16;
+      lineW += nuevoUlt.w;
     }
   }
+  var descX = Math.max(5, Math.round((400 - lineW) / 2));
+  var descY = 2 + offsetY;
+  for (var tj = 0; tj < primeraLinea.length; tj++) {
+    var o = primeraLinea[tj];
+    // En descripción chica todo Font 3 — highlights pierden sentido a este tamaño
+    var safe = String(o.tok).replace(/"/g, "'");
+    bytes = bytes.concat(_strToBytesEtq('TEXT ' + descX + ',' + descY + ',"3",0,1,1,"' + safe + '"\r\n'));
+    descX += o.w + SPACE;
+  }
 
-  // [v2026-06-05 FIX scanner pistola] Cálculo adaptativo del barcode →
-  // helper _calcBarcodeAdaptativo (Envasados.gs). ANTES: narrowBc=1 si código
-  // largo → ilegible para scanner pistola CCD. AHORA: nunca <=2, altura 48.
+  // ─── 2) PRECIO MEGA Font 5 (32×48) CENTRADO en Y=30 ───
+  // "S/ 14.50" = 8 chars × 32 = 256 dots wide → precioX = (400-256)/2 = 72
+  // "S/ 999.99" = 9 chars × 32 = 288 → precioX = 56
+  // Imposible que se moche: 55+ dots margen izq/der, 28+ dots margen arriba.
+  var precioStr = 'S/ ' + (parseFloat(producto.precio) || 0).toFixed(2);
+  var precioFontW = 32;
+  var precioWidth = precioStr.length * precioFontW;
+  var precioX = Math.max(5, Math.round((400 - precioWidth) / 2));
+  var precioY = 30 + offsetY;
+  bytes = bytes.concat(_strToBytesEtq('TEXT ' + precioX + ',' + precioY + ',"5",0,1,1,"' + precioStr + '"\r\n'));
+
+  // ─── 3) Línea decorativa gruesa bajo precio Y=82 (3 dots gruesa) ───
+  // Refuerza la jerarquía: separa visualmente PRECIO de barcode.
+  var lineaDecoY = 82 + offsetY;
+  var lineaDecoX = Math.max(30, precioX - 8);
+  var lineaDecoW = Math.min(340, precioWidth + 16);
+  bytes = bytes.concat(_strToBytesEtq('BAR ' + lineaDecoX + ',' + lineaDecoY + ',' + lineaDecoW + ',3\r\n'));
+
+  // ─── 4) BARCODE altura 48 con frame + corner marks Y=88-148 ───
+  // [v2026-06-05 FIX scanner pistola] _calcBarcodeAdaptativo: nunca narrowBc=1,
+  // siempre >=2 (0.250mm) legible para scanner CCD.
   var codigo = String(
     (producto.esSkuBase ? producto.skuBase : producto.codigoBarra)
     || producto.codigoBarra
@@ -189,13 +213,11 @@ function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
   if (!codigo) codigo = 'SIN-CODIGO';
   var _bcCalc = _calcBarcodeAdaptativo(codigo);
   var narrowBc = _bcCalc.narrowBc;
-  var barcodeWidth = _bcCalc.barcodeWidth;
-  var barcodeHeight = _bcCalc.barcodeHeight;
+  var barcodeHeight = _bcCalc.barcodeHeight;  // 48 dots
   var barcodeX = _bcCalc.barcodeX;
-  var barcodeY = 124 + offsetY;
-  // Frame con corner marks (igual que envasado y WH)
+  var barcodeY = 94 + offsetY;
   var frameX1 = 10, frameX2 = 389;
-  var frameY1 = 118 + offsetY, frameY2 = 196 + offsetY, cmL = 12;
+  var frameY1 = 88 + offsetY, frameY2 = 148 + offsetY, cmL = 12;
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',' + cmL + ',1\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX1 + ',' + frameY1 + ',1,' + cmL + '\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BAR ' + (frameX2 - cmL + 1) + ',' + frameY1 + ',' + cmL + ',1\r\n'));
@@ -206,11 +228,11 @@ function _buildTSPLMembreteMe(producto, allEnvasables, offsetOverride) {
   bytes = bytes.concat(_strToBytesEtq('BAR ' + frameX2 + ',' + (frameY2 - cmL + 1) + ',1,' + cmL + '\r\n'));
   bytes = bytes.concat(_strToBytesEtq('BARCODE ' + barcodeX + ',' + barcodeY + ',"128",' + barcodeHeight + ',0,0,' + narrowBc + ',' + narrowBc + ',"' + codigo + '"\r\n'));
 
-  // [v2.13.142] Texto del código LIMPIO (sin ícono ">", "*", "(SKU)" — son sucios)
+  // ─── 5) Texto código Font 1 (8×12) centrado Y=152 ───
   var codigoFontW = 8;
   var codigoWidth = codigo.length * codigoFontW;
   var codigoX = Math.max(frameX1 + 4, Math.floor((400 - codigoWidth) / 2));
-  var codigoY = barcodeY + barcodeHeight + 8;
+  var codigoY = 152 + offsetY;
   bytes = bytes.concat(_strToBytesEtq('TEXT ' + codigoX + ',' + codigoY + ',"1",0,1,1,"' + codigo + '"\r\n'));
 
   bytes = bytes.concat(_strToBytesEtq('PRINT 1,1\r\n'));
