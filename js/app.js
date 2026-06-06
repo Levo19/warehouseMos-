@@ -667,6 +667,53 @@ function _carretaAddSfx() {
   } catch(_){}
 }
 
+// [v2.13.175] Lógica CENTRALIZADA del ciclo de carretas. Antes el avance
+// LLENA→MEDIA→VACIA→eliminar (y alta/baja) estaba TRIPLICADO en los flujos de
+// creación, edición y "día". Vive una sola vez acá; cada flujo aporta su array,
+// render, persistencia y animación. Mutaciones in-place sobre el array dado.
+const CarretaCiclo = {
+  // Decide el siguiente paso de UNA carreta según su estado actual.
+  // → { accion:'estado', estado } | { accion:'eliminar' }
+  siguiente(estadoActual) {
+    const a = ESTADOS_CARGA.indexOf(estadoActual) >= 0 ? estadoActual : 'LLENA';
+    if (a === 'VACIA') return { accion: 'eliminar' };
+    return { accion: 'estado', estado: ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(a) + 1) % ESTADOS_CARGA.length] };
+  },
+  // Avanza el estado de una carreta. En 'eliminar' quita la carreta; si el
+  // cargador queda en 0 lo quita del array. Devuelve descriptor o null.
+  avanzar(arr, cargIdx, carretaIdx) {
+    const c = arr && arr[cargIdx];
+    if (!c || !Array.isArray(c.estados)) return null;
+    const r = this.siguiente(c.estados[carretaIdx] || 'LLENA');
+    if (r.accion === 'eliminar') {
+      c.estados.splice(carretaIdx, 1);
+      c.carretas = c.estados.length;
+      const cargadorEliminado = c.carretas === 0;
+      if (cargadorEliminado) arr.splice(cargIdx, 1);
+      return { accion: 'eliminar', cargadorEliminado: cargadorEliminado };
+    }
+    c.estados[carretaIdx] = r.estado;
+    return { accion: 'estado', estado: r.estado };
+  },
+  // Agrega una carreta LLENA. Devuelve { accion:'add', carretaIdx, estado }.
+  agregar(arr, cargIdx) {
+    const c = arr && arr[cargIdx];
+    if (!c) return null;
+    if (!Array.isArray(c.estados)) c.estados = [];
+    c.estados.push('LLENA');
+    c.carretas = c.estados.length;
+    return { accion: 'add', carretaIdx: c.estados.length - 1, estado: 'LLENA' };
+  },
+  // Quita la última carreta (compat con cambiarCarretas delta<0). Mínimo 1.
+  quitarUltima(arr, cargIdx) {
+    const c = arr && arr[cargIdx];
+    if (!c) return null;
+    c.carretas = Math.max(1, (c.carretas || 1) - 1);
+    if (Array.isArray(c.estados)) c.estados = c.estados.slice(0, c.carretas);
+    return { accion: 'trim' };
+  }
+};
+
 // [v2.13.3] Resumen agregado de cargadores. Sin tarifa: el cargador
 // pone su precio en caja. Devuelve estados de carga agregados.
 function _resumenCargadoresDia(items) {
@@ -14920,79 +14967,79 @@ const PreingresosView = (() => {
   }
 
   // [v2.13.3] LEGACY compat — alias para HTML cacheado viejo
+  // [v2.13.175] LEGACY compat — delta>0 agrega, delta<0 quita la última.
   function cambiarCarretasEdit(idx, delta) {
     if (!_cargadoresEdit[idx]) return;
     if (delta > 0) { agregarCarretaEdit(idx); return; }
-    const c = _cargadoresEdit[idx];
-    c.carretas = Math.max(1, (c.carretas || 1) - 1);
-    if (Array.isArray(c.estados)) c.estados = c.estados.slice(0, c.carretas);
+    CarretaCiclo.quitarUltima(_cargadoresEdit, idx);
     _renderCargadoresEdit();
     _autoguardarCargadores();
   }
 
-  // [v2.13.4] Toggle estado en edición — ciclo de 4 con eliminación + autoguarda
+  // [v2.13.175] Ciclo de carretas (edición) — delega en el manejador único.
   function toggleEstadoCarretaEdit(idx, carretaIdx) {
-    const c = _cargadoresEdit[idx];
-    if (!c || !Array.isArray(c.estados)) return;
-    const actual = c.estados[carretaIdx] || 'LLENA';
-    if (actual === 'VACIA') {
-      _desintegrarCarreta(idx, carretaIdx, true, () => {
-        c.estados.splice(carretaIdx, 1);
-        c.carretas = c.estados.length;
-        if (c.carretas === 0) _cargadoresEdit.splice(idx, 1);
-        _renderCargadoresEdit();
-        _autoguardarCargadores();
-      });
-      return;
-    }
-    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
-    c.estados[carretaIdx] = next;
-    _carretaSfx(next);
-    _renderCargadoresEdit();
-    _autoguardarCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next, false));
+    _toggleCarretaArray(_cargadoresEdit, idx, carretaIdx, _renderCargadoresEdit, _autoguardarCargadores, '#piCargadoresList');
   }
 
   function agregarCarretaEdit(idx) {
-    const c = _cargadoresEdit[idx];
-    if (!c) return;
-    c.carretas = (c.carretas || 0) + 1;
-    if (!Array.isArray(c.estados)) c.estados = [];
-    c.estados.push('LLENA');
-    _carretaAddSfx();
-    _renderCargadoresEdit();
-    _autoguardarCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
+    _agregarCarretaArray(_cargadoresEdit, idx, _renderCargadoresEdit, _autoguardarCargadores, '#piCargadoresList');
   }
 
-  // [v2.13.3] Visual feedback al togglear/agregar — busca el chip por DOM
-  function _flashCarretaChip(cargIdx, carretaIdx, estado, esNueva) {
-    const blocks = document.querySelectorAll(
-      '#preCargadoresList .cargador-block, #piCargadoresList .cargador-block, #cargDiaList .cargador-block'
-    );
-    if (!blocks[cargIdx]) return;
-    const chips = blocks[cargIdx].querySelectorAll('.carreta-chip');
-    const chip = chips[carretaIdx];
+  // [v2.13.175] Primitivas de animación CENTRALIZADAS (antes había
+  // _flashCarretaChip y _desintegrarCarreta duplicando selectores). Operan
+  // sobre un elemento chip ya resuelto, así sirven igual para los flujos por
+  // array (creación/edición) como para el modal del día (chips anidados por pi).
+  function _chipEnLista(selector, cargIdx, carretaIdx) {
+    const blocks = document.querySelectorAll(selector + ' .cargador-block');
+    return (blocks[cargIdx] && blocks[cargIdx].querySelectorAll('.carreta-chip')[carretaIdx]) || null;
+  }
+  function _flashChipEl(chip, esNueva) {
     if (!chip) return;
     chip.classList.remove('cc-flash', 'cc-flash-nueva');
     void chip.offsetWidth; // force reflow
     chip.classList.add(esNueva ? 'cc-flash-nueva' : 'cc-flash');
   }
-
-  // [v2.13.4] Desintegración: aplica animación + SFX, luego ejecuta callback
-  // que mutará el array y re-renderizará. Si no encuentra el chip (caso edge)
-  // ejecuta el callback inmediatamente para no dejar la carreta zombie.
-  function _desintegrarCarreta(cargIdx, carretaIdx, esEdit, onDone) {
-    const selector = esEdit
-      ? '#piCargadoresList .cargador-block, #cargDiaList .cargador-block'
-      : '#preCargadoresList .cargador-block, #cargDiaList .cargador-block';
-    const blocks = document.querySelectorAll(selector);
-    const chip = blocks[cargIdx]?.querySelectorAll('.carreta-chip')?.[carretaIdx];
+  // Anima la desintegración del chip + SFX/vibración, luego ejecuta onDone (que
+  // muta y re-renderiza). Si no hay chip, ejecuta onDone igual (no zombie).
+  function _desintegrarChipEl(chip, onDone) {
     _desintegrarSfx();
     try { if (navigator.vibrate) navigator.vibrate([15, 30, 10]); } catch(_) {}
     if (!chip) { onDone(); return; }
     chip.classList.add('cc-desintegrar');
     setTimeout(onDone, 380);
+  }
+  // Dispara el SFX correcto según el descriptor de cambio de CarretaCiclo.
+  function _sfxCarreta(cambio) {
+    if (!cambio) return;
+    if (cambio.accion === 'add')         _carretaAddSfx();
+    else if (cambio.accion === 'estado') _carretaSfx(cambio.estado);
+    // 'eliminar' → el SFX lo pone _desintegrarChipEl
+  }
+
+  // [v2.13.175] Manejador ÚNICO de toggle para flujos basados en array
+  // (creación y edición). Recibe el array, índices, render, persist (o null) y
+  // el selector del contenedor para las animaciones.
+  function _toggleCarretaArray(arr, cargIdx, carretaIdx, render, persist, selector) {
+    const c = arr[cargIdx];
+    if (!c || !Array.isArray(c.estados)) return;
+    if (CarretaCiclo.siguiente(c.estados[carretaIdx] || 'LLENA').accion === 'eliminar') {
+      _desintegrarChipEl(_chipEnLista(selector, cargIdx, carretaIdx), () => {
+        CarretaCiclo.avanzar(arr, cargIdx, carretaIdx);
+        render(); if (persist) persist();
+      });
+      return;
+    }
+    const cambio = CarretaCiclo.avanzar(arr, cargIdx, carretaIdx);
+    _sfxCarreta(cambio);
+    render(); if (persist) persist();
+    requestAnimationFrame(() => _flashChipEl(_chipEnLista(selector, cargIdx, carretaIdx), false));
+  }
+  function _agregarCarretaArray(arr, cargIdx, render, persist, selector) {
+    const cambio = CarretaCiclo.agregar(arr, cargIdx);
+    if (!cambio) return;
+    _sfxCarreta(cambio);
+    render(); if (persist) persist();
+    requestAnimationFrame(() => _flashChipEl(_chipEnLista(selector, cargIdx, cambio.carretaIdx), true));
   }
 
   // [v2.13.4] SFX descendente para la desintegración (whoosh corto)
@@ -15153,6 +15200,100 @@ const PreingresosView = (() => {
     }
   }
 
+  // [v2.13.175] Preview óptimista del aviso a cajas — espejo en pantalla del
+  // ticket comparativo ANTES→AHORA. NO bloquea ni condiciona la impresión:
+  // aparece al instante con datos locales, auto-cierra y se puede descartar;
+  // la impresión real viaja en paralelo. Self-contained (inyecta su CSS 1 vez).
+  function _ensurePreviewAvisoCss() {
+    if (document.getElementById('pavStyles')) return;
+    const st = document.createElement('style');
+    st.id = 'pavStyles';
+    st.textContent = `
+    #previewAvisoOverlay{position:fixed;inset:0;z-index:10050;display:flex;align-items:flex-end;justify-content:center;background:rgba(2,6,23,.55);backdrop-filter:blur(2px);animation:pavFade .18s ease}
+    #previewAvisoOverlay.pav-closing{animation:pavFade .18s ease reverse forwards}
+    .pav-card{width:100%;max-width:460px;margin:0 8px 8px;background:#0f172a;border:1px solid #1e293b;border-radius:18px 18px 14px 14px;box-shadow:0 -8px 40px rgba(0,0,0,.5);overflow:hidden;animation:pavUp .26s cubic-bezier(.2,.9,.25,1)}
+    .pav-head{display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:1px solid #1e293b}
+    .pav-ico{font-size:20px}
+    .pav-tit{font-weight:800;font-size:14px;color:#e2e8f0;letter-spacing:.2px}
+    .pav-sub{font-size:11px;color:#64748b;margin-top:1px}
+    .pav-body{padding:8px 14px 4px;max-height:46vh;overflow-y:auto}
+    .pav-row{padding:9px 4px;border-bottom:1px dashed #1e293b}
+    .pav-row:last-child{border-bottom:0}
+    .pav-campo{font-size:10px;font-weight:800;letter-spacing:.6px;color:#fbbf24;text-transform:uppercase;margin-bottom:3px}
+    .pav-diff{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    .pav-antes{font-size:13px;color:#94a3b8;text-decoration:line-through;text-decoration-color:#475569;opacity:.8;word-break:break-word}
+    .pav-flecha{color:#f59e0b;font-weight:900;flex-shrink:0}
+    .pav-ahora{font-size:13px;color:#34d399;font-weight:700;word-break:break-word}
+    .pav-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px 13px}
+    .pav-status{font-size:11px;color:#7dd3fc;display:flex;align-items:center;gap:6px}
+    .pav-dot{width:7px;height:7px;border-radius:50%;background:#38bdf8;animation:pavPulse 1s infinite}
+    .pav-ok{font-size:13px;font-weight:700;color:#0f172a;background:#34d399;border:0;border-radius:10px;padding:8px 16px}
+    .pav-bar{height:3px;background:#f59e0b;width:100%;transform-origin:left;animation:pavBar var(--pav-dur,6s) linear forwards}
+    @keyframes pavUp{from{transform:translateY(28px);opacity:.4}to{transform:translateY(0);opacity:1}}
+    @keyframes pavFade{from{opacity:0}to{opacity:1}}
+    @keyframes pavPulse{0%,100%{opacity:1}50%{opacity:.25}}
+    @keyframes pavBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}`;
+    document.head.appendChild(st);
+  }
+
+  function _cerrarPreviewAviso() {
+    const ov = document.getElementById('previewAvisoOverlay');
+    if (!ov) return;
+    if (ov._pavTimer) { clearTimeout(ov._pavTimer); ov._pavTimer = null; }
+    ov.classList.add('pav-closing');
+    setTimeout(() => ov.remove(), 180);
+  }
+
+  function _mostrarPreviewAviso(idPreingreso, provNombre, cambios, snapAnt, snapAct) {
+    if (!cambios || !cambios.length) return;
+    _ensurePreviewAvisoCss();
+    const old = document.getElementById('previewAvisoOverlay');
+    if (old) old.remove();
+    const lblTag = v => v === 'si' ? 'Sí' : v === 'no' ? 'No' : '—';
+    const filas = cambios.map(k => {
+      let tit, antes, ahora;
+      if (k === 'idProveedor')         { tit = 'Proveedor';   antes = _getProveedorNombre(snapAnt.idProveedor) || '—'; ahora = provNombre || '—'; }
+      else if (k === 'monto')          { tit = 'Monto';       antes = 'S/ ' + (parseFloat(snapAnt.monto) || 0).toFixed(2); ahora = 'S/ ' + (parseFloat(snapAct.monto) || 0).toFixed(2); }
+      else if (k === 'tagComp')        { tit = 'Comprobante'; antes = lblTag(snapAnt.tagComp); ahora = lblTag(snapAct.tagComp); }
+      else if (k === 'tagCompl')       { tit = 'Completo';    antes = lblTag(snapAnt.tagCompl); ahora = lblTag(snapAct.tagCompl); }
+      else if (k === 'comentarioLibre'){ tit = 'Comentario';  antes = snapAnt.comentarioLibre || '(vacío)'; ahora = snapAct.comentarioLibre || '(vacío)'; }
+      else return '';
+      return `<div class="pav-row">
+        <div class="pav-campo">${escHtml(tit)}</div>
+        <div class="pav-diff">
+          <span class="pav-antes">${escHtml(String(antes))}</span>
+          <span class="pav-flecha">→</span>
+          <span class="pav-ahora">${escHtml(String(ahora))}</span>
+        </div>
+      </div>`;
+    }).filter(Boolean).join('');
+
+    const ov = document.createElement('div');
+    ov.id = 'previewAvisoOverlay';
+    ov.addEventListener('click', e => { if (e.target === ov) _cerrarPreviewAviso(); });
+    ov.innerHTML = `
+      <div class="pav-card" onclick="event.stopPropagation()">
+        <div class="pav-bar" style="--pav-dur:6s"></div>
+        <div class="pav-head">
+          <span class="pav-ico">🖨</span>
+          <div style="flex:1;min-width:0">
+            <div class="pav-tit">Avisando a cajas — cambios</div>
+            <div class="pav-sub">${escHtml(provNombre || '')} · ${escHtml(idPreingreso || '')}</div>
+          </div>
+        </div>
+        <div class="pav-body">${filas}</div>
+        <div class="pav-foot">
+          <span class="pav-status"><span class="pav-dot"></span>Enviando a impresora…</span>
+          <button class="pav-ok" onclick="PreingresosView.cerrarPreviewAviso()">Entendido</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    try { if (typeof SoundFX !== 'undefined') (SoundFX.ping || SoundFX.click)?.(); } catch(_){}
+    // Auto-cierre alineado con la barra de progreso (6s). El operador puede
+    // cerrarlo antes; la impresión NO depende de esto.
+    ov._pavTimer = setTimeout(_cerrarPreviewAviso, 6000);
+  }
+
   // ── Guardar edición (optimista) ──────────────────────────
   async function guardarEdicion() {
     if (!_editItem) return;
@@ -15165,8 +15306,8 @@ const PreingresosView = (() => {
 
     // Capturar datos y estado antes de cerrar
     const idPreingreso  = _editItem.idPreingreso;
-    const idProveedor   = document.getElementById('piEditProv').value;
-    const textoExtra    = (document.getElementById('piEditComentario').value || '').trim();
+    const idProveedor   = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
+    const textoExtra    = (document.getElementById('piEditComentario')?.value || '').trim();
     const partes = [];
     if (_tagsEdit.comp)  partes.push(`Comprobante: ${_tagsEdit.comp === 'si' ? 'Sí' : 'No'}`);
     if (_tagsEdit.compl) partes.push(`Completo: ${_tagsEdit.compl === 'si' ? 'Sí' : 'No'}`);
@@ -15175,7 +15316,7 @@ const PreingresosView = (() => {
     // [v2.13.173 BUG FIX] No zerar un monto existente si "Comprobante" no está
     // definido (comp===null) — solo si el operador lo puso explícito en 'no'.
     let monto;
-    if (_tagsEdit.comp === 'si')      monto = parseFloat(document.getElementById('piEditMonto').value) || 0;
+    if (_tagsEdit.comp === 'si')      monto = parseFloat(document.getElementById('piEditMonto')?.value) || 0;
     else if (_tagsEdit.comp === 'no') monto = 0;
     else                              monto = parseFloat(_editItem.monto) || 0;
     const fotosExistentes = [..._fotosEdit];
@@ -15206,6 +15347,13 @@ const PreingresosView = (() => {
     try { if (typeof SoundFX !== 'undefined') (SoundFX.savedTick || SoundFX.beepDouble || SoundFX.click)?.(); } catch(_){}
     try { if (navigator.vibrate) navigator.vibrate(12); } catch(_){}
     cargar(_filtroEstado, true);
+
+    // [v2.13.175] Preview ÓPTIMISTA del diff (ANTES→AHORA). Es solo visual: la
+    // impresión sale igual en el IIFE de abajo, sin importar si el operador lo
+    // lee o lo cierra. Espejo en pantalla del ticket comparativo físico.
+    if (cambios.length > 0) {
+      _mostrarPreviewAviso(idPreingreso, _getProveedorNombre(idProveedor), cambios, snapAnterior, snapActual);
+    }
 
     // Limpiar estado de edición
     _fotosNuevas = [];
@@ -15500,47 +15648,22 @@ const PreingresosView = (() => {
   // [v2.13.3] LEGACY compat — alias de agregarCarreta/quitarCarreta.
   // Si delta > 0: agrega 1 carreta LLENA. Si delta < 0: quita la última.
   // El export sigue exponiendo `cambiarCarretas` por compat con HTML cacheado.
+  // [v2.13.175] LEGACY compat — delta>0 agrega, delta<0 quita la última.
   function cambiarCarretas(idx, delta) {
     if (!_cargadores[idx]) return;
     if (delta > 0) { agregarCarreta(idx); return; }
-    const c = _cargadores[idx];
-    c.carretas = Math.max(1, (c.carretas || 1) - 1);
-    if (Array.isArray(c.estados)) c.estados = c.estados.slice(0, c.carretas);
+    CarretaCiclo.quitarUltima(_cargadores, idx);
     _renderCargadores();
   }
 
-  // [v2.13.4] Ciclo de 4 estados: LLENA → MEDIA → VACIA → [eliminar]
-  // El cuarto click reproduce animación de desintegración y borra la carreta.
-  // Si era la última carreta del cargador, el cargador entero se elimina.
+  // [v2.13.175] Ciclo de carretas (creación) — delega en el manejador único.
+  // Sin persist: el array vive en memoria hasta crear().
   function toggleEstadoCarreta(idx, carretaIdx) {
-    const c = _cargadores[idx];
-    if (!c || !Array.isArray(c.estados)) return;
-    const actual = c.estados[carretaIdx] || 'LLENA';
-    if (actual === 'VACIA') {
-      _desintegrarCarreta(idx, carretaIdx, false, () => {
-        c.estados.splice(carretaIdx, 1);
-        c.carretas = c.estados.length;
-        if (c.carretas === 0) _cargadores.splice(idx, 1);
-        _renderCargadores();
-      });
-      return;
-    }
-    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
-    c.estados[carretaIdx] = next;
-    _carretaSfx(next);
-    _renderCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, carretaIdx, next, false));
+    _toggleCarretaArray(_cargadores, idx, carretaIdx, _renderCargadores, null, '#preCargadoresList');
   }
 
   function agregarCarreta(idx) {
-    const c = _cargadores[idx];
-    if (!c) return;
-    c.carretas = (c.carretas || 0) + 1;
-    if (!Array.isArray(c.estados)) c.estados = [];
-    c.estados.push('LLENA');
-    _carretaAddSfx();
-    _renderCargadores();
-    requestAnimationFrame(() => _flashCarretaChip(idx, c.estados.length - 1, 'LLENA', true));
+    _agregarCarretaArray(_cargadores, idx, _renderCargadores, null, '#preCargadoresList');
   }
 
   function quitarCargador(idx) {
@@ -16121,57 +16244,52 @@ const PreingresosView = (() => {
     return arr;
   }
 
+  // [v2.13.175] Modal del día — mismo ciclo central (CarretaCiclo), pero la
+  // mutación persiste por preingreso (_mutarCargadorDelPreingreso) y los chips
+  // están anidados por pi, así que la animación se resuelve dentro de `cont`.
+  function _refrescarCargDia() {
+    _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
+    _renderCargDiaContent();
+  }
+  // Re-consulta el chip tras el re-render (el DOM se reemplazó).
+  function _chipDia(idPreingreso, carretaIdx) {
+    const cont = document.querySelector(`#cargDiaList [data-id-pre="${idPreingreso}"]`);
+    return cont ? cont.querySelectorAll('.carreta-chip')[carretaIdx] || null : null;
+  }
+
   function toggleEstadoCarretaDia(idPreingreso, carretaIdx) {
-    // Necesito el cargId desde el DOM (data-cg-id en el contenedor)
     const cont = document.querySelector(`#cargDiaList [data-id-pre="${idPreingreso}"]`);
     if (!cont) return;
     const cargId = cont.getAttribute('data-cg-id');
-    // Para la animación de desintegrar, necesito el cargIdx en el bloque visible
-    const block = cont.closest('.cargador-block');
-    const cargIdxDom = block ? parseInt(block.getAttribute('data-cg-idx')) : 0;
-    // Tomar estado actual desde cache (no del DOM, por seguridad)
+    // Estado actual desde cache (fuente de verdad, no el DOM)
     const cache = OfflineManager.getPreingresosCache() || [];
     const pi = cache.find(p => p.idPreingreso === idPreingreso);
     if (!pi) return;
     let arr = []; try { arr = JSON.parse(pi.cargadores || '[]'); } catch {}
     const c0 = arr.find(c => String(c.id || c.idPersonal || c.nombre || '') === String(cargId));
     if (!c0 || !Array.isArray(c0.estados)) return;
-    const actual = c0.estados[carretaIdx] || 'LLENA';
+    const paso = CarretaCiclo.siguiente(c0.estados[carretaIdx] || 'LLENA');
 
-    if (actual === 'VACIA') {
-      // Animación de desintegrar antes de mutar
-      const chips = cont.querySelectorAll('.carreta-chip');
-      const chip = chips[carretaIdx];
-      _desintegrarSfx();
-      try { if (navigator.vibrate) navigator.vibrate([15, 30, 10]); } catch(_) {}
-      const doMutate = () => {
+    if (paso.accion === 'eliminar') {
+      _desintegrarChipEl(cont.querySelectorAll('.carreta-chip')[carretaIdx], () => {
         _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
           c.estados.splice(carretaIdx, 1);
           c.carretas = c.estados.length;
         });
-        _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
-        _renderCargDiaContent();
-      };
-      if (chip) { chip.classList.add('cc-desintegrar'); setTimeout(doMutate, 380); }
-      else doMutate();
+        _refrescarCargDia();
+      });
       return;
     }
-    const next = ESTADOS_CARGA[(ESTADOS_CARGA.indexOf(actual) + 1) % 3];
-    _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
-      c.estados[carretaIdx] = next;
-    });
-    _carretaSfx(next);
-    _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
-    _renderCargDiaContent();
-    requestAnimationFrame(() => _flashCarretaChip(cargIdxDom, carretaIdx, next, false));
+    _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => { c.estados[carretaIdx] = paso.estado; });
+    _carretaSfx(paso.estado);
+    _refrescarCargDia();
+    requestAnimationFrame(() => _flashChipEl(_chipDia(idPreingreso, carretaIdx), false));
   }
 
   function agregarCarretaDia(idPreingreso) {
     const cont = document.querySelector(`#cargDiaList [data-id-pre="${idPreingreso}"]`);
     if (!cont) return;
     const cargId = cont.getAttribute('data-cg-id');
-    const block = cont.closest('.cargador-block');
-    const cargIdxDom = block ? parseInt(block.getAttribute('data-cg-idx')) : 0;
     let nuevoIdx = 0;
     _mutarCargadorDelPreingreso(idPreingreso, cargId, (c) => {
       if (!Array.isArray(c.estados)) c.estados = [];
@@ -16180,9 +16298,8 @@ const PreingresosView = (() => {
       nuevoIdx = c.estados.length - 1;
     });
     _carretaAddSfx();
-    _cargDiaState.data = _calcularCargadoresDelDia(_cargDiaState.fecha);
-    _renderCargDiaContent();
-    requestAnimationFrame(() => _flashCarretaChip(cargIdxDom, nuevoIdx, 'LLENA', true));
+    _refrescarCargDia();
+    requestAnimationFrame(() => _flashChipEl(_chipDia(idPreingreso, nuevoIdx), true));
   }
 
   // [v2.13.3] LEGACY compat — guardarTarifaCarreta queda como no-op si el
@@ -16263,7 +16380,8 @@ const PreingresosView = (() => {
            toggleEstadoCarreta, agregarCarreta, toggleEstadoCarretaEdit, agregarCarretaEdit,
            abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
            renderTppList, buscarEnPanel, limpiarBuscarPanel,
-           toggleTppFiltro, filtrarTpp, _searchFocusTpp, compartirWA };
+           toggleTppFiltro, filtrarTpp, _searchFocusTpp, compartirWA,
+           cerrarPreviewAviso: _cerrarPreviewAviso };
 })();
 
 // ════════════════════════════════════════════════
