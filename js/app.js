@@ -14957,10 +14957,13 @@ const PreingresosView = (() => {
     // Overlay: si el operario clickea fuera del sheet, flush antes de cerrar.
     const overlay = document.getElementById('overlayDetallePI');
     if (overlay && !overlay._whAuto) {
-      overlay.addEventListener('click', () => {
-        _flushAutoguardarMeta();
-        _flushAutoguardarCargadores();
-        _avisarSiCambiosSinEnviar();   // [v2.13.174] banner "sin avisar" si cerró con cambios
+      overlay.addEventListener('click', async () => {
+        // [v2.13.177] Esperar a que terminen los autoguardados ANTES de avisar y
+        // limpiar — si nulleáramos _editItem antes, un save pendiente se perdería.
+        try { await _flushAutoguardarMeta(); } catch(_){}
+        try { await _flushAutoguardarCargadores(); } catch(_){}
+        _avisarSiCambiosSinEnviar();   // banner "sin avisar" si cerró con cambios
+        _limpiarEstadoEdicion();       // revoca blobs + resetea estado fantasma
       });
       overlay._whAuto = 1;
     }
@@ -15198,6 +15201,20 @@ const PreingresosView = (() => {
       toast('⚠ Guardado, pero NO avisado a cajas — abre y pulsa "Guardar y avisar"', 'warn', 5500);
       try { if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn(); } catch(_){}
     }
+  }
+
+  // [v2.13.177] Limpieza al abandonar el detalle (cerrar por overlay): revoca
+  // los blobs de fotos NO guardadas (evita fuga de memoria) y resetea el estado
+  // de edición para que no quede "fantasma" entre preingresos. Se llama SOLO
+  // después de flushear los autoguardados (no antes — nullear _editItem cortaría
+  // un save pendiente).
+  function _limpiarEstadoEdicion() {
+    try { _fotosNuevas.forEach(f => f && f.objectUrl && URL.revokeObjectURL(f.objectUrl)); } catch(_){}
+    _fotosNuevas    = [];
+    _fotosEdit      = [];
+    _cargadoresEdit = [];
+    _tagsEdit       = { comp: null, compl: null };
+    _editItem       = null;
   }
 
   // [v2.13.175] Preview óptimista del aviso a cajas — espejo en pantalla del
@@ -15785,7 +15802,12 @@ const PreingresosView = (() => {
         }
         const errList = (res.data?.impresiones || []).filter(r => !r.ok);
         if (errList.length) {
-          toast(`⚠ ${errList.length} impresora(s) fallaron`, 'warn', 5000);
+          // [v2.13.177] Nombrar las cajas que fallaron + acción concreta. El
+          // snapshot ya se persiste con éxito parcial (para no re-spamear a las
+          // que sí imprimieron), así que el operador debe reimprimir manual a
+          // las que fallaron.
+          const cuales = errList.map(r => `${r.vendedor || '—'} (${r.zona || '—'})`).join(', ');
+          toast(`⚠ NO recibieron el aviso: ${cuales}. Usá "🖨 Reimprimir aviso a cajas".`, 'warn', 7000);
           try { if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn(); } catch(_){}
         }
       } else if (res.error === 'NO_CHANGES') {

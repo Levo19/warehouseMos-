@@ -49,9 +49,12 @@ function _checkDuplicado(localId) {
     var sheet = getSheet('SYNC_LOG');
     if (!sheet) return null;
     var data = sheet.getDataRange().getValues();
-    for (var i = 1; i < data.length; i++) {
+    // [v2.13.177] Búsqueda INVERSA: los reintentos casi siempre son de ops
+    // recientes, así que recorrer desde el final encuentra el match enseguida
+    // (antes era O(n) desde el inicio, lento con el log grande).
+    for (var i = data.length - 1; i >= 1; i--) {
       if (data[i][0] === localId) {
-        try { return JSON.parse(data[i][2]); } catch { return { ok: true, dedup: true }; }
+        try { return JSON.parse(data[i][2]); } catch (e) { return { ok: true, dedup: true }; }
       }
     }
   } catch(e) {}
@@ -62,7 +65,15 @@ function _logSync(localId, action, resultado) {
   if (!localId || !String(localId).startsWith('L')) return;
   try {
     var sheet = _getOrCreateSyncLog();
-    if (sheet) sheet.appendRow([localId, action, JSON.stringify(resultado), new Date()]);
+    if (!sheet) return;
+    sheet.appendRow([localId, action, JSON.stringify(resultado), new Date()]);
+    // [v2.13.177] Poda oportunista: SYNC_LOG solo sirve para deduplicar
+    // reintentos recientes; sin tope crecería indefinidamente y degradaría
+    // _checkDuplicado. Cuando cruza MAX filas, recorta a las KEEP más nuevas.
+    // Costo amortizado: solo borra al cruzar el umbral, no en cada append.
+    var MAX = 4000, KEEP = 2000;
+    var last = sheet.getLastRow();
+    if (last > MAX) sheet.deleteRows(2, last - 1 - KEEP); // conserva header + últimas KEEP
   } catch(e) {}
 }
 

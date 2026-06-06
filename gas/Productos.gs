@@ -1889,6 +1889,17 @@ function _actualizarPreingresoImpl(params) {
             var cC = gHdrs.indexOf('comentario');
             if (cC >= 0) gs.getRange(j + 1, cC + 1).setValue(String(params.comentario));
           }
+          // [v2.13.177] Propagar también monto y cargadores a la guía (si la
+          // hoja GUIAS tiene esas columnas) — mantiene la guía consistente con
+          // lo que se imprime/edita en el preingreso. No-op si la col no existe.
+          if (params.monto !== undefined) {
+            var cM = gHdrs.indexOf('monto');
+            if (cM >= 0) gs.getRange(j + 1, cM + 1).setValue(parseFloat(params.monto) || 0);
+          }
+          if (params.cargadores !== undefined) {
+            var cCg = gHdrs.indexOf('cargadores');
+            if (cCg >= 0) gs.getRange(j + 1, cCg + 1).setValue(_snapshotTarifaCargadores(params.cargadores));
+          }
           break;
         }
       } catch(e) { /* non-fatal */ }
