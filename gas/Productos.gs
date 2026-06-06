@@ -1660,10 +1660,18 @@ function getPreingresos(params) {
 }
 
 // ── Snapshot de tarifa por carreta ─────────────────────────────
-// Recibe el JSON string de cargadores [{id,nombre,carretas,tarifa?}] y retorna
-// el mismo string pero con `tarifa` rellenada con la tarifa global vigente
-// si no venía. Garantiza que reimpresiones a futuro conserven el monto que
-// se pactó al momento, aunque cambie TARIFA_CARRETA global.
+// Recibe el JSON string de cargadores y retorna el mismo string con `tarifa`
+// rellenada con la tarifa global vigente si no venía.
+//
+// [v2.13.176 BUG FIX CRÍTICO] Antes esta función reconstruía cada cargador
+// como {id, nombre, carretas, tarifa} y DESCARTABA el campo `estados` (el
+// estado de cada carreta: LLENA/MEDIA/VACIA). Como se llama en CADA creación
+// y actualización de cargadores, el backend borraba los estados en cada
+// guardado: tras el round-trip y el TTL del cache, el servidor devolvía
+// cargadores sin `estados` y _normalizarCargador los reponía todos en LLENA.
+// ESA era la causa de fondo de "el estado de la carreta se pierde / vuelve al
+// inicial". Ahora preservamos TODOS los campos del cargador (incl. estados) y
+// solo normalizamos/añadimos `tarifa` por compatibilidad.
 function _snapshotTarifaCargadores(cargadoresStr) {
   if (!cargadoresStr) return '';
   try {
@@ -1674,7 +1682,8 @@ function _snapshotTarifaCargadores(cargadoresStr) {
       if (typeof c !== 'object' || c === null) return c;
       var t = parseFloat(c.tarifa);
       if (isNaN(t) || t < 0) t = tarifaGlobal;
-      return { id: c.id, nombre: c.nombre, carretas: c.carretas, tarifa: t };
+      // Preservar todos los campos (id, nombre, carretas, estados, …) + tarifa.
+      return Object.assign({}, c, { tarifa: t });
     });
     return JSON.stringify(out);
   } catch(e) { return cargadoresStr; }
