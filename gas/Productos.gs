@@ -1919,12 +1919,28 @@ function _actualizarFotosPreingresoImpl(params) {
 }
 
 function aprobarPreingreso(params) {
-  var sheet = getSheet('PREINGRESOS');
-  var data  = sheet.getDataRange().getValues();
-  var hdrs  = data[0];
+  // [v2.13.173 BUG FIX] Lock + idempotencia. Antes, un doble click en "+Guía"
+  // (o un reintento por timeout) creaba DOS guías: cada click llevaba un
+  // localId distinto, así que la dedup del router no aplicaba, y la función
+  // nunca verificaba si el preingreso ya estaba PROCESADO. Ahora si ya tiene
+  // guía, la devuelve sin crear otra; y el lock serializa aprobaciones
+  // concurrentes del mismo preingreso.
+  return _conLock('aprobarPreingreso', function() {
+    var sheet = getSheet('PREINGRESOS');
+    var data  = sheet.getDataRange().getValues();
+    var hdrs  = data[0];
+    var colEstado = hdrs.indexOf('estado');
+    var colGuia   = hdrs.indexOf('idGuia');
 
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === params.idPreingreso) {
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] !== params.idPreingreso) continue;
+
+      var estadoActual  = String(data[i][colEstado] || '').toUpperCase();
+      var guiaExistente = colGuia >= 0 ? String(data[i][colGuia] || '') : '';
+      if (estadoActual === 'PROCESADO' && guiaExistente) {
+        return { ok: true, data: { idGuia: guiaExistente, dedup: true } };
+      }
+
       // Crear guía de ingreso
       var resultGuia = crearGuia({
         tipo:          'INGRESO_PROVEEDOR',
@@ -1936,13 +1952,13 @@ function aprobarPreingreso(params) {
 
       if (!resultGuia.ok) return { ok: false, error: 'Error al crear guía: ' + resultGuia.error };
 
-      sheet.getRange(i + 1, hdrs.indexOf('estado') + 1).setValue('PROCESADO');
-      sheet.getRange(i + 1, hdrs.indexOf('idGuia') + 1).setValue(resultGuia.data.idGuia);
+      sheet.getRange(i + 1, colEstado + 1).setValue('PROCESADO');
+      sheet.getRange(i + 1, colGuia + 1).setValue(resultGuia.data.idGuia);
 
       return { ok: true, data: { idGuia: resultGuia.data.idGuia } };
     }
-  }
-  return { ok: false, error: 'Preingreso no encontrado' };
+    return { ok: false, error: 'Preingreso no encontrado' };
+  });
 }
 
 // ============================================================

@@ -473,6 +473,35 @@ const OfflineManager = (() => {
   function setSubiendoFotos(on) { _subiendoFotos = !!on; }
   function isSubiendoFotos() { return _subiendoFotos; }
 
+  // [v2.13.173 BUG FIX] Registro de CAMPOS de preingreso con escritura local en
+  // vuelo (sin confirmar en el Sheet). Mientras un campo esté pendiente,
+  // _mergePreingresos preserva su valor LOCAL para que el polling de 60s no
+  // revierta lo que el backend aún no terminó de persistir. Patrón hermano de
+  // _subiendoFotos (Fix #2 v2.11.1), pero scoped por id+campo y con TTL para
+  // que un fallo de red no congele el campo para siempre. Corrige la pérdida
+  // tanto de `cargadores` como de `comentario`/`monto` al refrescar.
+  const _preingPendientes = new Map(); // idPreingreso -> { campo: expiraTs }
+  function marcarPreingresoPendiente(id, campos, ttlMs) {
+    if (!id || !campos) return;
+    const k = String(id);
+    let m = _preingPendientes.get(k);
+    if (!m) { m = {}; _preingPendientes.set(k, m); }
+    const exp = Date.now() + (ttlMs || 15000);
+    (Array.isArray(campos) ? campos : [campos]).forEach(c => { m[c] = exp; });
+  }
+  function _preingCampoPendiente(id, campo) {
+    const m = _preingPendientes.get(String(id));
+    if (!m || !m[campo]) return false;
+    if (Date.now() > m[campo]) {
+      delete m[campo];
+      if (!Object.keys(m).length) _preingPendientes.delete(String(id));
+      return false;
+    }
+    return true;
+  }
+  // Atajo para el caso más común (estado de carretas).
+  function marcarCargadoresPendiente(id, ttlMs) { marcarPreingresoPendiente(id, 'cargadores', ttlMs); }
+
   async function precargarOperacional(forzar = false) {
     if (!navigator.onLine) return;
     if (_opLoading) return;
@@ -512,6 +541,16 @@ const OfflineManager = (() => {
             merged.fotos = old.fotos;
             if (window.__WH_DEBUG_FOTOS) console.log('[Offline merge] preservé fotos de', n.idPreingreso, '→', old.fotos.substring(0, 60));
           }
+          // [v2.13.173 BUG FIX] Preservar campos editables con escritura local
+          // en vuelo. Sin esto, el poll de 60s revertía lo que el operador
+          // acababa de cambiar pero que el backend aún no había grabado
+          // (síntoma: "el cambio se pierde / vuelve al inicial" — afectaba a
+          // cargadores Y a comentario/monto).
+          ['cargadores', 'comentario', 'monto', 'idProveedor'].forEach(campo => {
+            if (_preingCampoPendiente(n.idPreingreso, campo) && old[campo] != null) {
+              merged[campo] = old[campo];
+            }
+          });
           return merged;
         });
       }
@@ -686,6 +725,7 @@ const OfflineManager = (() => {
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     setSubiendoFotos, isSubiendoFotos,
+    marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
   };
 })();

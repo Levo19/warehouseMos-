@@ -884,18 +884,21 @@ function _horaDesdeGuia(g) {
 function _tagsFromComentario(comentario) {
   const s = String(comentario || '');
   const tags = { comp: null, compl: null };
-  if (/comprobante:\s*sí/i.test(s))        tags.comp  = 'si';
-  else if (/comprobante:\s*no/i.test(s))    tags.comp  = 'no';
-  if (/completo:\s*sí/i.test(s))            tags.compl = 'si';
-  else if (/completo:\s*no/i.test(s))       tags.compl = 'no';
+  // [v2.13.173] Tolerante a "Sí"/"Si"/"sí"/"si" (con o sin acento) por si el
+  // comentario viene de otra app o de edición manual. El builder sigue
+  // escribiendo "Sí" para mantener consistencia visual.
+  if (/comprobante:\s*s[ií]\b/i.test(s))    tags.comp  = 'si';
+  else if (/comprobante:\s*no\b/i.test(s))  tags.comp  = 'no';
+  if (/completo:\s*s[ií]\b/i.test(s))       tags.compl = 'si';
+  else if (/completo:\s*no\b/i.test(s))     tags.compl = 'no';
   return tags;
 }
 
 // Extrae el texto libre quitando los prefijos de tags
 function _textoLibreFromComentario(comentario) {
   return (comentario || '')
-    .replace(/Comprobante:\s*(Sí|No)\s*\|?\s*/gi, '')
-    .replace(/Completo:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/Comprobante:\s*(?:S[ií]|No)\s*\|?\s*/gi, '')
+    .replace(/Completo:\s*(?:S[ií]|No)\s*\|?\s*/gi, '')
     .replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '')
     .trim();
 }
@@ -14555,6 +14558,18 @@ const PreingresosView = (() => {
 
   // ── Abrir detalle / edición ───────────────────────────────
   function abrirDetalle(idPreingreso) {
+    // [v2.13.173 BUG FIX] Si había OTRO preingreso en edición, capturar sus
+    // autoguardados pendientes ANTES de cambiar _editItem. Sin esto, un
+    // comentario/cargador tipeado que seguía en el debounce se perdía al
+    // saltar a otro preingreso. Disparo síncrono: _ejecutar* lee _editItem y
+    // el DOM (= valores del ANTERIOR) y construye sus params antes del await,
+    // así el save sale con los datos correctos aunque reasignemos abajo.
+    if (_editItem && _editItem.idPreingreso !== idPreingreso) {
+      clearTimeout(_autoguardarMetaTimer);
+      clearTimeout(_autoguardarTimer);
+      try { _ejecutarAutoguardarMeta(); }       catch(_){}
+      try { _ejecutarAutoguardarCargadores(); } catch(_){}
+    }
     const cached = OfflineManager.getPreingresosCache();
     const p = cached.find(x => x.idPreingreso === idPreingreso);
     if (p) {
@@ -14687,8 +14702,12 @@ const PreingresosView = (() => {
   //     deja de tocar cargadores por 700ms.
   //   - Lock _saving: si llega otro pedido mientras hay uno en vuelo, queda
   //     pendiente; al volver el response, se dispara el último.
-  //   - idempotencyKey por sesión de edición → backend SYNC_LOG dedupea.
+  //   - marcarCargadoresPendiente: protege el `cargadores` local del merge de
+  //     polling (60s) hasta que el backend confirme. [v2.13.173]
   //   - Errores SÍ se muestran con toast (.catch no silencioso).
+  // NOTA: la idempotencia real la da `localId` (lo inyecta API.post porque
+  // actualizarPreingreso está en _IDEMPOTENT_ACTIONS). Cada save lleva un
+  // localId nuevo → no se deduplican entre sí, que es justo lo que queremos.
   let _autoguardarTimer = null;
   let _autoguardarSaving = false;
   let _autoguardarPending = false;
@@ -14710,14 +14729,15 @@ const PreingresosView = (() => {
     const idPreingreso = _editItem.idPreingreso;
     try {
       const cargadores = JSON.stringify(_cargadoresEdit);
-      const idempotencyKey = 'ag_carg_' + idPreingreso + '_' + Date.now();
-      const r = await API.actualizarPreingreso({
-        idPreingreso, cargadores, idempotencyKey
-      });
+      // [v2.13.173] Patch + flag pendiente ANTES del await: el cache local es
+      // la fuente de verdad mientras el backend confirma, y el merge de polling
+      // no debe revertirlo.
+      OfflineManager.patchPreingresosCache(idPreingreso, { cargadores });
+      OfflineManager.marcarCargadoresPendiente(idPreingreso);
+      const r = await API.actualizarPreingreso({ idPreingreso, cargadores });
       if (r && r.ok === false) {
         try { toast('⚠ No se guardaron cargadores: ' + (r.error || ''), 'warn', 4000); } catch(_){}
       } else {
-        OfflineManager.patchPreingresosCache(idPreingreso, { cargadores });
         if (_editItem && _editItem.idPreingreso === idPreingreso) {
           _editItem.cargadores = cargadores;
         }
@@ -14784,23 +14804,34 @@ const PreingresosView = (() => {
       if (_tagsEdit.compl) partes.push('Completo: ' + (_tagsEdit.compl === 'si' ? 'Sí' : 'No'));
       if (textoExtra) partes.push(textoExtra);
       const comentario = partes.join(' | ');
-      const monto = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto')?.value) || 0) : 0;
       const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
-      const idempotencyKey = 'ag_meta_' + idPreingreso + '_' + Date.now();
-      const r = await API.actualizarPreingreso({
-        idPreingreso, idProveedor, monto, comentario,
-        idempotencyKey
-      });
+
+      // [v2.13.173 BUG FIX] No forzar monto=0 cuando el tag "Comprobante" está
+      // SIN setear (null): eso borraba un monto existente con solo editar el
+      // comentario. Solo tocamos monto si el operador definió el tag —
+      //   comp==='si' → monto del input · comp==='no' → 0 explícito ·
+      //   comp===null → omitir (el backend preserva el valor existente).
+      const params = { idPreingreso, idProveedor, comentario };
+      if (_tagsEdit.comp === 'si')      params.monto = parseFloat(document.getElementById('piEditMonto')?.value) || 0;
+      else if (_tagsEdit.comp === 'no') params.monto = 0;
+
+      // [v2.13.173] Patch + flag pendiente ANTES del await: el cache local es la
+      // fuente de verdad mientras el backend confirma; el merge de polling no
+      // debe revertir comentario/monto/idProveedor recién editados.
+      const patch = { comentario, idProveedor };
+      if (params.monto !== undefined) patch.monto = params.monto;
+      OfflineManager.patchPreingresosCache(idPreingreso, patch);
+      OfflineManager.marcarPreingresoPendiente(idPreingreso, Object.keys(patch));
+
+      const r = await API.actualizarPreingreso(params);
       if (r && r.ok === false) {
         try { toast('⚠ No se guardó la edición: ' + (r.error || ''), 'warn', 4000); } catch(_){}
       } else {
-        // Patch del cache local siempre (sobrevive al cierre del modal).
-        OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor });
         // Sincronizar _editItem solo si SIGUE siendo el mismo preingreso
         // (el operario puede haber cambiado a otro durante el await).
         if (_editItem && _editItem.idPreingreso === idPreingreso) {
           _editItem.comentario = comentario;
-          _editItem.monto = monto;
+          if (params.monto !== undefined) _editItem.monto = params.monto;
           _editItem.idProveedor = idProveedor;
         }
       }
@@ -15089,7 +15120,12 @@ const PreingresosView = (() => {
     if (_tagsEdit.compl) partes.push(`Completo: ${_tagsEdit.compl === 'si' ? 'Sí' : 'No'}`);
     if (textoExtra) partes.push(textoExtra);
     const comentario    = partes.join(' | ');
-    const monto         = _tagsEdit.comp === 'si' ? (parseFloat(document.getElementById('piEditMonto').value) || 0) : 0;
+    // [v2.13.173 BUG FIX] No zerar un monto existente si "Comprobante" no está
+    // definido (comp===null) — solo si el operador lo puso explícito en 'no'.
+    let monto;
+    if (_tagsEdit.comp === 'si')      monto = parseFloat(document.getElementById('piEditMonto').value) || 0;
+    else if (_tagsEdit.comp === 'no') monto = 0;
+    else                              monto = parseFloat(_editItem.monto) || 0;
     const fotosExistentes = [..._fotosEdit];
     const fotosNuevasCaptura = [..._fotosNuevas];
 
@@ -15144,6 +15180,10 @@ const PreingresosView = (() => {
       // [v2.11.3] NO revocar blob URLs — usados como fallback por photos.js
       try { OfflineManager.setSubiendoFotos(false); } catch(_){}
       const fotos = todasFotos.map(f => f.url).join(',');
+      // [v2.13.173] Re-marcar pendiente: la subida de fotos pudo tardar >15s y
+      // el flag del flush ya habría expirado; sin esto el poll revierte la meta.
+      OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor, fotos });
+      OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor']);
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => console.warn('[EditPreingreso]', e));
       // [v2.13.7] Solo reimprimir si cambió al menos uno de los 5 campos críticos
@@ -15195,7 +15235,14 @@ const PreingresosView = (() => {
     }
   }
 
+  // [v2.13.173] Guard de re-entrada: evita inyectar dos cards optimistas (y dos
+  // aprobaciones en vuelo) si el operador toca "+Guía" dos veces. El backend ya
+  // es idempotente, pero esto evita el duplicado visual mientras viaja la red.
+  const _aprobandoPI = new Set();
+
   async function _ejecutarCrearGuia(idPreingreso, idProveedor, fileIdFoto) {
+    if (_aprobandoPI.has(idPreingreso)) return;
+    _aprobandoPI.add(idPreingreso);
     const tempId     = 'G_tmp_' + Date.now();
     const provNombre = _getProveedorNombre(idProveedor);
     GuiasView.injectOptimisticGuia({ tempId, idProveedor, provNombre });
@@ -15220,6 +15267,7 @@ const PreingresosView = (() => {
       toast('Error al crear guía: ' + res.error, 'danger');
       GuiasView.removeOptimisticGuia(tempId);
     }
+    _aprobandoPI.delete(idPreingreso);
     cargar(_filtroEstado, true);
   }
 
@@ -15506,6 +15554,9 @@ const PreingresosView = (() => {
       fecha: new Date().toISOString(), fotos: '',
       usuario: window.WH_CONFIG.usuario
     });
+    // [v2.13.173] Si trae cargadores, blindarlos del merge de polling hasta
+    // que el backend confirme la fila recién creada.
+    if (cargadores) OfflineManager.marcarCargadoresPendiente(idPreingresoReal);
     btn.disabled = false; btn.textContent = 'Registrar preingreso';
 
     // 3. Subir fotos en segundo plano (no bloquea UI)
@@ -15936,6 +15987,44 @@ const PreingresosView = (() => {
       </div>`;
   }
 
+  // [v2.13.173] Guardado robusto de cargadores para el modal del día.
+  // Reemplaza el fire-and-forget anterior (.catch(()=>{})): con clicks rápidos
+  // se mandaban varias escrituras concurrentes cuyo orden de LLEGADA al backend
+  // no estaba garantizado → la última en llegar podía ser un estado viejo y
+  // "perdía" el cambio. Ahora: debounce 600ms por preingreso + coalescing +
+  // errores visibles. El flag pendiente (marcarCargadoresPendiente) ya lo pone
+  // _mutarCargadorDelPreingreso para blindar el cache del merge de polling.
+  // Mismo patrón que el autoguardado del modal de edición (v2.13.110/111).
+  const _cargDiaSavers = {}; // idPreingreso -> { timer, saving, pending, ultimo }
+
+  function _guardarCargadoresDia(idPreingreso, cargadoresStr) {
+    let s = _cargDiaSavers[idPreingreso];
+    if (!s) s = _cargDiaSavers[idPreingreso] = { timer: null, saving: false, pending: false, ultimo: '' };
+    s.ultimo = cargadoresStr;
+    clearTimeout(s.timer);
+    s.timer = setTimeout(() => _ejecutarGuardarCargadoresDia(idPreingreso), 600);
+  }
+
+  async function _ejecutarGuardarCargadoresDia(idPreingreso) {
+    const s = _cargDiaSavers[idPreingreso];
+    if (!s) return;
+    if (s.saving) { s.pending = true; return; }
+    s.saving = true;
+    // Re-marcar pendiente para cubrir la latencia del round-trip.
+    OfflineManager.marcarCargadoresPendiente(idPreingreso);
+    try {
+      const r = await API.actualizarPreingreso({ idPreingreso, cargadores: s.ultimo });
+      if (r && r.ok === false) {
+        try { toast('⚠ No se guardaron carretas: ' + (r.error || ''), 'warn', 4000); } catch(_){}
+      }
+    } catch (e) {
+      try { toast('⚠ Sin conexión al guardar carretas', 'warn', 3500); } catch(_){}
+    } finally {
+      s.saving = false;
+      if (s.pending) { s.pending = false; setTimeout(() => _ejecutarGuardarCargadoresDia(idPreingreso), 0); }
+    }
+  }
+
   // [v2.13.4] Edición desde el modal del día — encuentra el preingreso real,
   // muta el cargador correspondiente, persiste y refresca. La carreta vacía
   // se desintegra con animación; si quedan 0 carretas el cargador desaparece.
@@ -15954,8 +16043,11 @@ const PreingresosView = (() => {
     // Si el cargador quedó sin carretas → eliminarlo del array
     if (arr[idx] && arr[idx].carretas === 0) arr.splice(idx, 1);
     const cargadoresStr = JSON.stringify(arr);
+    // [v2.13.173] Cache local = fuente de verdad; flag pendiente protege del
+    // merge de polling; el save real va debounced/coalesced (no fire-and-forget).
     OfflineManager.patchPreingresosCache(idPreingreso, { cargadores: cargadoresStr });
-    API.actualizarPreingreso({ idPreingreso, cargadores: cargadoresStr }).catch(() => {});
+    OfflineManager.marcarCargadoresPendiente(idPreingreso);
+    _guardarCargadoresDia(idPreingreso, cargadoresStr);
     return arr;
   }
 
