@@ -675,6 +675,9 @@ const CarretaCiclo = {
   avanzar(arr, cargIdx, carretaIdx) {
     const c = arr && arr[cargIdx];
     if (!c || !Array.isArray(c.estados)) return null;
+    // [v2.13.179] Guard de rango: si el chip clickeado ya no existe en el array
+    // (DOM desfasado vs cache), abortar en vez de crear un "hole" en estados.
+    if (carretaIdx < 0 || carretaIdx >= c.estados.length) return null;
     const r = this.siguiente(c.estados[carretaIdx] || 'LLENA');
     if (r.accion === 'eliminar') {
       c.estados.splice(carretaIdx, 1);
@@ -15401,21 +15404,21 @@ const PreingresosView = (() => {
       OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor, fotos });
       OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor']);
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
-        .catch(e => console.warn('[EditPreingreso]', e));
+        .catch(e => {
+          console.warn('[EditPreingreso]', e);
+          // [v2.13.179] No silenciar: si falla, las fotos quedaron en Drive pero
+          // sin vincular a la fila. El operador debe saberlo para reintentar.
+          try { toast('⚠ No se sincronizó la edición (fotos/datos) — reintenta', 'warn', 4500); } catch(_){}
+        });
       // [v2.13.7] Solo reimprimir si cambió al menos uno de los 5 campos críticos
       if (cambios.length > 0) {
+        // El patch óptimista del snapshotAviso (limpia el chip "sin avisar") lo
+        // hace ahora _dispararAvisoCajeros centralizadamente. [v2.13.179]
         _dispararAvisoCajeros(idPreingreso, {
           silent: false,
           modoComparativo: true,
           snapshotAnterior: snapAnterior
-        }).then(r => {
-          // [v2.13.174] En cuanto la caja recibe el aviso, limpiar el chip
-          // "⚠ sin avisar" de la card sin esperar el poll de 60s (óptimista).
-          if (r && r.ok) {
-            OfflineManager.patchPreingresosCache(idPreingreso, { snapshotAviso: JSON.stringify(snapActual) });
-            try { PreingresosView.silentRefresh(); } catch(_){}
-          }
-        }).catch(() => {});
+        });
       } else {
         console.log('[EditPreingreso] sin cambios en campos críticos — no se reimprime aviso');
       }
@@ -15813,6 +15816,23 @@ const PreingresosView = (() => {
         toast('⚠ No hay cajas abiertas — no se imprimió aviso', 'warn', 5000);
       } else {
         toast('Error aviso cajas: ' + (res.error || 'desconocido'), 'danger', 6000);
+      }
+      // [v2.13.179] Sincronizar el snapshotAviso LOCAL → limpia el chip
+      // "⚠ sin avisar" sin esperar el poll de 60s. Aplica si la caja recibió
+      // (ok) o si NO había cajas abiertas (el operador hizo su parte; no hay a
+      // quién avisar — antes el chip quedaba pegado para siempre). En NO_CHANGES
+      // el snapshot ya coincide; en error REAL de impresión NO se toca (el
+      // cambio sigue pendiente de verdad).
+      if (res.ok || res.error === 'NO_HAY_CAJEROS_ACTIVOS') {
+        try {
+          const pi = (OfflineManager.getPreingresosCache() || []).find(x => x.idPreingreso === idPreingreso);
+          if (pi) {
+            const snap = _snapshotAvisoLocal(pi.idProveedor, pi.monto,
+              _tagsFromComentario(pi.comentario), _textoLibreFromComentario(pi.comentario));
+            OfflineManager.patchPreingresosCache(idPreingreso, { snapshotAviso: JSON.stringify(snap) });
+            PreingresosView.silentRefresh();
+          }
+        } catch(_){}
       }
       return res;
     } catch (e) {

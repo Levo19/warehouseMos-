@@ -1,1 +1,1 @@
-{ "version": "2.13.178", "build": "20260606-fix-race-cleanup+borra-codigo-muerto" }
+{ "version": "2.13.179", "build": "20260606-ronda3-chip-sin-avisar+bounds-guard+toast-sync" }
