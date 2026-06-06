@@ -1,1 +1,1 @@
-{ "version": "2.13.177", "build": "20260606-mejoras-senior-1a5+synclog-prune+cleanup-edicion" }
+{ "version": "2.13.178", "build": "20260606-fix-race-cleanup+borra-codigo-muerto" }

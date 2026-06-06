@@ -621,15 +621,6 @@ function _resumenEstadosCarretas(estados) {
   return r;
 }
 
-function _textoEstadosCarretas(estados) {
-  const r = _resumenEstadosCarretas(estados);
-  if (r.medias === 0 && r.vacias === 0) return '';
-  const parts = [];
-  if (r.medias > 0) parts.push(r.medias + ' 🟡 ' + (r.medias === 1 ? 'media' : 'medias'));
-  if (r.vacias > 0) parts.push(r.vacias + ' 🔴 ' + (r.vacias === 1 ? 'casi vacía' : 'casi vacías'));
-  return '(' + parts.join(', ') + ')';
-}
-
 // [v2.13.3] Sonidos + vibración háptica al togglear/agregar chip
 let _ccAudio = null;
 function _carretaSfx(estado) {
@@ -14962,6 +14953,11 @@ const PreingresosView = (() => {
         // limpiar — si nulleáramos _editItem antes, un save pendiente se perdería.
         try { await _flushAutoguardarMeta(); } catch(_){}
         try { await _flushAutoguardarCargadores(); } catch(_){}
+        // [v2.13.178 BUG FIX] Si durante el await el operador REABRIÓ el detalle
+        // (mismo u otro preingreso), el sheet vuelve a estar 'open' → NO limpiar,
+        // o nullearíamos el estado del modal recién abierto.
+        const sh = document.getElementById('sheetDetallePI');
+        if (sh && sh.classList.contains('open')) return;
         _avisarSiCambiosSinEnviar();   // banner "sin avisar" si cerró con cambios
         _limpiarEstadoEdicion();       // revoca blobs + resetea estado fantasma
       });
@@ -15909,16 +15905,6 @@ const PreingresosView = (() => {
     try { PreingresosView.silentRefresh(); } catch(_){}
   }
 
-  async function aprobar(id) {
-    const res = await API.aprobarPreingreso({ idPreingreso: id, usuario: window.WH_CONFIG.usuario });
-    if (res.ok) {
-      toast(`Guía ${res.data.idGuia} creada`, 'ok');
-      cargar();
-    } else {
-      toast('Error: ' + res.error, 'danger');
-    }
-  }
-
   function nuevo() {
     // Reset completo del formulario
     _tags = { comp: null, compl: null };
@@ -16389,7 +16375,7 @@ const PreingresosView = (() => {
     else if (res)      toast('Error: ' + (res?.error || 'No se pudo imprimir'), 'danger');
   }
 
-  return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, aprobar, nuevo,
+  return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, nuevo,
            abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
            onFotosSeleccionadas, quitarFoto, verFotos,
