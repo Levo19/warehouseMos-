@@ -14223,6 +14223,25 @@ const PreingresosView = (() => {
     return prov ? (prov.nombre || idProveedor) : idProveedor;
   }
 
+  // [v2.13.174] ¿El preingreso tiene cambios persistidos que AÚN no se
+  // avisaron a cajas? Compara los 5 campos críticos actuales contra el
+  // snapshotAviso (lo último impreso). Stateless: si coinciden, ya se avisó.
+  // Sin snapshot (preingreso viejo / nunca impreso) → no marcamos.
+  function _hayCambiosSinAvisar(p) {
+    try {
+      const snap = p.snapshotAviso
+        ? (typeof p.snapshotAviso === 'string' ? JSON.parse(p.snapshotAviso) : p.snapshotAviso)
+        : null;
+      if (!snap) return false;
+      const actual = _snapshotAvisoLocal(
+        p.idProveedor, p.monto,
+        _tagsFromComentario(p.comentario),
+        _textoLibreFromComentario(p.comentario)
+      );
+      return _diffSnapAvisoLocal(snap, actual).length > 0;
+    } catch(_) { return false; }
+  }
+
   function _renderCard(p) {
     const tieneGuia   = !!(p.idGuia && String(p.idGuia).trim());
     const nFotos      = p.fotos ? String(p.fotos).split(',').filter(Boolean).length : 0;
@@ -14244,6 +14263,7 @@ const PreingresosView = (() => {
       tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comp.</span>'       : '',
       nFotos > 0          ? `<span class="pre-qtag pre-qtag-slate">📷${nFotos}</span>` : '',
       nCargadores > 0     ? `<span class="pre-qtag" style="background:#451a03;color:#fbbf24">🛺${nCargadores}</span>` : '',
+      _hayCambiosSinAvisar(p) ? `<span class="pre-qtag" style="background:#7c2d12;color:#fed7aa" title="Tiene cambios que no se han avisado a cajas">⚠ sin avisar</span>` : '',
     ].filter(Boolean).join('');
 
     const montoStr = p.monto ? ' · S/. ' + fmt(p.monto, 2) : '';
@@ -14502,6 +14522,12 @@ const PreingresosView = (() => {
     const map = { comp: { si: 'piTagComp1', no: 'piTagComp0' }, compl: { si: 'piTagCompl1', no: 'piTagCompl0' } };
     ['si','no'].forEach(v => document.getElementById(map[grupo][v])?.classList.toggle('active', _tagsEdit[grupo] === v));
     document.getElementById('piMontoRow')?.classList.toggle('hidden', _tagsEdit.comp !== 'si');
+    // [v2.13.174] Feedback + autoguardado: antes las etiquetas SOLO persistían al
+    // pulsar "Guardar cambios". Si el operador cambiaba un tag y cerraba, se perdía
+    // (y el snapshot del aviso no lo reflejaba). Ahora autoguarda como comentario/monto.
+    try { if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click(); } catch(_){}
+    try { if (navigator.vibrate) navigator.vibrate(10); } catch(_){}
+    _autoguardarMeta();
   }
 
   // ── Fotos seleccionadas ───────────────────────────────────
@@ -14641,7 +14667,7 @@ const PreingresosView = (() => {
     const btnG = document.getElementById('btnCrearGuiaPI');
     if (btnG) { btnG.disabled = false; btnG.textContent = 'Crear Guía de Ingreso'; }
     const btnS = document.getElementById('btnGuardarPI');
-    if (btnS) { btnS.disabled = false; btnS.textContent = 'Guardar cambios'; }
+    if (btnS) { btnS.disabled = false; btnS.textContent = '💾 Guardar y avisar a cajas'; }
   }
 
   // ── Cargadores edit modal ────────────────────────────────
@@ -14887,6 +14913,7 @@ const PreingresosView = (() => {
       overlay.addEventListener('click', () => {
         _flushAutoguardarMeta();
         _flushAutoguardarCargadores();
+        _avisarSiCambiosSinEnviar();   // [v2.13.174] banner "sin avisar" si cerró con cambios
       });
       overlay._whAuto = 1;
     }
@@ -15101,6 +15128,31 @@ const PreingresosView = (() => {
     });
   }
 
+  // [v2.13.174] Al cerrar el detalle, si hay cambios persistidos (autoguardados)
+  // que difieren de lo último avisado a cajas, recordar al operador que pulse
+  // "Guardar y avisar". El chip "⚠ sin avisar" de la card es el banner persistente.
+  function _avisarSiCambiosSinEnviar() {
+    if (!_editItem) return;
+    let snap = null;
+    try {
+      snap = _editItem.snapshotAviso
+        ? (typeof _editItem.snapshotAviso === 'string' ? JSON.parse(_editItem.snapshotAviso) : _editItem.snapshotAviso)
+        : null;
+    } catch(_) {}
+    if (!snap) return; // sin snapshot impreso no hay base de comparación
+    const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
+    const textoExtra  = (document.getElementById('piEditComentario')?.value || '').trim();
+    let monto;
+    if (_tagsEdit.comp === 'si')      monto = parseFloat(document.getElementById('piEditMonto')?.value) || 0;
+    else if (_tagsEdit.comp === 'no') monto = 0;
+    else                              monto = parseFloat(_editItem.monto) || 0;
+    const actual = _snapshotAvisoLocal(idProveedor, monto, _tagsEdit, textoExtra);
+    if (_diffSnapAvisoLocal(snap, actual).length > 0) {
+      toast('⚠ Guardado, pero NO avisado a cajas — abre y pulsa "Guardar y avisar"', 'warn', 5500);
+      try { if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn(); } catch(_){}
+    }
+  }
+
   // ── Guardar edición (optimista) ──────────────────────────
   async function guardarEdicion() {
     if (!_editItem) return;
@@ -15150,6 +15202,9 @@ const PreingresosView = (() => {
     // Cerrar sheet y mostrar toast inmediatamente — sin esperar red
     cerrarSheet('sheetDetallePI');
     toast('Preingreso actualizado', 'ok');
+    // [v2.13.174] Tick óptimista inmediato (el aviso a cajas confirma aparte con SoundFX.done)
+    try { if (typeof SoundFX !== 'undefined') (SoundFX.savedTick || SoundFX.beepDouble || SoundFX.click)?.(); } catch(_){}
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch(_){}
     cargar(_filtroEstado, true);
 
     // Limpiar estado de edición
@@ -15192,7 +15247,14 @@ const PreingresosView = (() => {
           silent: false,
           modoComparativo: true,
           snapshotAnterior: snapAnterior
-        });
+        }).then(r => {
+          // [v2.13.174] En cuanto la caja recibe el aviso, limpiar el chip
+          // "⚠ sin avisar" de la card sin esperar el poll de 60s (óptimista).
+          if (r && r.ok) {
+            OfflineManager.patchPreingresosCache(idPreingreso, { snapshotAviso: JSON.stringify(snapActual) });
+            try { PreingresosView.silentRefresh(); } catch(_){}
+          }
+        }).catch(() => {});
       } else {
         console.log('[EditPreingreso] sin cambios en campos críticos — no se reimprime aviso');
       }
@@ -15546,6 +15608,9 @@ const PreingresosView = (() => {
     toast(res.offline
       ? `Preingreso guardado (offline) — sincronizando…`
       : `Preingreso ${idPreingresoReal} registrado`, 'ok');
+    // [v2.13.174] Confirmación óptimista de registro (el aviso a cajas suena aparte)
+    try { if (typeof SoundFX !== 'undefined') (SoundFX.savedTick || SoundFX.done || SoundFX.beepDouble)?.(); } catch(_){}
+    try { if (navigator.vibrate) navigator.vibrate([10, 20, 10]); } catch(_){}
 
     // Inyectar en caché para que abrirDetalle no tenga que ir al GAS
     OfflineManager.inyectarPreingreso({
@@ -15590,10 +15655,15 @@ const PreingresosView = (() => {
         if (okList.length) {
           const detalle = okList.map(r => `${r.vendedor || '—'} (${r.zona || '—'})`).join(', ');
           toast(`✓ Aviso enviado a: ${detalle}`, 'ok', 5000);
+          // [v2.13.174] Confirmación sonora/háptica: el operador no mira la pantalla
+          // mientras maneja la mercadería; el "done" le confirma que la caja recibió.
+          try { if (typeof SoundFX !== 'undefined' && SoundFX.done) SoundFX.done(); } catch(_){}
+          try { if (navigator.vibrate) navigator.vibrate([12, 28, 12]); } catch(_){}
         }
         const errList = (res.data?.impresiones || []).filter(r => !r.ok);
         if (errList.length) {
           toast(`⚠ ${errList.length} impresora(s) fallaron`, 'warn', 5000);
+          try { if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn(); } catch(_){}
         }
       } else if (res.error === 'NO_CHANGES') {
         // Modo comparativo y no hay cambios reales — no toast molesto

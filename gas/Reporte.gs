@@ -1143,13 +1143,16 @@ function imprimirAvisoCajeros(params) {
 function _parseComentarioPI(c) {
   var s = String(c || '');
   var tags = { comp: null, compl: null };
-  if (/comprobante:\s*sí/i.test(s))      tags.comp  = 'si';
-  else if (/comprobante:\s*no/i.test(s)) tags.comp  = 'no';
-  if (/completo:\s*sí/i.test(s))         tags.compl = 'si';
-  else if (/completo:\s*no/i.test(s))    tags.compl = 'no';
+  // [v2.13.174] Espejo EXACTO del frontend (_tagsFromComentario): tolerante a
+  // "Sí"/"Si" con o sin acento. Si difieren, los snapshots no coinciden y la
+  // reimpresión comparativa se dispara de más o no detecta el cambio.
+  if (/comprobante:\s*s[ií]\b/i.test(s))    tags.comp  = 'si';
+  else if (/comprobante:\s*no\b/i.test(s))  tags.comp  = 'no';
+  if (/completo:\s*s[ií]\b/i.test(s))       tags.compl = 'si';
+  else if (/completo:\s*no\b/i.test(s))     tags.compl = 'no';
   var libre = s
-    .replace(/Comprobante:\s*(Sí|No)\s*\|?\s*/gi, '')
-    .replace(/Completo:\s*(Sí|No)\s*\|?\s*/gi, '')
+    .replace(/Comprobante:\s*(?:S[ií]|No)\s*\|?\s*/gi, '')
+    .replace(/Completo:\s*(?:S[ií]|No)\s*\|?\s*/gi, '')
     .replace(/^\s*\|\s*/, '').replace(/\s*\|\s*$/, '')
     .trim();
   return { tagComp: tags.comp, tagCompl: tags.compl, comentarioLibre: libre };
