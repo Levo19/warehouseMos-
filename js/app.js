@@ -5361,10 +5361,8 @@ const GuiasView = (() => {
         </div>
         <p class="font-bold text-base leading-tight" style="color:#64748b">${escHtml(g.usuario || '—')}</p>
         <p class="text-xs mt-0.5" style="color:#475569">${fmtFecha(g.fecha)} · Solo lectura</p>`;
-      // Ocultar panel de foto/notas/editar y el add-item
-      document.getElementById('guiaDetFotoPanel')?.classList.add('hidden');
-      document.getElementById('guiaDetNotasPanel')?.classList.add('hidden');
-      document.getElementById('guiaDetAddItem')?.classList.add('hidden');
+      // [v2.13.185] (eliminadas 3 líneas no-op: los IDs guiaDet*Panel no existen;
+      // la vista de solo-lectura se arma por innerHTML arriba, no por classList.)
     } else {
 
     // Lock button
@@ -5832,7 +5830,7 @@ const GuiasView = (() => {
     OfflineManager.addDetalleCache(d);
     _selIdx = -1;
     _mostrarDetalleSheet(_guiaActual, false);
-    API.anularDetalle({ idDetalle: d.idDetalle }).catch(() => {});
+    _avisarFalloDetalle(API.anularDetalle({ idDetalle: d.idDetalle }), 'la anulación');
     toast('Ítem eliminado', 'warn', 1200);
   }
 
@@ -5916,7 +5914,7 @@ const GuiasView = (() => {
       d.observacion = 'ANULADO';
       OfflineManager.addDetalleCache(d);
       _mostrarDetalleSheet(_guiaActual, false);
-      API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
+      _avisarFalloDetalle(API.anularDetalle({ idDetalle: _editItemId }), 'la anulación');
       toast('Ítem eliminado', 'warn', 1500);
       return;
     }
@@ -5997,7 +5995,7 @@ const GuiasView = (() => {
     OfflineManager.addDetalleCache(d);
     cerrarSheet('sheetEditItem');
     _mostrarDetalleSheet(_guiaActual, false);
-    API.anularDetalle({ idDetalle: _editItemId }).catch(() => {});
+    _avisarFalloDetalle(API.anularDetalle({ idDetalle: _editItemId }), 'la anulación');
     toast('Ítem eliminado', 'warn', 1500);
   }
 
@@ -6988,7 +6986,7 @@ const GuiasView = (() => {
       if (item) {
         if (item.idDetalle && !item._local) {
           item.observacion = 'ANULADO'; item.cantidadRecibida = 0;
-          API.anularDetalle({ idDetalle: item.idDetalle }).catch(() => {});
+          _avisarFalloDetalle(API.anularDetalle({ idDetalle: item.idDetalle }), 'la anulación');
         } else {
           _guiaActual.detalle = _guiaActual.detalle.filter(d => d !== item);
         }
@@ -7092,7 +7090,7 @@ const GuiasView = (() => {
       if (item) {
         if (item.idDetalle && !item._local) {
           item.observacion = 'ANULADO'; item.cantidadRecibida = 0;
-          API.anularDetalle({ idDetalle: item.idDetalle }).catch(() => {});
+          _avisarFalloDetalle(API.anularDetalle({ idDetalle: item.idDetalle }), 'la anulación');
         } else {
           _guiaActual.detalle = _guiaActual.detalle.filter(d => d !== item);
         }
@@ -7528,33 +7526,44 @@ const GuiasView = (() => {
     }
   }
 
+  let _creandoGuia = false;
   async function crearGuia() {
+    if (_creandoGuia) return;   // [v2.13.185] guard de doble-click (evita 2 cards/2 guías)
     const tipo        = document.getElementById('guiaTipo').value;
     const idProveedor = document.getElementById('guiaProveedor').value;
-    const textoExtra  = (document.getElementById('guiaComentario').value || '').trim();
-    const comentario  = _buildComentario(_tagsNueva, textoExtra);
-    const params = {
-      tipo,
-      usuario:         window.WH_CONFIG.usuario,
-      idProveedor,
-      idZona:          document.getElementById('guiaZona').value,
-      numeroDocumento: document.getElementById('guiaNumDoc').value,
-      comentario
-    };
+    // [v2.13.185] Validar ANTES de optimista/cerrar sheet (si falla, el form sigue abierto)
+    if (!tipo) { toast('Selecciona el tipo de guía', 'warn'); return; }
+    if (tipo === 'INGRESO_PROVEEDOR' && !idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
 
-    // Optimista con animación pulsante
-    const tempId     = 'G_opt_' + Date.now();
-    const provNombre = _getProvNombre(idProveedor);
-    injectOptimisticGuia({ tempId, idProveedor, provNombre });
-    cerrarSheet('sheetGuia');
+    _creandoGuia = true;
+    try {
+      const textoExtra  = (document.getElementById('guiaComentario').value || '').trim();
+      const comentario  = _buildComentario(_tagsNueva, textoExtra);
+      const params = {
+        tipo,
+        usuario:         window.WH_CONFIG.usuario,
+        idProveedor,
+        idZona:          document.getElementById('guiaZona').value,
+        numeroDocumento: document.getElementById('guiaNumDoc').value,
+        comentario
+      };
 
-    const res = await API.crearGuia(params);
-    if (res.ok) {
-      finalizeOptimisticGuia(tempId, res.data?.idGuia, tipo, provNombre);
-      toast(`Guía ${res.data?.idGuia || 'nueva'} creada`, 'ok');
-    } else if (!res.offline) {
-      removeOptimisticGuia(tempId);
-      toast('Error: ' + res.error, 'danger');
+      // Optimista con animación pulsante
+      const tempId     = 'G_opt_' + Date.now();
+      const provNombre = _getProvNombre(idProveedor);
+      injectOptimisticGuia({ tempId, idProveedor, provNombre });
+      cerrarSheet('sheetGuia');
+
+      const res = await API.crearGuia(params);
+      if (res.ok) {
+        finalizeOptimisticGuia(tempId, res.data?.idGuia, tipo, provNombre);
+        toast(res.offline ? 'Guía guardada (offline) — sincronizando…' : `Guía ${res.data?.idGuia || 'nueva'} creada`, 'ok');
+      } else {
+        removeOptimisticGuia(tempId);
+        toast('Error: ' + (res.error || 'no se pudo crear'), 'danger');
+      }
+    } finally {
+      _creandoGuia = false;
     }
   }
 
