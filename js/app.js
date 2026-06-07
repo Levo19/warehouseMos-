@@ -5346,7 +5346,7 @@ const GuiasView = (() => {
     const esIngreso   = g.tipo?.startsWith('INGRESO');
     const esEnvasado  = g.tipo === 'SALIDA_ENVASADO' || g.tipo === 'INGRESO_ENVASADO';
     const abierta     = g.estado === 'ABIERTA';
-    const esDiaAnterior = g.fecha && g.fecha < new Date().toISOString().split('T')[0];
+    const esDiaAnterior = g.fecha && _diaPeru(g.fecha) < _hoyPeru();  // [v2.13.183] día en TZ Perú
 
     // Guías de envasado: header bloqueado, sin acciones
     if (esEnvasado) {
@@ -5579,10 +5579,12 @@ const GuiasView = (() => {
           }
 
           // ── Tarjeta colapsada ──────────────────────────────
-          const hoy       = new Date().toISOString().split('T')[0];
-          const vf        = d.fechaVencimiento || '';
+          // [v2.13.183] "hoy" en TZ Perú; vf normalizado a su parte de fecha
+          // (la fecha de vencimiento es un día calendario, no se convierte TZ).
+          const hoy       = _hoyPeru();
+          const vf        = String(d.fechaVencimiento || '').slice(0, 10);
           const isVencido = vf && vf < hoy;
-          const isSoon    = vf && !isVencido && vf <= new Date(Date.now() + 30*86400000).toISOString().split('T')[0];
+          const isSoon    = vf && !isVencido && vf <= _diaPeru(new Date(Date.now() + 30*86400000));
           const venc      = vf
             ? `<span style="font-size:.68rem;${isVencido ? 'color:#f87171;font-weight:700' : 'color:#fbbf24'} " class="block mt-0.5">
                 ${isVencido ? '⚠ VENCIDO' : isSoon ? '⚠ Venc próx:'  : 'Venc:'} ${vf}</span>`
@@ -5691,11 +5693,22 @@ const GuiasView = (() => {
 
   // ── Edición inline de ítems ──────────────────────────────
   let _selIdx     = -1;   // índice del ítem seleccionado (-1 = ninguno)
+  let _selDetId   = '';   // [v2.13.183] idDetalle seleccionado (fuente de verdad al commitear)
   let _selQty     = 0;
   let _selVenc    = '';
   let _selOrigQty = 0;
   let _selOrigVenc = '';
   let _selGuiaId  = '';
+
+  // [v2.13.183] Surfacing de error para ediciones optimistas de detalle: si el
+  // backend rechaza o no hay red, avisar (antes era .catch(()=>{}) silencioso →
+  // mostraba "Guardado" aunque no se guardara y al refrescar revertía).
+  function _avisarFalloDetalle(p, label) {
+    try {
+      p.then(r => { if (r && r.ok === false) { try { toast('⚠ No se guardó ' + label + ': ' + (r.error || ''), 'warn', 4000); } catch(_){} } })
+       .catch(() => { try { toast('⚠ Sin conexión — ' + label + ' no se guardó', 'warn', 3500); } catch(_){} });
+    } catch(_){}
+  }
 
   function selectItem(newIdx) {
     if (_selIdx === newIdx) {
@@ -5710,6 +5723,7 @@ const GuiasView = (() => {
     const d = items[newIdx];
     if (!d) return;
     _selIdx      = newIdx;
+    _selDetId    = d.idDetalle;   // [v2.13.183] fuente de verdad al commitear
     _selQty      = parseFloat(d.cantidadRecibida) || 0;
     _selVenc     = d.fechaVencimiento || '';
     _selOrigQty  = _selQty;
@@ -5730,8 +5744,10 @@ const GuiasView = (() => {
     const inputEl = document.getElementById('inlineQtyInput');
     if (inputEl) _selQty = parseFloat(inputEl.value) || _selQty;
 
-    const items = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
-    const d = items[_selIdx];
+    // [v2.13.183] Resolver el ítem por idDetalle (no por índice): si un
+    // silentRefresh re-renderizó y la lista filtrada cambió, el índice quedaría
+    // stale y editaríamos el ítem equivocado.
+    const d = (_guiaActual.detalle || []).find(x => x.idDetalle === _selDetId);
     if (!d) return;
 
     const qtyChanged  = _selQty !== _selOrigQty;
@@ -5742,15 +5758,15 @@ const GuiasView = (() => {
     if (_selQty <= 0) {
       d.observacion = 'ANULADO';
       OfflineManager.addDetalleCache(d);
-      API.anularDetalle({ idDetalle }).catch(() => {});
+      _avisarFalloDetalle(API.anularDetalle({ idDetalle }), 'la anulación');
       toast('Ítem eliminado', 'warn', 1200);
       return;
     }
     d.cantidadRecibida = _selQty;
     d.fechaVencimiento = _selVenc;
     OfflineManager.addDetalleCache(d);
-    if (qtyChanged)  API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }).catch(() => {});
-    if (vencChanged) API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }).catch(() => {});
+    if (qtyChanged)  _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }), 'la cantidad');
+    if (vencChanged) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
     toast('Guardado', 'ok', 1000);
   }
 
@@ -6765,12 +6781,6 @@ const GuiasView = (() => {
     return [];
   }
 
-  // ── Legacy: procesarHidInput (compat con sheetScanInput anterior) ─
-  function procesarHidInput() { /* obsoleto, no se usa */ }
-  function onHidKey(e) { /* obsoleto */ }
-  function usarCamara() { cerrarScannerItem(); setTimeout(abrirCamaraItem, 220); }
-  function cerrarScanInput() { cerrarScannerItem(); }
-
   function _agregarProductoDirecto(prod, indirecto) {
     if (!_guiaActual) return;
     // Clave = código escaneado (equiv o master) — GAS acepta ambos y stock es independiente por barcode
@@ -6848,6 +6858,9 @@ const GuiasView = (() => {
       cantidadEsperada: 0, cantidadRecibida: 1,
       precioUnitario: 0, fechaVencimiento: ''
     }).then(res => {
+      // [v2.13.183] Guard: si el operador cambió de guía mientras el POST viajaba,
+      // _guiaActual ya es otra → no tocar su estado (como hace verDetalle).
+      if (!_guiaActual || _guiaActual.idGuia !== _idGuia) return;
       if (res.ok && !res.offline) {
         const idx = _guiaActual.detalle?.findIndex(d => d.idDetalle === localId);
         if (idx >= 0) {
@@ -7862,9 +7875,13 @@ const GuiasView = (() => {
       const nuevoComentario = _buildComentario(_tagsGuia, textoExtra);
       if (nuevoComentario !== (_guiaActual.comentario || '')) {
         _guiaActual.comentario = nuevoComentario;
-        API.actualizarGuia({ idGuia: _guiaActual.idGuia, comentario: nuevoComentario }).catch(() => {});
+        const idG = _guiaActual.idGuia;
+        // [v2.13.183] No silenciar: si falla, avisar para que reintente.
+        API.actualizarGuia({ idGuia: idG, comentario: nuevoComentario })
+          .then(r => { if (r && r.ok === false) { try { toast('⚠ No se guardó el comentario: ' + (r.error || ''), 'warn', 4000); } catch(_){} } })
+          .catch(() => { try { toast('⚠ Sin conexión — comentario no guardado', 'warn', 3500); } catch(_){} });
         // Refrescar card en lista
-        const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+        const idx = todas.findIndex(g => g.idGuia === idG);
         if (idx >= 0) { todas[idx].comentario = nuevoComentario; }
       }
     }
@@ -7927,8 +7944,6 @@ const GuiasView = (() => {
     camPrevQtyPlus, camPrevQtyMinus,
     cerrarScannerItem, _enfocarHid,
     seleccionarItemHid,
-    // compat stubs
-    cerrarScanInput, onHidKey, procesarHidInput, usarCamara,
     _procesarCodigoEscaneado: _buscarCandidatos, _rescanear,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
     confirmarCerrarGuia, crearGuia, nueva,

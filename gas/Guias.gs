@@ -61,6 +61,15 @@ function getGuia(idGuia) {
 }
 
 function crearGuia(params) {
+  // [v2.13.183] Bajo lock global: serializa contra el resto de operaciones de
+  // guías/stock para evitar escrituras intercaladas. (La idempotencia ante
+  // doble-click se cubre además en el frontend con guard de re-entrada y en
+  // los flujos que crean guía: aprobarPreingreso por estado, crearDespachoRapido
+  // por CacheService.)
+  return _conLock('crearGuia', function() { return _crearGuiaImpl(params); });
+}
+
+function _crearGuiaImpl(params) {
   var sheet  = getSheet('GUIAS');
   var idGuia = _generateId('G');
   var fecha  = new Date();
@@ -101,7 +110,15 @@ function agregarDetalleGuia(params) {
 // y el LockService es la única forma confiable de evitar race conditions
 // entre POSTs paralelos. Operaciones individuales son rápidas (<1s típico),
 // así que este timeout solo afecta picos de concurrencia extrema.
+// [v2.13.183] REENTRANTE dentro de una misma ejecución. Como el lock es global
+// de script, una función envuelta que llama a OTRA envuelta (ej. aprobarPreingreso
+// → crearGuia, crearDespachoRapido → cerrarGuia) reusa el lock que ya tiene esta
+// ejecución en vez de intentar re-adquirirlo (lo que se auto-bloquearía 60s).
+// `_lockHeld` es por-ejecución (cada invocación GAS tiene su propio contexto),
+// así que NO rompe la serialización entre POSTs concurrentes.
+var _lockHeld = false;
 function _conLock(nombre, fn) {
+  if (_lockHeld) return fn();   // ya tenemos el lock en esta ejecución → reentrante
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(60000);
@@ -109,8 +126,9 @@ function _conLock(nombre, fn) {
     Logger.log('[' + nombre + '] timeout lock tras 60s: ' + eL.message);
     return { ok: false, error: 'Sistema saturado, espera unos segundos y reintenta' };
   }
+  _lockHeld = true;
   try { return fn(); }
-  finally { try { lock.releaseLock(); } catch(e) {} }
+  finally { _lockHeld = false; try { lock.releaseLock(); } catch(e) {} }
 }
 
 function _agregarDetalleGuiaImpl(params) {
@@ -164,6 +182,10 @@ function _agregarDetalleGuiaImpl(params) {
   var cantEsperada  = parseFloat(params.cantidadEsperada)  || 0;
   var cantRecibida  = parseFloat(params.cantidadRecibida !== undefined ? params.cantidadRecibida : cantEsperada);
   var precioUnit    = parseFloat(params.precioUnitario)    || 0;
+  // [v2.13.183] Cantidades negativas nunca son válidas (corromperían el stock).
+  if (cantEsperada < 0 || cantRecibida < 0) {
+    return { ok: false, error: 'Las cantidades no pueden ser negativas' };
+  }
 
   // Preservar el código escaneado exacto (puede ser equiv o master) — stock es independiente por barcode
   var cbProd = codigoBuscado;
@@ -643,6 +665,9 @@ function _actualizarCantidadDetalleImpl(params) {
 // Actualizar precios unitarios de varias líneas de una guía en batch.
 // params: { idGuia, items: [{ idDetalle, precioUnitario }] }
 function actualizarPreciosDetalle(params) {
+  return _conLock('actualizarPreciosDetalle', function() { return _actualizarPreciosDetalleImpl(params); });
+}
+function _actualizarPreciosDetalleImpl(params) {
   if (!params.idGuia || !Array.isArray(params.items) || !params.items.length) {
     return { ok: false, error: 'idGuia + items[] requeridos' };
   }
@@ -726,6 +751,9 @@ function _getGuiaInfo(idGuia) {
 //   - Si borra fecha → marca lote como ANULADO
 //   - Lote NO se duplica si re-aplica misma fecha
 function actualizarFechaVencimiento(params) {
+  return _conLock('actualizarFechaVencimiento', function() { return _actualizarFechaVencimientoImpl(params); });
+}
+function _actualizarFechaVencimientoImpl(params) {
   var idDetalle = String(params.idDetalle || '');
   var fechaVencRaw = params.fechaVencimiento || '';
   if (!idDetalle) return { ok: false, error: 'idDetalle requerido' };
@@ -1151,6 +1179,9 @@ function _anularPNPorGuiaYCodigo(idGuia, codigoBarra) {
 // REVIERTE el stock que se aplicó al cerrar para que al volver a cerrar
 // no se descuente dos veces. Es la operación inversa de cerrarGuia.
 function reabrirGuia(params) {
+  return _conLock('reabrirGuia', function() { return _reabrirGuiaImpl(params); });
+}
+function _reabrirGuiaImpl(params) {
   var idGuia = params.idGuia;
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
 
@@ -1201,6 +1232,9 @@ function reabrirGuia(params) {
 
 // ── Auto-cerrar guías abiertas de días anteriores ────────────
 function autoCloseDayGuias() {
+  return _conLock('autoCloseDayGuias', function() { return _autoCloseDayGuiasImpl(); });
+}
+function _autoCloseDayGuiasImpl() {
   var sheet   = getSheet('GUIAS');
   var data    = sheet.getDataRange().getValues();
   var hdrs    = data[0];
@@ -1277,7 +1311,8 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
     return acc + (parseFloat(d.cantidadRecibida) || 0) * (parseFloat(d.precioUnitario) || 0);
   }, 0);
 
-  var esIngreso = tipoGuia.startsWith('INGRESO');
+  // [v2.13.183] Comparación case-insensitive (consistente con el resto del módulo)
+  var esIngreso = String(tipoGuia || '').toUpperCase().indexOf('INGRESO') === 0;
   var esEnvasado = _esGuiaEnvasado(tipoGuia);
 
   // Actualizar stock por cada detalle.
@@ -1474,6 +1509,9 @@ function getPickups(params) {
 // Payload: { idGuiaME, idCaja, idZona, cajero, items: [{skuBase,nombre,solicitado,despachado,codigosOriginales}] }
 // Idempotente por idGuiaME — si ya existe un pickup con ese origen, no duplica.
 function recibirPickupDeME(params) {
+  return _conLock('recibirPickupDeME', function() { return _recibirPickupDeMEImpl(params); });
+}
+function _recibirPickupDeMEImpl(params) {
   var idGuiaME = String(params.idGuiaME || '').trim();
   var idZona   = String(params.idZona   || '').trim();
   if (!idGuiaME) return { ok: false, error: 'Requiere idGuiaME' };
@@ -1574,6 +1612,9 @@ function _sameUser_(a, b) {
 // o coincide con lockUsuario (comparación normalizada). Si tomarLock=true,
 // marca atendidoPor=lockUsuario.
 function actualizarPickup(params) {
+  return _conLock('actualizarPickup', function() { return _actualizarPickupImpl(params); });
+}
+function _actualizarPickupImpl(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
 
@@ -1623,6 +1664,9 @@ function actualizarPickup(params) {
 // Liberar lock de un pickup (operador "suelta" para que otro lo tome).
 // Vuelve estado a PENDIENTE si estaba EN_PROCESO sin progreso.
 function liberarPickup(params) {
+  return _conLock('liberarPickup', function() { return _liberarPickupImpl(params); });
+}
+function _liberarPickupImpl(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
   var data    = sheet.getDataRange().getValues();
@@ -1664,6 +1708,9 @@ function getPickup(params) {
 // params: { idCaja, idGuiaME?, itemsAnulados: [{codigoBarra, cantidad}] }
 // Si después del descuento todos los items quedan en 0 → pickup CANCELADO.
 function pickupDescontarVenta(params) {
+  return _conLock('pickupDescontarVenta', function() { return _pickupDescontarVentaImpl(params); });
+}
+function _pickupDescontarVentaImpl(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
   var idCaja    = String(params.idCaja || '').trim();
@@ -1788,6 +1835,9 @@ function setupPickupTriggers() {
 // El frontend manda items con despachado actualizado; aquí solo overwrite del JSON
 // y marca estado='EN_PROCESO' + actualiza ultimaActividad (heartbeat).
 function guardarProgresoPickup(params) {
+  return _conLock('guardarProgresoPickup', function() { return _guardarProgresoPickupImpl(params); });
+}
+function _guardarProgresoPickupImpl(params) {
   var sheet = getSheet('PICKUPS');
   if (!sheet) return { ok: false, error: 'Hoja PICKUPS no existe' };
   var data    = sheet.getDataRange().getValues();
@@ -2191,324 +2241,4 @@ function _validarTipoGuia(tipo) {
                  'SALIDA_DEVOLUCION','SALIDA_ZONA','SALIDA_JEFATURA',
                  'SALIDA_ENVASADO','SALIDA_MERMA'];
   return validos.indexOf(tipo) >= 0;
-}
-
-// ════════════════════════════════════════════════════════════════════
-// ONE-SHOT: corregirPickupPCK_1778539364666
-// ────────────────────────────────────────────────────────────────────
-// Incidente 2026-05-12 (11:34-11:35): el pickup PCK-1778539364666 generó
-// 3 GUIA_SALIDA duplicadas (G1778603697440, G1778603712456, G1778603728910)
-// por doble-click del operador en "Cerrar Pickup". Stock fue descontado de
-// más en varios productos. Esta función:
-//
-//   1. Anula detalle por detalle de las 3 guías  → cada anularDetalle()
-//      reverte el stock de esa línea automáticamente
-//   2. Crea una guía nueva SALIDA_ZONA en ZONA-02 con la lista consolidada
-//      (15 líneas únicas, suma sin duplicados — calculada manualmente)
-//   3. Marca el pickup como COMPLETADO con referencia a la nueva guía
-//
-// EJECUTAR UNA SOLA VEZ desde el editor de Apps Script.
-// Idempotencia: si las 3 guías ya tienen todos los detalles ANULADOS,
-// anularDetalle retorna {yaAnulado:true} sin descontar otra vez.
-// ════════════════════════════════════════════════════════════════════
-function corregirPickupPCK_1778539364666() {
-  var idPickup = 'PCK-1778539364666';
-  var guiasAAnular = ['G1778603697440', 'G1778603712456', 'G1778603728910'];
-  var idZona = 'ZONA-02';
-  var usuario = 'fix-script-2026-05-12';
-
-  // Despacho consolidado (sin duplicados) — derivado del análisis manual
-  // de las 3 guías. Cada línea es lo que REALMENTE quiso despachar el
-  // operador (canónico o equivalente), tomando el máximo no repetido +
-  // sumando los items huérfanos del pickup que no entraron a ninguna guía.
-  var despachoLimpio = [
-    { codigoBarra: 'WHANNODO100GR',  cantidad: 1 },
-    { codigoBarra: 'WHNAXMTO001KG',  cantidad: 3 }, // extra fuera del pickup
-    { codigoBarra: 'WHORLIRO250GR',  cantidad: 2 },
-    { codigoBarra: 'WHORLIRO050GR',  cantidad: 1 },
-    { codigoBarra: 'WHPIEODO050GR',  cantidad: 2 },
-    { codigoBarra: 'WHANEODO050GR',  cantidad: 7 },
-    { codigoBarra: '6973360692632',  cantidad: 2 },
-    { codigoBarra: 'TONYJG003',      cantidad: 1 },
-    { codigoBarra: '7750844410062',  cantidad: 1 },
-    { codigoBarra: 'WHCLOOIO050GR',  cantidad: 1 },
-    { codigoBarra: 'WHAVXUNO001KG',  cantidad: 1 },
-    { codigoBarra: '7756034140481',  cantidad: 1 },
-    { codigoBarra: '6937518108314',  cantidad: 4 }, // huérfano del pickup
-    { codigoBarra: '7752285038911',  cantidad: 1 }, // huérfano del pickup
-    { codigoBarra: '8445292343428',  cantidad: 1 }  // huérfano del pickup
-  ];
-
-  // ── 1. Anular detalles de las 3 guías (reverte stock por cada anulación) ──
-  var sheetDet = getSheet('GUIA_DETALLE');
-  var data = sheetDet.getDataRange().getValues();
-  var hdrs = data[0];
-  var idxIdDet = hdrs.indexOf('idDetalle');
-  var idxIdG   = hdrs.indexOf('idGuia');
-  var idxObs   = hdrs.indexOf('observacion');
-
-  var anulados = 0, yaAnulados = 0, errores = [];
-  for (var i = 1; i < data.length; i++) {
-    var ig = String(data[i][idxIdG] || '');
-    if (guiasAAnular.indexOf(ig) < 0) continue;
-    var idDet = String(data[i][idxIdDet] || '');
-    if (!idDet) continue;
-    if (String(data[i][idxObs] || '').toUpperCase() === 'ANULADO') { yaAnulados++; continue; }
-    var resA = anularDetalle({ idDetalle: idDet, usuario: usuario });
-    if (resA.ok) anulados++;
-    else errores.push(idDet + ': ' + resA.error);
-  }
-  Logger.log('Anulados: ' + anulados + ' · YaAnulados: ' + yaAnulados + ' · Errores: ' + errores.length);
-  if (errores.length) Logger.log('Detalle errores: ' + JSON.stringify(errores));
-
-  // ── 2. Marcar las 3 guías viejas como anuladas en el comentario ────────
-  // No se "eliminan" físicamente (deja rastro auditable) pero el comentario
-  // las marca claramente. Los detalles ya están ANULADOS → no descuentan stock.
-  var sheetG = getSheet('GUIAS');
-  var dataG  = sheetG.getDataRange().getValues();
-  var hdrsG  = dataG[0];
-  var idxIdGG  = hdrsG.indexOf('idGuia');
-  var idxComG  = hdrsG.indexOf('comentario');
-  var idxEstG  = hdrsG.indexOf('estado');
-  for (var r = 1; r < dataG.length; r++) {
-    var ig2 = String(dataG[r][idxIdGG] || '');
-    if (guiasAAnular.indexOf(ig2) < 0) continue;
-    var comAct = String(dataG[r][idxComG] || '');
-    if (comAct.indexOf('[ANULADA-DUPLICADO]') < 0) {
-      sheetG.getRange(r + 1, idxComG + 1).setValue('[ANULADA-DUPLICADO] ' + comAct + ' · consolidada en fix 2026-05-12');
-    }
-    sheetG.getRange(r + 1, idxEstG + 1).setValue('ANULADA');
-  }
-
-  // ── 3. Crear guía nueva consolidada ────────────────────────────────────
-  var nuevaGuia = crearDespachoRapido({
-    tipo:     'SALIDA_ZONA',
-    idZona:   idZona,
-    items:    despachoLimpio,
-    usuario:  usuario,
-    nota:     '[pickup:' + idPickup + '] [FIX-CONSOLIDADO 2026-05-12] Reemplaza G1778603697440 + G1778603712456 + G1778603728910 (duplicadas por doble-click).',
-    imprimir: true
-  });
-  Logger.log('Nueva guía consolidada: ' + JSON.stringify(nuevaGuia));
-
-  // ── 4. Marcar pickup COMPLETADO con ref a la nueva guía ───────────────
-  var idGuiaNueva = nuevaGuia && nuevaGuia.data ? nuevaGuia.data.idGuia : '';
-  var sheetPick = getSheet('PICKUPS');
-  var dataP = sheetPick.getDataRange().getValues();
-  var hdrsP = dataP[0];
-  var idxIdP   = hdrsP.indexOf('idPickup');
-  var idxEstP  = hdrsP.indexOf('estado');
-  var idxNtP   = hdrsP.indexOf('notas');
-  var idxAteP  = hdrsP.indexOf('fechaAtendido');
-  var idxUaP   = hdrsP.indexOf('ultimaActividad');
-  for (var rp = 1; rp < dataP.length; rp++) {
-    if (String(dataP[rp][idxIdP]) !== idPickup) continue;
-    sheetPick.getRange(rp + 1, idxEstP + 1).setValue('COMPLETADO');
-    var notaAct = String(dataP[rp][idxNtP] || '');
-    if (notaAct.indexOf('FIX-CONSOLIDADO') < 0) {
-      sheetPick.getRange(rp + 1, idxNtP + 1).setValue(notaAct + ' · FIX-CONSOLIDADO ' + idGuiaNueva);
-    }
-    var nowIso = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
-    sheetPick.getRange(rp + 1, idxAteP + 1).setValue(nowIso);
-    sheetPick.getRange(rp + 1, idxUaP + 1).setValue(nowIso);
-    break;
-  }
-
-  return {
-    ok: true,
-    detallesAnulados: anulados,
-    yaAnulados:       yaAnulados,
-    erroresAnulacion: errores,
-    guiaNueva:        idGuiaNueva,
-    pickup:           idPickup,
-    estadoPickup:     'COMPLETADO'
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════
-// GENÉRICO: _consolidarGuiasPickupDuplicadas
-// ─────────────────────────────────────────────────────────────────────
-// Cuando un pickup se cierra varias veces seguidas (doble-click del
-// operador), se generan múltiples GUIA_SALIDA con los mismos items.
-// Esta función las consolida automáticamente:
-//   1. Lee los detalles activos de cada guía duplicada
-//   2. Para cada codigoBarra → cantidad = MAX entre las guías (asume
-//      que la última pasada del operador refleja lo realmente despachado)
-//   3. Incluye items huérfanos del JSON del pickup (despachadoPorCodigo
-//      que no aparecen en ninguna de las guías)
-//   4. Anula detalle por detalle de las viejas → stock vuelve
-//   5. Marca las viejas como ANULADA con prefijo [ANULADA-DUPLICADO]
-//   6. Crea UNA guía nueva con la lista consolidada (imprime ticket)
-//   7. Marca el pickup como COMPLETADO con referencia
-//
-// EJECUTAR DESDE EL EDITOR DE GAS. Idempotente: si ya fueron anuladas
-// no descuentan stock de nuevo.
-// ════════════════════════════════════════════════════════════════════
-function _consolidarGuiasPickupDuplicadas(opts) {
-  var idsGuias = opts.idsGuias || [];
-  var idPickup = opts.idPickup;
-  var idZona   = opts.idZona;
-  var usuario  = opts.usuario || 'fix-script';
-  if (!idsGuias.length || !idPickup) {
-    return { ok: false, error: 'Requiere idsGuias[] e idPickup' };
-  }
-
-  // ── 1. Leer detalles activos de las guías duplicadas ─────────────
-  var sheetDet = getSheet('GUIA_DETALLE');
-  var dataDet  = sheetDet.getDataRange().getValues();
-  var hdrsDet  = dataDet[0];
-  var idxIdDet = hdrsDet.indexOf('idDetalle');
-  var idxIdG   = hdrsDet.indexOf('idGuia');
-  var idxCb    = hdrsDet.indexOf('codigoProducto');
-  var idxRec   = hdrsDet.indexOf('cantidadRecibida');
-  var idxObs   = hdrsDet.indexOf('observacion');
-
-  var porCodigo = {};
-  var detallesAAnular = [];
-  for (var i = 1; i < dataDet.length; i++) {
-    var ig = String(dataDet[i][idxIdG] || '');
-    if (idsGuias.indexOf(ig) < 0) continue;
-    var obs = String(dataDet[i][idxObs] || '').toUpperCase();
-    var idDet = String(dataDet[i][idxIdDet] || '');
-    if (obs === 'ANULADO') continue;
-    detallesAAnular.push(idDet);
-    var cb  = String(dataDet[i][idxCb] || '');
-    var qty = parseFloat(dataDet[i][idxRec]) || 0;
-    if (!porCodigo[cb]) porCodigo[cb] = {};
-    porCodigo[cb][ig] = (porCodigo[cb][ig] || 0) + qty;
-  }
-
-  // ── 2. Consolidar (max por cb) ──────────────────────────────────
-  var despachoConsolidado = [];
-  Object.keys(porCodigo).forEach(function(cb) {
-    var perGuia = porCodigo[cb];
-    var maxQ = 0;
-    Object.keys(perGuia).forEach(function(g) {
-      if (perGuia[g] > maxQ) maxQ = perGuia[g];
-    });
-    if (maxQ > 0) despachoConsolidado.push({ codigoBarra: cb, cantidad: maxQ });
-  });
-
-  // ── 3. Incluir huérfanos del JSON del pickup ────────────────────
-  var sheetPick = getSheet('PICKUPS');
-  var dataPick  = sheetPick.getDataRange().getValues();
-  var hdrsPick  = dataPick[0];
-  var idxIdP    = hdrsPick.indexOf('idPickup');
-  var idxIt     = hdrsPick.indexOf('items');
-
-  var pickupRow = -1, pickupItems = null;
-  for (var r = 1; r < dataPick.length; r++) {
-    if (String(dataPick[r][idxIdP]) === idPickup) {
-      pickupRow = r + 1;
-      try { pickupItems = JSON.parse(String(dataPick[r][idxIt] || '[]')); } catch(_){}
-      break;
-    }
-  }
-
-  var cubiertos = {};
-  despachoConsolidado.forEach(function(d) {
-    cubiertos[String(d.codigoBarra).trim().toUpperCase()] = true;
-  });
-  if (pickupItems && Array.isArray(pickupItems)) {
-    pickupItems.forEach(function(it) {
-      var dpc = it.despachadoPorCodigo || {};
-      Object.keys(dpc).forEach(function(cb) {
-        var qty = parseFloat(dpc[cb]) || 0;
-        if (qty <= 0) return;
-        var cbU = String(cb).trim().toUpperCase();
-        if (cubiertos[cbU]) return;
-        despachoConsolidado.push({ codigoBarra: String(cb), cantidad: qty });
-        cubiertos[cbU] = true;
-      });
-    });
-  }
-
-  // ── 4. Anular detalles (reverte stock automáticamente) ──────────
-  var anulados = 0, errores = [];
-  detallesAAnular.forEach(function(idDet) {
-    var res = anularDetalle({ idDetalle: idDet, usuario: usuario });
-    if (res.ok) anulados++;
-    else errores.push(idDet + ': ' + (res.error || 'err'));
-  });
-
-  // ── 5. Marcar guías viejas como ANULADA con prefijo ─────────────
-  var sheetG  = getSheet('GUIAS');
-  var dataG   = sheetG.getDataRange().getValues();
-  var hdrsG   = dataG[0];
-  var idxIdGG = hdrsG.indexOf('idGuia');
-  var idxComG = hdrsG.indexOf('comentario');
-  var idxEstG = hdrsG.indexOf('estado');
-  var hoyStr  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  for (var rg = 1; rg < dataG.length; rg++) {
-    var ig2 = String(dataG[rg][idxIdGG] || '');
-    if (idsGuias.indexOf(ig2) < 0) continue;
-    var comAct = String(dataG[rg][idxComG] || '');
-    if (comAct.indexOf('[ANULADA-DUPLICADO]') < 0) {
-      sheetG.getRange(rg + 1, idxComG + 1).setValue('[ANULADA-DUPLICADO] ' + comAct + ' · consolidada en fix ' + hoyStr);
-    }
-    sheetG.getRange(rg + 1, idxEstG + 1).setValue('ANULADA');
-  }
-
-  // ── 6. Crear guía nueva consolidada ─────────────────────────────
-  if (!despachoConsolidado.length) {
-    return {
-      ok: false,
-      error: 'No hay items consolidados para crear guía nueva',
-      detallesAnulados: anulados,
-      erroresAnulacion: errores,
-      guiasAnuladas: idsGuias
-    };
-  }
-  var nuevaGuia = crearDespachoRapido({
-    tipo:     'SALIDA_ZONA',
-    idZona:   idZona,
-    items:    despachoConsolidado,
-    usuario:  usuario,
-    nota:     '[pickup:' + idPickup + '] [FIX-CONSOLIDADO ' + hoyStr + '] '
-            + 'Reemplaza ' + idsGuias.join(' + ') + ' (duplicadas por doble-click).',
-    imprimir: true
-  });
-  var idGuiaNueva = nuevaGuia && nuevaGuia.data ? nuevaGuia.data.idGuia : '';
-
-  // ── 7. Marcar pickup COMPLETADO ─────────────────────────────────
-  if (pickupRow >= 2) {
-    var idxEstP = hdrsPick.indexOf('estado');
-    var idxNtP  = hdrsPick.indexOf('notas');
-    var idxAteP = hdrsPick.indexOf('fechaAtendido');
-    var idxUaP  = hdrsPick.indexOf('ultimaActividad');
-    var idxAtpP = hdrsPick.indexOf('atendidoPor');
-    sheetPick.getRange(pickupRow, idxEstP + 1).setValue('COMPLETADO');
-    var notaAct = String(dataPick[pickupRow - 1][idxNtP] || '');
-    if (notaAct.indexOf('FIX-CONSOLIDADO') < 0) {
-      sheetPick.getRange(pickupRow, idxNtP + 1).setValue(notaAct + ' · FIX-CONSOLIDADO ' + idGuiaNueva);
-    }
-    var nowIso = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
-    if (idxAteP >= 0) sheetPick.getRange(pickupRow, idxAteP + 1).setValue(nowIso);
-    if (idxUaP  >= 0) sheetPick.getRange(pickupRow, idxUaP  + 1).setValue(nowIso);
-    if (idxAtpP >= 0) sheetPick.getRange(pickupRow, idxAtpP + 1).setValue(''); // libera lock
-  }
-
-  Logger.log('CONSOLIDACIÓN OK: ' + idsGuias.join(',') + ' → ' + idGuiaNueva +
-             ' (' + despachoConsolidado.length + ' items, ' + anulados + ' detalles anulados)');
-
-  return {
-    ok: true,
-    pickup:           idPickup,
-    guiasAnuladas:    idsGuias,
-    detallesAnulados: anulados,
-    erroresAnulacion: errores,
-    guiaNueva:        idGuiaNueva,
-    itemsConsolidados: despachoConsolidado.length,
-    estadoPickup:     'COMPLETADO'
-  };
-}
-
-// ── ONE-SHOT: incidente 2026-05-12 14:50 pickup PCK-1778365859327 ──
-function corregirPickupPCK_1778365859327() {
-  return _consolidarGuiasPickupDuplicadas({
-    idsGuias: ['G1778615429513', 'G1778615445751', 'G1778615467341'],
-    idPickup: 'PCK-1778365859327',
-    idZona:   'ZONA-02',
-    usuario:  'fix-script-2026-05-12'
-  });
 }
