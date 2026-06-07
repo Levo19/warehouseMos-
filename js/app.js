@@ -497,11 +497,19 @@ function loading(parentId, show) {
   }
 }
 
+// [v2.13.188] Scroll-lock del fondo mientras haya algún bottom-sheet abierto.
+// Reconcilia contra el DOM real (no un contador), así NUNCA queda "pegado":
+// si un sheet cierra por cualquier vía, el siguiente abrir/cerrar lo corrige.
+function _syncSheetScrollLock() {
+  try { document.body.style.overflow = document.querySelector('.bottom-sheet.open') ? 'hidden' : ''; } catch(_){}
+}
+
 function abrirSheet(id) {
   const overlay = document.getElementById('overlay' + id.replace('sheet', ''));
   const sheet = document.getElementById(id);
   overlay?.classList.add('open');
   sheet?.classList.add('open');
+  _syncSheetScrollLock();
 }
 
 function cerrarSheet(id) {
@@ -509,6 +517,7 @@ function cerrarSheet(id) {
   const sheet = document.getElementById(id);
   overlay?.classList.remove('open');
   sheet?.classList.remove('open');
+  _syncSheetScrollLock();
 }
 
 function abrirModal(id) {
@@ -5125,7 +5134,10 @@ const GuiasView = (() => {
     if (!container) return;
     const optCards = Array.from(container.querySelectorAll('.card-optimistic'));
     if (!list.length) {
-      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">No hay guías</p>';
+      // [v2.13.188] Distinguir "no hay" de "sin coincidencias" (filtro/búsqueda activos)
+      const filtrando = !!(filtroActual || _busquedaQ);
+      const msg = filtrando ? 'Sin coincidencias para el filtro o la búsqueda' : 'No hay guías';
+      container.innerHTML = `<p class="text-slate-500 text-center py-8 text-sm">${msg}</p>`;
       optCards.forEach(c => container.insertBefore(c, container.firstChild));
       _renderTabletPrePanel();
       return;
@@ -5396,7 +5408,7 @@ const GuiasView = (() => {
       </div>
       <p class="font-black text-lg text-white leading-tight" onclick="GuiasView.deselectItem()">${escHtml(provNombreHdr)}</p>
       <p class="text-xs text-slate-500 mt-0.5" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
-      ${esDiaAnterior && abierta ? `<p class="text-xs text-red-400 mt-1 font-bold">⚠ Guía del día anterior — ciérrala pronto</p>` : ''}
+      ${esDiaAnterior && abierta ? `<p class="text-xs text-amber-400 mt-1 font-semibold">⚠ Guía de un día anterior aún abierta</p>` : ''}
       <div class="flex gap-2 mt-2 mb-1">
         <button onclick="GuiasView.toggleFotoPanel()" id="btnHdrFoto"
                 class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs transition-colors ${_fotoOpen ? 'bg-blue-700/60 text-blue-200' : 'bg-slate-800 text-slate-400'}">
@@ -7263,6 +7275,11 @@ const GuiasView = (() => {
     }
     // Pausar scanner continuo para que no dispare sonidos mientras el modal está abierto
     if (document.getElementById('scannerModal')?.classList.contains('open')) Scanner.stop();
+    // [v2.13.188] Foco automático: si falta código, al input de código; si ya
+    // viene escaneado, a la descripción (campo obligatorio).
+    setTimeout(() => {
+      try { (hasCode ? (obs || codInput) : (codInput || obs))?.focus(); } catch(_){}
+    }, 120);
   }
 
   function _pnCodigoChanged() {
