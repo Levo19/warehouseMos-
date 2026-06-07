@@ -1659,34 +1659,19 @@ function getPreingresos(params) {
   return { ok: true, data: rows };
 }
 
-// ── Snapshot de tarifa por carreta ─────────────────────────────
-// Recibe el JSON string de cargadores y retorna el mismo string con `tarifa`
-// rellenada con la tarifa global vigente si no venía.
-//
-// [v2.13.176 BUG FIX CRÍTICO] Antes esta función reconstruía cada cargador
-// como {id, nombre, carretas, tarifa} y DESCARTABA el campo `estados` (el
-// estado de cada carreta: LLENA/MEDIA/VACIA). Como se llama en CADA creación
-// y actualización de cargadores, el backend borraba los estados en cada
-// guardado: tras el round-trip y el TTL del cache, el servidor devolvía
-// cargadores sin `estados` y _normalizarCargador los reponía todos en LLENA.
-// ESA era la causa de fondo de "el estado de la carreta se pierde / vuelve al
-// inicial". Ahora preservamos TODOS los campos del cargador (incl. estados) y
-// solo normalizamos/añadimos `tarifa` por compatibilidad.
-function _snapshotTarifaCargadores(cargadoresStr) {
+// ── Sanitiza el JSON string de cargadores para la hoja ─────────
+// [v2.13.180] El concepto de "tarifa de cargador/carreta" fue ELIMINADO. Esta
+// función solo valida que sea un array y lo re-serializa, preservando todos los
+// campos del cargador (id, nombre, carretas, estados). NO agrega tarifa.
+// (Históricamente fue _snapshotTarifaCargadores, que además llegó a DESCARTAR
+// `estados` — bug crítico ya corregido; ahora sin tarifa del todo.)
+function _limpiarCargadoresStr(cargadoresStr) {
   if (!cargadoresStr) return '';
   try {
     var arr = JSON.parse(cargadoresStr);
-    if (!Array.isArray(arr) || !arr.length) return cargadoresStr;
-    var tarifaGlobal = parseFloat(_getConfigValue('TARIFA_CARRETA')) || 0;
-    var out = arr.map(function(c) {
-      if (typeof c !== 'object' || c === null) return c;
-      var t = parseFloat(c.tarifa);
-      if (isNaN(t) || t < 0) t = tarifaGlobal;
-      // Preservar todos los campos (id, nombre, carretas, estados, …) + tarifa.
-      return Object.assign({}, c, { tarifa: t });
-    });
-    return JSON.stringify(out);
-  } catch(e) { return cargadoresStr; }
+    if (!Array.isArray(arr)) return '';
+    return JSON.stringify(arr);
+  } catch(e) { return String(cargadoresStr || ''); }
 }
 
 // [v2.13.7] Auto-create columnas faltantes en PREINGRESOS — patrón _ensureColumnasMerma.
@@ -1715,9 +1700,8 @@ function crearPreingreso(params) {
     if (data[i][0] === id) return { ok: true, data: { idPreingreso: id } };
   }
 
-  // Snapshot de tarifa por carreta para que reimpresiones futuras conserven
-  // el monto pactado al momento, aunque después se cambie la tarifa global.
-  var cargSnapshot = _snapshotTarifaCargadores(params.cargadores);
+  // Cargadores: se guarda el JSON tal cual (id/nombre/carretas/estados).
+  var cargSnapshot = _limpiarCargadoresStr(params.cargadores);
 
   // Escribir por nombre de columna — funciona con 9 o 12 cols (schema viejo/nuevo)
   var hdrs = data[0];
@@ -1866,7 +1850,7 @@ function _actualizarPreingresoImpl(params) {
       if (col < 0) return;
       var val;
       if (key === 'monto')           val = parseFloat(params[key]) || 0;
-      else if (key === 'cargadores') val = _snapshotTarifaCargadores(params[key]);
+      else if (key === 'cargadores') val = _limpiarCargadoresStr(params[key]);
       else                            val = String(params[key]);
       sheet.getRange(i + 1, col + 1).setValue(val);
     });
@@ -1898,7 +1882,7 @@ function _actualizarPreingresoImpl(params) {
           }
           if (params.cargadores !== undefined) {
             var cCg = gHdrs.indexOf('cargadores');
-            if (cCg >= 0) gs.getRange(j + 1, cCg + 1).setValue(_snapshotTarifaCargadores(params.cargadores));
+            if (cCg >= 0) gs.getRange(j + 1, cCg + 1).setValue(_limpiarCargadoresStr(params.cargadores));
           }
           break;
         }

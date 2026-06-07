@@ -582,20 +582,12 @@ function _horaDesdeId(id) {
 function escAttr(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;'); }
 function escHtml(s)  { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-// ── Cargadores: tarifa global vigente (cache local de CONFIG) ──
-function _getTarifaCarreta() {
-  try {
-    const cfg = OfflineManager.getConfigCache() || {};
-    const t = parseFloat(cfg.TARIFA_CARRETA);
-    return isNaN(t) ? 0 : t;
-  } catch { return 0; }
-}
-
 // ════════════════════════════════════════════════
 // [v2.13.3] Estados por carreta (LLENA/MEDIA/VACIA)
-// Modelo extendido del cargador: agregar array `estados` con length === carretas.
-// Mantiene retrocompatibilidad: si no hay `estados`, se asume todas LLENAS.
-// La tarifa sigue existiendo en el modelo legacy pero se ignora en UI/WA/print.
+// Modelo del cargador: { id, nombre, carretas, estados[] } con
+// estados.length === carretas. Si no hay `estados` (legacy), se asume todas
+// LLENAS. [v2.13.180] El concepto de "tarifa de cargador" fue ELIMINADO: el
+// cargador cobra en caja; el resumen del día solo muestra cargadores + estados.
 // ════════════════════════════════════════════════
 const ESTADOS_CARGA = ['LLENA', 'MEDIA', 'VACIA'];
 const EMOJI_CARGA   = { LLENA: '🟢', MEDIA: '🟡', VACIA: '🔴' };
@@ -708,8 +700,7 @@ const CarretaCiclo = {
   }
 };
 
-// [v2.13.3] Resumen agregado de cargadores. Sin tarifa: el cargador
-// pone su precio en caja. Devuelve estados de carga agregados.
+// [v2.13.3] Resumen agregado de cargadores: solo conteo de carretas por estado.
 function _resumenCargadoresDia(items) {
   let carretas = 0, llenas = 0, medias = 0, vacias = 0;
   (items || []).forEach(p => {
@@ -726,8 +717,7 @@ function _resumenCargadoresDia(items) {
       vacias   += r.vacias;
     });
   });
-  // monto: 0 mantenido por retrocompat con código viejo que lee r.monto
-  return { carretas, llenas, medias, vacias, monto: 0 };
+  return { carretas, llenas, medias, vacias };
 }
 
 // Filtra preingresos de un día (key=YYYY-MM-DD) usando la fecha LOCAL del
@@ -749,7 +739,7 @@ function _resumenCargadoresDiaPorFecha(key) {
   try {
     const all = OfflineManager.getPreingresosCache() || [];
     return _resumenCargadoresDia(_preingresosDeFecha(all, key));
-  } catch { return { carretas: 0, llenas: 0, medias: 0, vacias: 0, monto: 0 }; }
+  } catch { return { carretas: 0, llenas: 0, medias: 0, vacias: 0 }; }
 }
 
 // Construye el detalle agrupado por cargador (mismo shape que devolvía
@@ -759,7 +749,6 @@ function _resumenCargadoresDiaPorFecha(key) {
 function _calcularCargadoresDelDia(key) {
   const all = OfflineManager.getPreingresosCache() || [];
   const items = _preingresosDeFecha(all, key);
-  const tarifaGlobal = _getTarifaCarreta();
   const provs = OfflineManager.getProveedoresCache() || [];
   const provMap = {};
   provs.forEach(p => { provMap[String(p.idProveedor)] = String(p.nombre || ''); });
@@ -780,7 +769,6 @@ function _calcularCargadoresDelDia(key) {
       if (!byId[id]) byId[id] = {
         id, nombre,
         carretasTotal: 0, llenasTotal: 0, mediasTotal: 0, vaciasTotal: 0,
-        montoTotal: 0,  // compat: queda en 0 siempre (tarifa eliminada)
         preingresos: []
       };
       byId[id].carretasTotal += carretas;
@@ -793,7 +781,6 @@ function _calcularCargadoresDelDia(key) {
         carretas,
         estados:      cn.estados,
         llenas: r.llenas, medias: r.medias, vacias: r.vacias,
-        tarifa: 0, subtotal: 0,  // compat
         estado: String(pi.estado || '')
       });
     });
@@ -807,8 +794,6 @@ function _calcularCargadoresDelDia(key) {
     totalLlenas:   cargadores.reduce((s, c) => s + c.llenasTotal,   0),
     totalMedias:   cargadores.reduce((s, c) => s + c.mediasTotal,   0),
     totalVacias:   cargadores.reduce((s, c) => s + c.vaciasTotal,   0),
-    totalMonto:    0,  // compat
-    tarifaGlobal,
     preingresos:   items.length
   };
 }
@@ -16131,9 +16116,6 @@ const PreingresosView = (() => {
   function abrirCargadoresDia(fechaKey) {
     _cargDiaState.fecha = fechaKey;
     document.getElementById('cargDiaFechaLbl').textContent = _fmtFechaLabel(fechaKey);
-    // [v2.13.3] cargDiaTarifaInput puede no existir (HTML actualizado lo elimina)
-    const tarifaInp = document.getElementById('cargDiaTarifaInput');
-    if (tarifaInp) tarifaInp.value = String(_getTarifaCarreta() || '');
     _cargDiaState.data = _calcularCargadoresDelDia(fechaKey);
     _renderCargDiaContent();
     abrirSheet('sheetCargadoresDia');
@@ -16330,25 +16312,6 @@ const PreingresosView = (() => {
     requestAnimationFrame(() => _flashChipEl(_chipDia(idPreingreso, nuevoIdx), true));
   }
 
-  // [v2.13.3] LEGACY compat — guardarTarifaCarreta queda como no-op si el
-  // input no existe. Si el admin instala una versión vieja del HTML, sigue
-  // funcionando (no era prioridad). Exportada para no romper el return {}.
-  async function guardarTarifaCarreta() {
-    const inp = document.getElementById('cargDiaTarifaInput');
-    if (!inp) { toast('Tarifa eliminada — los cargadores cobran en caja', 'info'); return; }
-    const v = parseFloat(inp.value);
-    if (isNaN(v) || v < 0) { toast('Tarifa inválida', 'warn'); return; }
-    const res = await API.setConfig('TARIFA_CARRETA', String(v)).catch(() => null);
-    if (!res || !res.ok) { toast('Error guardando', 'danger'); return; }
-    try {
-      const cfg = OfflineManager.getConfigCache() || {};
-      cfg.TARIFA_CARRETA = String(v);
-      localStorage.setItem('wh_config', JSON.stringify({ data: cfg, ts: Date.now() }));
-    } catch {}
-    toast('Tarifa actualizada', 'ok');
-    if (_cargDiaState.fecha) abrirCargadoresDia(_cargDiaState.fecha);
-  }
-
   // [v2.13.4] WhatsApp consolidado — desglose explícito 🟢/🟡/🔴 por cargador y preingreso
   function compartirCargadoresDiaWA() {
     const d = _cargDiaState.data;
@@ -16401,7 +16364,7 @@ const PreingresosView = (() => {
            onFotosSeleccionadas, quitarFoto, verFotos,
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido, reimprimirAviso,
-           abrirCargadoresDia, guardarTarifaCarreta, compartirCargadoresDiaWA, imprimirCargadoresDia,
+           abrirCargadoresDia, compartirCargadoresDiaWA, imprimirCargadoresDia,
            toggleEstadoCarretaDia, agregarCarretaDia,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
