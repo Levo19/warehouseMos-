@@ -6999,7 +6999,7 @@ const GuiasView = (() => {
       if (item) {
         item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
         if (item.idDetalle && !item._local) {
-          API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+          _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
         }
         _mostrarDetalleSheet(_guiaActual, false);
       }
@@ -7030,7 +7030,7 @@ const GuiasView = (() => {
     if (item) {
       item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) + diff);
       if (item.idDetalle && !item._local) {
-        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+        _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
       }
       _mostrarDetalleSheet(_guiaActual, false);
     }
@@ -7047,7 +7047,7 @@ const GuiasView = (() => {
     if (!item) return;
     item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
     if (item.idDetalle && !item._local) {
-      API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+      _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
     }
     _mostrarDetalleSheet(_guiaActual, false);
     _renderCamList();
@@ -7063,7 +7063,7 @@ const GuiasView = (() => {
     if (cur <= 1) return;
     item.cantidadRecibida = cur - 1;
     if (item.idDetalle && !item._local) {
-      API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+      _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
     }
     _mostrarDetalleSheet(_guiaActual, false);
     _renderCamList();
@@ -7104,7 +7104,7 @@ const GuiasView = (() => {
       if (item) {
         item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
         if (item.idDetalle && !item._local) {
-          API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }).catch(() => {});
+          _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
         }
         _mostrarDetalleSheet(_guiaActual, false);
       }
