@@ -127,6 +127,9 @@ function _crearProductoImpl(params) {
 }
 
 function actualizarProducto(params) {
+  return _conLock('actualizarProducto', function() { return _actualizarProductoImpl(params); });
+}
+function _actualizarProductoImpl(params) {
   var sheet = getProductosSheet();
   var data  = sheet.getDataRange().getValues();
   var headers = data[0];
