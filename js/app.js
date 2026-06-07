@@ -568,7 +568,10 @@ function _diaPeru(fechaInput) {
   try {
     return new Intl.DateTimeFormat('en-CA', { timeZone: WH_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
   } catch (e) {
-    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    // Fallback sin Intl (navegador muy viejo): Perú es UTC-5 todo el año (sin
+    // DST), así que el instante −5h en UTC = fecha de Lima. Determinista, NO
+    // depende de la TZ del dispositivo.
+    return new Date(d.getTime() - 5 * 3600000).toISOString().slice(0, 10);
   }
 }
 function _hoyPeru()  { return _diaPeru(new Date()); }
@@ -5149,10 +5152,10 @@ const GuiasView = (() => {
       if (!key || key === '0000-00-00') return 'Sin fecha';
       if (key === hoyKey)  return 'Hoy';
       if (key === ayerKey) return 'Ayer';
-      const d = new Date(key + 'T12:00:00'); // key ya correcto; noon = etiqueta TZ-segura
-      return key.slice(0, 4) === hoyKey.slice(0, 4)
-        ? `${d.getDate()} ${months[d.getMonth()]}`
-        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      const [yyyy, mm, dd] = key.split('-'); // key = 'YYYY-MM-DD' del día de Perú
+      return yyyy === hoyKey.slice(0, 4)
+        ? `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`
+        : `${dd}/${mm}/${yyyy}`;
     }
 
     const groupMap = {};
@@ -14380,10 +14383,10 @@ const PreingresosView = (() => {
       if (!key || key === '0000-00-00') return 'Sin fecha';
       if (key === hoyKey)  return 'Hoy';
       if (key === ayerKey) return 'Ayer';
-      const d = new Date(key + 'T12:00:00'); // key ya es el día correcto; noon = etiqueta TZ-segura
-      return key.slice(0, 4) === hoyKey.slice(0, 4)
-        ? `${d.getDate()} ${months[d.getMonth()]}`
-        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      const [yyyy, mm, dd] = key.split('-'); // key = 'YYYY-MM-DD' del día de Perú
+      return yyyy === hoyKey.slice(0, 4)
+        ? `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`
+        : `${dd}/${mm}/${yyyy}`;
     }
 
     const groupMap = {};
@@ -15980,10 +15983,10 @@ const PreingresosView = (() => {
       if (!key || key === '0000-00-00') return 'Sin fecha';
       if (key === hoyKey)  return 'Hoy';
       if (key === ayerKey) return 'Ayer';
-      const d = new Date(key + 'T12:00:00'); // key ya es el día correcto; noon = etiqueta TZ-segura
-      return key.slice(0, 4) === hoyKey.slice(0, 4)
-        ? `${d.getDate()} ${months[d.getMonth()]}`
-        : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      const [yyyy, mm, dd] = key.split('-'); // key = 'YYYY-MM-DD' del día de Perú
+      return yyyy === hoyKey.slice(0, 4)
+        ? `${parseInt(dd, 10)} ${months[parseInt(mm, 10) - 1]}`
+        : `${dd}/${mm}/${yyyy}`;
     }
 
     const groupMap = {};

@@ -19,9 +19,8 @@
     try {
       return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     } catch (e) {
-      const d = new Date();
-      const z = n => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())}`;
+      // Fallback sin Intl: Perú = UTC-5 todo el año (sin DST). Determinista.
+      return new Date(Date.now() - 5 * 3600000).toISOString().slice(0, 10);
     }
   }
 
