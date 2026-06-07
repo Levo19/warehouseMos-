@@ -1986,17 +1986,22 @@ function setupGuiasFolders() {
 }
 
 function _actualizarColumnaGuia(idGuia, campo, valor) {
-  var sheet = getSheet('GUIAS');
-  var data  = sheet.getDataRange().getValues();
-  var hdrs  = data[0];
-  var col   = hdrs.indexOf(campo);
-  if (col < 0) return;
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === idGuia) {
-      sheet.getRange(i + 1, col + 1).setValue(valor);
-      return;
+  // [v2.13.184] Bajo lock (reentrante): protege la escritura en GUIAS de
+  // subirFotoGuia/copiarFotoDePreingreso. Se envuelve SOLO la escritura (no la
+  // subida a Drive, que ocurre antes) para no retener el lock global de más.
+  return _conLock('_actualizarColumnaGuia', function() {
+    var sheet = getSheet('GUIAS');
+    var data  = sheet.getDataRange().getValues();
+    var hdrs  = data[0];
+    var col   = hdrs.indexOf(campo);
+    if (col < 0) return;
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][0] === idGuia) {
+        sheet.getRange(i + 1, col + 1).setValue(valor);
+        return;
+      }
     }
-  }
+  });
 }
 
 function subirFotoGuia(params) {
@@ -2092,6 +2097,9 @@ function _setSharingPublicoRobusto(driveObj) {
 }
 
 function actualizarGuia(params) {
+  return _conLock('actualizarGuia', function() { return _actualizarGuiaImpl(params); });
+}
+function _actualizarGuiaImpl(params) {
   var idGuia = String(params.idGuia || '');
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
   var sheet = getSheet('GUIAS');
