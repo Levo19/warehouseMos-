@@ -6917,7 +6917,20 @@ const GuiasView = (() => {
             res.error === 'PRODUCTO_NO_ENCONTRADO' ? 'warn' : 'danger', 4000);
         }
       }
-    }).catch(() => {});
+    }).catch(() => {
+      // [v2.13.185] Excepción/red: revertir el optimista y avisar (no silenciar).
+      if (_guiaActual && _guiaActual.idGuia === _idGuia) {
+        _guiaActual.detalle = (_guiaActual.detalle || []).filter(d => d.idDetalle !== localId);
+        _mostrarDetalleSheet(_guiaActual, false);
+      }
+      if (_camSession[cb]) {
+        _camSession[cb].qty = Math.max(0, (_camSession[cb].qty || 1) - 1);
+        if (_camSession[cb].qty === 0) delete _camSession[cb];
+      }
+      _renderCamList();
+      try { SoundFX.error(); } catch(_){}
+      toast('⚠ Sin conexión — el escaneo no se guardó', 'warn', 4000);
+    });
   }
 
   // ── Controles de cantidad en la lista de sesión cámara ───────
@@ -7758,7 +7771,12 @@ const GuiasView = (() => {
     toast('Foto eliminada', 'warn', 1500);
     // Background: eliminar archivo + limpiar columna en sheet
     if (match) API.eliminarFotoDrive({ fileId: match[1] }).catch(() => {});
-    API.actualizarGuia({ idGuia: _guiaActual.idGuia, foto: '' }).catch(() => {});
+    // [v2.13.185] No silenciar el clear de la columna: si falla, la foto sigue en
+    // el servidor y reaparecerá al refrescar → avisar para reintentar. (No revierto
+    // local para no mostrar una imagen de Drive que quizá ya se borró.)
+    API.actualizarGuia({ idGuia: _guiaActual.idGuia, foto: '' })
+      .then(r => { if (r && r.ok === false) { try { toast('⚠ La foto no se quitó en el servidor — reintenta', 'warn', 4000); } catch(_){} } })
+      .catch(() => { try { toast('⚠ Sin conexión — la foto no se quitó del servidor', 'warn', 3500); } catch(_){} });
   }
 
   // ── Editar guía existente ────────────────────────────────
