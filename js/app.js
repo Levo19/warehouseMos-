@@ -6877,10 +6877,10 @@ const GuiasView = (() => {
           OfflineManager.addDetalleCache(itemFinal);
           // Si el local fue incrementado mientras GAS estaba en vuelo → sincronizar
           if (localQty > gasQty) {
-            API.actualizarCantidadDetalle({
+            _avisarFalloDetalle(API.actualizarCantidadDetalle({
               idDetalle: res.data.idDetalle,
               cantidadRecibida: localQty
-            }).catch(() => {});
+            }), 'la cantidad');
           }
         }
         _renderCamList(); // quitar ⏳
@@ -7925,7 +7925,7 @@ const GuiasView = (() => {
         PreingresosView.abrirDetalle(idPreingreso);
       } else {
         // Cargar y luego abrir
-        PreingresosView.cargar().then(() => PreingresosView.abrirDetalle(idPreingreso)).catch(() => {});
+        PreingresosView.cargar().then(() => PreingresosView.abrirDetalle(idPreingreso)).catch(() => { try { toast('No se pudo abrir el preingreso', 'warn', 3000); } catch(_){} });
       }
     }, 380);
   }
