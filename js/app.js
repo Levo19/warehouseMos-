@@ -7519,7 +7519,9 @@ const GuiasView = (() => {
     abrirModalPN('', _guiaActual?.idGuia || null);
   }
 
+  let _cerrandoGuia = false;
   async function confirmarCerrarGuia() {
+    if (_cerrandoGuia) return;   // [v2.13.190] guard anti-doble-submit (evita doble POST de cierre)
     if (!_guiaActual) return;
     const det = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
     if (!det.length) { toast('Agrega al menos un ítem antes de cerrar', 'warn'); return; }
@@ -7528,6 +7530,8 @@ const GuiasView = (() => {
     const pnPend = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === _guiaActual.idGuia && p.estado === 'PENDIENTE').length;
     if (pnPend) toast(`⚠ ${pnPend} producto(s) nuevo(s) sin aprobar en esta guía`, 'warn', 4000);
 
+    _cerrandoGuia = true;
+    try {
     // Optimista: actualizar estado en UI inmediatamente
     _guiaActual.estado = 'CERRADA';
     _mostrarDetalleSheet(_guiaActual, false);
@@ -7565,6 +7569,7 @@ const GuiasView = (() => {
       render(_filtrarYBuscar());
       toast('Error: ' + res.error, 'danger');
     }
+    } finally { _cerrandoGuia = false; }
   }
 
   let _creandoGuia = false;
@@ -7918,7 +7923,10 @@ const GuiasView = (() => {
     if (idx >= 0) Object.assign(todas[idx], { tipo, idProveedor, idZona, numeroDocumento: numDoc, comentario });
 
     API.actualizarGuia({ idGuia: _guiaActual.idGuia, tipo, idProveedor, idZona, numeroDocumento: numDoc, comentario })
-      .catch(() => toast('Error al guardar cambios', 'danger'));
+      // [v2.13.190] Capturar también el RECHAZO del backend (ok:false), no solo
+      // la excepción de red — antes mostraba "actualizada" aunque el server fallara.
+      .then(r => { if (r && r.ok === false) { try { toast('⚠ No se guardaron los cambios: ' + (r.error || ''), 'warn', 4000); } catch(_){} } })
+      .catch(() => { try { toast('⚠ Sin conexión — cambios no guardados', 'warn', 3500); } catch(_){} });
 
     toast('Guía actualizada', 'ok', 1500);
   }

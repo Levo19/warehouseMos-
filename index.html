@@ -3095,13 +3095,16 @@
       #guiasToolbar { display:none !important; }
       /* Mostrar el botón NUEVA GUÍA (oculto por defecto en mobile) */
       #tabletNuevaGuia { display:flex; }
-      #listGuias { flex:1; overflow-y:auto; padding-bottom:8px; }
+      /* [v2.13.190] min-height:0 es obligatorio para que un hijo flex con
+         overflow scrollee dentro de una columna flex de altura fija (sin esto
+         el contenido desborda y el último ítem queda cortado, sin scroll). */
+      #listGuias { flex:1; overflow-y:auto; padding-bottom:8px; min-height:0; }
 
       /* Ocultar FAB flotante en tablet (hay botón inline) */
       #view-guias .fab-pill { display:none !important; }
 
       /* Panel preingresos */
-      #tppList { flex:1; overflow-y:auto; }
+      #tppList { flex:1; overflow-y:auto; min-height:0; padding-bottom:8px; }
 
       /* Ocultar botones de navegación cruzada (el panel siempre está visible) */
       #view-guias .nav-sibling-btn,
