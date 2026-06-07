@@ -497,11 +497,17 @@ function loading(parentId, show) {
   }
 }
 
-// [v2.13.188] Scroll-lock del fondo mientras haya algún bottom-sheet abierto.
-// Reconcilia contra el DOM real (no un contador), así NUNCA queda "pegado":
-// si un sheet cierra por cualquier vía, el siguiente abrir/cerrar lo corrige.
+// [v2.13.189] Scroll-lock del fondo mientras haya un sheet abierto VÍA abrirSheet.
+// Se rastrea con un Set (no con query al DOM) para que los sheets que se abren por
+// classList directo (navLp/actionDia/typePicker/etc.) NO contaminen el estado y
+// dejen el body pegado. Backstop: nav() limpia el Set y libera el overflow.
+const _openSheets = new Set();
 function _syncSheetScrollLock() {
-  try { document.body.style.overflow = document.querySelector('.bottom-sheet.open') ? 'hidden' : ''; } catch(_){}
+  try { document.body.style.overflow = _openSheets.size ? 'hidden' : ''; } catch(_){}
+}
+function _resetSheetScrollLock() {
+  _openSheets.clear();
+  try { document.body.style.overflow = ''; } catch(_){}
 }
 
 function abrirSheet(id) {
@@ -509,6 +515,7 @@ function abrirSheet(id) {
   const sheet = document.getElementById(id);
   overlay?.classList.add('open');
   sheet?.classList.add('open');
+  _openSheets.add(id);
   _syncSheetScrollLock();
 }
 
@@ -517,6 +524,7 @@ function cerrarSheet(id) {
   const sheet = document.getElementById(id);
   overlay?.classList.remove('open');
   sheet?.classList.remove('open');
+  _openSheets.delete(id);
   _syncSheetScrollLock();
 }
 
@@ -3898,6 +3906,9 @@ const App = (() => {
     }
 
     closeUserMenu();
+    // [v2.13.189] Backstop: navegar siempre libera el scroll del fondo (un sheet
+    // de la vista anterior no debe dejar el body bloqueado en la nueva vista).
+    _resetSheetScrollLock();
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     const el = document.getElementById('view-' + viewName);
