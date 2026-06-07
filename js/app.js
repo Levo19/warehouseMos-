@@ -555,6 +555,25 @@ function _parseLocalDate(s) {
   return str.length <= 10 ? new Date(str + 'T12:00:00') : new Date(str);
 }
 
+// [v2.13.181] Día (YYYY-MM-DD) SIEMPRE en zona horaria de Perú, sin importar
+// cómo esté configurada la TZ del dispositivo. Espeja al backend, que usa
+// Utilities.formatDate(..., 'America/Lima', 'yyyy-MM-dd'). Así frontend y
+// servidor agrupan el MISMO preingreso en el MISMO día aunque una tablet quede
+// mal configurada en otra zona (antes .getFullYear()/getDate() usaba la TZ local
+// y podía mandar un preingreso de cerca de medianoche al día equivocado).
+const WH_TZ = 'America/Lima';
+function _diaPeru(fechaInput) {
+  const d = fechaInput instanceof Date ? fechaInput : _parseLocalDate(fechaInput);
+  if (!d || isNaN(d)) return '';
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: WH_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  } catch (e) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+}
+function _hoyPeru()  { return _diaPeru(new Date()); }
+function _ayerPeru() { return _diaPeru(new Date(Date.now() - 86400000)); }
+
 function fmtFecha(s) {
   if (!s) return '—';
   const d = _parseLocalDate(s);
@@ -724,13 +743,7 @@ function _resumenCargadoresDia(items) {
 // cliente, igual que el pill del header. Centralizado para garantizar que
 // pill y modal vean exactamente la misma data.
 function _preingresosDeFecha(all, key) {
-  return (all || []).filter(p => {
-    if (!p.fecha) return false;
-    const d = _parseLocalDate(p.fecha);
-    if (isNaN(d)) return false;
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-    return k === key;
-  });
+  return (all || []).filter(p => p.fecha && _diaPeru(p.fecha) === key);
 }
 
 // Para vistas que NO tienen los preingresos en mano (como Guías): mira
@@ -5124,23 +5137,20 @@ const GuiasView = (() => {
       return nb - na;
     });
 
-    const today     = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today.getTime()); yesterday.setDate(today.getDate() - 1);
-    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    // [v2.13.181] Día en TZ de Perú (consistente con el pill de cargadores y el backend)
+    const hoyKey  = _hoyPeru();
+    const ayerKey = _ayerPeru();
+    const months  = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
     function _gKey(g) {
-      if (!g.fecha) return '0000-00-00';
-      const d = _parseLocalDate(g.fecha);
-      if (isNaN(d)) return '0000-00-00';
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return (g.fecha && _diaPeru(g.fecha)) || '0000-00-00';
     }
     function _gLabel(key) {
       if (!key || key === '0000-00-00') return 'Sin fecha';
-      const d = new Date(key + 'T12:00:00');
-      const dMid = new Date(d); dMid.setHours(0,0,0,0);
-      if (dMid.getTime() === today.getTime())     return 'Hoy';
-      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
-      return d.getFullYear() === today.getFullYear()
+      if (key === hoyKey)  return 'Hoy';
+      if (key === ayerKey) return 'Ayer';
+      const d = new Date(key + 'T12:00:00'); // key ya correcto; noon = etiqueta TZ-segura
+      return key.slice(0, 4) === hoyKey.slice(0, 4)
         ? `${d.getDate()} ${months[d.getMonth()]}`
         : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     }
@@ -14359,23 +14369,19 @@ const PreingresosView = (() => {
       const nb = parseInt((b.idPreingreso || '').replace(/\D/g, '')) || 0;
       return nb - na;
     });
-    const today     = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today.getTime()); yesterday.setDate(today.getDate() - 1);
-    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const hoyKey  = _hoyPeru();
+    const ayerKey = _ayerPeru();
+    const months  = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
     function _dateKey(p) {
-      if (!p.fecha) return '0000-00-00';
-      const d = _parseLocalDate(p.fecha);
-      if (isNaN(d)) return '0000-00-00';
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return (p.fecha && _diaPeru(p.fecha)) || '0000-00-00';
     }
     function _dateLabel(key) {
       if (!key || key === '0000-00-00') return 'Sin fecha';
-      const d = new Date(key + 'T12:00:00');
-      const dMid = new Date(d); dMid.setHours(0,0,0,0);
-      if (dMid.getTime() === today.getTime())     return 'Hoy';
-      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
-      return d.getFullYear() === today.getFullYear()
+      if (key === hoyKey)  return 'Hoy';
+      if (key === ayerKey) return 'Ayer';
+      const d = new Date(key + 'T12:00:00'); // key ya es el día correcto; noon = etiqueta TZ-segura
+      return key.slice(0, 4) === hoyKey.slice(0, 4)
         ? `${d.getDate()} ${months[d.getMonth()]}`
         : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     }
@@ -15963,23 +15969,19 @@ const PreingresosView = (() => {
       return nb - na;
     });
 
-    const today     = new Date(); today.setHours(0,0,0,0);
-    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
-    const months    = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    const hoyKey  = _hoyPeru();
+    const ayerKey = _ayerPeru();
+    const months  = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
     function _dateKey(p) {
-      if (!p.fecha) return '0000-00-00';
-      const d = _parseLocalDate(p.fecha);
-      if (isNaN(d)) return '0000-00-00';
-      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      return (p.fecha && _diaPeru(p.fecha)) || '0000-00-00';
     }
     function _dateLabel(key) {
       if (!key || key === '0000-00-00') return 'Sin fecha';
-      const d = new Date(key + 'T12:00:00');
-      const dMid = new Date(d); dMid.setHours(0,0,0,0);
-      if (dMid.getTime() === today.getTime())     return 'Hoy';
-      if (dMid.getTime() === yesterday.getTime()) return 'Ayer';
-      return d.getFullYear() === today.getFullYear()
+      if (key === hoyKey)  return 'Hoy';
+      if (key === ayerKey) return 'Ayer';
+      const d = new Date(key + 'T12:00:00'); // key ya es el día correcto; noon = etiqueta TZ-segura
+      return key.slice(0, 4) === hoyKey.slice(0, 4)
         ? `${d.getDate()} ${months[d.getMonth()]}`
         : `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
     }
@@ -16104,12 +16106,10 @@ const PreingresosView = (() => {
 
   function _fmtFechaLabel(yyyymmdd) {
     if (!yyyymmdd || yyyymmdd === '0000-00-00') return 'Sin fecha';
-    const d = new Date(yyyymmdd + 'T12:00:00');
+    if (yyyymmdd === _hoyPeru())  return 'Hoy';
+    if (yyyymmdd === _ayerPeru()) return 'Ayer';
+    const d = new Date(yyyymmdd + 'T12:00:00'); // key ya correcto; noon = etiqueta TZ-segura
     if (isNaN(d)) return yyyymmdd;
-    const today = new Date(); today.setHours(0,0,0,0);
-    const yest  = new Date(today.getTime() - 86400000);
-    if (+d.setHours(0,0,0,0) === +today) return 'Hoy';
-    if (+d === +yest) return 'Ayer';
     return d.toLocaleDateString('es-PE', { day:'2-digit', month:'long', year:'numeric' });
   }
 
