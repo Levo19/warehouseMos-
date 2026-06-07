@@ -88,6 +88,9 @@ function getStockProducto(codigo) {
 }
 
 function crearProducto(params) {
+  return _conLock('crearProducto', function() { return _crearProductoImpl(params); });
+}
+function _crearProductoImpl(params) {
   var sheet = getProductosSheet();
   var id    = params.idProducto || ('P' + new Date().getTime());
 
@@ -610,6 +613,9 @@ function editarPNCantidad(params) {
 }
 
 function aprobarProductoNuevo(params) {
+  return _conLock('aprobarProductoNuevo', function() { return _aprobarProductoNuevoImpl(params); });
+}
+function _aprobarProductoNuevoImpl(params) {
   var tipo           = String(params.tipo || 'NUEVO').toUpperCase();
   var idGuia         = params.idGuia;
   var codigoOriginal = String(params.codigoOriginal || '').trim();
@@ -1489,6 +1495,9 @@ function ejecutarAuditoria(params) {
 // Registra conteo físico, crea STOCK si no existe (texto),
 // crea AJUSTE si hay diferencia (texto). Todo preserva codigoBarra como texto.
 function auditarProducto(params) {
+  return _conLock('auditarProducto', function() { return _auditarProductoImpl(params); });
+}
+function _auditarProductoImpl(params) {
   var codigoBarra = String(params.codigoBarra || '').trim();
   if (!codigoBarra) return { ok: false, error: 'codigoBarra requerido' };
 
