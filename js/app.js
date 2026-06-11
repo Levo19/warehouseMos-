@@ -18980,6 +18980,13 @@ const ConfigView = (() => {
   function guardar() {
     const gasUrl = document.getElementById('cfgGasUrl').value.trim();
     if (!gasUrl) { toast('Ingresa la URL del GAS', 'warn'); return; }
+    // [fix ALTO-4] validar formato de deployment de Apps Script antes de persistir.
+    // Sin esto, una URL errada/malformada se fijaba para SIEMPRE (wh_gas_url está en PRESERVAR)
+    // → la app quedaba pegada a un /exec equivocado (la preocupación #1 materializada).
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/AKfyc[\w-]{20,}\/exec$/.test(gasUrl)) {
+      toast('URL inválida — debe ser https://script.google.com/macros/s/AKfyc.../exec', 'warn');
+      return;
+    }
     window.WH_CONFIG.gasUrl = gasUrl;
     localStorage.setItem('wh_gas_url', gasUrl);
     const el = document.getElementById('toolsGasUrl');
