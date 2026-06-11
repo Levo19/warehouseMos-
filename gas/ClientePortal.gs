@@ -102,7 +102,9 @@ function clienteRegistrar(params) {
 }
 
 // ── 3. LISTAR clientes (para el modal admin de WH) ─────────
-function clienteListar() {
+function clienteListar(params) {
+  var chk = _requireAdmin(params || {});            // gate admin: la PII de clientes (nombre/teléfono) solo para admin (fix C6)
+  if (!chk.ok) return { ok: false, error: chk.error || 'clave admin requerida' };
   var sh = _shClientes(), data = sh.getDataRange().getValues();
   var out = [];
   for (var i = 1; i < data.length; i++) {
@@ -248,6 +250,14 @@ function clienteConfirmarPedido(params) {
     if (String(data[i][0]) === idPedido) { row = i + 1; tokenCli = data[i][1]; break; }
   }
   if (row < 0) return { ok: false, error: 'PEDIDO_NO_ENCONTRADO' };
+
+  // IDOR guard: quien confirma debe ser el DUEÑO del pedido (su token == token del pedido). (fix C6)
+  // Sin esto, cualquiera con un idPedido enumerable (PC+timestamp) confirmaba pedidos ajenos.
+  // Normaliza vacío→'ANON' espejando clienteRecibirPedido (preserva pedidos anónimos sin ?c=).
+  var tokenReq = String(params.token || '').toUpperCase() || 'ANON';
+  if (String(tokenCli).toUpperCase() !== tokenReq) {
+    return { ok: false, error: 'PEDIDO_NO_ENCONTRADO' };   // no distinguir: no revelar existencia del pedido
+  }
 
   var cli = _cliBuscarToken(tokenCli);
   var nombreCli = cli ? cli.nombre : tokenCli;

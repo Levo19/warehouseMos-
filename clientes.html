@@ -76,12 +76,37 @@ async function api(action, body) {
   return await r.json();
 }
 
+let _claveAdmin = sessionStorage.getItem('whCliClave') || '';
+
+function _gateClave(msg) {
+  document.getElementById('tablaCont').innerHTML =
+    '<div class="text-sm text-slate-300 space-y-2">'
+    + '<div>' + (msg || '🔒 Ingresá la clave admin (8 dígitos) para ver los clientes.') + '</div>'
+    + '<div class="flex gap-2 mt-2">'
+    + '<input id="inClaveAdmin" type="password" inputmode="numeric" maxlength="8" placeholder="Clave admin"'
+    + ' class="bg-slate-800/60 border border-white/10 rounded-lg px-3 py-2 text-sm"'
+    + ' onkeydown="if(event.key===\'Enter\')desbloquear()">'
+    + '<button class="cta" onclick="desbloquear()">Desbloquear</button>'
+    + '</div></div>';
+}
+function desbloquear() {
+  const el = document.getElementById('inClaveAdmin');
+  _claveAdmin = String((el && el.value) || '').trim();
+  sessionStorage.setItem('whCliClave', _claveAdmin);
+  cargar();
+}
+
 async function cargar() {
+  if (!_claveAdmin) { _gateClave(); return; }
   document.getElementById('tablaCont').innerHTML = '<div class="text-slate-400 text-sm">Cargando…</div>';
   try {
-    const r = await fetch(GAS_URL + '?action=clienteListar', { method: 'GET' });
-    const d = await r.json();
-    const clientes = (d.ok && d.data && d.data.clientes) || [];
+    const d = await api('clienteListar', { claveAdmin: _claveAdmin });
+    if (!d.ok) {
+      _claveAdmin = ''; sessionStorage.removeItem('whCliClave');
+      _gateClave('❌ ' + (d.error || 'clave incorrecta') + ' — reintentá.');
+      return;
+    }
+    const clientes = (d.data && d.data.clientes) || [];
     if (!clientes.length) {
       document.getElementById('tablaCont').innerHTML = '<div class="text-slate-400 text-sm italic">Aún no hay clientes. Crea uno arriba.</div>';
       return;

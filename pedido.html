@@ -624,7 +624,7 @@ async function confirmarPedido(){
     if (!DEMO_MODE){
       await fetch(BACKEND_URL, {
         method:'POST',
-        body: JSON.stringify({ action:'clienteConfirmarPedido', idPedido: state.pedidoId, items: state.items })
+        body: JSON.stringify({ action:'clienteConfirmarPedido', idPedido: state.pedidoId, items: state.items, token: token })
       });
     }
     // Guardar histórico local

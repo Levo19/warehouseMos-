@@ -115,7 +115,7 @@ function _route(method, e) {
       case 'actualizarProducto': return actualizarProducto(params);
 
       // ── Stock ──────────────────────────────────────────────
-      case 'getStock':              return getStock(params);
+      case 'getStock':              return getStockFlip(params);  // [Fase 1.D] flag FUENTE_DATOS (default sheets)
       case 'getStockProducto':      return getStockProducto(params.codigo);
       case 'getHistorialStock':     return getHistorialStock(params);
       case 'imprimirHistorialStock':return imprimirHistorialStock(params);
@@ -139,7 +139,7 @@ function _route(method, e) {
       // ── Portal de pedidos del cliente (pedido.html) ──────
       case 'clienteInfo':            return clienteInfo(params);
       case 'clienteRegistrar':       return clienteRegistrar(params);
-      case 'clienteListar':          return clienteListar();
+      case 'clienteListar':          return clienteListar(params);   // ahora exige clave admin (fix C6)
       case 'clienteRecibirPedido':   return clienteRecibirPedido(params);
       case 'clienteConfirmarPedido': return clienteConfirmarPedido(params);
       case 'clienteEstadoPedido':    return clienteEstadoPedido(params);
@@ -239,7 +239,7 @@ function _route(method, e) {
       case 'getLotesVencimiento': return getLotesVencimiento(params);
 
       // ── Rotación semanal para Catálogo MOS ─────────────────
-      case 'getRotacionSemanal':  return getRotacionSemanal(params);
+      case 'getRotacionSemanal':  return getRotacionSemanalFlip(params);  // [Fase 1.D] flag FUENTE_DATOS (default sheets)
 
       // ── Config ─────────────────────────────────────────────
       case 'getConfig':          return getConfigAll();
