@@ -138,7 +138,7 @@ function _route(method, e) {
       case 'extraerCorreccionesJefa':  return extraerCorreccionesJefa(params);
       // ── Portal de pedidos del cliente (pedido.html) ──────
       case 'clienteInfo':            return clienteInfo(params);
-      case 'clienteRegistrar':       return clienteRegistrar(params);
+      case 'clienteRegistrar':       { var _raReg = _requireAdmin(params); if (!_raReg.ok) return _raReg; return clienteRegistrar(params); }   // gate admin (fix C6b); el auto-alta interno (clienteRecibirPedido) NO pasa por el router
       case 'clienteListar':          return clienteListar(params);   // ahora exige clave admin (fix C6)
       case 'clienteRecibirPedido':   return clienteRecibirPedido(params);
       case 'clienteConfirmarPedido': return clienteConfirmarPedido(params);

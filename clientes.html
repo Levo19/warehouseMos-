@@ -156,7 +156,7 @@ function crear() {
   }
 
   // ── Fire-and-forget al backend, rollback si falla ──
-  api('clienteRegistrar', { nombre, telefono, tipo })
+  api('clienteRegistrar', { nombre, telefono, tipo, claveAdmin: _claveAdmin })
     .then(d => {
       if (d.ok && d.data) {
         toast(`✓ Token: ${d.data.token}`);
