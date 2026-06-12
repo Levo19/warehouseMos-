@@ -307,6 +307,15 @@ function clienteEstadoPedido(params) {
   var shP = _shPedidos(), data = shP.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]) === idPedido) {
+      // [Lote2-C · fix M1 revisión 2026-06-12] IDOR guard — mismo patrón que
+      // clienteConfirmarPedido (fix C6): el token del request debe ser el del
+      // DUEÑO del pedido. idPedido es enumerable ('PC'+timestamp); sin esto
+      // cualquiera leía el estado de pedidos ajenos. Mismo error opaco (no
+      // revelar existencia). Sin caller activo en pedido.html hoy → no rompe nada.
+      var tokenReqE = String(params.token || '').toUpperCase() || 'ANON';
+      if (String(data[i][1] || '').toUpperCase() !== tokenReqE) {
+        return { ok: false, error: 'PEDIDO_NO_ENCONTRADO' };
+      }
       var estado = data[i][3] || 'PREVIEW';
       var pasos = CLI_TIMELINE.map(function(p, idx) {
         var idxEstado = ({ 'PREVIEW':0,'CONFIRMADO':1,'EN_DESPACHO':2,'LISTO':3,'EN_CAMINO':4,'ENTREGADO':5 })[estado] || 0;

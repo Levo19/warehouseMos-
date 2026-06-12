@@ -219,7 +219,12 @@ function _route(method, e) {
 
       // ── Ajustes ────────────────────────────────────────────
       case 'getAjustes':         return getAjustes(params);
-      case 'crearAjuste':        return crearAjuste(params);
+      // [Lote2-C · fix A1 revisión 2026-06-12] crearAjuste hace read-modify-write
+      // sobre STOCK (_actualizarStock) — expuesto desnudo en el router corría
+      // concurrente con cerrarGuia/registrarEnvasado (que SÍ toman _conLock) →
+      // lost update = stock corrupto. _conLock es reentrante: la llamada anidada
+      // desde auditarProducto (que ya lo envuelve) sigue funcionando.
+      case 'crearAjuste':        return _conLock('crearAjuste', function() { return crearAjuste(params); });
 
       // ── Producto Nuevo ─────────────────────────────────────
       case 'getProductosNuevos':         return getProductosNuevos(params);
@@ -307,7 +312,9 @@ function _route(method, e) {
       case 'auditarStockGlobal':       return auditarStockGlobal();
       // [v2.13.55] Reconciliación stock
       case 'reconciliarStockMasivo':   return reconciliarStockMasivo(params);
-      case 'reconciliarStockProducto': return reconciliarStockProducto(params);
+      // [Lote2-C · fix A1] mismo lock que crearAjuste (internamente la llama y
+      // escribe STOCK) — antes corría desnuda contra cierres/envasados concurrentes
+      case 'reconciliarStockProducto': return _conLock('reconciliarStockProducto', function() { return reconciliarStockProducto(params); });
       case 'cerrarGuiasAbiertasGlobal': return cerrarGuiasAbiertasGlobal();
 
       // ── Personal ───────────────────────────────────────────
