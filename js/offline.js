@@ -658,6 +658,18 @@ const OfflineManager = (() => {
     return false;
   }
 
+  // ── Patch de una guía existente en caché ────────────────────
+  // [v2.13.186 BUG reabrir] Reabrir/cerrar solo actualizaba la guía en memoria
+  // (todas[idx] + _guiaActual). El cache wh_guias quedaba con el estado VIEJO →
+  // cualquier silentRefresh (que lee getGuiasCache) revertía visualmente el
+  // estado y la guía reabierta volvía a verse CERRADA = no se podía editar
+  // cantidad. Mismo patrón que patchPreingresosCache.
+  function patchGuiaCache(idGuia, changes) {
+    const cache = cargar(KEYS.GUIAS) || [];
+    const idx   = cache.findIndex(g => g.idGuia === idGuia);
+    if (idx >= 0) { Object.assign(cache[idx], changes); guardar(KEYS.GUIAS, cache); }
+  }
+
   // ── Patch de un preingreso existente en caché ───────────────
   function patchPreingresosCache(id, changes) {
     const cache = cargar(KEYS.PREINGRESOS) || [];
@@ -721,6 +733,7 @@ const OfflineManager = (() => {
     getAjustesCache, getAuditoriasCache,
     getAdminPin, getAdminCache, sincronizarAdminCache,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
+    patchGuiaCache,
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,

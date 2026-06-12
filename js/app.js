@@ -4637,8 +4637,15 @@ const App = (() => {
       if (res && res.ok) {
         if (typeof toast === 'function') toast('✓ Guía reabierta', 'ok');
         if (typeof SoundFX !== 'undefined' && SoundFX.done) SoundFX.done();
+        // [v2.13.186 BUG reabrir] PARCHEAR el cache ANTES del silentRefresh.
+        // Antes: precargarOperacional corría async (sin await) y silentRefresh
+        // leía el cache TODAVÍA VIEJO → la guía recién reabierta se re-pintaba
+        // CERRADA → no se podía editar cantidad ("desbloqueé pero no edita").
+        OfflineManager.patchGuiaCache?.(idGuia, { estado: 'ABIERTA' });
         OfflineManager.precargarOperacional?.(true);
         if (window.GuiasView && GuiasView.silentRefresh) GuiasView.silentRefresh();
+        // Si el detalle de ESTA guía está abierto, reflejar el estado ahí también
+        if (window.GuiasView && GuiasView.marcarGuiaAbierta) GuiasView.marcarGuiaAbierta(idGuia);
       } else if (typeof toast === 'function') {
         toast('No se pudo reabrir: ' + ((res && res.error) || '?'), 'warn');
       }
@@ -4904,6 +4911,18 @@ const GuiasView = (() => {
   }
 
   // Refresh silencioso desde el evento 60s — no muestra spinner
+  // [v2.13.186 BUG reabrir] Marca una guía como ABIERTA en el estado local del
+  // módulo (todas + _guiaActual) y re-renderiza. Lo llama _ejecutarReabrir (App),
+  // que vive fuera de este módulo y no puede tocar _guiaActual directo.
+  function marcarGuiaAbierta(idGuia) {
+    const idx = todas.findIndex(g => g.idGuia === idGuia);
+    if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrarYBuscar()); }
+    if (_guiaActual?.idGuia === idGuia) {
+      _guiaActual.estado = 'ABIERTA';
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+  }
+
   function silentRefresh() {
     const fresh = OfflineManager.getGuiasCache();
     if (!fresh.length) return;
@@ -6153,6 +6172,10 @@ const GuiasView = (() => {
     _updAdminDots(0);
     const res = await API.reabrirGuia({ idGuia: _pinGuiaTarget });
     if (res.ok || res.offline) {
+      // [v2.13.186 BUG reabrir] Parchear TAMBIÉN el cache wh_guias — sin esto,
+      // el próximo silentRefresh (sync tick) revertía el estado a CERRADA y la
+      // guía recién reabierta no dejaba editar cantidades.
+      OfflineManager.patchGuiaCache?.(_pinGuiaTarget, { estado: 'ABIERTA' });
       if (_guiaActual?.idGuia === _pinGuiaTarget) {
         _guiaActual.estado = 'ABIERTA';
         _mostrarDetalleSheet(_guiaActual, false);
@@ -7534,6 +7557,9 @@ const GuiasView = (() => {
     try {
     // Optimista: actualizar estado en UI inmediatamente
     _guiaActual.estado = 'CERRADA';
+    // [v2.13.186] Parchear cache también (simétrico con reabrir) — sin esto un
+    // silentRefresh en la ventana del POST re-pintaba la guía ABIERTA.
+    OfflineManager.patchGuiaCache?.(_guiaActual.idGuia, { estado: 'CERRADA' });
     _mostrarDetalleSheet(_guiaActual, false);
     const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
     if (idx >= 0) { todas[idx].estado = 'CERRADA'; render(_filtrarYBuscar()); }
@@ -7564,6 +7590,7 @@ const GuiasView = (() => {
     } else {
       // Revertir si GAS rechazó
       _guiaActual.estado = 'ABIERTA';
+      OfflineManager.patchGuiaCache?.(_guiaActual.idGuia, { estado: 'ABIERTA' });   // [v2.13.186] revert simétrico en cache
       if (idx >= 0) todas[idx].estado = 'ABIERTA';
       _mostrarDetalleSheet(_guiaActual, false);
       render(_filtrarYBuscar());
@@ -7998,6 +8025,7 @@ const GuiasView = (() => {
 
   return {
     cargar, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
+    marcarGuiaAbierta,   // [v2.13.186] reabrir desde App → refleja ABIERTA en módulo
     crearConTipo,
     filtrarTablet, _searchFocusGuiaTablet,
     buscar, buscarClear,
