@@ -1975,6 +1975,9 @@ function _actualizarFotosPreingresoImpl(params) {
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === idPreingreso) {
       sheet.getRange(i + 1, colFotos + 1).setValue(fotos);
+      // [100x] dual-write: la subida de fotos en background actualiza la hoja DESPUÉS del crear → sin esto
+      // la sombra quedaba con fotos='' hasta el batch (15min). Cierra el gap de frescura en preingresos flipeado.
+      try { if (typeof _dualWritePreingresoWH === 'function') _dualWritePreingresoWH(idPreingreso); } catch(_eDW) {}
       return { ok: true, data: { fotos: fotos } };
     }
   }
