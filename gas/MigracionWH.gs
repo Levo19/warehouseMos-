@@ -30,8 +30,13 @@ function _whText(v){ return (v==null||v==='')?null:String(v); }
 function _whNum(v){ if(v==null||v==='')return null; if(typeof v==='number')return isNaN(v)?null:v; var s=String(v).trim(); if(s.charAt(0)==='#')return null; var n=parseFloat(s.replace(',','.')); return isNaN(n)?null:n; }   // "#NUM!"→null
 function _whInt(v){ var n=_whNum(v); return n==null?null:Math.round(n); }
 function _whDate(v){ if(v==null||v==='')return null;
-  // date-only STRING → new Date lo lee como UTC y al formatear en Lima cae al día anterior. Anclar a medianoche Lima.
-  if(!(v instanceof Date) && /^\d{4}-\d{2}-\d{2}$/.test(String(v).trim())) v=String(v).trim()+'T00:00:00-05:00';
+  if(!(v instanceof Date)){
+    var sv=String(v).trim();
+    // date-only STRING → new Date lo lee como UTC y al formatear en Lima cae al día anterior. Anclar a medianoche Lima.
+    if(/^\d{4}-\d{2}-\d{2}$/.test(sv)) v=sv+'T00:00:00-05:00';
+    // dd/MM/yyyy (formato peruano de fechas OCR ingresadas a mano) → ISO anclado a Lima.
+    else if(/^\d{2}\/\d{2}\/\d{4}$/.test(sv)){ var p=sv.split('/'); v=p[2]+'-'+p[1]+'-'+p[0]+'T00:00:00-05:00'; }
+  }
   var d=(v instanceof Date)?v:new Date(v); if(isNaN(d.getTime()))return null; return Utilities.formatDate(d,'America/Lima',"yyyy-MM-dd'T'HH:mm:ssXXX"); }
 function _whHora(v){ if(v==null||v==='')return null; if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),'HH:mm:ss'); return String(v); }   // time-serial 1899 → HH:mm:ss en TZ del script (coherente con _sheetToObjects)
 function _whBool(v){ if(v==null||v==='')return null; if(typeof v==='boolean')return v; var s=String(v).trim().toLowerCase(); if(s==='true'||s==='1'||s==='si'||s==='sí'||s==='verdadero'||s==='x')return true; if(s==='false'||s==='0'||s==='no'||s==='falso')return false; return null; }
@@ -1009,7 +1014,9 @@ function _sortKeysDeep(o){
 // Normaliza a 'yyyy-MM-dd' (igual que _sheetToObjects trunca toda Date). Tolera string ISO con hora.
 function _norm10(v){
   if(v==null||v==='') return '';
-  var s=String(v); if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0,10);
+  var s=String(v).trim();
+  if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0,10);
+  if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)){ var p=s.split('/'); return p[2]+'-'+p[1]+'-'+p[0]; }  // dd/MM/yyyy → yyyy-MM-dd
   var d=new Date(s); return isNaN(d.getTime())?s:Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd');
 }
 // Igualdad de fecha tolerante: ambos lados se comparan como 'yyyy-MM-dd' (la celda puede ser Date o string ISO).

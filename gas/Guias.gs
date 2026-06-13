@@ -7,8 +7,7 @@
 // ============================================================
 
 function getGuias(params) {
-  var sheet = getSheet('GUIAS');
-  var rows  = _sheetToObjects(sheet);
+  var rows = _filasLecturaWH('guias', 'GUIAS');   // [PASO 3] sombra Supabase + fallback Sheets (OCR fechas normalizadas a yyyy-MM-dd)
 
   if (params.tipo)    rows = rows.filter(function(r){ return r.tipo === params.tipo; });
   if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
