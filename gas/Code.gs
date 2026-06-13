@@ -106,6 +106,13 @@ function _route(method, e) {
       case 'descargarOperacional': return descargarOperacional();
       // [Migración WH · gate Fase 2] paridad Sheets↔Supabase (solo lectura)
       case 'verificarParidadWH':   return verificarParidadWH(params.dias, params.tabla);
+      // [Migración WH · PASO 3 lectura directa] gate de paridad de LECTURA + estado del flip (solo lectura)
+      case 'compararStockWH':      return compararStockWH();
+      case 'compararRotacionWH':   return compararRotacionWH();
+      case 'estadoFuenteDatosWH':  return estadoFuenteDatosWH();
+      // rollback seguro: volver a Sheets (default histórico) — exponer SIN token es inofensivo
+      // (leer de Sheets es el comportamiento conocido-bueno; el activar SÍ queda fuera del router).
+      case 'desactivarSupabaseWH': return desactivarSupabaseWH();
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();
