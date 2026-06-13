@@ -940,3 +940,107 @@ function _dualWriteProductoNuevoWH(idProductoNuevo){
     return { ok:false, error:'producto nuevo no encontrado: '+id };
   } catch(e){ Logger.log('[dualWriteProductoNuevoWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
+
+// ════════════════════════════════════════════════════════════════════
+// [Migración WH · PASO 3] LECTURA DIRECTA genérica desde la sombra Supabase.
+// Invierte _sheetToObjects: reconstruye objetos con el MISMO shape (claves camelCase, fechas
+// 'yyyy-MM-dd' en TZ del script, celdas vacías='') a partir de wh.<tabla>, reusando _WH_SPECS.
+// Un solo helper sirve para TODAS las tablas → cada lectura nueva = un getXxxFlip + cablear.
+// El gate compararLecturaWH(tabla) valida paridad EXACTA por id ANTES de cablear (regla de oro).
+// ════════════════════════════════════════════════════════════════════
+
+// Convierte un valor pg al valor que _sheetToObjects habría producido de la celda original.
+function _sbValToSheet(v, t, tz){
+  if(v==null) return '';                                   // celda vacía en Sheets = ''
+  if(t==='num' || t==='int'){ var n=(typeof v==='number')?v:parseFloat(v); return isNaN(n)?'':n; }
+  if(t==='date'){ var d=(v instanceof Date)?v:new Date(v); return isNaN(d.getTime())?'':Utilities.formatDate(d,tz,'yyyy-MM-dd'); }
+  if(t==='bool'){ return (v===true||v==='true'||v===1||v==='1'); }
+  if(t==='hora'){ return String(v); }
+  if(t==='json'){ return v; }                              // objeto (PostgREST ya parsea jsonb)
+  return String(v);                                        // text
+}
+
+// Reconstruye los objetos de UNA tabla desde filas pg (mismo shape que _sheetToObjects).
+function _sbRowsToObjsWH(tabla, rows){
+  var cfg=_WH_SPECS[tabla]; if(!cfg) throw new Error('sin spec: '+tabla);
+  var tz=Session.getScriptTimeZone(), out=[];
+  for(var i=0;i<rows.length;i++){
+    var row=rows[i], o={};
+    for(var s=0;s<cfg.spec.length;s++){ o[cfg.spec[s][1]]=_sbValToSheet(row[cfg.spec[s][0]], cfg.spec[s][2], tz); }
+    out.push(o);
+  }
+  return out;
+}
+
+// Lee TODA una tabla wh.<tabla> (paginado, ordenado por PK) y la mapea a shape Sheets. Lanza si falla.
+function _leerTablaWH(tabla){
+  var cfg=_WH_SPECS[tabla]; if(!cfg) throw new Error('sin spec: '+tabla);
+  var pk=cfg.onConflict.split(',')[0];
+  var r=_sbSelectAll('wh.'+tabla, pk+'.asc');
+  if(!r.ok) throw new Error('lectura wh.'+tabla+' falló: '+(r.error||''));
+  return _sbRowsToObjsWH(tabla, r.data||[]);
+}
+
+// PUNTO ÚNICO de lectura de una tabla para las funciones de API: sombra Supabase si el flip está ON
+// (key 'lectura_<tabla>'), con FALLBACK automático a Sheets ante cualquier fallo. Reemplaza
+// `_sheetToObjects(getSheet(X))` en las funciones getXxx de presentación (NO en lecturas internas).
+function _filasLecturaWH(tabla, sheetName){
+  if(_fuenteDatos('lectura_'+tabla)==='supabase'){
+    try{ return _leerTablaWH(tabla); }
+    catch(e){ Logger.log('[filasLecturaWH '+tabla+'] cae a Sheets: '+(e&&e.message)); }
+  }
+  return _sheetToObjects(getSheet(sheetName));
+}
+
+// Comparación numérica tolerante (vacío==vacío, ±0.001).
+function _numEqLoose(a,b){
+  var va=(a===''||a==null), vb=(b===''||b==null);
+  if(va&&vb) return true; if(va!==vb) return false;
+  var x=parseFloat(a), y=parseFloat(b); if(isNaN(x)&&isNaN(y)) return true;
+  return Math.abs((x||0)-(y||0))<0.001;
+}
+
+// Diffs por id entre dataset Sheets y dataset Supabase de UNA tabla (campo a campo según spec).
+function _diffDatasetWH(tabla, sheetData, supaData){
+  var cfg=_WH_SPECS[tabla], key=cfg.keyHeader, diffs=[];
+  function byKey(arr){ var m={}; for(var i=0;i<arr.length;i++){ m[String(arr[i][key])]=arr[i]; } return m; }
+  var ms=byKey(sheetData), mb=byKey(supaData), ids={};
+  Object.keys(ms).forEach(function(k){ids[k]=1;}); Object.keys(mb).forEach(function(k){ids[k]=1;});
+  Object.keys(ids).forEach(function(id){
+    if(!ms[id]){ diffs.push(id+': falta en SHEETS'); return; }
+    if(!mb[id]){ diffs.push(id+': falta en SUPABASE'); return; }
+    var a=ms[id], b=mb[id];
+    for(var s=0;s<cfg.spec.length;s++){
+      var h=cfg.spec[s][1], t=cfg.spec[s][2];
+      var eq=(t==='num'||t==='int') ? _numEqLoose(a[h],b[h]) : (String(a[h])===String(b[h]));
+      if(!eq) diffs.push(id+'.'+h+': sheets='+JSON.stringify(a[h])+' sb='+JSON.stringify(b[h]));
+    }
+  });
+  return diffs;
+}
+
+// Map tabla → lectura CRUDA de la hoja (sin filtros) para el gate. Se extiende por ronda.
+var _LECTURA_SHEET_FN = {
+  mermas:         function(){ return _sheetToObjects(getSheet('MERMAS')); },
+  auditorias:     function(){ return _sheetToObjects(getSheet('AUDITORIAS')); },
+  ajustes:        function(){ return _sheetToObjects(getSheet('AJUSTES')); },
+  envasados:      function(){ return _sheetToObjects(getSheet('ENVASADOS')); },
+  producto_nuevo: function(){ return _sheetToObjects(getSheet('PRODUCTO_NUEVO')); }
+};
+
+// GATE genérico de paridad de lectura: Sheets crudo vs sombra Supabase, por id.
+function compararLecturaWH(tabla){
+  tabla=String(tabla||'');
+  if(!_WH_SPECS[tabla]) return { ok:false, error:'tabla sin spec: '+tabla };
+  if(!_LECTURA_SHEET_FN[tabla]) return { ok:false, error:'tabla sin lectura sheet registrada: '+tabla };
+  try{
+    var t0=Date.now(); var sh=_LECTURA_SHEET_FN[tabla](); var tS=Date.now()-t0;
+    var t1=Date.now(); var sb=_leerTablaWH(tabla); var tB=Date.now()-t1;
+    var diffs=_diffDatasetWH(tabla, sh, sb);
+    return { ok:diffs.length===0, tabla:tabla,
+      filas:{sheets:sh.length, sb:sb.length},
+      velocidad:{sheets_ms:tS, supabase_ms:tB, speedup:(tS&&tB)?(Math.round(tS/tB*10)/10+'x'):'n/a'},
+      veredicto: diffs.length===0?'✓ PARIDAD EXACTA — listo para flip':'⚠ '+diffs.length+' diferencias',
+      diferencias: diffs.slice(0,40) };
+  }catch(e){ return { ok:false, tabla:tabla, error:String(e&&e.message||e) }; }
+}

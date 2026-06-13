@@ -109,6 +109,7 @@ function _route(method, e) {
       // [Migración WH · PASO 3 lectura directa] gate de paridad de LECTURA + estado del flip (solo lectura)
       case 'compararStockWH':      return compararStockWH();
       case 'compararRotacionWH':   return compararRotacionWH();
+      case 'compararLecturaWH':    return compararLecturaWH(params.tabla);  // gate genérico de lectura por tabla
       case 'estadoFuenteDatosWH':  return estadoFuenteDatosWH();
       // Controles operativos del flip de lectura (par activar/desactivar). Seguro de exponer: la lectura
       // Supabase cuadra al centavo (gate verificado) y SIEMPRE cae a Sheets ante cualquier fallo.

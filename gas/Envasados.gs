@@ -51,7 +51,7 @@ function _calcBarcodeAdaptativo(codigo) {
 }
 
 function getEnvasados(params) {
-  var rows = _sheetToObjects(getSheet('ENVASADOS'));
+  var rows = _filasLecturaWH('envasados', 'ENVASADOS');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.fecha)      rows = rows.filter(function(r){ return r.fecha === params.fecha; });
   if (params.fechaDesde) rows = rows.filter(function(r){ return String(r.fecha) >= String(params.fechaDesde); });

@@ -236,7 +236,7 @@ function _subirFotoProductoNuevo(codigoBarra, fotoBase64, mimeType) {
 }
 
 function getProductosNuevos(params) {
-  var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
+  var rows = _filasLecturaWH('producto_nuevo', 'PRODUCTO_NUEVO');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado) rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   return { ok: true, data: rows };
 }
@@ -246,7 +246,7 @@ function getProductosNuevosRecientes(params) {
   var dias = parseInt(params && params.dias) || 3;
   var corte = new Date();
   corte.setDate(corte.getDate() - dias);
-  var rows = _sheetToObjects(getSheet('PRODUCTO_NUEVO')).filter(function(r){
+  var rows = _filasLecturaWH('producto_nuevo', 'PRODUCTO_NUEVO').filter(function(r){   // [PASO 3] sombra + fallback
     if (String(r.estado).toUpperCase() !== 'APROBADO') return false;
     if (!r.fechaAprobacion) return false;
     var f = r.fechaAprobacion instanceof Date ? r.fechaAprobacion : new Date(r.fechaAprobacion);
@@ -1183,7 +1183,7 @@ function imprimirHistorialStock(params) {
 
 // ── Mermas ──────────────────────────────────────────────────
 function getMermas(params) {
-  var rows = _sheetToObjects(getSheet('MERMAS'));
+  var rows = _filasLecturaWH('mermas', 'MERMAS');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.codigo)  rows = rows.filter(function(r){ return r.codigoProducto === params.codigo; });
   if (params.limit)   rows = rows.slice(0, parseInt(params.limit));
@@ -1402,7 +1402,7 @@ function _getOCrearGuiaMermaSemana(usuario) {
 
 // Endpoint: lista mermas EN_PROCESO con flag de vencidas (>3 días)
 function getMermasEnProceso(params) {
-  var rows = _sheetToObjects(getSheet('MERMAS'));
+  var rows = _filasLecturaWH('mermas', 'MERMAS');   // [PASO 3] sombra Supabase + fallback Sheets
   rows = rows.filter(function(r) { return String(r.estado || '').toUpperCase() === 'EN_PROCESO'; });
   var ahora = new Date().getTime();
   var TRES_DIAS = 3 * 24 * 60 * 60 * 1000;
@@ -1417,7 +1417,7 @@ function getMermasEnProceso(params) {
 
 // Cuenta mermas vencidas (>3 días sin resolver) — para badge en dashboard
 function getMermasVencidas() {
-  var rows = _sheetToObjects(getSheet('MERMAS'));
+  var rows = _filasLecturaWH('mermas', 'MERMAS');   // [PASO 3] sombra Supabase + fallback Sheets
   var ahora = new Date().getTime();
   var TRES_DIAS = 3 * 24 * 60 * 60 * 1000;
   var vencidas = rows.filter(function(r) {
@@ -1461,7 +1461,7 @@ function _cerrarMermasDeGuia(idGuia, detalles) {
 
 // ── Auditorias ──────────────────────────────────────────────
 function getAuditorias(params) {
-  var rows = _sheetToObjects(getSheet('AUDITORIAS'));
+  var rows = _filasLecturaWH('auditorias', 'AUDITORIAS');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado)  rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.usuario) rows = rows.filter(function(r){ return r.usuario === params.usuario; });
   return { ok: true, data: rows };
@@ -1615,7 +1615,7 @@ function _auditarProductoImpl(params) {
 
 // ── Ajustes ─────────────────────────────────────────────────
 function getAjustes(params) {
-  var rows = _sheetToObjects(getSheet('AJUSTES'));
+  var rows = _filasLecturaWH('ajustes', 'AJUSTES');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.codigo) rows = rows.filter(function(r){ return r.codigoProducto === params.codigo; });
   return { ok: true, data: rows };
 }
