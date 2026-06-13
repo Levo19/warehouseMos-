@@ -1426,6 +1426,9 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   guiasSheet.getRange(filaGuia, idxMontoTotal + 1).setValue(montoTotal);
   // [WH Fase 2 · PASO 2] PATCH del estado+monto a la sombra en tiempo real (best-effort)
   try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { estado: 'CERRADA', monto_total: montoTotal }); } catch(_eDW) {}
+  // [WH Fase 2 · PASO 2] re-sincronizar las líneas (ítems) de la guía a la sombra: al cerrar, los ítems son
+  // finales y es cuando se leen para despacho/auditoría → wh.guia_detalle queda fresco junto con la cabecera.
+  try { if (typeof _dualWriteDetallesGuiaWH === 'function') _dualWriteDetallesGuiaWH(idGuia); } catch(_eDD) {}
 
   // Si fue SALIDA_MERMA (cierre semanal manual), marcar mermas asociadas como DESECHADA
   // y notificar a MASTER/ADMINISTRADOR vía push

@@ -776,3 +776,34 @@ function _dualWritePreingresoWH(idPreingreso){
     return { ok:false, error:'preingreso no encontrado: '+id };
   } catch(e){ Logger.log('[dualWritePreingresoWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
+
+// [WH Fase 2 · PASO 2] Re-sincroniza TODAS las líneas de UNA guía a wh.guia_detalle (best-effort).
+// La PK es (id_guia, linea) posicional → NO se puede dual-write una línea suelta sin re-numerar. Esta
+// función reproduce EXACTAMENTE la numeración del batch (linea = N-ésima fila de la guía en orden de hoja),
+// así el upsert pisa las filas correctas. Pensada para llamarse al CERRAR la guía (ítems finales = cuando
+// se leen para despacho/auditoría). NUNCA lanza. Nota: si una fila se BORRÓ físicamente y N decrece, queda
+// un huérfano de linea alta en la sombra (misma limitación que el batch; anularDetalle marca, no borra).
+function _dualWriteDetallesGuiaWH(idGuia){
+  try {
+    var id = String(idGuia||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('GUIA_DETALLE'); if(!sh) return { ok:false, error:'GUIA_DETALLE no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    var iIdG = hdrs.indexOf('idGuia'); if(iIdG<0) return { ok:false, error:'col idGuia' };
+    var cfg = _WH_SPECS.guia_detalle;
+    var rows = [], linea = 0;
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][iIdG]) !== id) continue;
+      linea++;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      var r = _whRowMap(o, cfg.spec);
+      if(cfg.post) r = cfg.post(r, o);
+      r.linea = linea;   // PK posicional — idéntico criterio que el batch (lineaBy id_guia, orden de hoja)
+      rows.push(r);
+    }
+    if(!rows.length) return { ok:true, nada:true };
+    var res = _sbUpsert('wh.guia_detalle', rows, cfg.onConflict);
+    if(!res.ok) Logger.log('[dualWriteDetallesGuiaWH '+id+'] '+(res.error||''));
+    return res;
+  } catch(e){ Logger.log('[dualWriteDetallesGuiaWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
