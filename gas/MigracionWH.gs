@@ -91,7 +91,8 @@ var _WH_SPECS = {
   guia_detalle: { sheet:'GUIA_DETALLE', onConflict:'id_guia,linea', keyHeader:'idGuia', lineaBy:'id_guia', spec:[
     ['id_guia','idGuia','text'],['cod_producto','codigoProducto','text'],['cant_esperada','cantidadEsperada','num'],
     ['cant_recibida','cantidadRecibida','num'],['precio_unitario','precioUnitario','num'],['id_lote','idLote','text'],
-    ['observacion','observacion','text'],['id_producto_nuevo','idProductoNuevo','text']
+    ['observacion','observacion','text'],['id_producto_nuevo','idProductoNuevo','text'],
+    ['id_detalle','idDetalle','text'],['fecha_vencimiento','fechaVencimiento','date']
   ]},
   stock: { sheet:'STOCK', onConflict:'id_stock', keyHeader:'idStock', spec:[
     ['id_stock','idStock','text'],['cod_producto','codigoProducto','text'],['cantidad_disponible','cantidadDisponible','num'],
