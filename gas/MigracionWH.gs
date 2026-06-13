@@ -1043,7 +1043,10 @@ var _LECTURA_SHEET_FN = {
   envasados:      function(){ return _sheetToObjects(getSheet('ENVASADOS')); },
   producto_nuevo: function(){ return _sheetToObjects(getSheet('PRODUCTO_NUEVO')); },
   guias:          function(){ return _sheetToObjects(getSheet('GUIAS')); },
-  preingresos:    function(){ return _sheetToObjects(getSheet('PREINGRESOS')); }
+  preingresos:    function(){ return _sheetToObjects(getSheet('PREINGRESOS')); },
+  lotes_vencimiento: function(){ return _sheetToObjects(getSheet('LOTES_VENCIMIENTO')); },
+  stock_movimientos: function(){ return _sheetToObjects(getSheet('STOCK_MOVIMIENTOS')); },
+  alertas_stock:     function(){ return _sheetToObjects(getSheet('ALERTAS_STOCK')); }
 };
 
 // GATE genérico de paridad de lectura: Sheets crudo vs sombra Supabase, por id.

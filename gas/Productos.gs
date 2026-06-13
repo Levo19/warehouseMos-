@@ -154,7 +154,7 @@ function _actualizarProductoImpl(params) {
 
 // ── Lotes de vencimiento ────────────────────────────────────
 function getLotesVencimiento(params) {
-  var rows = _sheetToObjects(getSheet('LOTES_VENCIMIENTO'));
+  var rows = _filasLecturaWH('lotes_vencimiento', 'LOTES_VENCIMIENTO');   // [PASO 3] sombra Supabase + fallback Sheets
   var hoy  = new Date();
 
   if (params.codigoProducto) {
