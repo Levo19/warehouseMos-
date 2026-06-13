@@ -510,6 +510,9 @@ function registrarProductoNuevo(params) {
       } catch(eP) { Logger.log('Push PN nuevo: ' + eP.message); }
     }
 
+    // [WH F2 p2 · R4] dual-write del producto nuevo (insert o update) a la sombra (best-effort)
+    try { if (typeof _dualWriteProductoNuevoWH === 'function') _dualWriteProductoNuevoWH(id); } catch(_eDW) {}
+
     return { ok: true, data: { idProductoNuevo: id, codigoBarra: codigoBarra, idempotente: idempotente } };
   } finally {
     try { lock.releaseLock(); } catch(_) {}
@@ -609,6 +612,9 @@ function editarPNCantidad(params) {
         }
       }
     }
+    // [WH F2 p2 · R4] dual-write del PN con la cantidad editada (best-effort)
+    try { if (typeof _dualWriteProductoNuevoWH === 'function') _dualWriteProductoNuevoWH(idProductoNuevo); } catch(_eDW) {}
+
     return { ok: true, data: { idProductoNuevo: idProductoNuevo, cantidad: nuevaCantidad } };
   } finally {
     try { lock.releaseLock(); } catch(_) {}
@@ -819,6 +825,11 @@ function _aprobarProductoNuevoImpl(params) {
   } catch(eL) {
     Logger.log('aprobarProductoNuevo: lote error: ' + eL.message);
   }
+
+  // [WH F2 p2 · R4] dual-write del PN aprobado + re-sync de líneas de la guía (estado/código/cantidad
+  // cambian en GUIA_DETALLE durante la aprobación → mantener la sombra fresca). Best-effort.
+  try { if (typeof _dualWriteProductoNuevoWH === 'function') _dualWriteProductoNuevoWH(params.idProductoNuevo); } catch(_eDW) {}
+  try { if (idGuia && typeof _dualWriteDetallesGuiaWH === 'function') _dualWriteDetallesGuiaWH(idGuia); } catch(_eDW2) {}
 
   return { ok: true, data: { idProducto: idProductoCreado, tipo: tipo, guiaCerrada: guiaCerrada } };
 }
@@ -1465,6 +1476,8 @@ function asignarAuditoria(params) {
     id, new Date(), params.codigoProducto, params.usuario,
     stockActual, 0, 0, '', '', 'ASIGNADA', ''
   ]);
+  // [WH F2 p2 · R4] dual-write de la auditoría asignada (best-effort)
+  try { if (typeof _dualWriteAuditoriaWH === 'function') _dualWriteAuditoriaWH(id); } catch(_eDW) {}
   return { ok: true, data: { idAuditoria: id } };
 }
 
@@ -1488,6 +1501,8 @@ function ejecutarAuditoria(params) {
       sheet.getRange(i + 1, hdrs.indexOf('estado')         + 1).setValue('EJECUTADA');
       sheet.getRange(i + 1, hdrs.indexOf('fechaEjecucion') + 1).setValue(new Date());
       if (params.idSesion) registrarActividad(params.idSesion, 'AUDITORIA_EJECUTADA', 1);
+      // [WH F2 p2 · R4] dual-write de la auditoría ejecutada (best-effort)
+      try { if (typeof _dualWriteAuditoriaWH === 'function') _dualWriteAuditoriaWH(params.idAuditoria); } catch(_eDW) {}
       return { ok: true, data: { idAuditoria: params.idAuditoria, diferencia: diff, resultado: resultado } };
     }
   }
@@ -1543,6 +1558,14 @@ function _auditarProductoImpl(params) {
     if (ajColCod > 0) ajSheet.getRange(ajNext, ajColCod).setNumberFormat('@');
     ajSheet.getRange(ajNext, 8).setNumberFormat('dd/MM/yyyy HH:mm');
     ajSheet.getRange(ajNext, 1, 1, ajVals.length).setValues([ajVals]);
+    // [WH F2 p2 · R4] dual-write del ajuste (best-effort; espeja igual que crearAjuste)
+    try {
+      if (typeof _dualWriteWH === 'function') {
+        _dualWriteWH('ajustes', { idAjuste: ajId, codigoProducto: codigoBarra, tipoAjuste: tipo,
+          cantidadAjuste: cant, motivo: motivo, usuario: String(params.usuario || ''),
+          idAuditoria: audId, fecha: ajVals[7] });
+      }
+    } catch(_eDW) {}
     return ajId;
   }
 
@@ -1556,6 +1579,13 @@ function _auditarProductoImpl(params) {
     stSheet.getRange(stNext, 2).setNumberFormat('@');
     stSheet.getRange(stNext, 4).setNumberFormat('dd/MM/yyyy HH:mm');
     stSheet.getRange(stNext, 1, 1, stVals.length).setValues([stVals]);
+    // [WH F2 p2 · R4] dual-write del stock recién creado (este camino NO pasa por _actualizarStock)
+    try {
+      if (typeof _dualWriteWH === 'function') {
+        _dualWriteWH('stock', { idStock: stVals[0], codigoProducto: codigoBarra,
+          cantidadDisponible: stockFisico, ultimaActualizacion: stVals[3] });
+      }
+    } catch(_eDW) {}
   } else if (Math.abs(diff) > 0.5) {
     // Diferencia real → AJUSTE INC/DEC + actualizar STOCK
     _writeAjuste(diff > 0 ? 'INC' : 'DEC', Math.abs(diff), 'Auditoria diaria');
@@ -1567,6 +1597,9 @@ function _auditarProductoImpl(params) {
     });
   }
   // Si diff ≤ 0.5: stock cuadra, solo queda en AUDITORIAS, sin tocar AJUSTES
+
+  // [WH F2 p2 · R4] dual-write de la auditoría directa (best-effort)
+  try { if (typeof _dualWriteAuditoriaWH === 'function') _dualWriteAuditoriaWH(audId); } catch(_eDW) {}
 
   return {
     ok: true,

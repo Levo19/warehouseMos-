@@ -839,3 +839,35 @@ function _dualWriteMermaWH(idMerma){
     return { ok:false, error:'merma no encontrada: '+id };
   } catch(e){ Logger.log('[dualWriteMermaWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
+
+// [WH Fase 2 · PASO 2 · R4] Re-lee una auditoría por id y la espeja a wh.auditorias (best-effort).
+function _dualWriteAuditoriaWH(idAuditoria){
+  try {
+    var id = String(idAuditoria||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('AUDITORIAS'); if(!sh) return { ok:false, error:'AUDITORIAS no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][0]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('auditorias', o);
+    }
+    return { ok:false, error:'auditoria no encontrada: '+id };
+  } catch(e){ Logger.log('[dualWriteAuditoriaWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+
+// [WH Fase 2 · PASO 2 · R4] Re-lee un producto nuevo por id y lo espeja a wh.producto_nuevo (best-effort).
+function _dualWriteProductoNuevoWH(idProductoNuevo){
+  try {
+    var id = String(idProductoNuevo||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('PRODUCTO_NUEVO'); if(!sh) return { ok:false, error:'PRODUCTO_NUEVO no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][0]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('producto_nuevo', o);
+    }
+    return { ok:false, error:'producto nuevo no encontrado: '+id };
+  } catch(e){ Logger.log('[dualWriteProductoNuevoWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
