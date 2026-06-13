@@ -49,6 +49,7 @@ function _whVal(raw,t){
   if(t==='date')return _whDate(raw);
   if(t==='hora')return _whHora(raw);
   if(t==='bool')return _whBool(raw);
+  if(t==='sino')return _whBool(raw);   // "SI/NO" en hoja → boolean en pg (mismo forward que bool)
   if(t==='json')return _whJson(raw);
   return _whText(raw);
 }
@@ -185,7 +186,7 @@ var _WH_SPECS = {
   alertas_stock: { sheet:'ALERTAS_STOCK', onConflict:'id_alerta', keyHeader:'idAlerta', spec:[
     ['id_alerta','idAlerta','text'],['fecha','fecha','date'],['cod_producto','codigoProducto','text'],['descripcion','descripcion','text'],
     ['stock_real','stockReal','num'],['stock_teorico','stockTeorico','num'],['diferencia','diferencia','num'],
-    ['revisado','revisado','bool'],['fecha_revision','fechaRevision','date']
+    ['revisado','revisado','sino'],['fecha_revision','fechaRevision','date']
   ]},
   config: { sheet:'CONFIG', onConflict:'clave', keyHeader:'clave', spec:[
     ['clave','clave','text'],['valor','valor','text'],['descripcion','descripcion','text']
@@ -960,6 +961,7 @@ function _sbValToSheet(v, t, tz){
   if(t==='num' || t==='int'){ var n=(typeof v==='number')?v:parseFloat(v); return isNaN(n)?'':n; }
   if(t==='date'){ var d=(v instanceof Date)?v:new Date(v); return isNaN(d.getTime())?'':Utilities.formatDate(d,tz,'yyyy-MM-dd'); }
   if(t==='bool'){ return (v===true||v==='true'||v===1||v==='1'); }
+  if(t==='sino'){ return (v===true||v==='true'||v===1||v==='1') ? 'SI' : 'NO'; }   // boolean pg → "SI/NO" (como la celda)
   if(t==='hora'){ return String(v); }
   if(t==='json'){ return (typeof v==='object') ? JSON.stringify(v) : String(v); }  // string JSON, como _sheetToObjects (celda texto)
   return String(v);                                        // text

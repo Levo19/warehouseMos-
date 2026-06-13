@@ -215,10 +215,8 @@ function _guardarAlertasStock(alertas, fechaAud) {
 // Endpoints para el frontend
 // ============================================================
 function getAlertasStock(params) {
-  var ss = SpreadsheetApp.openById(SS_ID);
-  var sheet = ss.getSheetByName('ALERTAS_STOCK');
-  if (!sheet) return { ok: true, data: [] };
-  var rows = _sheetToObjects(sheet);
+  // [PASO 3] sombra Supabase + fallback Sheets (dedup por idAlerta; revisado normalizado SI/NO)
+  var rows = _filasLecturaWH('alertas_stock', 'ALERTAS_STOCK');
   var soloPendientes = params && (params.soloPendientes === true || params.soloPendientes === 'true');
   if (soloPendientes) {
     rows = rows.filter(function(r) { return String(r.revisado || '').toUpperCase() !== 'SI'; });
