@@ -121,6 +121,7 @@ function _route(method, e) {
       case 'activarSupabaseWH':    return activarSupabaseWH();     // lectura directa de Supabase
       case 'desactivarUnoWH':      return desactivarUnoWH(params.ep);  // un endpoint → Sheets (off-list)
       case 'reactivarUnoWH':       return reactivarUnoWH(params.ep);   // quitar de off-list
+      case 'mintTokenWH':          return mintSupabaseTokenWH(params.deviceId);  // [PASO 5 B1] JWT app=warehouseMos
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();
