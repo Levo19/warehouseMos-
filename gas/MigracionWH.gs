@@ -78,7 +78,7 @@ var _WH_SPECS = {
     ['id_preingreso','idPreingreso','text'],['foto','foto','text'],
     ['ocr_estado','OCR_Estado','text'],['ocr_tipo','OCR_Tipo','text'],['ocr_ruc_emisor','OCR_RUC_Emisor','text'],
     ['ocr_razon_social','OCR_Razon_Social','text'],['ocr_serie','OCR_Serie','text'],['ocr_numero','OCR_Numero','text'],
-    ['ocr_fecha_comprobante','OCR_Fecha_Comprobante','text'],['ocr_total','OCR_Total','num'],['ocr_subtotal','OCR_Subtotal','num'],
+    ['ocr_fecha_comprobante','OCR_Fecha_Comprobante','date'],['ocr_total','OCR_Total','num'],['ocr_subtotal','OCR_Subtotal','num'],
     ['igv_recuperable','IGV_Recuperable','num'],['ocr_confidence','OCR_Confidence','num'],['ocr_notas','OCR_Notas','text'],
     ['ocr_fecha_proceso','OCR_Fecha_Proceso','date']
   ]},
@@ -1006,6 +1006,15 @@ function _sortKeysDeep(o){
   if(o&&typeof o==='object'){ var r={}; Object.keys(o).sort().forEach(function(k){ r[k]=_sortKeysDeep(o[k]); }); return r; }
   return o;
 }
+// Normaliza a 'yyyy-MM-dd' (igual que _sheetToObjects trunca toda Date). Tolera string ISO con hora.
+function _norm10(v){
+  if(v==null||v==='') return '';
+  var s=String(v); if(/^\d{4}-\d{2}-\d{2}/.test(s)) return s.substring(0,10);
+  var d=new Date(s); return isNaN(d.getTime())?s:Utilities.formatDate(d,Session.getScriptTimeZone(),'yyyy-MM-dd');
+}
+// Igualdad de fecha tolerante: ambos lados se comparan como 'yyyy-MM-dd' (la celda puede ser Date o string ISO).
+function _dateEqLoose(a,b){ return _norm10(a)===_norm10(b); }
+
 // Igualdad de JSON tolerante al orden de claves y a string-vs-objeto (mismo contenido = igual).
 function _jsonEqLoose(a,b){
   var pa, pb;
@@ -1028,6 +1037,7 @@ function _diffDatasetWH(tabla, sheetData, supaData){
       var h=cfg.spec[s][1], t=cfg.spec[s][2];
       var eq=(t==='num'||t==='int') ? _numEqLoose(a[h],b[h])
            : (t==='json')          ? _jsonEqLoose(a[h],b[h])
+           : (t==='date')          ? _dateEqLoose(a[h],b[h])
            :                         (String(a[h])===String(b[h]));
       if(!eq) diffs.push(id+'.'+h+': sheets='+JSON.stringify(a[h])+' sb='+JSON.stringify(b[h]));
     }

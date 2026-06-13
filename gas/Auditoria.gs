@@ -283,11 +283,25 @@ function aceptarTeoricoAlerta(params) {
 // Útil para diagnosticar "¿quién/cuándo movió este stock?".
 function getStockMovimientos(params) {
   var codigo = String(params.codigoProducto || '').trim();
-  var ss = SpreadsheetApp.openById(SS_ID);
-  var sheet = ss.getSheetByName('STOCK_MOVIMIENTOS');
-  if (!sheet) return { ok: true, data: [] };
-  var rows = _sheetToObjects(sheet);
-  if (codigo) rows = rows.filter(function(r) { return String(r.codigoProducto) === codigo; });
+  var rows = null;
+  // [PASO 3] lectura directa con FILTRO server-side (no carga las 6197 filas): por codigo via PostgREST.
+  if (typeof _fuenteDatos === 'function' && _fuenteDatos('lectura_stock_movimientos') === 'supabase') {
+    try {
+      if (codigo) {
+        var r = _sbSelect('wh.stock_movimientos', { filters: { cod_producto: 'eq.' + codigo }, limit: 5000 });
+        if (r.ok && Array.isArray(r.data)) rows = _sbRowsToObjsWH('stock_movimientos', r.data);
+      } else {
+        rows = _leerTablaWH('stock_movimientos');   // sin filtro → paginado completo (raro; evita truncar)
+      }
+    } catch (e) { rows = null; /* cae a Sheets */ }
+  }
+  if (rows === null) {   // fallback Sheets (original)
+    var ss = SpreadsheetApp.openById(SS_ID);
+    var sheet = ss.getSheetByName('STOCK_MOVIMIENTOS');
+    if (!sheet) return { ok: true, data: [] };
+    rows = _sheetToObjects(sheet);
+    if (codigo) rows = rows.filter(function(r) { return String(r.codigoProducto) === codigo; });
+  }
   rows.sort(function(a, b) { return new Date(b.fecha) - new Date(a.fecha); });
   if (params.limit) rows = rows.slice(0, parseInt(params.limit));
   return { ok: true, data: rows };
