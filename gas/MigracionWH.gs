@@ -758,3 +758,21 @@ function _dualWritePatchWH(tabla, pkFilters, patch){
     return r;
   } catch(e){ Logger.log('[dualWritePatchWH '+tabla+'] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
+
+// [WH Fase 2 · PASO 2] Re-lee una fila de PREINGRESOS por id y la espeja a wh.preingresos (best-effort).
+// Robusto: refleja SIEMPRE el estado actual en Sheets → sirve para crear/actualizar/aprobar sin reconstruir
+// el objeto en cada caller. PREINGRESOS es chica (preingresos activos). NUNCA lanza.
+function _dualWritePreingresoWH(idPreingreso){
+  try {
+    var id = String(idPreingreso || ''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('PREINGRESOS'); if(!sh) return { ok:false, error:'PREINGRESOS no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][0]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('preingresos', o);
+    }
+    return { ok:false, error:'preingreso no encontrado: '+id };
+  } catch(e){ Logger.log('[dualWritePreingresoWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}

@@ -1741,6 +1741,9 @@ function crearPreingreso(params) {
     );
   } catch(eP) { Logger.log('Push preingreso: ' + eP.message); }
 
+  // [WH Fase 2 · PASO 2] dual-write del preingreso nuevo a la sombra (best-effort)
+  try { if (typeof _dualWritePreingresoWH === 'function') _dualWritePreingresoWH(id); } catch(_eDW) {}
+
   return { ok: true, data: { idPreingreso: id } };
 }
 
@@ -1900,6 +1903,8 @@ function _actualizarPreingresoImpl(params) {
         }
       } catch(e) { /* non-fatal */ }
     }
+    // [WH Fase 2 · PASO 2] dual-write del preingreso actualizado a la sombra (best-effort)
+    try { if (typeof _dualWritePreingresoWH === 'function') _dualWritePreingresoWH(idPreingreso); } catch(_eDW) {}
     return { ok: true };
   }
   return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
@@ -1970,6 +1975,9 @@ function aprobarPreingreso(params) {
 
       sheet.getRange(i + 1, colEstado + 1).setValue('PROCESADO');
       sheet.getRange(i + 1, colGuia + 1).setValue(resultGuia.data.idGuia);
+
+      // [WH Fase 2 · PASO 2] dual-write del preingreso PROCESADO a la sombra (la guía ya se espejó en crearGuia)
+      try { if (typeof _dualWritePreingresoWH === 'function') _dualWritePreingresoWH(params.idPreingreso); } catch(_eDW) {}
 
       return { ok: true, data: { idGuia: resultGuia.data.idGuia } };
     }
