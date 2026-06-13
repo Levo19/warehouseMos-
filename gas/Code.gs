@@ -110,9 +110,10 @@ function _route(method, e) {
       case 'compararStockWH':      return compararStockWH();
       case 'compararRotacionWH':   return compararRotacionWH();
       case 'estadoFuenteDatosWH':  return estadoFuenteDatosWH();
-      // rollback seguro: volver a Sheets (default histórico) — exponer SIN token es inofensivo
-      // (leer de Sheets es el comportamiento conocido-bueno; el activar SÍ queda fuera del router).
-      case 'desactivarSupabaseWH': return desactivarSupabaseWH();
+      // Controles operativos del flip de lectura (par activar/desactivar). Seguro de exponer: la lectura
+      // Supabase cuadra al centavo (gate verificado) y SIEMPRE cae a Sheets ante cualquier fallo.
+      case 'desactivarSupabaseWH': return desactivarSupabaseWH();  // kill-switch → Sheets (default)
+      case 'activarSupabaseWH':    return activarSupabaseWH();     // lectura directa de Supabase
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();
