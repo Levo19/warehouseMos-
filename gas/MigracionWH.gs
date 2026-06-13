@@ -371,6 +371,21 @@ var _WH_SUMCOLS = {
 };
 var _WH_PRUNE = { alertas_stock:true };   // se auto-podan → el shadow conserva huérfanos (supabase ≥ sheet esperado)
 
+/** Lee TODAS las filas de una tabla de Supabase paginando por PK estable (evita el cap db-max-rows=1000). */
+function _sbSelectAll(schemaTable, order, select){
+  var out=[], offset=0, PAGE=1000;
+  while(true){
+    var r=_sbSelect(schemaTable,{ select: select||'*', order:order, limit:PAGE, offset:offset });
+    if(!r.ok) return { ok:false, error:'HTTP '+r.code+' '+(r.error||''), code:r.code };
+    var rows=r.data||[];
+    for(var i=0;i<rows.length;i++) out.push(rows[i]);
+    if(rows.length<PAGE) break;
+    offset+=PAGE;
+    if(offset>200000) break; // backstop anti-bucle
+  }
+  return { ok:true, data:out };
+}
+
 /** Suma columnas de una tabla de Supabase, paginando ordenado por PK (estable). */
 function _sbSumCols(schemaTable, cols, order){
   var sums={}; cols.forEach(function(c){ sums[c]=0; });
@@ -675,13 +690,14 @@ function verificarParidadWH(diasAtras, tabla){
   var dias = parseInt(diasAtras, 10); if(!dias || dias < 1) dias = 3;
 
   if(tabla === 'stock'){
-    // STOCK es estado actual (1 fila por producto): comparar presencia + cantidad
+    // STOCK es estado actual (1 fila por producto): comparar presencia + cantidad.
+    // ⚠️ ~1348 filas > db-max-rows=1000 de PostgREST → PAGINAR o se trunca silenciosamente.
     var shS = getSheet('STOCK'); if(!shS) return { ok:false, error:'STOCK no existe' };
     var dS = shS.getDataRange().getValues(); var hS = dS[0].map(function(h){return String(h||'').trim();});
     var iIdS = hS.indexOf('idStock'), iCod = hS.indexOf('codigoProducto'), iCant = hS.indexOf('cantidadDisponible');
     var shStock = {}, nSh = 0;
     for(var i=1;i<dS.length;i++){ var id=String(dS[i][iIdS]||'').trim(); if(!id) continue; shStock[id]={cant:parseFloat(dS[i][iCant])||0}; nSh++; }
-    var rS = _sbSelect('wh.stock', { limit:10000 });
+    var rS = _sbSelectAll('wh.stock', 'id_stock.asc', 'id_stock,cantidad_disponible');
     if(!rS.ok) return { ok:false, error:'no se pudo leer wh.stock: '+(rS.error||'') };
     var supStock={}; (rS.data||[]).forEach(function(s){ supStock[String(s.id_stock||'').trim()]={cant:parseFloat(s.cantidad_disponible)||0}; });
     var faltan=[], difCant=[];
@@ -692,6 +708,57 @@ function verificarParidadWH(diasAtras, tabla){
     return { ok:true, data:{ tabla:'stock', sheets_total:nSh, supabase_total:(rS.data||[]).length,
       solo_en_sheets_count:faltan.length, solo_en_sheets:faltan.slice(0,30),
       cantidad_difiere_count:difCant.length, cantidad_difiere:difCant.slice(0,30) }};
+  }
+
+  // ── Verificador UNIVERSAL por presencia de PK (cubre las tablas dual-written) ──
+  // Para cualquier tabla de _WH_SPECS distinta de guias/stock: id en col 0 de la hoja vs PK en Supabase.
+  // Si la spec tiene una columna 'date', filtra la ventana de N días por esa fecha; si no, compara todo.
+  if(tabla !== 'guias' && _WH_SPECS[tabla]){
+    var cfg = _WH_SPECS[tabla];
+    var pkCol = cfg.onConflict.split(',')[0];          // PK pg (1ra col)
+    // Guard: solo tablas con PK de UNA columna que además es la 1ra col de la hoja (col 0 = id).
+    // Excluye PK compuestas (guia_detalle, pedidos_cliente_*) donde col0 ≠ pkCol → comparación inválida.
+    if(cfg.onConflict.indexOf(',') >= 0 || cfg.spec[0][0] !== pkCol){
+      return { ok:false, error:'verificador universal no soporta '+tabla+' (PK compuesta o no es la 1ra col)' };
+    }
+    var shT = getSheet(cfg.sheet); if(!shT) return { ok:false, error:cfg.sheet+' no existe' };
+    var dT = shT.getDataRange().getValues();
+    if(dT.length < 2) return { ok:true, data:{ tabla:tabla, sheets_total:0, supabase_total:0, solo_en_sheets_count:0, solo_en_sheets:[] } };
+    // Elegir columna de fecha para la ventana: priorizar fecha de CREACIÓN/registro, nunca vencimiento/aprobación.
+    var bestEntry = null, bestScore = -99;
+    for(var s=0;s<cfg.spec.length;s++){
+      if(cfg.spec[s][2] !== 'date') continue;
+      var pg = cfg.spec[s][0];
+      if(pg.indexOf('venc') >= 0) continue;                 // vencimiento NO sirve como ventana temporal
+      var sc = 0;
+      if(/registro|asignacion|creacion/.test(pg)) sc = 3;
+      else if(pg === 'fecha' || /_mov$/.test(pg)) sc = 2;
+      else if(/ejecucion/.test(pg)) sc = 1;
+      else if(/aprob/.test(pg)) sc = -1;
+      if(sc > bestScore){ bestScore = sc; bestEntry = cfg.spec[s]; }
+    }
+    var dateHeader = bestEntry ? bestEntry[1] : null;
+    var hT = dT[0].map(function(h){ return String(h||'').trim(); });
+    var iDate = dateHeader ? hT.indexOf(dateHeader) : -1;
+    var desdeT = new Date(Date.now() - dias*86400000);
+    var shIdsT = {}, shTotalT = 0;
+    for(var t=1;t<dT.length;t++){
+      if(iDate >= 0){
+        var fv = dT[t][iDate]; var fd = (fv instanceof Date) ? fv : new Date(fv);
+        if(isNaN(fd.getTime()) || fd < desdeT) continue;
+      }
+      var idT = String(dT[t][0]||'').trim();
+      if(idT){ shIdsT[idT]=1; shTotalT++; }
+    }
+    var rT = _sbSelectAll('wh.'+tabla, pkCol+'.asc', pkCol);
+    if(!rT.ok) return { ok:false, error:'no se pudo leer wh.'+tabla+': '+(rT.error||'') };
+    var enSupaT = {}; (rT.data||[]).forEach(function(row){ var v=String(row[pkCol]||'').trim(); if(v) enSupaT[v]=1; });
+    var soloSheetsT = Object.keys(shIdsT).filter(function(id){ return !enSupaT[id]; });
+    return { ok:true, data:{
+      tabla:tabla, dias: (iDate>=0 ? dias : 'todo'), filtrado_por: dateHeader || '(sin fecha)',
+      sheets_total:shTotalT, supabase_total:(rT.data||[]).length,
+      solo_en_sheets_count: soloSheetsT.length, solo_en_sheets: soloSheetsT.slice(0,30)
+    }};
   }
 
   // GUIAS (time-series): hueco = guía en Sheets ausente de Supabase
