@@ -1167,3 +1167,27 @@ function resyncDetalleAutocerradas(diasAtras){
   }
   return { ok: true, resincronizadas: n, errores: errs, dias: dias };
 }
+
+// [PASO 3 fix] Re-sincroniza estado+detalle de guías CERRADA/AUTOCERRADA recientes (ventana de rotación) a la
+// sombra — cubre cualquier guía de salida con detalle incompleto que descuadre la rotación. Best-effort por guía.
+function resyncDetalleGuiasRecientes(diasAtras){
+  var dias = parseInt(diasAtras, 10) || 60;
+  var sh = getSheet('GUIAS'); var data = sh.getDataRange().getValues(); var h = data[0];
+  var iId = h.indexOf('idGuia'), iFec = h.indexOf('fecha'), iEst = h.indexOf('estado'), iTipo = h.indexOf('tipo');
+  var desde = new Date(Date.now() - dias*86400000);
+  var n = 0, errs = 0, salidas = 0;
+  for (var i = 1; i < data.length; i++){
+    var est = String(data[i][iEst] || '').toUpperCase();
+    if (est !== 'CERRADA' && est !== 'AUTOCERRADA') continue;
+    var fv = data[i][iFec]; var f = (fv instanceof Date) ? fv : new Date(fv);
+    if (isNaN(f.getTime()) || f < desde) continue;
+    var id = String(data[i][iId] || ''); if (!id) continue;
+    if (String(data[i][iTipo] || '').toUpperCase().indexOf('SALIDA') === 0) salidas++;
+    try {
+      if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + id }, { estado: est });
+      if (typeof _dualWriteDetallesGuiaWH === 'function') _dualWriteDetallesGuiaWH(id);
+      n++;
+    } catch(e){ errs++; }
+  }
+  return { ok: true, resincronizadas: n, salidas: salidas, errores: errs, dias: dias };
+}
