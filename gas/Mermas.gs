@@ -63,6 +63,9 @@ function agregarAMermas(params) {
       try { registrarActividad(params.idSesion, 'MERMA_REGISTRADA', 1); } catch(_){}
     }
 
+    // [WH F2 p2 · R3] dual-write de la merma nueva a la sombra (best-effort)
+    try { if (typeof _dualWriteMermaWH === 'function') _dualWriteMermaWH(id); } catch(_eDW) {}
+
     return { ok: true, data: { idMerma: id, fotoUrl: fotoUrl } };
   });
 }
@@ -126,6 +129,9 @@ function solucionarMerma(params) {
       if (obs && idxObsR >= 0) {
         sheet.getRange(i + 1, idxObsR + 1).setValue(obs);
       }
+
+      // [WH F2 p2 · R3] dual-write de la merma actualizada a la sombra (best-effort)
+      try { if (typeof _dualWriteMermaWH === 'function') _dualWriteMermaWH(idMerma); } catch(_eDW) {}
 
       return { ok: true, data: {
         idMerma: idMerma,

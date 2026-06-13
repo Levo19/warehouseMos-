@@ -823,3 +823,19 @@ function _dualWriteLoteWH(idLote){
     return { ok:false, error:'lote no encontrado: '+id };
   } catch(e){ Logger.log('[dualWriteLoteWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
+
+// [WH Fase 2 · PASO 2] Re-lee una merma por id y la espeja a wh.mermas (best-effort).
+function _dualWriteMermaWH(idMerma){
+  try {
+    var id = String(idMerma||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('MERMAS'); if(!sh) return { ok:false, error:'MERMAS no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][0]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('mermas', o);
+    }
+    return { ok:false, error:'merma no encontrada: '+id };
+  } catch(e){ Logger.log('[dualWriteMermaWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}

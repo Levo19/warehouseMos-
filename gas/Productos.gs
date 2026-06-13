@@ -1611,6 +1611,15 @@ function crearAjuste(params) {
     observacion:   String(params.motivo || '')
   });
 
+  // [WH F2 p2 · R3] dual-write del ajuste a la sombra (best-effort; el stock ya se espejó en _actualizarStock)
+  try {
+    if (typeof _dualWriteWH === 'function') {
+      _dualWriteWH('ajustes', { idAjuste: id, codigoProducto: codigoBarra, tipoAjuste: tipo,
+        cantidadAjuste: cant, motivo: String(params.motivo || ''), usuario: String(params.usuario || ''),
+        idAuditoria: String(params.idAuditoria || ''), fecha: ajVals[7] });
+    }
+  } catch(_eDW) {}
+
   return { ok: true, data: { idAjuste: id, stockNuevo: _getStockProducto(codigoBarra).cantidad } };
 }
 
