@@ -247,6 +247,20 @@ function _registrarEnvasadoImpl(params) {
     ''
   ]);
 
+  // [WH Fase 2 · PASO 2 · R2] dual-write del envasado a la sombra (best-effort, mismos valores del appendRow)
+  try {
+    if (typeof _dualWriteWH === 'function') {
+      _dualWriteWH('envasados', {
+        idEnvasado: idEnvasado, codigoProductoBase: prodBase.codigoBarra || prodBase.idProducto,
+        cantidadBase: cantBase, unidadBase: prodBase.unidad,
+        codigoProductoEnvasado: prodDerivado.codigoBarra || prodDerivado.idProducto,
+        unidadesEsperadas: unidadesReales, unidadesProducidas: unidadesReales, mermaReal: 0, eficienciaPct: 100,
+        fecha: fecha, usuario: usuario, estado: 'COMPLETADO',
+        idGuiaSalida: gsRes.data.idGuia, idGuiaIngreso: giRes.data.idGuia, observacion: ''
+      });
+    }
+  } catch(_eDW) {}
+
   // 8. Imprimir etiquetas
   var resultImpresion = null;
   if (imprimirEtiq) {
@@ -1481,9 +1495,10 @@ function anularEnvasadoManual(params) {
     var nowStr = Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'");
     sheet.getRange(rowIdx, iEst + 1).setValue('ANULADO');
     var prevObs = sheet.getRange(rowIdx, iObs + 1).getValue();
-    sheet.getRange(rowIdx, iObs + 1).setValue(
-      String(prevObs || '') + ' | ANULADO por ' + usuario + ' · ' + motivo + ' · ' + nowStr
-    );
+    var obsNueva = String(prevObs || '') + ' | ANULADO por ' + usuario + ' · ' + motivo + ' · ' + nowStr;
+    sheet.getRange(rowIdx, iObs + 1).setValue(obsNueva);
+    // [WH F2 p2 · R2] PATCH del envasado anulado a la sombra (estado + observacion)
+    try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('envasados', { id_envasado: 'eq.' + idEnv }, { estado: 'ANULADO', observacion: obsNueva }); } catch(_eDW) {}
 
     return {
       ok: true,
