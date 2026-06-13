@@ -720,3 +720,27 @@ function verificarParidadWH(diasAtras, tabla){
     solo_en_sheets_count: soloSheets.length, solo_en_sheets: soloSheets.slice(0,30)
   }};
 }
+
+// ════════════════════════════════════════════════════════════════════
+// [Migración WH · Fase 2 · PASO 2] Dual-write en TIEMPO REAL (best-effort).
+// Espeja UNA fila a wh.<tabla> apenas se escribe en Sheets, reusando el mapeo del
+// sync batch (_WH_SPECS + _whRowMap). Idempotente (upsert por PK). NUNCA lanza:
+// un fallo de Supabase no debe romper la escritura a Sheets. El sync batch (15min)
+// + reconciliación siguen como red de seguridad si un dual-write se pierde.
+// `o` = objeto keyed por las cabeceras de la hoja (igual que produce _whSheetRows).
+// ════════════════════════════════════════════════════════════════════
+function _dualWriteWH(tabla, o){
+  try {
+    var cfg = _WH_SPECS[tabla];
+    if(!cfg) { Logger.log('[dualWriteWH] spec desconocida: '+tabla); return { ok:false, error:'spec' }; }
+    var row = _whRowMap(o, cfg.spec);
+    if(cfg.post) row = cfg.post(row, o);
+    // PK completa (sin pk → omitir; el batch lo levantará)
+    var pkCols = String(cfg.onConflict).split(',').map(function(c){ return c.trim(); });
+    for(var i=0;i<pkCols.length;i++){ if(row[pkCols[i]]==null || row[pkCols[i]]==='') return { ok:false, error:'falta pk '+pkCols[i] }; }
+    var r = _sbUpsert('wh.'+tabla, [row], cfg.onConflict);
+    if(!r.ok) Logger.log('[dualWriteWH '+tabla+'] upsert falló: HTTP '+(r.code)+' '+(r.error||''));
+    return r;
+  } catch(e){ Logger.log('[dualWriteWH '+tabla+'] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+

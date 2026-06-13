@@ -853,18 +853,31 @@ function _actualizarStock(codigo, delta, opts) {
   var nuevaCantidad = info.cantidad + delta;
   var now = new Date();
 
+  var idStock;   // [WH Fase 2] capturar el id real para el dual-write
   if (info.fila > 0) {
+    idStock = String(sheet.getRange(info.fila, 1).getValue() || '');
     sheet.getRange(info.fila, 3).setNumberFormat('0.##');
     sheet.getRange(info.fila, 4).setNumberFormat('dd/MM/yyyy HH:mm');
     sheet.getRange(info.fila, 3, 1, 2).setValues([[nuevaCantidad, now]]);
   } else {
     // Nueva fila: preservar barcode como texto
     var nextRow = sheet.getLastRow() + 1;
-    var stVals  = ['STK' + new Date().getTime(), String(codigo), nuevaCantidad, now];
+    idStock = 'STK' + new Date().getTime();
+    var stVals  = [idStock, String(codigo), nuevaCantidad, now];
     sheet.getRange(nextRow, 2).setNumberFormat('@');
     sheet.getRange(nextRow, 4).setNumberFormat('dd/MM/yyyy HH:mm');
     sheet.getRange(nextRow, 1, 1, stVals.length).setValues([stVals]);
   }
+
+  // [WH Fase 2 · PASO 2] dual-write del stock a la sombra en tiempo real (best-effort, no rompe el flujo).
+  // _actualizarStock es la mutación CENTRAL de stock (la llaman cierres de guía, envasados, ajustes) →
+  // espejar acá mantiene wh.stock fresco desde TODOS los caminos a la vez.
+  try {
+    if (typeof _dualWriteWH === 'function') {
+      _dualWriteWH('stock', { idStock: idStock, codigoProducto: String(codigo),
+        cantidadDisponible: nuevaCantidad, ultimaActualizacion: now });
+    }
+  } catch(_eDW) {}
 
   // Log de trazabilidad — silencioso si falla (no rompe el flujo principal)
   try {
@@ -898,12 +911,24 @@ function _logStockMovimiento(m) {
   var idMov = 'MOV' + new Date().getTime() + Math.floor(Math.random() * 1000);
   var nextRow = sheet.getLastRow() + 1;
   sheet.getRange(nextRow, 3).setNumberFormat('@');  // codigoBarra como texto
+  var fechaMov = new Date();
   sheet.getRange(nextRow, 1, 1, 9).setValues([[
-    idMov, new Date(), String(m.codigoProducto || ''),
+    idMov, fechaMov, String(m.codigoProducto || ''),
     m.delta, m.stockAntes, m.stockDespues,
     m.tipoOperacion, m.origen, m.usuario
   ]]);
   sheet.getRange(nextRow, 2).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+
+  // [WH Fase 2 · PASO 2] dual-write del movimiento a la sombra (best-effort)
+  try {
+    if (typeof _dualWriteWH === 'function') {
+      _dualWriteWH('stock_movimientos', {
+        idMov: idMov, fecha: fechaMov, codigoProducto: String(m.codigoProducto || ''),
+        delta: m.delta, stockAntes: m.stockAntes, stockDespues: m.stockDespues,
+        tipoOperacion: m.tipoOperacion, origen: m.origen, usuario: m.usuario
+      });
+    }
+  } catch(_eDW) {}
 }
 
 // Marca una guía CERRADA sin tocar stock (para envasados que gestionan stock directamente)
