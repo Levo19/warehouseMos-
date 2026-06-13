@@ -117,6 +117,8 @@ function _route(method, e) {
       // Supabase cuadra al centavo (gate verificado) y SIEMPRE cae a Sheets ante cualquier fallo.
       case 'desactivarSupabaseWH': return desactivarSupabaseWH();  // kill-switch → Sheets (default)
       case 'activarSupabaseWH':    return activarSupabaseWH();     // lectura directa de Supabase
+      case 'desactivarUnoWH':      return desactivarUnoWH(params.ep);  // un endpoint → Sheets (off-list)
+      case 'reactivarUnoWH':       return reactivarUnoWH(params.ep);   // quitar de off-list
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();
