@@ -131,7 +131,9 @@ function clienteRecibirPedido(params) {
   var adjuntos = Array.isArray(params.adjuntos) ? params.adjuntos : [];
   var textoUser = String(params.texto || '').trim();
 
-  var idPedido = 'PC' + new Date().getTime();
+  // [Lote4 · M3-WH] sufijo aleatorio: 'PC'+getTime() colisionaba si dos pedidos
+  // caían en el mismo ms → items/adjuntos se mezclaban entre pedidos (keyed por idPedido).
+  var idPedido = 'PC' + new Date().getTime() + Math.floor(Math.random() * 1000);
   var folder   = _cliGetFolder(token);
 
   // ── Guardar adjuntos en Drive y construir texto consolidado para la IA ──

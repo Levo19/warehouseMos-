@@ -20360,12 +20360,35 @@ const WhLoteAdhesivo = (() => {
     _orquestar(_state.idLote, { requireGapDetect: true });
   }
 
-  async function cancelar() {
+  // [Lote4 · M4-WH] confirm() nativo -> confirmación INLINE en el panel del lote
+  // (mismo patrón que _mostrarRolloAgotado; la casa prohíbe prompt/confirm/alert nativos).
+  function cancelar() {
     if (!_state) return;
-    if (!confirm('¿Cancelar el lote?\n\n' + _state.completadas + ' de ' + _state.total + ' ya impresas no se borran del rollo.')) return;
+    const actions = document.getElementById('whLoteActions');
+    if (!actions) { _cancelarConfirmado(); return; }   // sin panel → cancelar directo
+    actions.innerHTML = `
+      <div class="wh-lote-alert">
+        <div class="wh-lote-alert-title">¿Cancelar el lote?</div>
+        <div class="wh-lote-alert-msg">
+          ${_state.completadas} de ${_state.total} ya impresas <b>no se borran</b> del rollo.
+        </div>
+        <div class="wh-lote-alert-btns">
+          <button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo._cancelarConfirmado()">⊘ Sí, cancelar</button>
+          <button class="wh-lote-btn-primary" onclick="WhLoteAdhesivo._abortarCancelacion()">← Volver</button>
+        </div>
+      </div>`;
+    try { vibrate && vibrate([40]); } catch(_) {}
+  }
+  async function _cancelarConfirmado() {
+    if (!_state) return;
     try { await API.post('cancelarLoteAdhesivo', { idLote: _state.idLote }); } catch(_) {}
     _setStatus('CANCELADO');
     setTimeout(cerrar, 800);
+  }
+  // Volver del prompt de cancelación: restaurar el botón Cancelar normal.
+  function _abortarCancelacion() {
+    const actions = document.getElementById('whLoteActions');
+    if (actions) actions.innerHTML = '<button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cancelar()">⊘ Cancelar lote</button>';
   }
 
   // [v2.13.115] Cancelar sin pedir confirm — usado por rollback automático
@@ -20389,7 +20412,7 @@ const WhLoteAdhesivo = (() => {
     return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  return { crearYEjecutar, continuar, cancelar, cancelarSilencioso, cerrar };
+  return { crearYEjecutar, continuar, cancelar, _cancelarConfirmado, _abortarCancelacion, cancelarSilencioso, cerrar };
 })();
 
 // ════════════════════════════════════════════════════════════════════
