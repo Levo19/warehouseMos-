@@ -1145,3 +1145,25 @@ function dedupStockSheet(opts){
              filasABorrar:rowsBorrar.length, postConteoPorCod:postCount, lastRow:sheet.getLastRow(), detalle:grupos.slice(0,30) };
   });
 }
+
+// [PASO 3 fix] Re-sincroniza estado+detalle de guías AUTOCERRADA recientes a la sombra (históricas que
+// autoCloseDay marcó sin dual-write). Cubre la ventana que la rotación cuenta. Best-effort por guía.
+function resyncDetalleAutocerradas(diasAtras){
+  var dias = parseInt(diasAtras, 10) || 60;
+  var sh = getSheet('GUIAS'); var data = sh.getDataRange().getValues(); var h = data[0];
+  var iId = h.indexOf('idGuia'), iFec = h.indexOf('fecha'), iEst = h.indexOf('estado');
+  var desde = new Date(Date.now() - dias*86400000);
+  var n = 0, errs = 0;
+  for (var i = 1; i < data.length; i++){
+    if (String(data[i][iEst] || '').toUpperCase() !== 'AUTOCERRADA') continue;
+    var fv = data[i][iFec]; var f = (fv instanceof Date) ? fv : new Date(fv);
+    if (isNaN(f.getTime()) || f < desde) continue;
+    var id = String(data[i][iId] || ''); if (!id) continue;
+    try {
+      if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + id }, { estado: 'AUTOCERRADA' });
+      if (typeof _dualWriteDetallesGuiaWH === 'function') _dualWriteDetallesGuiaWH(id);
+      n++;
+    } catch(e){ errs++; }
+  }
+  return { ok: true, resincronizadas: n, errores: errs, dias: dias };
+}

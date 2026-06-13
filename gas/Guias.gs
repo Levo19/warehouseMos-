@@ -1266,6 +1266,7 @@ function _autoCloseDayGuiasImpl() {
   var hoy     = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   var cerradas = 0;
 
+  var idsAuto = [];
   for (var i = 1; i < data.length; i++) {
     if (data[i][idxEst] !== 'ABIERTA') continue;
     var fechaGuia = '';
@@ -1277,9 +1278,18 @@ function _autoCloseDayGuiasImpl() {
     }
     if (fechaGuia && fechaGuia < hoy) {
       sheet.getRange(i + 1, idxEst + 1).setValue('AUTOCERRADA');
+      idsAuto.push(String(data[i][idxId] || ''));
       cerradas++;
     }
   }
+  // [PASO 3 fix] La rotación cuenta guías AUTOCERRADA. Antes, autoCloseDay solo cambiaba el estado en la hoja:
+  // la sombra quedaba sin el estado NI el detalle de estas guías → rotación directa daba 0. Ahora espejamos
+  // estado (PATCH) + detalle (re-sync de líneas) de cada autocerrada. Best-effort (no rompe el cierre del día).
+  idsAuto.forEach(function(idG){
+    if (!idG) return;
+    try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idG }, { estado: 'AUTOCERRADA' }); } catch(_e1) {}
+    try { if (typeof _dualWriteDetallesGuiaWH === 'function') _dualWriteDetallesGuiaWH(idG); } catch(_e2) {}
+  });
   return { ok: true, data: { cerradas: cerradas } };
 }
 
