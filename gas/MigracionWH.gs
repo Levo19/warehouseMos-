@@ -749,6 +749,10 @@ function _dualWriteWH(tabla, o){
 // pisar el resto de la fila — p.ej. estado de guía sin tocar los campos OCR). pkFilters: {col:'eq.valor'}.
 function _dualWritePatchWH(tabla, pkFilters, patch){
   try {
+    // [20x] defensa extra: nunca PATCH con filtro vacío/sin valor (sino afectaría toda la tabla).
+    if(!pkFilters || !Object.keys(pkFilters).length) return { ok:false, error:'PATCH sin filtros — abortado' };
+    var malo = Object.keys(pkFilters).some(function(k){ var v=String(pkFilters[k]||''); return v==='' || /^[a-z]+\.$/.test(v); });
+    if(malo) return { ok:false, error:'PATCH con filtro vacío — abortado' };
     var r = _sb('PATCH', 'wh.'+tabla, { data: patch, filters: pkFilters, maxRetry: 1 });
     if(!r.ok) Logger.log('[dualWritePatchWH '+tabla+'] falló: HTTP '+(r.code)+' '+(r.error||''));
     return r;
