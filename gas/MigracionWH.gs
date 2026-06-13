@@ -744,3 +744,13 @@ function _dualWriteWH(tabla, o){
   } catch(e){ Logger.log('[dualWriteWH '+tabla+'] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
 
+
+// [WH Fase 2 · PASO 2] PATCH best-effort de campos puntuales a wh.<tabla> (para cambios de estado, sin
+// pisar el resto de la fila — p.ej. estado de guía sin tocar los campos OCR). pkFilters: {col:'eq.valor'}.
+function _dualWritePatchWH(tabla, pkFilters, patch){
+  try {
+    var r = _sb('PATCH', 'wh.'+tabla, { data: patch, filters: pkFilters, maxRetry: 1 });
+    if(!r.ok) Logger.log('[dualWritePatchWH '+tabla+'] falló: HTTP '+(r.code)+' '+(r.error||''));
+    return r;
+  } catch(e){ Logger.log('[dualWritePatchWH '+tabla+'] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}

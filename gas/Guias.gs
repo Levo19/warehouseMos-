@@ -1224,6 +1224,8 @@ function _reabrirGuiaImpl(params) {
       }
 
       sheet.getRange(i + 1, idxEst + 1).setValue('ABIERTA');
+      // [WH Fase 2 · PASO 2] PATCH del estado a la sombra (best-effort)
+      try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { estado: 'ABIERTA' }); } catch(_eDW) {}
       return { ok: true };
     }
   }
@@ -1407,6 +1409,8 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   // Marcar guía como cerrada
   guiasSheet.getRange(filaGuia, idxEstado + 1).setValue('CERRADA');
   guiasSheet.getRange(filaGuia, idxMontoTotal + 1).setValue(montoTotal);
+  // [WH Fase 2 · PASO 2] PATCH del estado+monto a la sombra en tiempo real (best-effort)
+  try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { estado: 'CERRADA', monto_total: montoTotal }); } catch(_eDW) {}
 
   // Si fue SALIDA_MERMA (cierre semanal manual), marcar mermas asociadas como DESECHADA
   // y notificar a MASTER/ADMINISTRADOR vía push
