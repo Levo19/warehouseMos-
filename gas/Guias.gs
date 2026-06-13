@@ -853,6 +853,7 @@ function _sincronizarLoteDesdeDetalle(opts) {
         idLote: idLoteActual, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
         accion: 'ANULAR', cantidad: 0, motivo: opts.motivo || 'fecha eliminada', usuario: opts.usuario
       });
+      try { _dualWriteLoteWH(idLoteActual); } catch(_){}   // [WH F2 p2] dual-write lote
       return { idLote: idLoteActual, accion: 'ANULAR' };
     }
     return { idLote: idLoteActual, accion: 'NOOP' };
@@ -885,6 +886,7 @@ function _sincronizarLoteDesdeDetalle(opts) {
         accion: 'UPDATE', cantidad: opts.cantidad,
         motivo: 'fecha=' + fechaVencStr + ' (era ' + fechaActualStr + ')', usuario: opts.usuario
       });
+      try { _dualWriteLoteWH(idLoteActual); } catch(_){}   // [WH F2 p2] dual-write lote
       return { idLote: idLoteActual, accion: 'UPDATE' };
     }
   }
@@ -908,6 +910,7 @@ function _sincronizarLoteDesdeDetalle(opts) {
       idLote: idReuse, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
       accion: 'REUSE', cantidad: opts.cantidad, motivo: 'mismo (cod,guia,fecha)', usuario: opts.usuario
     });
+    try { _dualWriteLoteWH(idReuse); } catch(_){}   // [WH F2 p2] dual-write lote
     return { idLote: idReuse, accion: 'UPDATE' };
   }
 
@@ -921,6 +924,7 @@ function _sincronizarLoteDesdeDetalle(opts) {
     idLote: nuevoId, codigoProducto: opts.codigoProducto, idGuia: opts.idGuia,
     accion: 'INSERT', cantidad: opts.cantidad, motivo: opts.motivo || '', usuario: opts.usuario
   });
+  try { _dualWriteLoteWH(nuevoId); } catch(_){}   // [WH F2 p2] dual-write lote
   return { idLote: nuevoId, accion: 'INSERT' };
 }
 
@@ -1019,6 +1023,7 @@ function _consumirLotesFIFO(codigoProducto, cantidadPedida, idGuia, usuario, mot
       idLote: cand.idLote, cantidad: consumir,
       fechaVencimiento: cand.fechaVenc ? cand.fechaVenc.toISOString() : null
     });
+    try { _dualWriteLoteWH(cand.idLote); } catch(_){}   // [WH F2 p2] dual-write del lote consumido (cantidadActual/AGOTADO)
     restante -= consumir;
   }
   return { lotesConsumidos: lotesConsumidos, huerfano: restante };
