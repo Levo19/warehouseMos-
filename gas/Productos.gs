@@ -1707,7 +1707,7 @@ function actualizarProveedor(params) {
 
 // ── Preingresos ─────────────────────────────────────────────
 function getPreingresos(params) {
-  var rows = _sheetToObjects(getSheet('PREINGRESOS'));
+  var rows = _filasLecturaWH('preingresos', 'PREINGRESOS');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
   if (params.idProveedor) rows = rows.filter(function(r){ return r.idProveedor === params.idProveedor; });
   return { ok: true, data: rows };

@@ -956,7 +956,7 @@ function _sbValToSheet(v, t, tz){
   if(t==='date'){ var d=(v instanceof Date)?v:new Date(v); return isNaN(d.getTime())?'':Utilities.formatDate(d,tz,'yyyy-MM-dd'); }
   if(t==='bool'){ return (v===true||v==='true'||v===1||v==='1'); }
   if(t==='hora'){ return String(v); }
-  if(t==='json'){ return v; }                              // objeto (PostgREST ya parsea jsonb)
+  if(t==='json'){ return (typeof v==='object') ? JSON.stringify(v) : String(v); }  // string JSON, como _sheetToObjects (celda texto)
   return String(v);                                        // text
 }
 
@@ -1000,6 +1000,20 @@ function _numEqLoose(a,b){
   return Math.abs((x||0)-(y||0))<0.001;
 }
 
+// Ordena claves recursivamente para comparar JSON por CONTENIDO (pg jsonb reordena las claves).
+function _sortKeysDeep(o){
+  if(Array.isArray(o)) return o.map(_sortKeysDeep);
+  if(o&&typeof o==='object'){ var r={}; Object.keys(o).sort().forEach(function(k){ r[k]=_sortKeysDeep(o[k]); }); return r; }
+  return o;
+}
+// Igualdad de JSON tolerante al orden de claves y a string-vs-objeto (mismo contenido = igual).
+function _jsonEqLoose(a,b){
+  var pa, pb;
+  try{ pa=(typeof a==='string')?JSON.parse(a||'null'):a; }catch(e){ return String(a)===String(b); }
+  try{ pb=(typeof b==='string')?JSON.parse(b||'null'):b; }catch(e){ return String(a)===String(b); }
+  return JSON.stringify(_sortKeysDeep(pa))===JSON.stringify(_sortKeysDeep(pb));
+}
+
 // Diffs por id entre dataset Sheets y dataset Supabase de UNA tabla (campo a campo según spec).
 function _diffDatasetWH(tabla, sheetData, supaData){
   var cfg=_WH_SPECS[tabla], key=cfg.keyHeader, diffs=[];
@@ -1012,7 +1026,9 @@ function _diffDatasetWH(tabla, sheetData, supaData){
     var a=ms[id], b=mb[id];
     for(var s=0;s<cfg.spec.length;s++){
       var h=cfg.spec[s][1], t=cfg.spec[s][2];
-      var eq=(t==='num'||t==='int') ? _numEqLoose(a[h],b[h]) : (String(a[h])===String(b[h]));
+      var eq=(t==='num'||t==='int') ? _numEqLoose(a[h],b[h])
+           : (t==='json')          ? _jsonEqLoose(a[h],b[h])
+           :                         (String(a[h])===String(b[h]));
       if(!eq) diffs.push(id+'.'+h+': sheets='+JSON.stringify(a[h])+' sb='+JSON.stringify(b[h]));
     }
   });
@@ -1025,7 +1041,9 @@ var _LECTURA_SHEET_FN = {
   auditorias:     function(){ return _sheetToObjects(getSheet('AUDITORIAS')); },
   ajustes:        function(){ return _sheetToObjects(getSheet('AJUSTES')); },
   envasados:      function(){ return _sheetToObjects(getSheet('ENVASADOS')); },
-  producto_nuevo: function(){ return _sheetToObjects(getSheet('PRODUCTO_NUEVO')); }
+  producto_nuevo: function(){ return _sheetToObjects(getSheet('PRODUCTO_NUEVO')); },
+  guias:          function(){ return _sheetToObjects(getSheet('GUIAS')); },
+  preingresos:    function(){ return _sheetToObjects(getSheet('PREINGRESOS')); }
 };
 
 // GATE genérico de paridad de lectura: Sheets crudo vs sombra Supabase, por id.
