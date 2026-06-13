@@ -143,7 +143,8 @@ var _WH_SPECS = {
     ['id_producto_nuevo','idProductoNuevo','text'],['id_guia','idGuia','text'],['marca','marca','text'],['descripcion','descripcion','text'],
     ['codigo_barra','codigoBarra','text'],['id_categoria','idCategoria','text'],['unidad','unidad','text'],['cantidad','cantidad','num'],
     ['fecha_vencimiento','fechaVencimiento','date'],['foto','foto','text'],['estado','estado','text'],['usuario','usuario','text'],
-    ['fecha_registro','fechaRegistro','date'],['aprobado_por','aprobadoPor','text'],['fecha_aprobacion','fechaAprobacion','date']
+    ['fecha_registro','fechaRegistro','date'],['aprobado_por','aprobadoPor','text'],['fecha_aprobacion','fechaAprobacion','date'],
+    ['observacion','observacion','text']
   ]},
   sesiones: { sheet:'SESIONES', onConflict:'id_sesion', keyHeader:'idSesion', spec:[
     ['id_sesion','idSesion','text'],['id_personal','idPersonal','text'],['fecha_inicio','fechaInicio','date'],['hora_inicio','horaInicio','hora'],
