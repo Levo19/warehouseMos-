@@ -104,6 +104,8 @@ function _route(method, e) {
       // ── Descarga maestros (precarga localStorage) ──────────
       case 'descargarMaestros':    return descargarMaestros();
       case 'descargarOperacional': return descargarOperacional();
+      // [Migración WH · gate Fase 2] paridad Sheets↔Supabase (solo lectura)
+      case 'verificarParidadWH':   return verificarParidadWH(params.dias, params.tabla);
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();

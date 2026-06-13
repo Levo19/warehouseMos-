@@ -660,3 +660,63 @@ function getRotacionSemanalFlip(params){
   }
   return getRotacionSemanal(params);   // Sheets: default y fallback
 }
+
+// ════════════════════════════════════════════════════════════════════
+// [Migración WH · Fase 2 · GATE] verificarParidadWH — SOLO LECTURA.
+// Mide qué tan completa está la sombra de WH en Supabase comparándola contra
+// Sheets (la fuente de verdad hoy). Es el prerequisito antes de habilitar
+// cualquier lectura/escritura directa de WH — mismo gate que usamos en ME.
+// Hoy la sombra se llena por sync BATCH (cada 15min), así que es esperable un
+// pequeño hueco de lo creado en los últimos ~15min; este check lo cuantifica.
+// GET ?action=verificarParidadWH&dias=3&tabla=guias  (tabla: guias|stock)
+// ════════════════════════════════════════════════════════════════════
+function verificarParidadWH(diasAtras, tabla){
+  tabla = String(tabla || 'guias');
+  var dias = parseInt(diasAtras, 10); if(!dias || dias < 1) dias = 3;
+
+  if(tabla === 'stock'){
+    // STOCK es estado actual (1 fila por producto): comparar presencia + cantidad
+    var shS = getSheet('STOCK'); if(!shS) return { ok:false, error:'STOCK no existe' };
+    var dS = shS.getDataRange().getValues(); var hS = dS[0].map(function(h){return String(h||'').trim();});
+    var iIdS = hS.indexOf('idStock'), iCod = hS.indexOf('codigoProducto'), iCant = hS.indexOf('cantidadDisponible');
+    var shStock = {}, nSh = 0;
+    for(var i=1;i<dS.length;i++){ var id=String(dS[i][iIdS]||'').trim(); if(!id) continue; shStock[id]={cant:parseFloat(dS[i][iCant])||0}; nSh++; }
+    var rS = _sbSelect('wh.stock', { limit:10000 });
+    if(!rS.ok) return { ok:false, error:'no se pudo leer wh.stock: '+(rS.error||'') };
+    var supStock={}; (rS.data||[]).forEach(function(s){ supStock[String(s.id_stock||'').trim()]={cant:parseFloat(s.cantidad_disponible)||0}; });
+    var faltan=[], difCant=[];
+    Object.keys(shStock).forEach(function(id){
+      if(!supStock[id]) faltan.push(id);
+      else if(Math.abs(shStock[id].cant - supStock[id].cant) > 0.001) difCant.push({id:id, sheet:shStock[id].cant, supa:supStock[id].cant});
+    });
+    return { ok:true, data:{ tabla:'stock', sheets_total:nSh, supabase_total:(rS.data||[]).length,
+      solo_en_sheets_count:faltan.length, solo_en_sheets:faltan.slice(0,30),
+      cantidad_difiere_count:difCant.length, cantidad_difiere:difCant.slice(0,30) }};
+  }
+
+  // GUIAS (time-series): hueco = guía en Sheets ausente de Supabase
+  var sh = getSheet('GUIAS'); if(!sh) return { ok:false, error:'GUIAS no existe' };
+  var data = sh.getDataRange().getValues();
+  var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+  var iId = hdrs.indexOf('idGuia'), iFecha = hdrs.indexOf('fecha');
+  if(iId < 0) return { ok:false, error:'col idGuia no encontrada' };
+  var desde = new Date(Date.now() - dias*86400000);
+  var shIds = {}, shTotal = 0;
+  for(var k=1;k<data.length;k++){
+    var f = iFecha>=0 ? data[k][iFecha] : null;
+    var fecha = (f instanceof Date) ? f : new Date(f);
+    if(iFecha>=0 && (isNaN(fecha.getTime()) || fecha < desde)) continue;
+    var id = String(data[k][iId]||'').trim();
+    if(id){ shIds[id]=1; shTotal++; }
+  }
+  var desdeIso = Utilities.formatDate(desde, 'America/Lima', "yyyy-MM-dd'T'00:00:00XXX");
+  var r = _sbSelect('wh.guias', { filters:{ fecha:'gte.'+desdeIso }, order:'fecha.asc', limit:5000 });
+  if(!r.ok) return { ok:false, error:'no se pudo leer wh.guias: '+(r.error||'') };
+  var enSupa = {};
+  (r.data||[]).forEach(function(g){ var id=String(g.id_guia||'').trim(); if(id) enSupa[id]=1; });
+  var soloSheets = Object.keys(shIds).filter(function(id){ return !enSupa[id]; });
+  return { ok:true, data:{
+    tabla:'guias', dias:dias, sheets_total:shTotal, supabase_total:(r.data||[]).length,
+    solo_en_sheets_count: soloSheets.length, solo_en_sheets: soloSheets.slice(0,30)
+  }};
+}
