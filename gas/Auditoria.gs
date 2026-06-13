@@ -215,8 +215,13 @@ function _guardarAlertasStock(alertas, fechaAud) {
 // Endpoints para el frontend
 // ============================================================
 function getAlertasStock(params) {
-  // [PASO 3] sombra Supabase + fallback Sheets (dedup por idAlerta; revisado normalizado SI/NO)
-  var rows = _filasLecturaWH('alertas_stock', 'ALERTAS_STOCK');
+  // [PASO 3 · REVERTIDO 20x] NO flipear: _guardarAlertasStock BORRA fisicamente las no-revisadas en cada
+  // auditoria (deleteRow) y reescribe con ids nuevos. La sombra (upsert sin delete) acumula huerfanos →
+  // la lectura directa devolveria alertas obsoletas. Se queda en Sheets hasta tener purga equivalente.
+  var ss = SpreadsheetApp.openById(SS_ID);
+  var sheet = ss.getSheetByName('ALERTAS_STOCK');
+  if (!sheet) return { ok: true, data: [] };
+  var rows = _sheetToObjects(sheet);
   var soloPendientes = params && (params.soloPendientes === true || params.soloPendientes === 'true');
   if (soloPendientes) {
     rows = rows.filter(function(r) { return String(r.revisado || '').toUpperCase() !== 'SI'; });
@@ -289,7 +294,11 @@ function getStockMovimientos(params) {
         var r = _sbSelect('wh.stock_movimientos', { filters: { cod_producto: 'eq.' + codigo }, limit: 5000 });
         if (r.ok && Array.isArray(r.data)) rows = _sbRowsToObjsWH('stock_movimientos', r.data);
       } else {
-        rows = _leerTablaWH('stock_movimientos');   // sin filtro → paginado completo (raro; evita truncar)
+        // [20x · MEDIO 4] sin código el frontend pide limit:500 → traer solo las N más recientes server-side
+        // (antes paginaba las ~6197 filas completas en cada llamada).
+        var lim = params.limit ? parseInt(params.limit) : 1000;
+        var r2 = _sbSelect('wh.stock_movimientos', { order: 'fecha.desc', limit: lim });
+        if (r2.ok && Array.isArray(r2.data)) rows = _sbRowsToObjsWH('stock_movimientos', r2.data);
       }
     } catch (e) { rows = null; /* cae a Sheets */ }
   }

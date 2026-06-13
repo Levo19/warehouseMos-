@@ -1068,6 +1068,24 @@ var _LECTURA_SHEET_FN = {
   alertas_stock:     function(){ return _sheetToObjects(getSheet('ALERTAS_STOCK')); }
 };
 
+// [Revisión 20x] AUDITOR de cobertura: columnas en la hoja que el spec NO mapea → se PIERDEN en la
+// lectura directa (el gate de paridad NO las detecta porque solo compara campos del spec). Para cada
+// tabla flipeada, lista las columnas huérfanas que algún consumidor del frontend podría necesitar.
+function auditarColumnasSpecWH(){
+  var out={};
+  ['mermas','auditorias','ajustes','envasados','producto_nuevo','preingresos','lotes_vencimiento','stock_movimientos','guias'].forEach(function(t){
+    try{
+      var cfg=_WH_SPECS[t]; var sh=getSheet(cfg.sheet);
+      var data=sh.getDataRange().getValues();
+      var hdrs=(data[0]||[]).map(function(h){return String(h||'').trim();}).filter(function(h){return h!=='';});
+      var specH={}; cfg.spec.forEach(function(s){ specH[s[1]]=1; });
+      out[t]={ hoja:cfg.sheet, cols_hoja:hdrs.length, cols_spec:cfg.spec.length,
+        faltan_en_spec: hdrs.filter(function(h){ return !specH[h]; }) };
+    }catch(e){ out[t]={error:String(e&&e.message||e)}; }
+  });
+  return out;
+}
+
 // GATE genérico de paridad de lectura: Sheets crudo vs sombra Supabase, por id.
 function compararLecturaWH(tabla){
   tabla=String(tabla||'');
