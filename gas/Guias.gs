@@ -96,6 +96,21 @@ function _crearGuiaImpl(params) {
     params.foto          || ''
   ]);
 
+  // [WH Fase 2 · PASO 2] dual-write de la guía RECIÉN creada a la sombra (best-effort, upsert por id_guia).
+  // Cierra el gap: ahora una guía creada post-batch SÍ está en wh.guias, así el PATCH de estado al cerrarla
+  // (cerrarGuia/reabrirGuia) sí aplica. Campos OCR ausentes = null en el INSERT (correcto: guía nueva sin OCR).
+  // aprobarPreingreso reusa esta función (lock reentrante) → su guía también queda espejada.
+  try {
+    if (typeof _dualWriteWH === 'function') {
+      _dualWriteWH('guias', {
+        idGuia: idGuia, tipo: tipo, fecha: fecha, usuario: params.usuario || '',
+        idProveedor: params.idProveedor || '', idZona: params.idZona || '',
+        numeroDocumento: params.numeroDocumento || '', comentario: params.comentario || '',
+        montoTotal: 0, estado: 'ABIERTA', idPreingreso: params.idPreingreso || '', foto: params.foto || ''
+      });
+    }
+  } catch(_eDW) {}
+
   return { ok: true, data: { idGuia: idGuia, estado: 'ABIERTA' } };
 }
 
