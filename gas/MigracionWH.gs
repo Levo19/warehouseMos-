@@ -1102,3 +1102,46 @@ function compararLecturaWH(tabla){
       diferencias: diffs.slice(0,40) };
   }catch(e){ return { ok:false, tabla:tabla, error:String(e&&e.message||e) }; }
 }
+
+// [Regla: 1 fila por producto en STOCK] Deduplica la hoja STOCK: por cada codigoProducto con >1 fila,
+// conserva la de ultimaActualizacion MÁS RECIENTE (la vigente) y borra las demás. dryRun por defecto.
+function dedupStockSheet(opts){
+  opts = opts || {};
+  var dry = String(opts.dryRun) !== 'false';   // default DRY-RUN (no borra)
+  return _conLock('dedupStockSheet', function(){
+    var sheet = getSheet('STOCK');
+    var data = sheet.getDataRange().getValues();
+    var hdrs = data[0];
+    var iId = hdrs.indexOf('idStock'), iCod = hdrs.indexOf('codigoProducto'),
+        iCant = hdrs.indexOf('cantidadDisponible'), iAct = hdrs.indexOf('ultimaActualizacion');
+    var porCod = {};
+    for(var r=1;r<data.length;r++){
+      var cod = String(data[r][iCod]||'').trim(); if(!cod) continue;
+      (porCod[cod] = porCod[cod] || []).push({ row:r+1, idStock:String(data[r][iId]||''), cant:data[r][iCant], act:data[r][iAct] });
+    }
+    var grupos = [], rowsBorrar = [];
+    Object.keys(porCod).forEach(function(cod){
+      var fs = porCod[cod]; if(fs.length < 2) return;
+      fs.sort(function(a,b){ return new Date(b.act).getTime() - new Date(a.act).getTime(); });  // más reciente primero
+      var keep = fs[0], del = fs.slice(1);
+      grupos.push({ cod:cod, conserva:{idStock:keep.idStock, cant:keep.cant, act:String(keep.act)},
+        borra: del.map(function(x){ return {idStock:x.idStock, cant:x.cant, act:String(x.act)}; }) });
+      del.forEach(function(x){ rowsBorrar.push(x.row); });
+    });
+    var postCount = null;
+    if(!dry){
+      var nCols = hdrs.length;
+      // VACIAR la fila huérfana (clearContent) en vez de deleteRow: si la hoja tiene protección de estructura
+      // o filtro, deleteRow es no-op pero setValue/clearContent sí funciona. _sheetToObjects descarta filas
+      // 100% vacías y el batch no sube filas sin idStock → la huérfana desaparece lógicamente.
+      rowsBorrar.sort(function(a,b){ return b-a; }).forEach(function(rw){ sheet.getRange(rw, 1, 1, nCols).clearContent(); });
+      SpreadsheetApp.flush();
+      // re-leer DENTRO de la misma ejecución para confirmar el borrado real (diagnóstico)
+      var d2 = sheet.getDataRange().getValues(); var c2 = {};
+      for(var k=1;k<d2.length;k++){ var cc=String(d2[k][iCod]||'').trim(); if(cc) c2[cc]=(c2[cc]||0)+1; }
+      postCount = {}; grupos.forEach(function(g){ postCount[g.cod] = c2[g.cod]||0; });
+    }
+    return { ok:true, dryRun:dry, gruposDuplicados:grupos.length, filasBorradas:(dry?0:rowsBorrar.length),
+             filasABorrar:rowsBorrar.length, postConteoPorCod:postCount, lastRow:sheet.getLastRow(), detalle:grupos.slice(0,30) };
+  });
+}

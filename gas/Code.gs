@@ -111,6 +111,7 @@ function _route(method, e) {
       case 'compararRotacionWH':   return compararRotacionWH();
       case 'compararLecturaWH':    return compararLecturaWH(params.tabla);  // gate genérico de lectura por tabla
       case 'auditarColumnasSpecWH': return auditarColumnasSpecWH();  // columnas de hoja no cubiertas por el spec
+      case 'dedupStockSheet':      return dedupStockSheet({ dryRun: params.dryRun });  // 1 fila por producto en STOCK
       case 'estadoFuenteDatosWH':  return estadoFuenteDatosWH();
       // Controles operativos del flip de lectura (par activar/desactivar). Seguro de exponer: la lectura
       // Supabase cuadra al centavo (gate verificado) y SIEMPRE cae a Sheets ante cualquier fallo.
