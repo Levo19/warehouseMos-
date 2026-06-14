@@ -8109,8 +8109,45 @@ const GuiasView = (() => {
     //   _saving      → POST en vuelo (aún no respondió el backend).
     //   _local       → optimista no sellado por el server (offline o sin confirmar).
     //   _saveFailed  → el backend rechazó/falló la línea (hay que reintentarla).
-    const enVuelo = (_guiaActual.detalle || [])
+    let enVuelo = (_guiaActual.detalle || [])
       .filter(d => d.observacion !== 'ANULADO' && (d._saving || d._local || d._saveFailed));
+    if (enVuelo.length) {
+      // [v2.13.219][BUG 4] RECONCILIACIÓN antes de bloquear. Una línea puede quedar
+      // con _local/_saving/_saveFailed pegado porque su agregarDetalle recibió shape
+      // offline/timeout AUNQUE el RPC SÍ commiteó (la fila ya está en wh.guia_detalle).
+      // El guard la contaba como "en vuelo" y bloqueaba para siempre ("cerrar no
+      // reacciona"). Solución: re-consultar el detalle REAL de Supabase y, para cada
+      // línea marcada que YA exista commiteada allí, bajar sus flags. Solo quedan
+      // bloqueantes las que GENUINAMENTE no están en el server.
+      try {
+        const g = await API.getGuia(_guiaActual.idGuia).catch(() => null);
+        const serverDet = (g && g.ok && g.data && Array.isArray(g.data.detalle)) ? g.data.detalle : null;
+        if (serverDet) {
+          // Índices de lo commiteado: por idDetalle exacto y por codigoProducto.
+          const idsServer = new Set(serverDet.map(s => String(s.idDetalle || '')).filter(Boolean));
+          const codsServer = new Set(serverDet
+            .filter(s => String(s.observacion || '') !== 'ANULADO')
+            .map(s => String(s.codigoProducto || '')).filter(Boolean));
+          let reconciliadas = 0;
+          (_guiaActual.detalle || []).forEach(d => {
+            if (d.observacion === 'ANULADO') return;
+            if (!(d._saving || d._local || d._saveFailed)) return;
+            const commit = idsServer.has(String(d.idDetalle || '')) ||
+                           codsServer.has(String(d.codigoProducto || ''));
+            if (commit) {
+              d._local = false; d._saving = false; d._saveFailed = false;
+              reconciliadas++;
+            }
+          });
+          if (reconciliadas) {
+            _mostrarDetalleSheet(_guiaActual, false);
+            // Recalcular el set en vuelo tras la reconciliación.
+            enVuelo = (_guiaActual.detalle || [])
+              .filter(d => d.observacion !== 'ANULADO' && (d._saving || d._local || d._saveFailed));
+          }
+        }
+      } catch (_) { /* si la consulta falla, caemos al guard original (no peor que antes) */ }
+    }
     if (enVuelo.length) {
       const fallidas = enVuelo.filter(d => d._saveFailed).length;
       if (fallidas) {
@@ -17929,6 +17966,14 @@ const ProductosView = (() => {
     try { SoundFX.beep && SoundFX.beep(); } catch(_){}
     vibrate(12);
 
+    // [BUG 1 · cutover Supabase] Los KPIs hero (Stock actual / Mínimo) DEBEN salir
+    // del stock EN VIVO de Supabase, no del cache wh_stock que puede estar stale
+    // (mostraba "actual 1 / mín 6" cuando el real era 10 / 1). _refrescarStockVivo
+    // sobre-escribe _stockMap con wh.stock_enriquecido y de ahí leemos los KPIs.
+    // No bloquea el render de movimientos (que ya tiene su propio await más abajo);
+    // si falla (offline) conserva el cache y nunca deja la vista peor que antes.
+    await _refrescarStockVivo();
+
     // KPIs hero
     const stockTotal = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
     const stockMin   = _s(codigos[0]).stockMinimo || 0;
@@ -17954,15 +17999,23 @@ const ProductosView = (() => {
 
     const local = _movimientosLocal(codigos);
     if (local.length) {
-      _histMovsCache = local;
-      _renderHistorial(local, true, stockTotal);
+      // Render preliminar offline-only: marca todo como pendiente (aún sin saldo real
+      // del server) para no inventar saldos hacia atrás. Se reemplaza al llegar GAS.
+      _histMovsCache = local.map(m => ({ ...m, _pendiente: true }));
+      _renderHistorial(_histMovsCache, true, stockTotal);
     }
 
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
     if (res.ok) {
-      const gasData = res.data || [];
+      // [BUG 2] gasData = movimientos REALES aplicados (wh.stock_movimientos), cada uno
+      // con su saldo verdadero. Las líneas locales cuyo idGuia NO está aplicado todavía
+      // son guías ABIERTAS (no movieron stock) → se marcan _pendiente y van en su propia
+      // sección, NUNCA mezcladas en el cálculo de saldos.
+      const gasData = (res.data || []).map(m => ({ ...m, _pendiente: false }));
       const gasIds  = new Set(gasData.map(m => m.idGuia).filter(Boolean));
-      const extras  = local.filter(m => m.idGuia && !gasIds.has(m.idGuia));
+      const extras  = local
+        .filter(m => m.idGuia && !gasIds.has(m.idGuia))
+        .map(m => ({ ...m, _pendiente: true }));
       const merged  = [...gasData, ...extras].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
       _histMovsCache = merged;
       if (merged.length) {
@@ -18001,13 +18054,25 @@ const ProductosView = (() => {
     if (!movs.length && esLocal) return;
     const stock = stockActual ?? 0;
 
-    // Balance corriente hacia atrás desde stock actual
+    // [BUG 2] Separar APLICADOS (movieron stock) de PENDIENTES (guías abiertas).
+    // Los pendientes NO tienen saldo real y NUNCA deben entrar al cálculo de saldos.
+    const aplicados  = movs.filter(m => !m._pendiente);
+    const pendientes = movs.filter(m => m._pendiente);
+
+    // Saldo de cada movimiento aplicado:
+    //  · Si el server mandó saldo REAL (m.saldo de wh.stock_movimientos) → se usa DIRECTO.
+    //  · Si no (fallback offline sin saldo), se recalcula hacia atrás desde stock actual
+    //    SOLO sobre aplicados (sin contaminar con guías abiertas).
     let bal = stock;
-    const conBal = movs.map(m => {
-      const row = { ...m, bal };
-      bal = m.esIngreso ? bal - m.cantidad : bal + m.cantidad;
+    const conBal = aplicados.map(m => {
+      const saldoReal = Number.isFinite(m.saldo) ? m.saldo : null;
+      const row = { ...m, bal: saldoReal != null ? saldoReal : bal };
+      // mantener el recálculo de respaldo coherente con la cadena
+      bal = (saldoReal != null ? saldoReal : bal) - (m.esIngreso ? m.cantidad : -m.cantidad);
       return row;
     });
+    // Pendientes: se anexan al final con bal=null (se renderiza "pendiente", sin saldo).
+    pendientes.forEach(m => conBal.push({ ...m, bal: null }));
 
     const fBadge = document.getElementById('histFuenteBadge');
     if (fBadge) fBadge.textContent = esLocal ? '📦 caché local' : '☁ sincronizado';
@@ -18089,7 +18154,12 @@ const ProductosView = (() => {
       const cat = _categoria(m);
       const lbl = _label[cat] || cat;
       const sign = _signo(cat);
-      const tipoChip = `<span class="hist-mov-tipo" style="background:rgba(15,23,42,.6);color:#94a3b8">${lbl}</span>`;
+      // [BUG 2] Las líneas de guías ABIERTAS se etiquetan como pendientes (aún no
+      // movieron stock); las aplicadas muestran su saldo real.
+      const esPend = !!m._pendiente;
+      const tipoChip = esPend
+        ? `<span class="hist-mov-tipo" style="background:rgba(251,146,60,.18);color:#fb923c">⏳ pendiente (guía abierta)</span>`
+        : `<span class="hist-mov-tipo" style="background:rgba(15,23,42,.6);color:#94a3b8">${lbl}</span>`;
       // [v2.13.54] Render de lotes anidados según tipo de movimiento
       let lotesHtml = '';
       if (m.esIngreso && m.lote) {
@@ -18110,7 +18180,9 @@ const ProductosView = (() => {
             ${m.origen ? `<p class="text-[10px] text-slate-600 truncate mt-0.5">${escHtml(m.origen)}</p>` : ''}
             ${lotesHtml}
             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span class="hist-mov-saldo">Saldo <strong>${fmt(m.bal)}</strong></span>
+              ${esPend
+                ? `<span class="hist-mov-saldo" style="color:#fb923c">Sin aplicar al stock</span>`
+                : `<span class="hist-mov-saldo">Saldo <strong>${m.bal == null ? '—' : fmt(m.bal)}</strong></span>`}
               ${m.usuario ? `<span class="text-[10px] text-slate-500">por ${escHtml(m.usuario)}</span>` : ''}
             </div>
           </div>

@@ -962,8 +962,19 @@ function _isoWeekLabel(d) {
 }
 
 // ── Historial de stock por producto ─────────────────────────
-// Devuelve los movimientos (GUIA_DETALLE JOIN GUIAS) del producto,
-// enriquecidos con balance corriente, ordenados DESC por fecha.
+// [BUG 2 · cutover Supabase] El historial DEBE reflejar los movimientos que
+// EFECTIVAMENTE movieron stock — y esos viven en wh.stock_movimientos, con sus
+// saldos REALES ya calculados (stockAntes/stockDespues). Antes se armaba desde
+// GUIA_DETALLE JOIN GUIAS, lo que incluía líneas de guías ABIERTAS (que aún NO
+// aplicaron stock, por el modelo "aplicar al cerrar") y obligaba al front a
+// recalcular saldos hacia atrás desde un stockActual a menudo equivocado →
+// saldos fantasma (+15 sobre guía abierta) y saldos NEGATIVOS inválidos.
+//
+// Ahora la fuente es STOCK_MOVIMIENTOS (lectura directa wh.stock_movimientos o
+// fallback Sheets vía _filasLecturaWH). Cada fila ya trae delta + stockAntes +
+// stockDespues, así que el saldo es DATO, no recálculo. Las líneas de guías
+// abiertas simplemente NO aparecen acá (nunca escribieron un movimiento de
+// stock); el front las muestra aparte como "pendiente (guía abierta)".
 function getHistorialStock(params) {
   var raw = String(params.codigoProducto || '');
   if (!raw) return { ok: false, error: 'codigoProducto requerido' };
@@ -983,10 +994,10 @@ function getHistorialStock(params) {
     });
   } catch(e) {}
 
-  var guias    = _sheetToObjects(getSheet('GUIAS'));
-  var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
+  // Mapa de guías (para tipo legible + estado): toleramos lectura directa o Sheets.
+  var guias    = _filasLecturaWH('guias', 'GUIAS');
   var guiaMap  = {};
-  guias.forEach(function(g) { guiaMap[g.idGuia] = g; });
+  guias.forEach(function(g) { guiaMap[String(g.idGuia)] = g; });
 
   // [v2.13.54] Pre-cargar LOTES_HISTORIAL para enriquecer cada movimiento
   // INGRESO → idLote del detalle + fechaVencimiento del detalle
@@ -1029,86 +1040,117 @@ function getHistorialStock(params) {
     }
   } catch(_) {}
 
-  // Movimientos de guías
-  var guiaMovs = detalles
-    .filter(function(d) { return codSet[String(d.codigoProducto)]; })
-    .map(function(d) {
-      var g    = guiaMap[d.idGuia] || {};
-      var tipo = String(g.tipo || '').toUpperCase();
-      var esIng = tipo.indexOf('INGRESO') >= 0 || tipo.indexOf('ENTRADA') >= 0 ||
-                  (!tipo.includes('SALIDA') && parseFloat(d.cantidad || 0) > 0);
-      var mov = {
-        idGuia:    d.idGuia,
-        fecha:     g.fecha  || d.fecha || '',
-        tipo:      g.tipo   || '—',
-        esIngreso: esIng,
-        cantidad:  Math.abs(parseFloat(d.cantidadRecibida || d.cantidadReal || d.cantidadEsperada || d.cantidad || 0)),
-        usuario:   g.usuario || d.usuario || '—',
-        origen:    g.idProveedor || g.destino || '',
-        estado:    g.estado || '',
-        fuente:    'guia'
-      };
-      // Enriquecer con lotes
-      if (esIng) {
-        // INGRESO: el detalle puede llevar idLote + fechaVencimiento directos
-        if (d.idLote) {
-          var lInfo = loteInfoById[String(d.idLote)] || {};
-          mov.lote = {
-            idLote: String(d.idLote),
-            fechaVencimiento: d.fechaVencimiento
-              ? (d.fechaVencimiento instanceof Date ? d.fechaVencimiento.toISOString() : String(d.fechaVencimiento))
-              : (lInfo.fechaVencimiento instanceof Date ? lInfo.fechaVencimiento.toISOString() : String(lInfo.fechaVencimiento || '')),
-            estado: String(lInfo.estado || 'ACTIVO')
-          };
-        }
-      } else {
-        // SALIDA: buscar consumos FIFO registrados en LOTES_HISTORIAL
-        var cbUp = String(d.codigoProducto).toUpperCase();
-        var consumos = (consumosByGuia[d.idGuia] || {})[cbUp] || [];
-        if (consumos.length > 0) {
-          mov.lotesConsumidos = consumos.map(function(co) {
-            var lInfo = loteInfoById[co.idLote] || {};
-            return {
-              idLote:   co.idLote,
-              cantidad: co.cantidad,
-              fechaVencimiento: lInfo.fechaVencimiento instanceof Date
-                ? lInfo.fechaVencimiento.toISOString()
-                : String(lInfo.fechaVencimiento || '')
-            };
-          });
-        }
-      }
-      return mov;
-    })
-    .filter(function(m){ return m.cantidad > 0; });
-
-  // Ajustes
-  var ajusteMovs = [];
+  // ── Fuente de verdad: wh.stock_movimientos (movimientos APLICADOS) ──────────
+  // Cada fila trae delta + stockAntes + stockDespues YA calculados → el saldo es
+  // dato, no recálculo. Aquí NUNCA aparecen guías abiertas (no escriben mov).
+  // En el cutover Supabase los movimientos los escriben las RPCs DIRECTO a
+  // wh.stock_movimientos; la hoja STOCK_MOVIMIENTOS solo se actualiza vía dual-write
+  // de GAS → puede quedar atrás. Por eso, igual que getStockMovimientos, leemos
+  // wh.stock_movimientos DIRECTO (filtro server-side por código) con fallback a la
+  // hoja ante cualquier fallo. No dependemos del flip 'lectura_stock_movimientos'.
+  var movimientos = null;
   try {
-    var ajSheet = getSheet('AJUSTES');
-    if (ajSheet) {
-      _sheetToObjects(ajSheet)
-        .filter(function(a){ return codSet[String(a.codigoProducto)]; })
-        .forEach(function(a){
-          var cant = Math.abs(parseFloat(a.cantidadAjuste || 0));
-          var tAj  = String(a.tipoAjuste || '').toUpperCase();
-          if (cant > 0) ajusteMovs.push({
-            idGuia:    a.idAjuste || '',
-            fecha:     a.fecha   || '',
-            tipo:      'Ajuste ' + (a.tipoAjuste || ''),
-            esIngreso: tAj === 'INC' || tAj === 'INI',
-            cantidad:  cant,
-            usuario:   a.usuario || '—',
-            origen:    a.motivo  || '',
-            estado:    '',
-            fuente:    'ajuste'
-          });
-        });
-    }
-  } catch(e) {}
+    var mvAcc = [];
+    codigos.forEach(function(cod) {
+      var r = _sbSelect('wh.stock_movimientos', { filters: { cod_producto: 'eq.' + cod }, limit: 5000 });
+      if (r && r.ok && Array.isArray(r.data)) {
+        mvAcc = mvAcc.concat(_sbRowsToObjsWH('stock_movimientos', r.data));
+      }
+    });
+    movimientos = mvAcc;
+  } catch (eMv) { movimientos = null; /* cae a Sheets */ }
+  if (movimientos === null) {
+    movimientos = _sheetToObjects(getSheet('STOCK_MOVIMIENTOS'))
+      .filter(function(m){ return codSet[String(m.codigoProducto)]; });
+  } else {
+    movimientos = movimientos.filter(function(m){ return codSet[String(m.codigoProducto)]; });
+  }
 
-  var todos = guiaMovs.concat(ajusteMovs)
-    .sort(function(a, b){ return new Date(b.fecha) - new Date(a.fecha); });
+  // Clasifica un movimiento por tipoOperacion + signo del delta.
+  // fuente='ajuste' para que el front lo pinte como AJUSTE ▲/▼ (categoría propia);
+  // resto = 'guia'. 'ini' (stock inicial) si el tipo lo indica.
+  function _clasificar(op, delta) {
+    var o = String(op || '').toUpperCase();
+    var esIng = parseFloat(delta) > 0;
+    var fuente = 'guia', tipo;
+    if (o === 'AJUSTE_MANUAL' || o === 'AUDITORIA' || o.indexOf('AJUSTE') >= 0) {
+      fuente = 'ajuste';
+      tipo   = 'Ajuste ' + (esIng ? 'INC' : 'DEC');
+    } else if (o.indexOf('INICIAL') >= 0 || o === 'INI') {
+      tipo = 'INICIAL';
+    } else if (o.indexOf('ENVASADO') >= 0) {
+      tipo = esIng ? 'INGRESO ENVASADO' : 'SALIDA ENVASADO';
+    } else if (o === 'APROBACION_PN') {
+      tipo = 'INGRESO (aprobación PN)';
+    } else {
+      tipo = esIng ? 'INGRESO' : 'SALIDA';
+    }
+    return { esIngreso: esIng, fuente: fuente, tipo: tipo };
+  }
+
+  var todos = movimientos.map(function(m) {
+    var delta = parseFloat(m.delta || 0);
+    var cls   = _clasificar(m.tipoOperacion, delta);
+    var idGuia = String(m.origen || '');         // origen = idGuia para movs de guía
+    var g      = guiaMap[idGuia] || {};
+    var mov = {
+      idGuia:       idGuia,
+      fecha:        m.fecha || '',
+      tipo:         cls.tipo,
+      tipoOperacion: String(m.tipoOperacion || ''),
+      esIngreso:    cls.esIngreso,
+      cantidad:     Math.abs(delta),
+      // [BUG 2] saldo REAL del movimiento — el front lo usa DIRECTO (no recalcula).
+      saldo:        parseFloat(m.stockDespues),
+      stockAntes:   parseFloat(m.stockAntes),
+      usuario:      m.usuario || g.usuario || '—',
+      origen:       g.idProveedor || g.destino || '',
+      estado:       g.estado || 'CERRADA',
+      fuente:       cls.fuente,
+      aplicado:     true
+    };
+    // Enriquecer con lotes (mismas fuentes LOTES_HISTORIAL / LOTES_VENCIMIENTO).
+    if (cls.esIngreso) {
+      // INGRESO: localizar el lote del ingreso (1 lote por línea de detalle).
+      var cbUp0 = String(m.codigoProducto).toUpperCase();
+      // Buscar en LOTES_VENCIMIENTO un lote de esta guía+producto.
+      var loteIng = null;
+      Object.keys(loteInfoById).forEach(function(idL) {
+        var l = loteInfoById[idL];
+        if (loteIng) return;
+        if (String(l.idGuia || '') === idGuia &&
+            String(l.codigoProducto || l.codigoBarra || '').toUpperCase() === cbUp0) loteIng = l;
+      });
+      if (loteIng) {
+        mov.lote = {
+          idLote: String(loteIng.idLote),
+          fechaVencimiento: loteIng.fechaVencimiento instanceof Date
+            ? loteIng.fechaVencimiento.toISOString()
+            : String(loteIng.fechaVencimiento || ''),
+          estado: String(loteIng.estado || 'ACTIVO')
+        };
+      }
+    } else {
+      // SALIDA: consumos FIFO registrados en LOTES_HISTORIAL para esta guía/producto.
+      var cbUp = String(m.codigoProducto).toUpperCase();
+      var consumos = (consumosByGuia[idGuia] || {})[cbUp] || [];
+      if (consumos.length > 0) {
+        mov.lotesConsumidos = consumos.map(function(co) {
+          var lInfo = loteInfoById[co.idLote] || {};
+          return {
+            idLote:   co.idLote,
+            cantidad: co.cantidad,
+            fechaVencimiento: lInfo.fechaVencimiento instanceof Date
+              ? lInfo.fechaVencimiento.toISOString()
+              : String(lInfo.fechaVencimiento || '')
+          };
+        });
+      }
+    }
+    return mov;
+  })
+  .filter(function(m){ return m.cantidad > 0; })
+  .sort(function(a, b){ return new Date(b.fecha) - new Date(a.fecha); });
 
   return { ok: true, data: todos };
 }

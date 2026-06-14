@@ -708,6 +708,70 @@ const API = (() => {
       if (params.limit) rows = rows.slice(0, parseInt(params.limit));
       return { ok: true, data: rows };
     }
+    if (action === 'getHistorialStock') {
+      // [BUG 2 · cutover Supabase] Historial REAL del producto: movimientos APLICADOS de
+      // wh.stock_movimientos (con stock_antes/stock_despues ya calculados → saldo = DATO).
+      // Las guías ABIERTAS no escriben movimiento → nunca aparecen acá (no más +15 fantasma
+      // ni saldos negativos). Lee directo de Supabase (dato fresco, no depende del flip GAS).
+      const codigos = String(params.codigoProducto || '').split(',').map(s => s.trim()).filter(Boolean);
+      if (!codigos.length) return { ok: false, error: 'codigoProducto requerido' };
+      const codSet = new Set(codigos.map(c => c.toUpperCase()));
+      // Movimientos por cada código (RPC con filtro server-side).
+      const lotsArr = await Promise.all(codigos.map(cod =>
+        _sbRpcWH('stock_movimientos_rls', { p_cod: cod, p_limit: null })
+          .then(o => (o && o.ok !== false && Array.isArray(o.data)) ? _sbRowsToObjsFront('stock_movimientos', o.data) : [])
+          .catch(() => [])));
+      const movsRaw = [].concat.apply([], lotsArr);
+      if (!movsRaw.length) return { ok: true, data: [] };
+      // Lotes (para enriquecer el INGRESO con su fecha de vencimiento).
+      let lotes = [];
+      try {
+        const lo = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
+        if (lo && lo.ok !== false && Array.isArray(lo.data)) lotes = lo.data;
+      } catch (_) {}
+      const guiaMap = {};
+      const guias = (typeof OfflineManager !== 'undefined' && OfflineManager.getGuiasCache) ? (OfflineManager.getGuiasCache() || []) : [];
+      guias.forEach(g => { guiaMap[String(g.idGuia)] = g; });
+      const _clasificar = (op, delta) => {
+        const o = String(op || '').toUpperCase();
+        const esIng = parseFloat(delta) > 0;
+        if (o === 'AJUSTE_MANUAL' || o === 'AUDITORIA' || o.indexOf('AJUSTE') >= 0)
+          return { esIngreso: esIng, fuente: 'ajuste', tipo: 'Ajuste ' + (esIng ? 'INC' : 'DEC') };
+        if (o.indexOf('INICIAL') >= 0 || o === 'INI') return { esIngreso: esIng, fuente: 'guia', tipo: 'INICIAL' };
+        if (o.indexOf('ENVASADO') >= 0) return { esIngreso: esIng, fuente: 'guia', tipo: esIng ? 'INGRESO ENVASADO' : 'SALIDA ENVASADO' };
+        if (o === 'APROBACION_PN') return { esIngreso: esIng, fuente: 'guia', tipo: 'INGRESO (aprobación PN)' };
+        return { esIngreso: esIng, fuente: 'guia', tipo: esIng ? 'INGRESO' : 'SALIDA' };
+      };
+      const data = movsRaw
+        .filter(m => codSet.has(String(m.codigoProducto).toUpperCase()))
+        .map(m => {
+          const delta = parseFloat(m.delta || 0);
+          const cls   = _clasificar(m.tipoOperacion, delta);
+          const idGuia = String(m.origen || '');
+          const g = guiaMap[idGuia] || {};
+          const mov = {
+            idGuia, fecha: m.fecha || '', tipo: cls.tipo, tipoOperacion: String(m.tipoOperacion || ''),
+            esIngreso: cls.esIngreso, cantidad: Math.abs(delta),
+            saldo: parseFloat(m.stockDespues), stockAntes: parseFloat(m.stockAntes),
+            usuario: m.usuario || g.usuario || '—', origen: g.idProveedor || g.destino || '',
+            estado: g.estado || 'CERRADA', fuente: cls.fuente, aplicado: true
+          };
+          if (cls.esIngreso) {
+            const codUp = String(m.codigoProducto).toUpperCase();
+            const l = lotes.find(x => String(x.id_guia || '') === idGuia &&
+                                       String(x.cod_producto || '').toUpperCase() === codUp);
+            if (l) mov.lote = {
+              idLote: String(l.id_lote),
+              fechaVencimiento: l.fecha_vencimiento ? new Date(l.fecha_vencimiento).toISOString() : '',
+              estado: String(l.estado || 'ACTIVO')
+            };
+          }
+          return mov;
+        })
+        .filter(m => m.cantidad > 0)
+        .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+      return { ok: true, data };
+    }
     return null;  // sin backend directo → GAS
   }
 
