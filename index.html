@@ -192,8 +192,14 @@
     .spinner { display:inline-block;width:20px;height:20px;border:2px solid #334155;
                border-top-color:#3b82f6;border-radius:50%;animation:spin .7s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
-    .slide-up { animation:slideUp .25s ease-out; }
-    @keyframes slideUp { from{transform:translateY(20px);opacity:0} to{transform:none;opacity:1} }
+    /* [perf] Entrada de vista: GPU-only (opacity+transform), corta. will-change
+       activo SOLO mientras dura la animación (la clase se quita en nav() al terminar)
+       para no dejar la vista promovida a capa permanentemente. */
+    .slide-up { animation:slideUp .18s ease-out; will-change:transform,opacity; }
+    @keyframes slideUp { from{transform:translateY(12px);opacity:0} to{transform:none;opacity:1} }
+    @media (prefers-reduced-motion:reduce) {
+      .slide-up { animation:none !important; will-change:auto; }
+    }
     .fade-in-up { animation:fadeInUp .35s cubic-bezier(.22,.61,.36,1) both; }
     @keyframes fadeInUp { from{transform:translateY(28px);opacity:0} to{transform:none;opacity:1} }
     .active-tab { background:#1d4ed8!important;color:#fff!important;border-color:#1d4ed8!important; }
@@ -2663,11 +2669,14 @@
 
     /* ════ v2.13.223 — Cards de guías ultramodernas ════ */
     /* Glassmorphism + jerarquía: la card respira, el tipo manda. */
-    .guia-card {
-      backdrop-filter: blur(2px);
-      -webkit-backdrop-filter: blur(2px);
-      will-change: transform;
-    }
+    /* [perf] Antes: .guia-card tenía `backdrop-filter:blur(2px)` + `will-change:transform`
+       PERMANENTES. Ambos forzaban una capa GPU (y un sampleo+blur del fondo) por CADA
+       card — con decenas de guías a la vez, el compositor rasterizaba/subía todas esas
+       capas al cambiar de módulo → la vista se sentía "pegada". El gradiente base
+       (.guia-card,.pre-card) ya es casi opaco (.92/.95), así que el blur era casi
+       imperceptible: quitarlo no cambia el look. El halo ::after (gradiente sólido)
+       mantiene el toque premium gratis. will-change ahora SOLO durante la entrada. */
+    .guia-card.gc-enter { will-change: transform, opacity; }
     .guia-card::after {
       content:''; position:absolute; inset:0; border-radius:14px; pointer-events:none;
       background: radial-gradient(120% 90% at 0% 0%, rgba(255,255,255,.04), transparent 55%);
@@ -2745,11 +2754,8 @@
     /* ════ Preingresos modernizados — mismo lenguaje visual que Guías ════ */
     /* La .pre-card hereda la base compartida; aquí le damos glassmorphism,
        halo, hover lift, entrada con stagger y glow, igual que .guia-card. */
-    .pre-card {
-      backdrop-filter: blur(2px);
-      -webkit-backdrop-filter: blur(2px);
-      will-change: transform;
-    }
+    /* [perf] Mismo motivo que .guia-card: nada de blur/will-change permanentes. */
+    .pre-card.gc-enter { will-change: transform, opacity; }
     .pre-card::after {
       content:''; position:absolute; inset:0; border-radius:14px; pointer-events:none;
       background: radial-gradient(120% 90% at 0% 0%, rgba(255,255,255,.04), transparent 55%);

@@ -3955,9 +3955,24 @@ const App = (() => {
     // de la vista anterior no debe dejar el body bloqueado en la nueva vista).
     _resetSheetScrollLock();
 
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    // [perf] El toggle visual es lo PRIMERO que ocurre al click (antes de cualquier
+    // cargar()/render), para que el módulo aparezca de inmediato.
+    document.querySelectorAll('.view').forEach(v => {
+      v.classList.remove('active');
+      v.classList.remove('slide-up'); // limpia entradas previas (re-dispara + libera will-change)
+    });
     const el = document.getElementById('view-' + viewName);
-    if (el) { el.classList.add('active'); el.classList.add('slide-up'); }
+    if (el) {
+      el.classList.add('active');
+      // Forzar reflow para que la animación se re-dispare aunque sea la misma vista.
+      void el.offsetWidth;
+      el.classList.add('slide-up');
+      // Quitar la clase al terminar → el navegador suelta la capa GPU (will-change).
+      el.addEventListener('animationend', function _done() {
+        el.classList.remove('slide-up');
+        el.removeEventListener('animationend', _done);
+      }, { once: true });
+    }
 
     // Marcar botón de nav activo por data-view
     document.querySelectorAll('.nav-btn').forEach(b => {
@@ -4981,7 +4996,12 @@ const GuiasView = (() => {
     const cached = OfflineManager.getGuiasCache();
     if (cached.length) {
       todas = cached;
-      render(_filtrarYBuscar());
+      // [perf] Diferir el render pesado (innerHTML de toda la lista) hasta DESPUÉS
+      // del paint del cambio de vista. setTimeout(0) cede tras el paint (rAF dispara
+      // ANTES del paint → seguiría bloqueándolo); mismo patrón probado en ProductosView.
+      // Así el shell + la animación de entrada se ven al instante y la lista se llena
+      // un tick después (mata el "pegado" al cambiar de módulo).
+      setTimeout(() => render(_filtrarYBuscar()), 0);
     } else {
       loading('listGuias', true);
     }
@@ -15441,7 +15461,11 @@ const PreingresosView = (() => {
     const cached = OfflineManager.getPreingresosCache();
     const filtrados = estado ? cached.filter(p => p.estado === estado) : cached;
     if (filtrados.length) {
-      _renderPreingresos(_aplicarBusqueda(filtrados));
+      // [perf] Diferir el render pesado hasta DESPUÉS del paint del cambio de vista
+      // (setTimeout 0; ver nota en GuiasView.cargar). En refresh silencioso (polling)
+      // no hay cambio de vista, así que se pinta directo sin diferir.
+      if (silencioso) _renderPreingresos(_aplicarBusqueda(filtrados));
+      else setTimeout(() => _renderPreingresos(_aplicarBusqueda(filtrados)), 0);
     } else if (!silencioso) {
       loading('listPreingresos', true);
     }
