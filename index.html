@@ -37,8 +37,8 @@
       // (validada en prod 2026-06-13). escritura/impresión siguen OFF → todo eso cae a GAS hasta activar.
       // Rollback de lectura: poner false + deploy. El control fino de escritura de stock es por WH_*_DIRECTO (server).
       lecturaNavegador:   true,
-      escrituraNavegador: false,
-      impresionNavegador: false
+      escrituraNavegador: true,   // [CUTOVER 2026-06-14] escritura directa server-wide (sombra sin drift + 27 flags ON)
+      impresionNavegador: false   // impresión queda en GAS hasta validar físicamente en impresora
     };
   </script>
 

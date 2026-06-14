@@ -1,1 +1,1 @@
-{ "version": "2.13.204", "build": "20260614-CUTOVER-B1-lectura-server-wide(WH_CONFIG.lecturaNavegador=true)-escritura/impresion-OFF" }
+{ "version": "2.13.205", "build": "20260614-CUTOVER-escritura-directa-server-wide(escrituraNavegador=true+27-flags-ON)-impresion-OFF" }
