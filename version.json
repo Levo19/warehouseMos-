@@ -1,1 +1,1 @@
-{ "version": "2.13.193", "build": "20260612-lote4-idpedido-confirm-inline" }
+{ "version": "2.13.195", "build": "20260613-fix-cruce-fallback(cola-reintenta-directo-no-GAS+guard-fromQueue)+auditoria-40x-x6+Storage+Edge+catalogo+autorizacion" }

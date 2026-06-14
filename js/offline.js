@@ -434,17 +434,29 @@ const OfflineManager = (() => {
     _syncing = true;
     _notificar();
 
+    // [40x cruce] Si la escritura directa está activa, reintentar vía API._postCola (post() directo, idempotente por el
+    // id sembrado del localId → la RPC de Supabase dedupea). NUNCA pegarle a GAS para estos ítems: GAS dedupea por su
+    // SYNC_LOG, que Supabase no comparte → un ítem que ya commiteó en Supabase se DUPLICARÍA al re-procesarse en GAS.
+    // Con el flag OFF (estado actual), el camino es idéntico al de antes (fetch a GAS).
+    // `API` es un const global (binding léxico, NO window.API) — se referencia bare con guard typeof, igual que
+    // api.js referencia OfflineManager. offline.js carga antes que api.js, pero esto corre en runtime → API ya existe.
+    const directoOn = !!(typeof API !== 'undefined' && API._escrituraDirectaActiva && API._escrituraDirectaActiva());
     var huboEnvasado = false;
     for (const item of queue) {
       try {
-        const res = await fetch(window.WH_CONFIG.gasUrl, {
-          method:  'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body:    JSON.stringify(item.params)
-        }).then(r => r.json());
+        let res;
+        if (directoOn) {
+          res = await API._postCola(item.params);
+        } else {
+          res = await fetch(window.WH_CONFIG.gasUrl, {
+            method:  'POST',
+            headers: { 'Content-Type': 'text/plain' },
+            body:    JSON.stringify(item.params)
+          }).then(r => r.json());
+        }
 
-        _actualizarItemQueue(item.localId, res.ok ? 'synced' : 'error');
-        if (res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
+        _actualizarItemQueue(item.localId, (res && res.ok) ? 'synced' : 'error');
+        if (res && res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
       } catch {
         _actualizarItemQueue(item.localId, 'error');
       }

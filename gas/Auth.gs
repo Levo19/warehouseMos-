@@ -14,10 +14,38 @@ function verificarClaveAdmin(params) {
   return _validarClaveAdminViaMOS(clave, params.accion || 'verificar', params.refDocumento || '');
 }
 
+// [F2] ¿validar la clave admin DIRECTO contra Supabase (mos.verificar_clave_admin) en vez de HTTP-MOS?
+// Flag WH_AUTH_DIRECTO='1' (default off → HTTP-MOS). GAS usa service_role → pasa el gate wh._claim_ok().
+// La RPC agrega el chequeo de NIVEL por acción (admin vs master-only); el HTTP-MOS no lo tiene (es la mejora del escalón).
+function _authClaveDirecta() {
+  try { return PropertiesService.getScriptProperties().getProperty('WH_AUTH_DIRECTO') === '1'; }
+  catch (e) { return false; }
+}
+function _validarClaveAdminDirecto(clave, accion, refDocumento) {
+  // Llama la RPC en schema mos vía service_role. Devuelve null si NO se debe usar (→ caller cae a HTTP-MOS).
+  try {
+    var r = _sbRpc('mos', 'verificar_clave_admin', {
+      p_clave: clave, p_accion: accion || 'verificar', p_ref: refDocumento || '', p_app: 'warehouseMos'
+    });
+    if (!r || !r.ok || !r.data) return null;            // fallo de transporte → fallback HTTP-MOS
+    var d = r.data;                                      // {ok, autorizado, validado_por, id_personal, nombre, rol, error}
+    if (d.ok === false) return null;                     // error interno de la RPC → fallback
+    if (d.autorizado !== true) return { ok: false, error: d.error || 'clave incorrecta' };
+    // mapear al shape que espera WH (igual que el HTTP-MOS): { ok, data: { validadoPor, idPersonal, nombre, rol } }
+    return { ok: true, data: { validadoPor: d.validado_por, idPersonal: d.id_personal, nombre: d.nombre, rol: d.rol, nivel: d.nivel } };
+  } catch (e) { return null; }                           // cualquier excepción → fallback HTTP-MOS
+}
+
 // Helper: delega la validación de la clave mixta al MOS.
 // MOS conoce la globalPin actual y los PINs personales de los admin/master,
 // además registra la auditoría de cada validación.
 function _validarClaveAdminViaMOS(clave, accion, refDocumento) {
+  // [F2] camino directo a Supabase (inerte por flag; fallback TOTAL a HTTP-MOS ante null/excepción)
+  if (_authClaveDirecta()) {
+    var directo = _validarClaveAdminDirecto(clave, accion, refDocumento);
+    if (directo) return directo;   // autorizado o rechazo explícito (clave incorrecta / nivel insuficiente)
+    // null → cae a HTTP-MOS abajo
+  }
   var mosUrl = PropertiesService.getScriptProperties().getProperty('MOS_WEB_APP_URL');
   if (!mosUrl) {
     return { ok: false, error: 'MOS_WEB_APP_URL no configurada en Script Properties de WH' };
