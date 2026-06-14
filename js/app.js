@@ -18007,14 +18007,22 @@ const ProductosView = (() => {
 
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
     if (res.ok) {
-      // [BUG 2] gasData = movimientos REALES aplicados (wh.stock_movimientos), cada uno
-      // con su saldo verdadero. Las líneas locales cuyo idGuia NO está aplicado todavía
-      // son guías ABIERTAS (no movieron stock) → se marcan _pendiente y van en su propia
-      // sección, NUNCA mezcladas en el cálculo de saldos.
+      // [BUG 2 · fix etiquetado+dup] gasData = movimientos REALES aplicados
+      // (wh.stock_movimientos), cada uno con su saldo verdadero.
+      //
+      // Sección "pendiente": SOLO líneas de guías GENUINAMENTE ABIERTAS (estado
+      // 'ABIERTA') que aún NO movieron stock. NUNCA ajustes/auditorías/stock-inicial:
+      // esos ya están aplicados y ya viven en gasData (bajo su idGuia/origen real,
+      // p.ej. 'AUD…'), pero en el cache local cargan su PROPIO id ('AJ…') que jamás
+      // matchea gasIds → antes se colaban como "⏳ pendiente" → mislabel + duplicado.
+      // Filtro: fuente==='guia' && estado==='ABIERTA' && idGuia no aplicado aún.
       const gasData = (res.data || []).map(m => ({ ...m, _pendiente: false }));
       const gasIds  = new Set(gasData.map(m => m.idGuia).filter(Boolean));
       const extras  = local
-        .filter(m => m.idGuia && !gasIds.has(m.idGuia))
+        .filter(m => m.idGuia &&
+                     m.fuente === 'guia' &&
+                     String(m.estado || '').toUpperCase() === 'ABIERTA' &&
+                     !gasIds.has(m.idGuia))
         .map(m => ({ ...m, _pendiente: true }));
       const merged  = [...gasData, ...extras].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
       _histMovsCache = merged;
