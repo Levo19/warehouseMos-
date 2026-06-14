@@ -1,1 +1,1 @@
-{ "version": "2.13.210", "build": "20260614-fix-stock-cutover-supabase(productos-view-stock-vivo+descargarOperacional-getStockFlip+silentRefresh-live-gana-cache)" }
+{ "version": "2.13.211", "build": "20260614-fix-crear-guia-directo-supabase(crearGuia-directo-refresca-listado+abre-detalle-real-no-card-optimista-sin-fecha)" }

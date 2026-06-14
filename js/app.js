@@ -7669,9 +7669,28 @@ const GuiasView = (() => {
       cerrarSheet('sheetGuia');
 
       const res = await API.crearGuia(params);
-      if (res.ok) {
+      if (res.ok && !res.offline && res.data?.idGuia) {
+        // [v2.13.211] Escritura DIRECTA (Supabase): la guía REAL ya existe con su
+        // fecha y estado ABIERTA. La card optimista quedaba "sin fecha" (no llevaba
+        // el campo fecha → caía al grupo 'Sin fecha') y NO era clickeable (el <div>
+        // optimista no tiene onclick verDetalle). Solución: descartar la optimista,
+        // refrescar el listado desde el backend (trae la guía real con fecha y card
+        // navegable) y abrir su detalle para empezar a agregar productos.
+        removeOptimisticGuia(tempId);
+        toast(`Guía ${res.data.idGuia} creada`, 'ok');
+        // Forzar fetch inmediato (ignora throttle) → cache con la guía real.
+        OfflineManager.precargarOperacional(true).then(() => {
+          const fresh = OfflineManager.getGuiasCache();
+          if (fresh.length) { todas = fresh; render(_filtrarYBuscar()); }
+        }).catch(() => {});
+        // Abrir el detalle de la guía recién creada (misma ruta que las guías
+        // viejas: si aún no está en cache, _abrirDetalleConGAS la pide al backend).
+        verDetalle(res.data.idGuia);
+      } else if (res.ok) {
+        // Camino OFFLINE (cola) o sin escritura directa: la respuesta puede tardar,
+        // mantener el patrón optimista — la card temporal cubre la espera.
         finalizeOptimisticGuia(tempId, res.data?.idGuia, tipo, provNombre);
-        toast(res.offline ? 'Guía guardada (offline) — sincronizando…' : `Guía ${res.data?.idGuia || 'nueva'} creada`, 'ok');
+        toast('Guía guardada (offline) — sincronizando…', 'ok');
       } else {
         removeOptimisticGuia(tempId);
         toast('Error: ' + (res.error || 'no se pudo crear'), 'danger');
