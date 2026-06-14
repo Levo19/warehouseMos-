@@ -113,6 +113,83 @@ const API = (() => {
     return res.json();   // {content:[{text}], ...} de Claude
   }
 
+  // [PASO 5 · B5] OCR de comprobante de proveedor — réplica FIEL de analizarFacturaProveedor (IA.gs:178-375).
+  // Llama Claude (visión) vía Edge `ia`, parsea los 12 campos SUNAT y los persiste en wh.guias (guardar_ocr_guia).
+  // Best-effort / fire-and-forget: NO bloquea la subida de la foto (igual que el disparo automático del GAS, Fotos.gs:59).
+  async function _ocrComprobanteGuia(idGuia, base64, mime) {
+    if (!idGuia || !base64) return null;
+    // [40x] kill-switch fino en el cliente: permite activar las fotos directas SIN disparar OCR (no gastar IA) durante
+    // el cutover. `localStorage 'wh_ocr_off'='1'` apaga la LLAMADA a Claude (el flag SQL solo apaga la persistencia).
+    try { if (localStorage.getItem('wh_ocr_off') === '1') return null; } catch (_) {}
+    const data = String(base64).replace(/^data:[^;]+;base64,/, '');   // base64 PURO (Claude rechaza el prefijo data-URI)
+    const m = /^data:([^;]+);/.exec(String(base64));
+    const mediaType = (m && m[1]) || mime || 'image/jpeg';
+    // SYSTEM PROMPT literal de IA.gs:224-253 (réplica exacta — datos fiscales SUNAT, no alterar).
+    const system = [
+      'Eres un asistente experto en lectura de comprobantes de pago peruanos (SUNAT).',
+      'Recibes una imagen y debes extraer los datos del documento.',
+      '',
+      'TIPOS DE COMPROBANTE:',
+      '- FACTURA: tiene RUC del emisor + IGV desglosado (18%) → IGV es recuperable',
+      '- BOLETA_VENTA con RUC: emisor identificado pero sin IGV recuperable',
+      '- TICKET o NOTA_DE_VENTA: sin IGV → NO recuperable',
+      '- NO_COMPROBANTE: la imagen no es un documento fiscal (es un producto, escena, etc.)',
+      '- ILEGIBLE: la imagen está borrosa, oscura o no se ve el documento',
+      '',
+      'Si extraes IGV, debe coincidir con el formato peruano (18% del subtotal gravado).',
+      'Si el total es S/ 118 y se ve "IGV 18" o "IGV S/ 18.00", entonces igvRecuperable=18.',
+      '',
+      'RESPONDE EXCLUSIVAMENTE con JSON válido (sin markdown, sin comentarios):',
+      '{',
+      '  "tipoComprobante": "FACTURA" | "BOLETA_VENTA" | "TICKET" | "NO_COMPROBANTE" | "ILEGIBLE",',
+      '  "rucEmisor": "20XXXXXXXXX" (11 dígitos) o "",',
+      '  "razonSocial": "string" o "",',
+      '  "serie": "F001" o "B001" o "" (la serie del documento),',
+      '  "numero": "0000123" o "" (el número del documento),',
+      '  "fecha": "DD/MM/YYYY" o "",',
+      '  "total": número o 0 (total del documento en soles),',
+      '  "subtotal": número o 0 (gravada sin IGV — solo si es FACTURA),',
+      '  "igvRecuperable": número o 0 (solo > 0 si es FACTURA con IGV discriminado),',
+      '  "confidence": 0-100 (qué tan seguro estás de los datos extraídos),',
+      '  "estado": "PROCESADO" | "SIN_IGV" | "ILEGIBLE" | "NO_COMPROBANTE",',
+      '  "notas": "string corto explicando el caso si aplica"',
+      '}'
+    ].join('\n');
+    let resp;
+    try {
+      resp = await _llamarEdgeIA({
+        max_tokens: 1536, system,   // 1536 > 1024 del GAS: margen para JSON con notas largas (cap Edge=8192)
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
+          { type: 'text', text: 'Analiza este comprobante de proveedor y devuelve el JSON con la estructura indicada.' }
+        ] }]
+      });
+    } catch (_) { return null; }
+    const text = (resp && resp.content && resp.content[0] && resp.content[0].text) || '';
+    const first = text.indexOf('{'), last = text.lastIndexOf('}');
+    if (first < 0 || last < 0) return null;
+    let r;
+    try { r = JSON.parse(text.substring(first, last + 1)); } catch (_) { return null; }
+    // Normalización fiel (IA.gs:300-314): tipado/defaults idénticos a los que persistía el GAS.
+    const p = {
+      id_guia: idGuia,
+      tipo_comprobante: String(r.tipoComprobante || 'NO_COMPROBANTE'),
+      ruc_emisor:       String(r.rucEmisor || ''),
+      razon_social:     String(r.razonSocial || ''),
+      serie:            String(r.serie || ''),
+      numero:           String(r.numero || ''),
+      fecha:            String(r.fecha || ''),
+      total:            parseFloat(r.total) || 0,
+      subtotal:         parseFloat(r.subtotal) || 0,
+      igv_recuperable:  parseFloat(r.igvRecuperable) || 0,
+      confidence:       parseInt(r.confidence, 10) || 0,
+      estado:           String(r.estado || 'NO_COMPROBANTE'),
+      notas:            String(r.notas || '')
+    };
+    try { await _sbRpcWH('guardar_ocr_guia', { p }); } catch (_) {}
+    return p;
+  }
+
   // Llama una RPC de LECTURA directo a PostgREST (apikey + Bearer + Profile). profile='wh' (default) o 'mos' (catálogo).
   async function _sbRpcWH(fn, args, profile) {
     const prof = profile || 'wh';
@@ -758,6 +835,9 @@ const API = (() => {
       try { url = (await _subirFotoStorage('guias', String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg', lid)).url; } catch (_) { return null; }
       const out = await _sbRpcWH('actualizar_foto_guia', { p: { id_guia: String(params.idGuia || ''), foto: url } });
       if (!out || out.ok === false) return null;
+      // [B5] OCR del comprobante en BACKGROUND (fire-and-forget, igual que el disparo automático de GAS, Fotos.gs:59):
+      // no bloquea el ok de la foto; persiste los campos SUNAT cuando Claude responde. Inerte si el flag OCR está OFF.
+      _ocrComprobanteGuia(String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg').catch(() => {});
       return { ok: true, data: { url } };
     }
     if (params.action === 'registrarMerma') {

@@ -1,1 +1,1 @@
-{ "version": "2.13.195", "build": "20260613-fix-cruce-fallback(cola-reintenta-directo-no-GAS+guard-fromQueue)+auditoria-40x-x6+Storage+Edge+catalogo+autorizacion" }
+{ "version": "2.13.196", "build": "20260613-OCR-comprobante-directo(Edge-ia-vision+guardar_ocr_guia-RPC)+fix-cruce-fallback+auditoria-40x+Storage+catalogo+autorizacion" }
