@@ -140,10 +140,6 @@ function _ejecutarOp(tipo, payload, meta) {
     case 'ANULAR_DETALLE':
       return anularDetalle({ idDetalle: payload.idDetalle });
 
-    case 'ANULAR_GUIA':
-      // No hay endpoint directo, marcamos guía como ANULADA si existe
-      return _anularGuiaSimple(payload.idGuia, meta.usuario);
-
     case 'PN_REGISTRAR':
       return registrarProductoNuevo(payload);
 
@@ -179,19 +175,6 @@ function _ejecutarOp(tipo, payload, meta) {
   }
 }
 
-// Helper minimal para ANULAR_GUIA — marca estado=ANULADA si la guía existe
-function _anularGuiaSimple(idGuia, usuario) {
-  if (!idGuia) return { ok: false, error: 'idGuia requerido' };
-  var sheet = getSheet('GUIAS');
-  var data  = sheet.getDataRange().getValues();
-  var hdrs  = data[0];
-  var idxId  = hdrs.indexOf('idGuia');
-  var idxEst = hdrs.indexOf('estado');
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][idxId]) === String(idGuia)) {
-      sheet.getRange(i + 1, idxEst + 1).setValue('ANULADA');
-      return { ok: true, data: { idGuia: idGuia, estado: 'ANULADA' } };
-    }
-  }
-  return { ok: false, error: 'guía no encontrada' };
-}
+// [higiene 2026-06-14] _anularGuiaSimple ELIMINADO: marcaba ANULADA sin revertir stock (riesgo de
+// stock fantasma). No era invocable (el front nunca emite ANULAR_GUIA). El case cae al default →
+// error limpio. Para anular una guía cerrada y revertir stock: reabrir_guia (revierte) + anular detalles.
