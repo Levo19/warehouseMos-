@@ -1006,6 +1006,15 @@ const API = (() => {
       if ('comentario' in params)  p.comentario = params.comentario;
       if ('fotos' in params)       p.fotos = String(params.fotos || '');
       if ('cargadores' in params)  p.cargadores = params.cargadores;
+      // [aviso-directo] snapshot_aviso: lo persiste imprimirAvisoCajeros tras avisar a cajas.
+      // La RPC wh.actualizar_preingreso ya lo acepta (33_wh_actualizar_preingreso.sql). Se envía
+      // SOLO si el front lo manda explícito (no se toca en patches normales del preingreso). Acepta
+      // string JSON o el snapshot ya stringificado — se normaliza a string para la columna json.
+      if ('snapshotAviso' in params) {
+        p.snapshot_aviso = (typeof params.snapshotAviso === 'string')
+          ? params.snapshotAviso
+          : JSON.stringify(params.snapshotAviso || {});
+      }
       const out = await _sbRpcWH('actualizar_preingreso', { p });
       if (!out || out.ok === false) return null;
       return out;
@@ -1362,7 +1371,20 @@ const API = (() => {
   // Sheets / fan-out multi-impresora / lotes orquestados en server NO se cablean (ver REPORTE).
   // ════════════════════════════════════════════════════════════════════
   async function _postDirectoImpresion(params, lid) {
-    const PRINT_ACTIONS = ['imprimirBienvenida', 'imprimirMembrete'];
+    // Solo se cablean acciones de impresión de UN job ESC/POS / TSPL autocontenido en el front (o resoluble del
+    // cache). NO se cablean:
+    //   • imprimirAvisoCajeros → fan-out CRUZA-DB: el GAS lee MosExpress.CAJAS (cajas abiertas) y manda 1 job por
+    //     impresora de cajero. El navegador WH no puede leer las cajas de MosExpress → la IMPRESIÓN del aviso queda
+    //     en GAS. La RAÍZ del bug del comentario "(vacío)" se cierra aparte, sin impresora (ver app.js
+    //     _dispararAvisoCajeros: persiste snapshot directo a Supabase + manda los campos REALES al GAS para el ticket).
+    //   • imprimirMembrete góndola ME / almacén WH y las etiquetas Caserito en LOTE → orquestadas por el sistema de
+    //     LOTES (crearLoteMembrete/crearLoteAdhesivo: cola en Sheet + trigger que imprime sub-lotes con compensación
+    //     de DRIFT térmico por-print desde Script Properties del rollo). Esa cola+drift NO existe en el navegador
+    //     (impresion-directa.js usa offset base = drift 0) → se quedan en GAS. Los builders TSPL2 (Caserito/ME/WH)
+    //     SÍ están listos en ImpresionDirecta para el día que la cola de lotes se porte a Supabase (Edge cron).
+    // Lo cableado (single-job): imprimirBienvenida + imprimirMembrete estándar (ESC/POS) + imprimirEtiqueta
+    // (Caserito TSPL2, ruta single-job legacy: drift 0 = offset base, válido para 1 etiqueta).
+    const PRINT_ACTIONS = ['imprimirBienvenida', 'imprimirMembrete', 'imprimirEtiqueta'];
     if (PRINT_ACTIONS.indexOf(params.action) < 0) return undefined;   // no es impresión cableada
     if (!_whImpresionDirecta()) return null;                          // flag OFF → GAS
     if (typeof ImpresionDirecta === 'undefined') return null;         // módulo no cargado → GAS
@@ -1403,7 +1425,48 @@ const API = (() => {
       return ok ? { ok: true } : null;
     }
 
+    if (params.action === 'imprimirEtiqueta') {
+      // Etiqueta Caserito/envasado (TSPL2) — ruta SINGLE-JOB (el GAS imprimirEtiqueta manda 1 job a PrintNode).
+      // El smart-highlight necesita el catálogo de envasables tokenizado: el GAS lo lee de Sheets
+      // (_getAllEnvasablesTokens); acá lo replicamos del cache de productos con el MISMO filtro (estado=1,
+      // tiene codigoProductoBase, código empieza con 'WH'). Si el cache está vacío, allEnv=[] → sin highlight
+      // diferenciador (el último token = peso igual se resalta), comportamiento degradado pero válido.
+      if (!ImpresionDirecta.armarEtiquetaCaserito) return null;
+      const allEnv = _envasablesTokensCache();
+      let armado;
+      try {
+        armado = ImpresionDirecta.armarEtiquetaCaserito({
+          codigoBarra:      params.codigoBarra,
+          descripcion:      params.descripcion,
+          unidades:         params.unidades,
+          fechaVencimiento: params.fechaVencimiento,
+          fechaEnvasado:    params.fechaEnvasado || params.fechaImpresion,
+          allEnvasables:    allEnv
+        });
+      } catch (_) { return null; }
+      if (!armado || !armado.base64) return null;
+      const pid = _resolvePrinterId(armado.printerHint, params.printerIdOverride);
+      if (!pid) return null;                                          // sin impresora ADHESIVO → GAS
+      const ok = await _imprimirDirecto(pid, armado.base64, armado.title);
+      return ok ? { ok: true } : null;
+    }
+
     return null;
+  }
+
+  // Réplica del catálogo de _getAllEnvasablesTokens (GAS) desde el cache de productos del navegador, para el
+  // smart-highlight de las etiquetas TSPL2. Mismo filtro: estado='1' + codigoProductoBase no vacío + código (WH...).
+  function _envasablesTokensCache() {
+    const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+    const out = [];
+    prods.forEach(p => {
+      if (String(p.estado) !== '1') return;
+      if (!p.codigoProductoBase) return;
+      const c = String(p.codigoBarra || p.idProducto || '').toUpperCase();
+      if (c.indexOf('WH') !== 0) return;
+      out.push({ descripcion: p.descripcion });   // el builder tokeniza con _normalizeEtq (igual que el GAS)
+    });
+    return out;
   }
 
   // GET: network first, cache como fallback

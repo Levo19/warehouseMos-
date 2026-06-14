@@ -16856,6 +16856,32 @@ const PreingresosView = (() => {
         payload.modoComparativo  = true;
         payload.snapshotAnterior = JSON.stringify(opts.snapshotAnterior || {});
       }
+      // [aviso-directo · cierra bug "(vacío)"] El comentario REAL vive en Supabase (escritura/lectura
+      // directa). El GAS deriva ticket + snapshot del SHEET (sombra que puede atrasarse si el trigger de
+      // sync muere) → el comentario salía "(vacío)". Acá enriquecemos el payload con los campos REALES
+      // tomados del cache (que se llena de getPreingresos → lectura DIRECTA a Supabase). El GAS los prefiere
+      // sobre el Sheet (overrides *Real); si no llegan, comportamiento idéntico al actual (fallback Sheet).
+      // Esto NO necesita impresora ni el flag de impresión: corrige la RAÍZ en el camino de producción (GAS
+      // fan-out a cajas), que es donde se imprime. La parte física (multi-impresora cruza-DB a MosExpress.CAJAS)
+      // sigue en GAS porque el navegador WH no puede leer las cajas abiertas de MosExpress.
+      let _piReal = null;
+      try {
+        _piReal = (OfflineManager.getPreingresosCache() || []).find(x => x.idPreingreso === idPreingreso) || null;
+      } catch (_) {}
+      if (_piReal) {
+        payload.comentarioReal  = String(_piReal.comentario || '');
+        payload.idProveedorReal = String(_piReal.idProveedor || '');
+        payload.montoReal       = (_piReal.monto != null ? _piReal.monto : '');
+        payload.cargadoresReal  = (typeof _piReal.cargadores === 'string')
+          ? _piReal.cargadores : JSON.stringify(_piReal.cargadores || []);
+        payload.fotosReal       = String(_piReal.fotos || '');
+        payload.fechaReal       = String(_piReal.fecha || '');
+      }
+      // NOTA: la PERSISTENCIA del snapshot_aviso se mantiene success-gated en el GAS (solo tras imprimir OK a
+      // alguna caja), igual que antes — así el chip "⚠ sin avisar" NO se limpia si la caja físicamente no recibió.
+      // El bug del "(vacío)" se cierra porque el snapshot que el GAS deriva+persiste ahora sale de `comentarioReal`
+      // (Supabase), no del Sheet atrasado. No persistimos un snapshot prematuro acá para no enmascarar fallos de
+      // impresión. (La RPC actualizar_preingreso ya acepta snapshot_aviso en api.js por si se necesita en el futuro.)
       const res = await API.imprimirAvisoCajeros(payload);
       if (res.ok) {
         const okList = (res.data?.impresiones || []).filter(r => r.ok);

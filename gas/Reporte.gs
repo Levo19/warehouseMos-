@@ -979,6 +979,20 @@ function imprimirAvisoCajeros(params) {
   } catch(e) { return { ok: false, error: 'Error leyendo PREINGRESOS: ' + e.message }; }
   if (!pi) return { ok: false, error: 'Preingreso no encontrado: ' + idPreingreso };
 
+  // [aviso-directo · cierra bug "(vacío)"] El comentario/monto/etc REAL vive en Supabase (escritura/lectura
+  // directa del navegador). La hoja PREINGRESOS es una SOMBRA sincronizada por trigger que PUEDE atrasarse en
+  // silencio (ver memoria sync_triggers_mueren) → este `pi` traía el comentario viejo y el aviso salía "(vacío)".
+  // El cliente ahora manda los valores REALES (overrides *Real, tomados de su lectura directa a Supabase). Si
+  // llegan, los preferimos sobre la fila del Sheet para construir TANTO el ticket COMO el snapshot que se persiste
+  // → snapshot y comentario quedan en la misma fuente. Si NO llegan (cliente viejo / sin lectura directa), se usa
+  // el Sheet exactamente como antes (fallback total, comportamiento idéntico).
+  if (params.comentarioReal  !== undefined && params.comentarioReal  !== null) pi.comentario  = String(params.comentarioReal);
+  if (params.idProveedorReal !== undefined && params.idProveedorReal !== null && String(params.idProveedorReal) !== '') pi.idProveedor = String(params.idProveedorReal);
+  if (params.montoReal       !== undefined && params.montoReal       !== null && String(params.montoReal) !== '') pi.monto = params.montoReal;
+  if (params.cargadoresReal  !== undefined && params.cargadoresReal  !== null) pi.cargadores  = params.cargadoresReal;
+  if (params.fotosReal       !== undefined && params.fotosReal       !== null) pi.fotos       = String(params.fotosReal);
+  if (params.fechaReal       !== undefined && params.fechaReal       !== null && String(params.fechaReal) !== '') pi.fecha = params.fechaReal;
+
   // 2. Resolver proveedor
   var provName = '';
   try {
