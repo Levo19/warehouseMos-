@@ -1,1 +1,1 @@
-{ "version": "2.13.197", "build": "20260614-crearPreingreso-directo(cablea-RPC-existente)+OCR-RPC-aplicada+impresion-bienvenida+fix-cruce+auditoria-40x" }
+{ "version": "2.13.198", "build": "20260614-tanda1-edicion-guia-directo(actualizarCantidadDetalle/anularDetalle/actualizarFechaVencimiento/actualizarGuia)+auditoria-40x+5fixes(ajustes,localid,TZlima,regex,PNhuerfano)" }

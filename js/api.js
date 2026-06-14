@@ -922,6 +922,51 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;
     }
+    if (params.action === 'actualizarCantidadDetalle') {
+      // Edita cant_recibida de una línea. Si la guía está CERRADA, la RPC ajusta stock por el DELTA → NO idempotente
+      // natural → dedup por local_id (la acción ya está en _IDEMPOTENT_ACTIONS → lid estable en reintentos).
+      // El front solo manda idDetalle/cantidadRecibida; la RPC resuelve idGuia/cod/cant_vieja/lote desde la fila.
+      const out = await _sbRpcWH('actualizar_cantidad_detalle', { p: {
+        id_detalle: String(params.idDetalle || ''), cantidad_recibida: params.cantidadRecibida,
+        usuario: params.usuario || '', id_mov: 'MOV_' + lid, id_lote_nuevo: 'LOTE_' + lid,
+        id_ajuste: 'AJ_' + lid, local_id: lid   // [FIX #1] id determinista del ajuste (guía CERRADA crea fila en wh.ajustes)
+      } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
+      return out;
+    }
+    if (params.action === 'anularDetalle') {
+      // Anula una línea. Idempotente NATURAL por estado (si ya ANULADO → yaAnulado, no re-devuelve stock); FOR UPDATE
+      // en la RPC serializa contra anulación concurrente. Solo devuelve stock si la guía está CERRADA (no envasado).
+      const out = await _sbRpcWH('anular_detalle', { p: {
+        id_detalle: String(params.idDetalle || ''), usuario: params.usuario || '', id_mov: 'MOV_' + lid
+      } });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
+    if (params.action === 'actualizarFechaVencimiento') {
+      // Edita la fecha de vencimiento de una línea + sincroniza el lote. NO toca stock. Idempotente natural por valor.
+      const out = await _sbRpcWH('actualizar_fecha_vencimiento', { p: {
+        id_detalle: String(params.idDetalle || ''), fecha_vencimiento: params.fechaVencimiento || '',
+        usuario: params.usuario || '', id_lote_nuevo: 'LOTE_' + lid
+      } });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
+    if (params.action === 'actualizarGuia') {
+      // Edita campos de CABECERA (solo los presentes). NO toca stock ni lotes. Idempotente natural (UPDATE concreto).
+      // Mapeo fiel a la whitelist GAS; solo se incluye la clave en p si el front la mandó (mandar '' SÍ limpia).
+      const p = { id_guia: String(params.idGuia || '') };
+      if (!p.id_guia) return null;
+      if ('tipo' in params)            p.tipo = String(params.tipo);
+      if ('idProveedor' in params)     p.id_proveedor = String(params.idProveedor);
+      if ('idZona' in params)          p.id_zona = String(params.idZona);
+      if ('numeroDocumento' in params) p.numero_documento = String(params.numeroDocumento);
+      if ('comentario' in params)      p.comentario = String(params.comentario);
+      if ('foto' in params)            p.foto = String(params.foto);
+      const out = await _sbRpcWH('actualizar_guia', { p });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 
