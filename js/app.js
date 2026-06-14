@@ -4984,6 +4984,8 @@ const GuiasView = (() => {
   }
 
   function _filtrar(list, f) {
+    // Las guías ANULADA no se muestran en el listado (quedan en DB para auditoría/historial).
+    list = list.filter(g => String(g.estado || '').toUpperCase() !== 'ANULADA');
     if (!f || f === 'TODAS') return list;
     if (f === 'INGRESO') return list.filter(g => g.tipo?.startsWith('INGRESO'));
     if (f === 'SALIDA')  return list.filter(g => g.tipo?.startsWith('SALIDA'));
