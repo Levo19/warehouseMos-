@@ -967,6 +967,57 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;
     }
+    if (params.action === 'resolverMerma') {
+      // Resuelve una merma (rep no toca stock; des → línea en guía SALIDA_MERMA semanal ABIERTA, que descuenta stock al
+      // CERRARSE). NO mueve stock acá. Idempotente: guard de estado en la RPC (RESUELTA→yaResuelta) + dedup por local_id
+      // (inserta línea de guía). El front solo manda idMerma/rep/des/obs; la RPC resuelve cod/original desde la fila.
+      const out = await _sbRpcWH('resolver_merma', { p: {
+        id_merma: String(params.idMerma || ''),
+        cantidad_reparada: params.cantidadReparada, cantidad_desechada: params.cantidadDesechada,
+        observacion_resolucion: params.observacionResolucion || '', usuario: params.usuario || '',
+        id_detalle: 'MRMDET_' + lid, local_id: lid
+      } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
+      return out;
+    }
+    if (params.action === 'corregirUnidadesEnvasado') {
+      // Corrige unidades de un envasado → mueve stock derivado (+deltaUds) y base (-deltaBase). El cliente resuelve
+      // base/factor del cache (la RPC no tiene catálogo). Mueve stock por DELTA → NO idempotente → dedup por local_id.
+      // La autorización admin (claveAdmin) se valida ANTES en el flujo; la RPC no la chequea.
+      const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+      const env = (typeof OfflineManager !== 'undefined' && OfflineManager.getEnvasadosCache) ? (OfflineManager.getEnvasadosCache() || []).find(e => String(e.idEnvasado) === String(params.idEnvasado)) : null;
+      const cbDer = env ? String(env.codigoProductoEnvasado || '') : '';
+      const der = prods.find(p => String(p.codigoBarra) === cbDer);
+      if (!der) return null;   // no resoluble → GAS
+      const factor = parseFloat(der.factorConversionBase) || 0;
+      if (factor <= 0) return null;
+      const cbBaseEnv = env ? String(env.codigoProductoBase || '') : '';
+      const base = prods.find(p => String(p.codigoBarra) === cbBaseEnv || String(p.skuBase) === cbBaseEnv || String(p.idProducto) === cbBaseEnv);
+      const out = await _sbRpcWH('corregir_unidades_envasado', { p: {
+        id_envasado: String(params.idEnvasado || ''), nuevas_unidades: params.nuevasUnidades,
+        cod_producto_envasado: cbDer, cod_producto_base: base ? String(base.codigoBarra) : '',
+        factor_base: factor, motivo: params.motivo || '', usuario: params.usuario || '',
+        id_mov_der: 'MOVEDD_' + lid, id_mov_base: 'MOVEDB_' + lid, local_id: lid
+      } });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
+    if (params.action === 'anularEnvasadoConClave') {
+      // Anula un envasado (reverso EXACTO de registrar_envasado): -uds derivado, +cantBase base, anula lote+detalles.
+      // Idempotente NATURAL por estado (si ya ANULADO → yaAnulado; FOR UPDATE serializa). La RPC usa los cod de la FILA
+      // como fuente de verdad; igual le pasamos los del cache como respaldo. La autorización admin se valida ANTES.
+      const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+      const env = (typeof OfflineManager !== 'undefined' && OfflineManager.getEnvasadosCache) ? (OfflineManager.getEnvasadosCache() || []).find(e => String(e.idEnvasado) === String(params.idEnvasado)) : null;
+      const cbDer = env ? String(env.codigoProductoEnvasado || '') : '';
+      const cbBaseEnv = env ? String(env.codigoProductoBase || '') : '';
+      const base = prods.find(p => String(p.codigoBarra) === cbBaseEnv || String(p.skuBase) === cbBaseEnv || String(p.idProducto) === cbBaseEnv);
+      const out = await _sbRpcWH('anular_envasado', { p: {
+        id_envasado: String(params.idEnvasado || ''), cod_producto_envasado: cbDer,
+        cod_producto_base: base ? String(base.codigoBarra) : '', motivo: params.motivo || '', usuario: params.usuario || ''
+      } });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 

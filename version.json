@@ -1,1 +1,1 @@
-{ "version": "2.13.198", "build": "20260614-tanda1-edicion-guia-directo(actualizarCantidadDetalle/anularDetalle/actualizarFechaVencimiento/actualizarGuia)+auditoria-40x+5fixes(ajustes,localid,TZlima,regex,PNhuerfano)" }
+{ "version": "2.13.199", "build": "20260614-tanda2-mermas-envasado-directo(resolverMerma/corregirUnidadesEnvasado/anularEnvasadoConClave)+auditoria-40x+fixes(lock-guia-semanal,fila>cliente)" }
