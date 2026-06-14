@@ -736,17 +736,24 @@ function descargarOperacional() {
   var result  = { guias: [], detalles: [], preingresos: [], stock: [], ajustes: [], auditorias: [] };
   var errores = [];
 
+  // [Fix cutover Supabase] TODOS los datasets operacionales deben respetar el
+  // flip FUENTE_DATOS. _filasLecturaWH(tabla, SHEET) lee de la sombra Supabase
+  // si el flip está ON (key 'lectura_<tabla>') con FALLBACK automático a Sheets
+  // ante cualquier fallo, y devuelve el MISMO shape que _sheetToObjects (los
+  // nombres de campo del spec son idénticos a los headers de la hoja). Antes
+  // estas lecturas iban al Sheet directo (congelado tras el cutover) → la vista
+  // de productos/guías mostraba datos viejos / SIN STOCK.
   try {
-    var guias = _sheetToObjects(getSheet('GUIAS'));
+    var guias = _filasLecturaWH('guias', 'GUIAS');
     result.guias = guias.slice().reverse().slice(0, 200);
   } catch(e) { errores.push('guias: ' + e.message); }
 
   try {
-    result.detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
+    result.detalles = _filasLecturaWH('guia_detalle', 'GUIA_DETALLE');
   } catch(e) { errores.push('detalles: ' + e.message); }
 
   try {
-    var preingresos = _sheetToObjects(getSheet('PREINGRESOS'));
+    var preingresos = _filasLecturaWH('preingresos', 'PREINGRESOS');
     var cutoff30 = new Date(); cutoff30.setDate(cutoff30.getDate() - 30);
     result.preingresos = preingresos.filter(function(p) {
       var f = new Date(p.fecha);
@@ -771,7 +778,7 @@ function descargarOperacional() {
   }
 
   try {
-    var ajustes = _sheetToObjects(getSheet('AJUSTES'));
+    var ajustes = _filasLecturaWH('ajustes', 'AJUSTES');
     var cutoff90 = new Date(); cutoff90.setDate(cutoff90.getDate() - 90);
     result.ajustes = ajustes.filter(function(a) {
       var f = new Date(a.fecha);
@@ -780,7 +787,7 @@ function descargarOperacional() {
   } catch(e) { errores.push('ajustes: ' + e.message); }
 
   try {
-    var auditorias = _sheetToObjects(getSheet('AUDITORIAS'));
+    var auditorias = _filasLecturaWH('auditorias', 'AUDITORIAS');
     var cutoff60 = new Date(); cutoff60.setDate(cutoff60.getDate() - 60);
     result.auditorias = auditorias.filter(function(a) {
       var f = new Date(a.fechaEjecucion || a.fechaAsignacion);
