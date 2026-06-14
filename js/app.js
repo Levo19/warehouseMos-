@@ -564,12 +564,27 @@ function fmt(n, dec = 0) {
   return (parseFloat(n) || 0).toFixed(dec).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-// Convierte string de fecha del sheet (yyyy-MM-dd) a Date local sin drift UTC
+// Convierte string de fecha del sheet (yyyy-MM-dd) a Date local sin drift UTC.
+// [v2.13.209] Tolerante a 3 formatos de `fecha` que conviven tras el cutover a Supabase:
+//   - 'yyyy-MM-dd'                 (guías VIEJAS: sync de Sheet con celda Date → _sheetToObjects yyyy-MM-dd)
+//   - 'yyyy-MM-ddTHH:mm:ss.sssZ'   (guías NUEVAS, escritura directa: timestamptz ISO-UTC con Z)
+//   - 'yyyy-MM-dd HH:mm:ss+00'     (variante timestamptz con ESPACIO en vez de 'T' → Safari/iOS la rechaza)
+// El espacio entre fecha y hora NO es ISO-8601: V8 lo tolera pero Safari devuelve Invalid Date
+// (→ fecha "desaparecía" en iPhone/iPad). Normalizamos el primer espacio a 'T' antes de parsear.
 function _parseLocalDate(s) {
   if (!s) return new Date(NaN);
-  const str = String(s);
-  // Si ya tiene componente de hora, parsear directo; si solo tiene fecha yyyy-MM-dd, añadir mediodia local
-  return str.length <= 10 ? new Date(str + 'T12:00:00') : new Date(str);
+  let str = String(s).trim();
+  // Solo fecha (yyyy-MM-dd): mediodía local para evitar drift de TZ al mostrar día.
+  if (str.length <= 10) return new Date(str + 'T12:00:00');
+  // Normaliza 'yyyy-MM-dd HH:mm...' → 'yyyy-MM-ddTHH:mm...' (Safari-safe). Si ya tiene 'T', no cambia.
+  if (str.indexOf('T') === -1) str = str.replace(' ', 'T');
+  // Normaliza offset de timestamptz Postgres a ISO-8601 estricto (Safari/V8 lo exigen):
+  //   '+00'   → '+00:00'   ·   '-05'   → '-05:00'     (offset de solo horas)
+  //   '+0000' → '+00:00'   ·   '-0500' → '-05:00'     (offset sin ':')
+  // 'Z' y '+HH:mm' ya válidos se dejan intactos. Sin esto, Safari devuelve Invalid Date y la
+  // fecha "desaparece" (agrupación → 'Sin fecha', _fmtCorta → string crudo).
+  str = str.replace(/([+-]\d{2})(\d{2})?$/, (m, hh, mm) => `${hh}:${mm || '00'}`);
+  return new Date(str);
 }
 
 // [v2.13.181] Día (YYYY-MM-DD) SIEMPRE en zona horaria de Perú, sin importar
@@ -610,11 +625,20 @@ function _fmtCorta(s) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
-// Hora desde timestamp embebido en ID (ej: PI1745123456789 → "10:28")
+// Hora desde timestamp embebido en ID, en TZ Lima.
+// [v2.13.209] IDs viejos (GAS): 'G1745123456789' → 13 dígitos limpios. IDs nuevos (escritura
+// directa): 'G_L1745123456789ab3xy9' → localId 'L'+Date.now()+random base36; el random PUEDE
+// traer dígitos, así que un replace(/\D/g,'') global concatenaba basura (ej. 15 dígitos → año 7615).
+// Extraemos SOLO la primera corrida de 13 dígitos (el ms epoch). Para PI1745... también funciona.
 function _horaDesdeId(id) {
-  const ts = parseInt((id || '').replace(/\D/g, ''));
+  const m = String(id || '').match(/(\d{13})/);   // primer bloque de 13 dígitos = ms epoch
+  const ts = m ? parseInt(m[1]) : 0;
   if (!ts || ts < 1e12) return '';
-  return new Date(ts).toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12: false });
+  try {
+    return new Intl.DateTimeFormat('es-PE', { timeZone: WH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ts));
+  } catch (e) {
+    return new Date(ts - 5 * 3600000).toISOString().slice(11, 16);
+  }
 }
 
 // Escapa para insertar en atributos onclick="..." (evita romper comillas)
@@ -928,13 +952,26 @@ async function _cargarPNAprobados() {
 }
 
 // Hora desde campo fecha de guía — solo si tiene componente de hora explícito
+// [v2.13.209] Hora HH:mm de la guía SIEMPRE en TZ Lima (no la del dispositivo).
+// Maneja los 3 formatos de `fecha` del cutover (ver _parseLocalDate): ISO-Z, ISO-con-espacio
+// y yyyy-MM-dd. Antes usaba toLocaleTimeString (TZ del equipo) → mostraba 15:02 en vez de
+// 10:02 fuera de Perú; y new Date(f) directo devolvía Invalid en Safari para el formato con
+// espacio → caía a _horaDesdeId, que con los IDs nuevos 'G_L<ts><random>' extrae dígitos del
+// random y produce hora basura. Ahora: si `fecha` trae hora, se formatea en Lima; solo si NO
+// trae hora caemos al timestamp embebido en el ID (limpio, ver _horaDesdeId).
 function _horaDesdeGuia(g) {
   const f = String(g.fecha || '');
-  // Solo usar si contiene hora (ISO 'T' o string con ':' y largo > 10)
   const tieneHora = f.includes('T') || (f.length > 10 && f.includes(':'));
   if (tieneHora) {
-    const d = new Date(f);
-    if (!isNaN(d)) return d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12: false });
+    const d = _parseLocalDate(f);   // Safari-safe (normaliza espacio→T)
+    if (!isNaN(d)) {
+      try {
+        return new Intl.DateTimeFormat('es-PE', { timeZone: WH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+      } catch (e) {
+        // Fallback sin Intl: Perú = UTC-5 fijo. Resta 5h y lee HH:mm del instante en UTC.
+        return new Date(d.getTime() - 5 * 3600000).toISOString().slice(11, 16);
+      }
+    }
   }
   return _horaDesdeId(g.idGuia);
 }
