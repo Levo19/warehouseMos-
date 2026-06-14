@@ -4098,19 +4098,48 @@ const App = (() => {
     }
   }
 
+  // [Parte 1] Dashboard cache-first: pintar al instante con lo que ya tenemos
+  // (último dashboardData o derivado de los caches locales) y refrescar en
+  // background. Antes hacía `await API.getDashboard()` ANTES de pintar → el KPI
+  // grid quedaba en skeleton mientras corrían ~7 queries del backend = "congelado".
+  function _dashboardDesdeCache() {
+    // Si ya tenemos un dashboard completo previo, ese gana (más fiel).
+    if (dashboardData) return dashboardData;
+    // Si no, derivamos un esqueleto mínimo de los caches operacionales para que
+    // el grid muestre algo coherente de inmediato (se corrige al llegar el fetch).
+    try {
+      const guias = OfflineManager.getGuiasCache() || [];
+      const abiertas = guias.filter(g => g.estado === 'ABIERTA');
+      return {
+        alertas: { guiasAbiertasTardias: abiertas },
+        kpis: {},
+        contadores: {},
+        _derivado: true   // sin KPIs reales aún → no pisar skeletons con 0
+      };
+    } catch(_) { return null; }
+  }
+
   async function cargarDashboard() {
     loading('kpiGrid', false);
+    // 1) Pintado inmediato desde cache (no bloquea con la red)
+    const cacheD = _dashboardDesdeCache();
+    if (cacheD) renderDashboard(cacheD, { cache: true });
+    // 2) Refresco en background — re-render cuando llega el dato fresco
+    const dot = document.getElementById('dashRefreshDot');
+    if (dot) dot.style.opacity = '1';
     const res = await API.getDashboard().catch(() => ({ ok: false }));
+    if (dot) setTimeout(() => { dot.style.opacity = '0'; }, 1000);
     if (!res.ok) {
-      toast('Sin conexión — datos de muestra', 'warn');
+      if (!cacheD) toast('Sin conexión — datos de muestra', 'warn');
       return;
     }
     dashboardData = res.data;
     renderDashboard(res.data);
   }
 
-  function renderDashboard(d) {
+  function renderDashboard(d, opts) {
     if (!d) return;
+    const esCache = !!(opts && opts.cache);
     const { alertas = {}, kpis = {}, contadores = {} } = d;
 
     // [v2.13.121] Widget "Mi horario" — pulse glow + countdown
@@ -4126,14 +4155,19 @@ const App = (() => {
     const stockBajo = alertas.stockBajoMinimo    || [];
     const mermasPend = alertas.mermasPendientes  || [];
 
-    // KPIs principales (reemplaza skeletons con valores reales)
-    document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
-    document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
-    document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
-    document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
+    // KPIs principales (reemplaza skeletons con valores reales).
+    // Si el dato es un esqueleto derivado (sin KPIs reales), dejamos los
+    // skeletons hasta que llegue el fetch fresco — evita un flash de "0".
+    if (!d._derivado) {
+      document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
+      document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
+      document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
+      document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
+    }
 
     // Alertas de cuadre stock (en background, no bloquea render)
-    Dashboard.cargarAlertasStock();
+    // Solo en el render fresco para no disparar la consulta dos veces.
+    if (!esCache) Dashboard.cargarAlertasStock();
 
     // Logo alert dot (topbar + sidebar)
     const totalAlertas = contadores.alertasTotal ?? 0;
@@ -4169,7 +4203,7 @@ const App = (() => {
     }
 
     // Productos nuevos aprobados (últimos 3 días) — carga en background
-    _cargarPNAprobados();
+    if (!esCache) _cargarPNAprobados();
 
     // Panel Vencimientos
     document.getElementById('listVencCrit').innerHTML = criticos.map(v => `
@@ -15052,12 +15086,24 @@ const DespachoView = (() => {
 const PreingresosView = (() => {
   let _filtroEstado      = '';
   let _busquedaQ         = '';
+  // [Parte 2] Efectos de entrada/glow (mismo patrón que GuiasView): stagger solo
+  // en el 1er render tras entrar a la vista; glow breve en el recién creado.
+  let _animarEntrada     = false;
+  let _glowTarget        = null;
   let _tppBusq           = '';   // búsqueda del panel tablet
   let _tppFiltro         = '';   // filtro estado del panel tablet
   let _tags              = { comp: null, compl: null };   // 'si' | 'no' | null
   let _fotosSeleccionadas = [];                           // [{ file, objectUrl }]
   // Edit modal state
   let _editItem          = null;
+  // [v2.13.185 DATALOSS FIX] Flag: ¿el operador tocó realmente el textarea de
+  // comentario en ESTA sesión de edición? Se resetea al abrir el detalle y se
+  // marca solo ante un input/change genuino. Sin esto, abrir un preingreso cuyo
+  // comentario en DB venía DEGRADADO (texto libre perdido) hidrataba el textarea
+  // vacío; un toque de tag reconstruía comentario = tags + textareaVacío y pisaba
+  // el valor bueno. Con el flag, si el textarea no fue tocado preservamos el
+  // texto libre original de _editItem en lugar del textarea vacío.
+  let _comentarioTocado  = false;
   let _tagsEdit          = { comp: null, compl: null };
   let _cargadoresEdit    = [];   // [{ id, nombre, carretas }]
   let _fotosEdit         = [];   // [{ url }] existing Drive URLs kept
@@ -15152,18 +15198,30 @@ const PreingresosView = (() => {
     } catch(_) { return false; }
   }
 
+  // [Parte 2] Icono de cámara SVG monocromo — reemplaza el emoji 📷 para
+  // que case con el grosor/estilo de los otros SVG del card (WhatsApp/+Guía).
+  const _SVG_CAM = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/><path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z"/></svg>';
+  // Ícono de proveedor (avatar del título) — tienda/casa monocroma.
+  const _SVG_PROV = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M2.97 1.35A1 1 0 0 1 3.73 1h8.54a1 1 0 0 1 .76.35l2.609 3.044A1.5 1.5 0 0 1 16 5.37v.255a2.375 2.375 0 0 1-4.25 1.458A2.371 2.371 0 0 1 9.875 8 2.37 2.37 0 0 1 8 7.083 2.37 2.37 0 0 1 6.125 8a2.37 2.37 0 0 1-1.875-.917A2.375 2.375 0 0 1 0 5.625V5.37a1.5 1.5 0 0 1 .361-.976l2.61-3.045zm1.78 4.275a1.375 1.375 0 0 0 2.75 0V5.37l-.04-.001a.5.5 0 0 1-.46-.5V2H4.69l-.94 3.155v.47zm5.5 0a1.375 1.375 0 0 0 2.75 0v-.47L11.06 2H8v3a.5.5 0 0 1-.5.5h-.04v.125a1.375 1.375 0 0 0 2.75 0V5zM1.5 8.5A.5.5 0 0 1 2 9v6h12V9a.5.5 0 0 1 1 0v6h.5a.5.5 0 0 1 0 1H.5a.5.5 0 0 1 0-1H1V9a.5.5 0 0 1 .5-.5z"/></svg>';
+
   function _renderCard(p) {
     const tieneGuia   = !!(p.idGuia && String(p.idGuia).trim());
     const nFotos      = p.fotos ? String(p.fotos).split(',').filter(Boolean).length : 0;
     const tags        = _tagsFromComentario(p.comentario);
     const borderColor = tieneGuia ? '#22c55e' : '#f59e0b';
-    const provNombre  = _getProveedorNombre(p.idProveedor);
+    // Proveedor SIEMPRE legible — _getProveedorNombre nunca debe devolver un id
+    // crudo (PROV082). Si por algún motivo no resuelve, mostramos un fallback.
+    let provNombre = _getProveedorNombre(p.idProveedor);
+    if (!provNombre || /^PROV\d+$/i.test(String(provNombre).trim())) {
+      provNombre = p.idProveedor ? 'Proveedor ' + String(p.idProveedor).replace(/^PROV/i, '') : 'Sin proveedor';
+    }
     const hora        = _horaDesdeId(p.idPreingreso);
     const fechaCorta  = _fmtCorta(p.fecha);
 
-    const chipBg  = tieneGuia ? 'rgba(34,197,94,.12)' : 'rgba(245,158,11,.12)';
-    const chipCol = tieneGuia ? '#4ade80' : '#fbbf24';
-    const chipTxt = tieneGuia ? 'Con guía' : 'Sin guía';
+    // Estado tipo Guías: PENDIENTE pulsa (dot vivo), con guía = sólido neutro.
+    const estadoBadge = tieneGuia
+      ? `<span class="pre-estado-badge pre-estado-guia" title="Ya tiene guía"><span class="pre-estado-dot"></span>Con guía</span>`
+      : `<span class="pre-estado-badge pre-estado-pend" title="Pendiente"><span class="pre-estado-dot"></span>Pendiente</span>`;
 
     let nCargadores = 0;
     try { const c = JSON.parse(p.cargadores || '[]'); nCargadores = Array.isArray(c) ? c.length : 0; } catch {}
@@ -15171,10 +15229,16 @@ const PreingresosView = (() => {
       tags.compl === 'si' ? '<span class="pre-qtag pre-qtag-green">Completo</span>'   : '',
       tags.compl === 'no' ? '<span class="pre-qtag pre-qtag-amber">Incompleto</span>' : '',
       tags.comp  === 'si' ? '<span class="pre-qtag pre-qtag-blue">Comp.</span>'       : '',
-      nFotos > 0          ? `<span class="pre-qtag pre-qtag-slate">📷${nFotos}</span>` : '',
-      nCargadores > 0     ? `<span class="pre-qtag" style="background:#451a03;color:#fbbf24">🛺${nCargadores}</span>` : '',
-      _hayCambiosSinAvisar(p) ? `<span class="pre-qtag" style="background:#7c2d12;color:#fed7aa" title="Tiene cambios que no se han avisado a cajas">⚠ sin avisar</span>` : '',
+      _hayCambiosSinAvisar(p) ? `<span class="pre-qtag pre-qtag-aviso" title="Tiene cambios que no se han avisado a cajas">⚠ sin avisar</span>` : '',
     ].filter(Boolean).join('');
+
+    // Pill de conteo unificada "🛺N · 📷N" (estilo gcount-pill de Guías).
+    const countParts = [];
+    if (nCargadores > 0) countParts.push(`<span>🛺 <span class="pc-num">${nCargadores}</span></span>`);
+    if (nFotos > 0)      countParts.push(`<span>${_SVG_CAM} <span class="pc-num">${nFotos}</span></span>`);
+    const countPill = countParts.length
+      ? `<span class="pre-count-pill" title="${nCargadores} cargador(es) · ${nFotos} foto(s)">${countParts.join('<span style="opacity:.4">·</span>')}</span>`
+      : '';
 
     const montoStr = p.monto ? ' · S/. ' + fmt(p.monto, 2) : '';
 
@@ -15190,19 +15254,29 @@ const PreingresosView = (() => {
            Guía
          </button>`
       : `<button onclick="event.stopPropagation();PreingresosView.crearGuiaRapido('${escAttr(p.idPreingreso)}')"
-           class="card-act card-act-guia">
-           + Guía
+           class="card-act card-act-guia" title="Crear guía de ingreso">
+           <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/></svg>
+           Guía
          </button>`;
 
-    // Foto block (izquierda): carousel si múltiples, thumb si una, placeholder si ninguna
+    // Foto block (izquierda): auto-rotación si múltiples, thumb si una,
+    // placeholder con cámara SVG si ninguna.
     const urls = p.fotos ? String(p.fotos).split(',').map(s => s.trim()).filter(Boolean).map(_normalizeDriveUrl) : [];
     let fotoBlock;
-    if (urls.length > 1 && window.Photos && Photos.carouselHTML) {
-      fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation()">${Photos.carouselHTML(urls, {size:'sm'})}</div>`;
+    if (urls.length > 1) {
+      // Auto-rota sola en el card (cada 2.7s) con fade; pausa al hover/tap.
+      // Click abre el lightbox sin romper el detalle del card.
+      const imgs = urls.map((u, i) =>
+        `<img src="${escAttr(u)}" class="${i === 0 ? 'on' : ''}" loading="lazy" onerror="this.style.opacity='.3'"/>`).join('');
+      const dots = urls.map((_, i) => `<span class="${i === 0 ? 'on' : ''}"></span>`).join('');
+      fotoBlock = `<div class="gcard-photo pre-photo-rot" data-prerot="${urls.length}"
+           data-urls="${urls.map(u => u.replace(/"/g, '&quot;')).join('|')}"
+           onclick="event.stopPropagation();Photos&&Photos.lightbox(this.getAttribute('data-urls').split('|'),this._rotIdx||0)">
+           ${imgs}<div class="pre-rot-dots">${dots}</div></div>`;
     } else if (urls.length === 1) {
       fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation();Photos&&Photos.lightbox('${escAttr(urls[0])}')"><img src="${escAttr(urls[0])}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`;
     } else {
-      fotoBlock = `<div class="gcard-photo placeholder" title="Sin foto">📷</div>`;
+      fotoBlock = `<div class="gcard-photo placeholder" title="Sin foto">${_SVG_CAM}</div>`;
     }
 
     return `
@@ -15212,16 +15286,53 @@ const PreingresosView = (() => {
       ${fotoBlock}
       <div class="gcard-body">
         <div class="card-row-top">
-          <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${chipTxt}</span>
-          <div class="flex items-center gap-1 flex-shrink-0">${tagHtml}</div>
+          <div class="pre-prov">
+            <span class="pre-prov-avatar">${_SVG_PROV}</span>
+            <span class="pre-prov-name">${escHtml(provNombre)}</span>
+          </div>
+          ${estadoBadge}
         </div>
-        <p class="card-name" style="font-size:16px">${escHtml(provNombre)}</p>
+        <div class="flex items-center gap-1.5 flex-wrap" style="margin-top:1px">${countPill}${tagHtml}</div>
         <div class="card-row-bottom">
           <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${montoStr}</span>
           <div class="card-actions">${waBtn}${actionBtn}</div>
         </div>
       </div>
     </div>`;
+  }
+
+  // [Parte 2] Auto-rotación de fotos en los cards de preingreso.
+  // Cambia la foto activa con fade cada 2.7s; pausa al hover/tap; respeta
+  // prefers-reduced-motion (no rota, deja la primera). Guarda el índice actual
+  // en el elemento (_rotIdx) para que el click abra el lightbox en la foto vista.
+  function _initFotoRot(root) {
+    root = root || document;
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+    root.querySelectorAll('.pre-photo-rot[data-prerot]').forEach(el => {
+      if (el._rotInit) return;
+      el._rotInit = true;
+      const imgs = el.querySelectorAll('img');
+      const dots = el.querySelectorAll('.pre-rot-dots span');
+      if (imgs.length < 2 || reduce) return;
+      el._rotIdx = 0;
+      let timer = null;
+      const tick = () => {
+        // Si el card fue reemplazado por un re-render, parar el timer (evita leak).
+        if (!el.isConnected) { if (timer) { clearInterval(timer); timer = null; } return; }
+        const prev = el._rotIdx;
+        el._rotIdx = (el._rotIdx + 1) % imgs.length;
+        imgs[prev]?.classList.remove('on');
+        imgs[el._rotIdx]?.classList.add('on');
+        dots[prev]?.classList.remove('on');
+        dots[el._rotIdx]?.classList.add('on');
+      };
+      const start = () => { if (!timer) timer = setInterval(tick, 2700); };
+      const stop  = () => { if (timer) { clearInterval(timer); timer = null; } };
+      el.addEventListener('mouseenter', stop);
+      el.addEventListener('mouseleave', start);
+      el.addEventListener('touchstart', stop, { passive: true });
+      start();
+    });
   }
 
   function _renderPreingresos(list) {
@@ -15292,8 +15403,32 @@ const PreingresosView = (() => {
       }
     });
 
-    // Activar carruseles de fotos (autoplay 4s + swipe + dots)
-    if (window.Photos && Photos.initCarousels) Photos.initCarousels(container);
+    // [Parte 2] Auto-rotación de fotos en los cards (fade 2.7s, pausa hover/tap).
+    _initFotoRot(container);
+
+    // [Parte 2] Entrada con stagger (solo 1er render tras entrar a la vista) —
+    // idéntico al lenguaje de Guías para que se sienta coherente.
+    if (_animarEntrada) {
+      _animarEntrada = false;
+      const cards = container.querySelectorAll('.pre-card:not(.card-optimistic)');
+      cards.forEach((c, i) => {
+        c.style.animationDelay = Math.min(i, 9) * 0.035 + 's';
+        c.classList.add('gc-enter');
+        c.addEventListener('animationend', () => {
+          c.classList.remove('gc-enter'); c.style.animationDelay = '';
+        }, { once: true });
+      });
+    }
+    // Glow breve para el preingreso recién creado/editado.
+    if (_glowTarget) {
+      const safe = String(_glowTarget).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const el = document.getElementById('pre-' + safe);
+      _glowTarget = null;
+      if (el) {
+        el.classList.add('gc-glow');
+        el.addEventListener('animationend', () => el.classList.remove('gc-glow'), { once: true });
+      }
+    }
 
     // Sincronizar panel tablet (columna derecha de Guías)
     renderTppList();
@@ -15301,6 +15436,7 @@ const PreingresosView = (() => {
 
   async function cargar(estado = '', silencioso = false) {
     _filtroEstado = estado;
+    if (!silencioso) _animarEntrada = true;  // [Parte 2] stagger al entrar a la vista
     // Mostrar desde caché primero (instantáneo)
     const cached = OfflineManager.getPreingresosCache();
     const filtrados = estado ? cached.filter(p => p.estado === estado) : cached;
@@ -15554,6 +15690,10 @@ const PreingresosView = (() => {
     if (montoInp) montoInp.value = p.monto || '';
 
     // Comentario libre
+    // [v2.13.185] Reset del flag "tocado" en cada apertura: hidratamos el
+    // textarea con el texto libre actual y, hasta que el operador escriba, NO
+    // debemos regrabar comentario a partir del textarea (puede venir degradado).
+    _comentarioTocado = false;
     const comEl = document.getElementById('piEditComentario');
     if (comEl) comEl.value = _textoLibreFromComentario(p.comentario);
 
@@ -15721,6 +15861,22 @@ const PreingresosView = (() => {
     _autoguardarMetaTimer = setTimeout(_ejecutarAutoguardarMeta, 1200);
   }
 
+  // [v2.13.185 DATALOSS FIX] Texto libre que se debe PERSISTIR al reconstruir el
+  // comentario. Regla anti-pérdida (resuelve la pérdida de "Ingresan 100kg..."):
+  //   - Si el operador TOCÓ el textarea en ESTA sesión → su valor manda (incluye
+  //     vaciarlo a propósito: borra el comentario, comportamiento esperado).
+  //   - Si NO lo tocó → preservar el texto libre ORIGINAL de _editItem.comentario,
+  //     NUNCA el textarea (que pudo hidratarse vacío desde un comentario degradado
+  //     en DB). Así, cambiar solo un tag conserva el texto libre existente.
+  // Siempre devolvemos un texto reconstruible con _buildComentario; no hace falta
+  // omitir el campo del patch porque el comentario reconstruido ya es el correcto.
+  function _comentarioLibreParaPersistir() {
+    const textarea = (document.getElementById('piEditComentario')?.value || '').trim();
+    if (_comentarioTocado) return textarea;            // intención explícita del operador
+    const libreOrig = _textoLibreFromComentario(_editItem ? _editItem.comentario : '');
+    return libreOrig || textarea;                       // preserva el original si lo hay
+  }
+
   async function _ejecutarAutoguardarMeta() {
     if (!_editItem) return;
     if (_autoguardarMetaSaving) { _autoguardarMetaPending = true; return; }
@@ -15730,12 +15886,11 @@ const PreingresosView = (() => {
     // cerrarDetalle/abrir otro preingreso → crash 'Cannot read of null'.
     const idPreingreso = _editItem.idPreingreso;
     try {
-      const textoExtra = (document.getElementById('piEditComentario')?.value || '').trim();
-      const partes = [];
-      if (_tagsEdit.comp)  partes.push('Comprobante: ' + (_tagsEdit.comp === 'si' ? 'Sí' : 'No'));
-      if (_tagsEdit.compl) partes.push('Completo: ' + (_tagsEdit.compl === 'si' ? 'Sí' : 'No'));
-      if (textoExtra) partes.push(textoExtra);
-      const comentario = partes.join(' | ');
+      // [v2.13.185 DATALOSS FIX] Texto libre preservado (textarea solo si el
+      // operador lo tocó; sino el original de _editItem) para que un toque de tag
+      // no borre el comentario libre cuando el textarea venía hidratado vacío.
+      const textoExtra = _comentarioLibreParaPersistir();
+      const comentario = _buildComentario(_tagsEdit, textoExtra);
       const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
 
       // [v2.13.173 BUG FIX] No forzar monto=0 cuando el tag "Comprobante" está
@@ -15800,6 +15955,10 @@ const PreingresosView = (() => {
     const monto = document.getElementById('piEditMonto');
     const prov  = document.getElementById('piEditProv');
     if (com   && !com._whAuto)   {
+      // [v2.13.185 DATALOSS FIX] Marcar "tocado" en el PRIMER input genuino del
+      // operador. Esto distingue un edit real (su valor manda, incluso vaciarlo)
+      // de la hidratación inicial del textarea (que NO debe regrabar comentario).
+      com.addEventListener('input',  () => { _comentarioTocado = true; });
       com.addEventListener('input',  _autoguardarMeta);
       com.addEventListener('blur',   () => { _flushAutoguardarMeta(); });
       com._whAuto   = 1;
@@ -15967,6 +16126,15 @@ const PreingresosView = (() => {
     _renderCargadoresEdit();
     _autoguardarCargadores();
     document.getElementById('sheetCargadoresEdit')?.remove();
+    // [Parte 2] Feedback sensorial al sumar cargador (sonoro + háptico).
+    try { _carretaAddSfx(); } catch(_){}
+    try { if (navigator.vibrate) navigator.vibrate([10, 20, 10]); } catch(_){}
+    // Glow del bloque recién agregado (último), tras el render.
+    requestAnimationFrame(() => {
+      const blocks = document.querySelectorAll('#piCargadoresList .cargador-block');
+      const el = blocks[blocks.length - 1];
+      if (el) { el.classList.add('cargador-block-new'); el.addEventListener('animationend', () => el.classList.remove('cargador-block-new'), { once:true }); }
+    });
   }
 
   // ── Fotos edit modal ──────────────────────────────────────
@@ -16055,7 +16223,10 @@ const PreingresosView = (() => {
     } catch(_) {}
     if (!snap) return; // sin snapshot impreso no hay base de comparación
     const idProveedor = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
-    const textoExtra  = (document.getElementById('piEditComentario')?.value || '').trim();
+    // [v2.13.185 DATALOSS FIX] Usar el texto libre preservado (no el textarea crudo)
+    // para no reportar un falso "cambio sin avisar" cuando el textarea venía vacío
+    // por un comentario degradado pero el operador no tocó nada.
+    const textoExtra  = _comentarioLibreParaPersistir();
     let monto;
     if (_tagsEdit.comp === 'si')      monto = parseFloat(document.getElementById('piEditMonto')?.value) || 0;
     else if (_tagsEdit.comp === 'no') monto = 0;
@@ -16188,12 +16359,11 @@ const PreingresosView = (() => {
     // Capturar datos y estado antes de cerrar
     const idPreingreso  = _editItem.idPreingreso;
     const idProveedor   = document.getElementById('piEditProv')?.value || _editItem.idProveedor;
-    const textoExtra    = (document.getElementById('piEditComentario')?.value || '').trim();
-    const partes = [];
-    if (_tagsEdit.comp)  partes.push(`Comprobante: ${_tagsEdit.comp === 'si' ? 'Sí' : 'No'}`);
-    if (_tagsEdit.compl) partes.push(`Completo: ${_tagsEdit.compl === 'si' ? 'Sí' : 'No'}`);
-    if (textoExtra) partes.push(textoExtra);
-    const comentario    = partes.join(' | ');
+    // [v2.13.185 DATALOSS FIX] Preservar el texto libre (ver _comentarioLibreParaPersistir):
+    // si el operador no tocó el textarea, NO usamos su valor (pudo hidratarse vacío
+    // desde un comentario degradado) sino el texto libre original de _editItem.
+    const textoExtra    = _comentarioLibreParaPersistir();
+    const comentario    = _buildComentario(_tagsEdit, textoExtra);
     // [v2.13.173 BUG FIX] No zerar un monto existente si "Comprobante" no está
     // definido (comp===null) — solo si el operador lo puso explícito en 'no'.
     let monto;
@@ -16524,6 +16694,14 @@ const PreingresosView = (() => {
     _cargadores.push({ id, nombre, carretas: 1, estados: ['LLENA'] });
     _renderCargadores();
     document.getElementById('sheetCargadores')?.remove();
+    // [Parte 2] Feedback sensorial al sumar cargador (sonoro + háptico).
+    try { _carretaAddSfx(); } catch(_){}
+    try { if (navigator.vibrate) navigator.vibrate([10, 20, 10]); } catch(_){}
+    requestAnimationFrame(() => {
+      const blocks = document.querySelectorAll('#preCargadoresList .cargador-block');
+      const el = blocks[blocks.length - 1];
+      if (el) { el.classList.add('cargador-block-new'); el.addEventListener('animationend', () => el.classList.remove('cargador-block-new'), { once:true }); }
+    });
   }
 
   // [v2.13.3] LEGACY compat — alias de agregarCarreta/quitarCarreta.
@@ -16601,6 +16779,7 @@ const PreingresosView = (() => {
     // algún side effect (proveedores no en cache, etc.) — el card NUNCA queda
     // zombie "Registrando…".
     const idPreingresoReal = res.data?.idPreingreso || idPreingreso;
+    _glowTarget = idPreingresoReal;  // [Parte 2] resaltar el recién creado en el próximo render
     try {
       _updateOptimisticId(tempId, idPreingresoReal);
       _finalizeOptimisticCard(idPreingresoReal, { idProveedor, monto });
@@ -16873,6 +17052,7 @@ const PreingresosView = (() => {
         `<div class="pre-date-hdr">${_dateLabel(key)}</div>
          <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`
       ).join('');
+    _initFotoRot(container);  // [Parte 2] auto-rotación también en el panel tablet
   }
 
   function buscarEnPanel(q) {
@@ -19004,7 +19184,12 @@ const ProductosView = (() => {
 
   // ── Cargar ──────────────────────────────────────
   async function cargar() {
-    loading('listProductos', true);
+    // [Parte 1] Spinner SOLO si no hay nada que pintar todavía. Si ya tenemos
+    // grupos en sesión o productos en cache, pintamos al instante y dejamos el
+    // refresco de stock vivo 100% en background — el `loading()` incondicional
+    // metía un skeleton innecesario aunque hubiera cache = "congelado".
+    const hayCache = !!(_grupos.length || (OfflineManager.getProductosCache() || []).length);
+    if (!hayCache) loading('listProductos', true);
     // setTimeout(0): cede al browser DESPUÉS del paint, así el tab y el skeleton se ven antes del trabajo pesado
     // (requestAnimationFrame dispara ANTES del paint — incorrecto para este caso)
     await new Promise(r => setTimeout(r, 0));

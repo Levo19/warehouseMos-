@@ -29,30 +29,86 @@ const API = (() => {
     return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(tid));
   }
 
-  // Pide el JWT (app=warehouseMos, exp ~5min) a GAS (endpoint mintTokenWH, B1) y lo cachea.
-  // Re-mintea 30s antes de expirar. Timeout 6s: un GAS colgado no debe trabar la cadena directa.
-  // _mintInFlight dedup: si varias lecturas salen juntas (arranque) → 1 solo POST a GAS, no ráfaga.
+  // Pide el JWT (app=warehouseMos) y lo cachea. PRIMARIO: Edge Function `mint-wh` (HS256, exp ~30min, ~50-150ms)
+  // → corta la dependencia de GAS y, con TTL 30min + refresh proactivo (abajo), saca el mint del hilo de navegación.
+  // FALLBACK: si la Edge falla/timeout/{ok:false} (incl. 404 si aún no está viva), cae a GAS `mintTokenWH` como hoy
+  //   → red de seguridad: nunca rompe el login aunque la Edge no exista todavía.
+  // Re-mintea 30s antes de expirar (camino sincrónico, último recurso); el refresh proactivo debería adelantarse.
+  // _mintInFlight dedup: si varias lecturas salen juntas (arranque) → 1 solo POST, no ráfaga.
   let _mintInFlight = null;
+
+  function _whDeviceId() {
+    try { return localStorage.getItem('wh_device_id') || ''; } catch (_) { return ''; }
+  }
+
+  // Edge `mint-wh`: verify_jwt=false → va con `apikey` (anon, público), SIN Authorization (es quien EMITE el token).
+  // Devuelve {ok,token,exp} igual que GAS. Lanza si la Edge no devuelve un token válido → el caller cae a GAS.
+  async function _mintViaEdge(deviceId) {
+    const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/mint-wh`, {
+      method: 'POST',
+      headers: { 'apikey': _SB_ANON, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceId })
+    }, 6000);
+    const d = await res.json().catch(() => null);
+    if (!d || !d.ok || !d.token) throw new Error('mint-wh edge: ' + ((d && d.error) || res.status));
+    return d;
+  }
+
+  // GAS `mintTokenWH` (B1): fallback histórico. Mantiene el login vivo si la Edge no responde.
+  async function _mintViaGAS(deviceId) {
+    const GAS_URL = _gasUrl();
+    if (!GAS_URL) throw new Error('sin gasUrl');
+    const res = await _whFetchTimeout(GAS_URL, {
+      method: 'POST', headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({ action: 'mintTokenWH', deviceId })
+    }, 6000);
+    const d = await res.json();
+    if (!d || !d.ok || !d.token) throw new Error('mint-token gas: ' + ((d && d.error) || 'sin token'));
+    return d;
+  }
+
   async function _mintTokenWH() {
     const now = Math.floor(Date.now() / 1000);
-    if (_sbTok.token && (_sbTok.exp - now) > 30) return _sbTok.token;
+    if (_sbTok.token && (_sbTok.exp - now) > 30) { _agendarRefresh(); return _sbTok.token; }
     if (_mintInFlight) return _mintInFlight;
     _mintInFlight = (async () => {
-      const GAS_URL = _gasUrl();
-      if (!GAS_URL) throw new Error('sin gasUrl');
-      let deviceId = '';
-      try { deviceId = localStorage.getItem('wh_device_id') || ''; } catch (_) {}
-      const res = await _whFetchTimeout(GAS_URL, {
-        method: 'POST', headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'mintTokenWH', deviceId })
-      }, 6000);
-      const d = await res.json();
-      if (!d || !d.ok || !d.token) throw new Error('mint-token: ' + ((d && d.error) || 'sin token'));
-      _sbTok.token = d.token; _sbTok.exp = d.exp || (now + 300);
+      const deviceId = _whDeviceId();
+      let d;
+      try { d = await _mintViaEdge(deviceId); }       // primario: Edge (rápido, sin GAS)
+      catch (_) { d = await _mintViaGAS(deviceId); }   // fallback: GAS (no romper login si la Edge cae)
+      const n = Math.floor(Date.now() / 1000);
+      _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
+      _agendarRefresh();
       return d.token;
     })();
     try { return await _mintInFlight; }
     finally { _mintInFlight = null; }
+  }
+
+  // Refresh PROACTIVO en background: re-mintea ~120s ANTES de expirar, fuera del camino crítico, para que una
+  // navegación NUNCA dispare el mint sincrónico (la causa del "se congela al rato"). Fire-and-forget: si falla,
+  // el camino sincrónico (con su fallback a GAS) sigue siendo la red de seguridad en la próxima lectura.
+  let _refreshTid = null;
+  function _agendarRefresh() {
+    if (_refreshTid) return;                                   // ya hay un refresh agendado
+    const now = Math.floor(Date.now() / 1000);
+    const margen = 120;                                        // re-mintear 2 min antes de exp
+    let enMs = (_sbTok.exp - now - margen) * 1000;
+    if (!isFinite(enMs) || enMs < 1000) enMs = 1000;          // mínimo 1s (token casi vencido)
+    if (enMs > 1800000) enMs = 1800000;                       // tope 30min (defensivo)
+    _refreshTid = setTimeout(async () => {
+      _refreshTid = null;
+      try {
+        const deviceId = _whDeviceId();
+        let d;
+        try { d = await _mintViaEdge(deviceId); }
+        catch (_) { d = await _mintViaGAS(deviceId); }
+        const n = Math.floor(Date.now() / 1000);
+        _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
+        _agendarRefresh();                                     // reencadena para el próximo ciclo
+      } catch (_) { /* el camino sincrónico re-minteará bajo demanda */ }
+    }, enMs);
+    try { if (_refreshTid && _refreshTid.unref) _refreshTid.unref(); } catch (_) {}
   }
 
   // [PASO 5 · B5] Impresión DIRECTA vía Edge Function `imprimir` (reemplaza el salto a GAS→PrintNode).
