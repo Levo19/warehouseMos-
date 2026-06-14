@@ -7605,13 +7605,133 @@ const GuiasView = (() => {
     // idDetalle local) con el resultado del backend. Guard de guía como en
     // _agregarProductoDirecto: si el operador cambió de guía, no tocar UI.
     const _localDetId = (optIdx >= 0) ? _guiaActual.detalle[optIdx].idDetalle : null;
+    // [v2.13.216] Reubicar la card del PN. Como _guardarLineaPN (en paralelo) puede
+    // RESELLAR el idDetalle local 'DL_PN_...' con el real de Supabase 'DET_...' antes
+    // de que corra el .then de registrarPN, el match por idDetalle exacto fallaría →
+    // fallback por código + naturaleza PN (misma heurística del dedup de getGuia).
+    const _codPN = (cbAEnviar || codDisplay || '').toUpperCase();
     const _reubicar = () => {
       if (!_guiaActual || _guiaActual.idGuia !== _idGuiaPN) return -1;
       if (!Array.isArray(_guiaActual.detalle)) return -1;
-      return _guiaActual.detalle.findIndex(d => d.idDetalle === _localDetId);
+      let i = _guiaActual.detalle.findIndex(d => d.idDetalle === _localDetId);
+      if (i >= 0) return i;
+      if (!_codPN) return -1;
+      return _guiaActual.detalle.findIndex(d =>
+        String(d.codigoProducto || '').toUpperCase() === _codPN &&
+        (d._esPN || String(d.observacion || '').toUpperCase().indexOf('PN_') === 0));
     };
 
+    // ════════════════════════════════════════════════════════════════════
+    // [v2.13.216] FIX CUTOVER — la LÍNEA del PN se guarda DESACOPLADA de GAS.
+    // ───────────────────────────────────────────────────────────────────
+    // CAUSA RAÍZ del bug (PN sin línea en wh.guia_detalle): antes la línea se
+    // insertaba DENTRO del `.then` de registrarPN, gateada por
+    // `res.ok && !res.offline`. registrarProductoNuevo (GAS) hace UPSERT + foto a
+    // Drive + sync a la hoja + notifica a MOS → tarda 2-5s y a veces excede el
+    // timeout (15s) o se pierde la respuesta. En ese caso _doFetchWithRetry
+    // devuelve el shape OFFLINE {ok:true, offline:true, data:{idLocal}} AUNQUE GAS
+    // SÍ commiteó (por eso el PN aparecía en wh.producto_nuevo). Con `res.offline`
+    // true, el bloque de la línea se SALTABA por completo y NO quedaba nada en cola
+    // → la línea se perdía para siempre. Evidencia confirmada en DB:
+    // PN1781455330042 (cb 7755204001249) en wh.producto_nuevo PENDIENTE pero sin
+    // fila en wh.guia_detalle.
+    //   FIX: la línea NO depende de GAS. El RPC agregar_detalle_guia NO valida
+    //   catálogo (acepta cualquier cod — verificado: insert de cod inexistente →
+    //   {ok:true,accion:INSERT}) y la guía está ABIERTA (solo inserta la línea, el
+    //   stock/lote se aplican al cerrar). Y el código YA lo tenemos en el front
+    //   ANTES de llamar a GAS: lo tipea el operador, o el toggle auto-gen genera el
+    //   NLEV en cliente (app.js:7399) — GAS respeta ese código (Productos.gs:322-323
+    //   solo genera NLEV si llega vacío, y nunca llega vacío). Por eso es SEGURO y
+    //   más RÁPIDO: guardar la línea YA (en paralelo con registrarPN), sin esperar.
+    //   Idempotente: localId determinístico 'PNDET_'+idDetalleLocal → el dedup del
+    //   RPC (por local_id) colapsa doble-tap/reintento; si va offline, la cola
+    //   reintenta con el MISMO localId → no duplica. Solo con escritura directa ON
+    //   (_directaPN): con OFF, la línea la sincroniza GAS→hoja (flujo viejo) y
+    //   guardarla acá duplicaría.
+    // ════════════════════════════════════════════════════════════════════
+    const _guardarLineaPN = (cod) => {
+      if (!(_directaPN && cod && _idGuiaPN)) {
+        // Escritura directa OFF (o sin código/guía): la línea la maneja el flujo
+        // viejo (GAS sync a la hoja). Sellamos la card cuando registrarPN confirme.
+        return;
+      }
+      API.agregarDetalle({
+        idGuia:           _idGuiaPN,
+        codigoProducto:   cod,
+        cantidadEsperada: 0,
+        cantidadRecibida: cantidad,
+        precioUnitario:   0,
+        fechaVencimiento: fechaVenc || '',
+        observacion:      'PN_PENDIENTE',
+        // localId DETERMINÍSTICO derivado del id local de la card (DL_PN_...).
+        // Estable por línea → doble-tap/reintento del mismo PN colapsa a la misma
+        // fila vía el dedup del RPC (por local_id) y vía la cola offline.
+        localId:          'PNDET_' + (_localDetId || cod)
+      }).then(rDet => {
+        const sigueAqui = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
+        if (sigueAqui && rDet && rDet.ok && rDet.data) {
+          // Sellar la card optimista con el idDetalle REAL de Supabase para que
+          // edición/anulación posteriores apunten a la fila real (no al DL_PN_ local)
+          // y un getGuia no la duplique.
+          const i = _reubicar();
+          if (i >= 0) {
+            const it = _guiaActual.detalle[i];
+            it.idDetalle = rDet.data.idDetalle || it.idDetalle;
+            if (rDet.data.idLote) it.idLote = rDet.data.idLote;
+            it._local = false; it._saving = false; it._saveFailed = false;
+            try { OfflineManager.addDetalleCache?.(it); } catch(_) {}
+            try { if (SoundFX.savedTick) SoundFX.savedTick(); } catch(_) {}
+            _mostrarDetalleSheet(_guiaActual, false);
+          }
+        } else if (sigueAqui && rDet && rDet.offline) {
+          // Línea encolada offline (idempotente por localId). _local → el guard de
+          // cierre (FIX #1) la trata como en vuelo hasta que la cola sincronice
+          // (no se cierra una guía con su línea solo encolada).
+          const i = _reubicar();
+          if (i >= 0) {
+            _guiaActual.detalle[i]._saving = false;
+            _guiaActual.detalle[i]._local = true;
+            _guiaActual.detalle[i]._saveFailed = false;
+            _mostrarDetalleSheet(_guiaActual, false);
+          }
+        } else if (sigueAqui) {
+          // rDet null / {ok:false} → el RPC rechazó/falló la línea. Marcar error:
+          // sin esto el operador cree que guardó y al cerrar falta el stock de esa
+          // línea. El guard de cierre (FIX #1) bloquea por _saveFailed hasta reintento.
+          const i = _reubicar();
+          if (i >= 0) {
+            _guiaActual.detalle[i]._saving = false;
+            _guiaActual.detalle[i]._saveFailed = true;
+            _mostrarDetalleSheet(_guiaActual, false);
+          }
+          toast('⚠ La línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
+        }
+      }).catch(() => {
+        // Excepción/red al guardar la LÍNEA. Marcar _saveFailed para que el guard de
+        // cierre (FIX #1) lo bloquee y el operador reintente (no silenciar).
+        const sigueAqui = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
+        if (sigueAqui) {
+          const i = _reubicar();
+          if (i >= 0) {
+            _guiaActual.detalle[i]._saving = false;
+            _guiaActual.detalle[i]._saveFailed = true;
+            _mostrarDetalleSheet(_guiaActual, false);
+          }
+        }
+        toast('⚠ Sin conexión — la línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
+      });
+    };
+
+    // [v2.13.216] INMEDIATO y en PARALELO con registrarPN: guardamos la línea YA
+    // con el código que el front ya conoce (cbAEnviar). NO esperamos a GAS. Esto es
+    // lo que arregla el bug (la línea ya no depende del shape de respuesta de GAS) y
+    // a la vez acelera la percepción (no hay espera de 2-5s para que aparezca/cuente).
+    _guardarLineaPN(cbAEnviar);
+
     // ── Guardado REAL en background (GAS, ruteo intacto). NO bloquea la UI. ──
+    // GAS sigue siendo la fuente del PN para que MOS lo vea/apruebe (lee la hoja WH).
+    // Acá solo: persistimos cache del PN + reconciliamos código/idPN en la card. La
+    // LÍNEA ya se está guardando arriba (desacoplada) → este .then NO la toca.
     API.registrarPN(params).then(res => {
       const smeQuedo = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
       if (res && (res.ok || res.offline)) {
@@ -7628,11 +7748,12 @@ const GuiasView = (() => {
           OfflineManager.setPNCache(pnCache);
         }
 
-        // Reconciliar la card optimista: sellar código/idPN reales devueltos por
-        // el backend (el GAS pudo generar un código NLEV). Solo bajamos el
-        // indicador "guardando…" si la respuesta es CONFIRMADA por el server
-        // (res.ok && !res.offline); en puro offline la card sigue _local (la cola
-        // la reconciliará al sincronizar) — mismo criterio que _agregarProductoDirecto.
+        // Reconciliar la card optimista: sellar idPN/código del backend (cosmético).
+        // [v2.13.216] La LÍNEA ya se guarda DESACOPLADA (_guardarLineaPN arriba) y es
+        // la dueña de _saving/_local/_saveFailed/idDetalle. Con escritura directa ON,
+        // este .then NO toca esos flags (la línea los gobierna). Con escritura directa
+        // OFF, _guardarLineaPN retornó temprano → acá sí sellamos la card (el flujo
+        // viejo GAS→hoja es la fuente de la línea).
         if (smeQuedo && _localDetId) {
           const i = _reubicar();
           if (i >= 0) {
@@ -7640,121 +7761,13 @@ const GuiasView = (() => {
             it.codigoProducto      = cod || it.codigoProducto;
             it.descripcionProducto = (obs || cod || '(nuevo)') + ' ⬡N';
             it.idProductoNuevo     = idPN;
-            if (res.ok && !res.offline) {
-              it._saveFailed = false; it._local = false;
-              // [v2.13.215][FIX 40x #1/#3] COHERENCIA: con escritura directa ON, el PN
-              // ya está en wh.producto_nuevo pero su LÍNEA en wh.guia_detalle aún se va
-              // a guardar en el .then de abajo. NO bajar _saving todavía: si lo
-              // bajáramos, la card parecería "guardada" y el guard de cierre (FIX #1) no
-              // bloquearía mientras la línea está en vuelo → cierre sin esa línea
-              // (descuadre). Se baja _saving cuando el agregarDetalle confirme (o se
-              // marca _saveFailed si falla). Con escritura directa OFF, el flujo viejo
-              // (sync GAS→Sheet) es la fuente → acá sí se sella.
-              if (!_directaPN) {
-                it._saving = false;
-                if (SoundFX.savedTick) SoundFX.savedTick();
-              }
-              // Persistir en el cache del detalle para que un getGuia/silentRefresh
-              // posterior no haga parpadear la card (mismo patrón que el escaneo).
+            if (!_directaPN && res.ok && !res.offline) {
+              it._saveFailed = false; it._local = false; it._saving = false;
+              if (SoundFX.savedTick) SoundFX.savedTick();
               try { OfflineManager.addDetalleCache?.(it); } catch(_){}
             }
             _mostrarDetalleSheet(_guiaActual, false);
           }
-        }
-
-        // ════════════════════════════════════════════════════════════════
-        // [v2.13.214] FIX cutover Supabase — la LÍNEA DE DETALLE del PN.
-        // Causa raíz: registrarProductoNuevo (GAS) hace una "sync 1:1" del PN a
-        // la hoja GUIA_DETALLE (modelo viejo). Pero las guías DIRECTAS 'G_L...'
-        // viven en wh.guia_detalle (Supabase), NO en el Sheet → la línea caía en
-        // un Sheet huérfano y NUNCA llegaba a Supabase. El front lee el detalle
-        // de Supabase → detalle vacío (el PN existía en wh.producto_nuevo, pero
-        // sin su línea en wh.guia_detalle).
-        //   FIX: con escritura directa ON, tras registrar el PN en GAS (que sigue
-        //   intacto, para que MOS lo apruebe leyendo la hoja), agregamos la línea
-        //   directo a wh.guia_detalle vía API.agregarDetalle (action
-        //   'agregarDetalleGuia', cableada al RPC agregar_detalle_guia). Esto:
-        //     (a) hace aparecer la línea en la guía directa,
-        //     (b) genera el lote con la fecha de vencimiento al CERRAR la guía.
-        //   Usamos el código REAL devuelto por GAS (`cod` = res.data.codigoBarra:
-        //   el que tipeó el operador, o un NLEV auto-generado por GAS).
-        //   La guía recién creada está ABIERTA → el RPC solo inserta la línea, NO
-        //   mueve stock (el stock se aplica al cerrar). Idempotente por local_id
-        //   en el RPC → un reintento/doble-tap no duplica la línea. Va en
-        //   background como el resto (no bloquea la UI optimista).
-        //   ⚠ Solo con escritura directa ON. Con OFF, el flujo viejo (GAS sync
-        //   Sheet) sigue, y agregar acá duplicaría la línea cuando el Sheet sea
-        //   la fuente → por eso el gate es obligatorio.
-        if (res.ok && !res.offline && _directaPN && cod && _idGuiaPN) {
-          API.agregarDetalle({
-            idGuia:           _idGuiaPN,
-            codigoProducto:   cod,
-            cantidadEsperada: 0,
-            cantidadRecibida: cantidad,
-            precioUnitario:   0,
-            fechaVencimiento: fechaVenc || '',
-            observacion:      'PN_PENDIENTE',
-            // [v2.13.215][FIX 40x #2 BLOQUEANTE] localId DETERMINÍSTICO derivado del
-            // id local del PN (DL_PN_...). Estable por línea → doble-tap/reintento del
-            // mismo PN colapsa a la misma fila vía el dedup del RPC (por local_id).
-            localId:          'PNDET_' + (_localDetId || cod)
-          }).then(rDet => {
-            const sigueAqui = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
-            if (sigueAqui && rDet && rDet.ok && rDet.data) {
-              // Sellar la card optimista con el idDetalle REAL de Supabase para que
-              // edición/anulación posteriores apunten a la fila real (no al DL_PN_ local)
-              // y un getGuia no la duplique.
-              const i = _reubicar();
-              if (i >= 0) {
-                const it = _guiaActual.detalle[i];
-                it.idDetalle = rDet.data.idDetalle || it.idDetalle;
-                if (rDet.data.idLote) it.idLote = rDet.data.idLote;
-                it._local = false; it._saving = false; it._saveFailed = false;
-                try { OfflineManager.addDetalleCache?.(it); } catch(_) {}
-                try { if (SoundFX.savedTick) SoundFX.savedTick(); } catch(_) {}
-                _mostrarDetalleSheet(_guiaActual, false);
-              }
-            } else if (sigueAqui && rDet && rDet.offline) {
-              // Línea encolada offline (idempotente por localId). Marcar _local para
-              // que el guard de cierre (FIX #1) la trate como en vuelo hasta que la
-              // cola sincronice (no se cierra una guía con su línea solo encolada).
-              const i = _reubicar();
-              if (i >= 0) {
-                _guiaActual.detalle[i]._saving = false;
-                _guiaActual.detalle[i]._local = true;
-                _guiaActual.detalle[i]._saveFailed = false;
-                _mostrarDetalleSheet(_guiaActual, false);
-              }
-            } else if (sigueAqui && rDet && !rDet.ok && !rDet.offline) {
-              // [v2.13.215][FIX 40x #3] El PN se registró en GAS pero su LÍNEA de
-              // detalle en wh.guia_detalle NO se guardó (rechazo del backend). Marcar
-              // la card en error: sin esto el operador cree que guardó y al cerrar
-              // falta el stock de esa línea. Encadena con el FIX #1 (el guard de
-              // cierre bloquea por _saveFailed hasta que se reintente).
-              const i = _reubicar();
-              if (i >= 0) {
-                _guiaActual.detalle[i]._saving = false;
-                _guiaActual.detalle[i]._saveFailed = true;
-                _mostrarDetalleSheet(_guiaActual, false);
-              }
-              toast('⚠ La línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
-            }
-          }).catch(() => {
-            // [v2.13.215][FIX 40x #3] Excepción/red al guardar la LÍNEA del PN.
-            // Marcar _saveFailed para que el guard de cierre (FIX #1) lo bloquee y el
-            // operador reintente; antes este catch era mudo ("la cola reintenta") y la
-            // guía se cerraba sin la línea → descuadre de stock.
-            const sigueAqui = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
-            if (sigueAqui) {
-              const i = _reubicar();
-              if (i >= 0) {
-                _guiaActual.detalle[i]._saving = false;
-                _guiaActual.detalle[i]._saveFailed = true;
-                _mostrarDetalleSheet(_guiaActual, false);
-              }
-            }
-            toast('⚠ Sin conexión — la línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
-          });
         }
 
         // Refrescar lista de guías para actualizar badge N
@@ -7762,23 +7775,29 @@ const GuiasView = (() => {
           render(_filtrar(todas, filtroActual));
         }
       } else if (res && !res.offline) {
-        // GAS rechazó (no es timeout/offline) → marcar la card en error. NO la
-        // borramos: el indicador "⚠ no guardado" deja claro que falta reintentar
-        // (coherente con el flujo de escaneo) y no se pierde lo que tipeó.
+        // GAS rechazó el REGISTRO del PN (no es timeout/offline). El PN no llegará a
+        // MOS para aprobarse. [v2.13.216] Pero la LÍNEA de la guía es independiente:
+        // con escritura directa ON ya la guarda _guardarLineaPN (que setea su propio
+        // estado). Solo marcamos error de card si la línea NO es la dueña del estado
+        // (escritura directa OFF) — así no pisamos una línea bien guardada.
+        if (!_directaPN && smeQuedo && _localDetId) {
+          const i = _reubicar();
+          if (i >= 0) { _guiaActual.detalle[i]._saving = false; _guiaActual.detalle[i]._saveFailed = true; _mostrarDetalleSheet(_guiaActual, false); }
+        }
+        toast('⚠ El producto nuevo no se envió a aprobación: ' + (res.error || 'reintenta'), 'warn', 4000);
+        try { vibrate?.([60, 80, 60]); } catch(_) {}
+      }
+    }).catch(() => {
+      // Red/excepción en el REGISTRO del PN a GAS. La LÍNEA (escritura directa ON) ya
+      // la maneja _guardarLineaPN con su propio estado → no la pisamos acá.
+      if (!_directaPN) {
+        const smeQuedo = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
         if (smeQuedo && _localDetId) {
           const i = _reubicar();
           if (i >= 0) { _guiaActual.detalle[i]._saving = false; _guiaActual.detalle[i]._saveFailed = true; _mostrarDetalleSheet(_guiaActual, false); }
         }
-        toast('⚠ No se guardó el producto nuevo: ' + (res.error || 'reintenta'), 'warn', 4000);
-        try { vibrate?.([60, 80, 60]); } catch(_) {}
       }
-    }).catch(() => {
-      const smeQuedo = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
-      if (smeQuedo && _localDetId) {
-        const i = _reubicar();
-        if (i >= 0) { _guiaActual.detalle[i]._saving = false; _guiaActual.detalle[i]._saveFailed = true; _mostrarDetalleSheet(_guiaActual, false); }
-      }
-      toast('⚠ Sin conexión — el producto nuevo no se guardó', 'warn', 3500);
+      toast('⚠ El producto nuevo no se envió a aprobación (sin conexión). La línea de la guía se guardó aparte.', 'warn', 3500);
     });
   }
 
