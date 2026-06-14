@@ -352,6 +352,52 @@ function desinstalarTriggersSyncWH(){
   return {ok:true, eliminados:n};
 }
 
+// ============================================================
+// CUTOVER SUPABASE DIRECTO — apagar triggers de Auditoría que
+// operan sobre el Sheet CONGELADO.
+//
+// Con el cutover, las escrituras van directo a Supabase y el Sheet
+// quedó congelado. Estos 2 triggers time-based siguen corriendo sobre
+// el Sheet y causan daño:
+//   · cerrarGuiasAbiertasGlobal (diario 21:00): autocierra leyendo el
+//     Sheet GUIAS y aplica stock al Sheet. NO ve las guías directas
+//     (viven en Supabase) y ensucia el Sheet congelado.
+//   · auditarStockGlobal (diario 22:00): compara Sheets congelados y
+//     escribe ALERTAS_STOCK → alertas de cuadre FANTASMA que aparecen
+//     en el panel (getAlertasStock lee ese Sheet).
+//
+// IMPORTANTE: solo borra los TRIGGERS, NO las funciones (por si se
+// reimplementan sobre Supabase). Mismo patrón que desinstalarTriggersSyncWH.
+// Cubre también la variante Safe (cerrarGuiasAbiertasGlobalSafe) de forma
+// defensiva, aunque hoy setupTriggersAuditoria solo instala las base.
+// ============================================================
+function desinstalarTriggersAuditoriaWH(){
+  var handlers = ['cerrarGuiasAbiertasGlobal','cerrarGuiasAbiertasGlobalSafe','auditarStockGlobal'];
+  var n=0, eliminados=[];
+  ScriptApp.getProjectTriggers().forEach(function(t){
+    var h=t.getHandlerFunction();
+    if(handlers.indexOf(h)>=0){ ScriptApp.deleteTrigger(t); n++; eliminados.push(h); }
+  });
+  Logger.log('desinstalarTriggersAuditoriaWH: '+n+' triggers eliminados → '+JSON.stringify(eliminados));
+  return {ok:true, eliminados:n, handlers:eliminados};
+}
+
+// Diagnóstico: lista todos los triggers actuales del proyecto (handler + tipo)
+// para verificar el estado tras desinstalar. 100% lectura.
+function listarTriggersWH(){
+  var lista = ScriptApp.getProjectTriggers().map(function(t){
+    var et;
+    try { et = String(t.getEventType()); } catch(e){ et = '?'; }
+    return {
+      handler: t.getHandlerFunction(),
+      eventType: et,
+      triggerId: (typeof t.getUniqueId==='function') ? t.getUniqueId() : ''
+    };
+  });
+  Logger.log('listarTriggersWH ('+lista.length+'): '+JSON.stringify(lista, null, 2));
+  return {ok:true, total:lista.length, triggers:lista};
+}
+
 // ---------- wrappers para el editor ----------
 function dryRunWH(){ return migrarWH({dryRun:true}); }
 function backfillWH(){ return migrarWH(); }
