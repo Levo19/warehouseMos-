@@ -180,6 +180,23 @@ const SoundFX = (() => {
       setTimeout(() => _tone(900,  0.08, 'sine', 0.55), 90);
       setTimeout(() => _tone(1200, 0.12, 'sine', 0.6),  180);
     },
+    // whoosh — eliminar ítem (barrido descendente corto y suave)
+    whoosh: () => {
+      try {
+        const ctx = _getCtx(); if (!ctx) return;
+        const t = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const g   = ctx.createGain();
+        osc.connect(g); g.connect(_comp);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(900, t);
+        osc.frequency.exponentialRampToValueAtTime(220, t + 0.18);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(0.5, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+        osc.start(t); osc.stop(t + 0.22);
+      } catch(_){}
+    },
     // productoVerificado — MOS aprobó producto nuevo (chime cristalino 2 notas)
     productoVerificado: () => {
       _tone(2000, 0.08, 'sine', 0.5);

@@ -5716,8 +5716,8 @@ const GuiasView = (() => {
           }
           return `
           <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
-               style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px"
-               data-det-id="${d.idDetalle || ''}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
+               style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px;position:relative"
+               data-det-id="${d.idDetalle || ''}" data-det-cb="${escAttr(String(d.codigoProducto || ''))}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
             <div class="flex-1 min-w-0">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 ${matchBadge}
@@ -5730,7 +5730,7 @@ const GuiasView = (() => {
               </p>
               ${venc}
             </div>
-            <span class="text-lg font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : '×' + fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
+            <span class="det-qty-val text-lg font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : '×' + fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -5742,52 +5742,38 @@ const GuiasView = (() => {
     if (abierta) requestAnimationFrame(_initSwipeGuia);
 
     const acciones = document.getElementById('guiaDetAcciones');
-    const _camItemCount = ((g.detalle || []).filter(d => d.observacion !== 'ANULADO')).length;
-    const _camBadge = _camItemCount > 0
-      ? `<span style="background:#7c3aed;color:#fff;border-radius:9px;padding:1px 6px;
-                      font-size:.65em;font-weight:900;line-height:1.4;margin-left:2px">${_camItemCount}</span>`
-      : '';
+    // [v2.13.217] BARRA DE CAPTURA INTELIGENTE UNIFICADA — reemplaza los 3 botones
+    // (cámara / scanner / nuevo) por una sola barra con foco permanente:
+    //   • Scanner físico HID escribe ahí + Enter (sin sheet aparte).
+    //   • Buscar por nombre o pegar código manual → Enter.
+    //   • 📷 abre el scanner visual (Scanner.start, ya existente).
+    // Match en catálogo → _capturaSubmit ruta a _agregarProductoDirecto (auto-suma).
+    // Código desconocido → botón inline "✨ crear nuevo con <código>" (quick-add PN).
     acciones.innerHTML = abierta ? `
-      <div style="display:flex;gap:0;border-radius:14px;overflow:hidden;border:1px solid rgba(124,58,237,.25);width:100%">
-        <button onclick="GuiasView.abrirCamaraItem()"
-                style="flex:3;min-height:52px;background:rgba(124,58,237,.12);
-                       border:none;border-right:1px solid rgba(124,58,237,.2);cursor:pointer;
-                       display:flex;align-items:center;justify-content:center;gap:8px;
-                       color:#c4b5fd;font-weight:800;font-size:.82em;letter-spacing:.04em;
-                       -webkit-tap-highlight-color:transparent"
-                ontouchstart="this.style.background='rgba(124,58,237,.25)'" ontouchend="this.style.background='rgba(124,58,237,.12)'">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="opacity:.8">
+      <div id="detCapturaBar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" stroke-width="2" style="flex-shrink:0;opacity:.85">
+          <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+        </svg>
+        <input id="detCapturaInput" type="text" inputmode="text"
+               placeholder="escaneá / buscá / pegá código…"
+               autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+               onkeydown="GuiasView.detCapturaKeydown(event)"
+               oninput="GuiasView.detCapturaInput(this.value)"
+               onfocus="this.closest('#detCapturaBar')?.classList.add('is-focus')"
+               onblur="this.closest('#detCapturaBar')?.classList.remove('is-focus')">
+        <button class="det-cap-btn" onclick="GuiasView.abrirCamaraItem()" title="Abrir cámara">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
             <circle cx="12" cy="13" r="4"/>
           </svg>
-          CÁMARA${_camBadge}
         </button>
-        <button onclick="GuiasView.abrirScannerItem()"
-                style="flex:1;min-height:52px;background:rgba(251,191,36,.06);
-                       border:none;border-right:1px solid rgba(124,58,237,.15);cursor:pointer;
-                       display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;
-                       color:#fbbf24;
-                       -webkit-tap-highlight-color:transparent"
-                ontouchstart="this.style.background='rgba(251,191,36,.18)'" ontouchend="this.style.background='rgba(251,191,36,.06)'">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M2 6h2v12H2zm4 0h1v12H6zm3 0h2v12H9zm4 0h1v12h-1zm3 0h2v12h-2zm3 0h1v12h-1z"/>
-          </svg>
-          <span style="font-size:.55em;font-weight:700;letter-spacing:.05em">SCANNER</span>
-        </button>
-        <button onclick="GuiasView.abrirPNSinCodigo()"
-                style="flex:1;min-height:52px;background:rgba(245,158,11,.06);
-                       border:none;cursor:pointer;
-                       display:flex;align-items:center;justify-content:center;flex-direction:column;gap:3px;
-                       color:#f59e0b;
-                       -webkit-tap-highlight-color:transparent"
-                ontouchstart="this.style.background='rgba(245,158,11,.22)'" ontouchend="this.style.background='rgba(245,158,11,.06)'"
-                title="Registrar producto nuevo (sin barcode)">
-          <span style="font-weight:900;font-size:1.15em;line-height:1">N</span>
-          <span style="font-size:.55em;font-weight:700;letter-spacing:.05em">NUEVO</span>
-        </button>
-      </div>` : '';
+      </div>
+      <div id="detUnknownBox" style="display:none"></div>` : '';
 
     if (conAnimacion) abrirSheet('sheetGuiaDetalle');
+    // Foco permanente en la barra (scanner físico escribe ahí). En táctil el
+    // foco se da al tocar; en PC/HID lo enfocamos al renderizar.
+    if (abierta) requestAnimationFrame(() => _focusCapturaBar());
   }
 
   // ── Edición inline de ítems ──────────────────────────────
@@ -5807,6 +5793,58 @@ const GuiasView = (() => {
       p.then(r => { if (r && r.ok === false) { try { toast('⚠ No se guardó ' + label + ': ' + (r.error || ''), 'warn', 4000); } catch(_){} } })
        .catch(() => { try { toast('⚠ Sin conexión — ' + label + ' no se guardó', 'warn', 3500); } catch(_){} });
     } catch(_){}
+  }
+
+  // [v2.13.218][FIX 40x #1] Serializar los writes de CANTIDAD por línea.
+  // Cada ajuste (auto-suma, +/−, tap-número, inline) dispara
+  // actualizarCantidadDetalle con cantidad ABSOLUTA como fire-and-forget. Si el
+  // operador ajusta rápido, dos POST de la MISMA línea pueden resolver fuera de
+  // orden y dejar en DB un valor MENOR que el de la UI (sub-conteo silencioso).
+  // Solución: encadenar los writes de una misma línea (idDetalle → última promesa).
+  // El último eslabón lee item.cantidadRecibida AL EJECUTAR (no capturado antes) →
+  // siempre manda el acumulado más reciente → el valor mayor/correcto gana.
+  // Líneas distintas siguen en paralelo (no se serializa entre líneas, no se
+  // pierde velocidad). [FIX 40x #2] Marca/limpia _saving en TODOS los paths que
+  // pasen por acá → el guard de cierre (confirmarCerrarGuia) los ve.
+  const _qtyChains = {}; // idDetalle → Promise (cola encadenada del write de cantidad)
+
+  function _persistirCantidad(item) {
+    if (!item || !item.idDetalle || item._local) return; // offline/no sellado → camino del caller (cola por localId)
+    const id = item.idDetalle;
+    item._saving = true;
+    item._saveFailed = false;
+    const prev = _qtyChains[id] || Promise.resolve();
+    const next = prev
+      .catch(() => {})  // un fallo anterior NO debe romper la cadena (el siguiente eslabón reintenta con el valor vigente)
+      .then(() => {
+        // Leer el valor ACTUAL al momento de ejecutar (no capturado antes) → último/mayor gana.
+        const qty = parseFloat(item.cantidadRecibida) || 0;
+        return API.actualizarCantidadDetalle({ idDetalle: id, cantidadRecibida: qty });
+      })
+      .then(r => {
+        // Solo el ÚLTIMO eslabón vigente refleja el estado (evita parpadeos de eslabones viejos).
+        if (_qtyChains[id] !== next) return r;
+        item._saving = false;
+        if (r && r.ok) {
+          item._saveFailed = false;
+          try { if (SoundFX && SoundFX.savedTick) SoundFX.savedTick(); } catch(_){}
+        } else if (!r || !r.offline) {
+          item._saveFailed = true;
+          try { toast('⚠ No se guardó la cantidad: ' + ((r && r.error) || ''), 'warn', 4000); } catch(_){}
+        }
+        _mostrarDetalleSheet(_guiaActual, false);
+        return r;
+      })
+      .catch(e => {
+        if (_qtyChains[id] !== next) throw e; // propagar para que el .catch del próximo eslabón lo absorba
+        item._saving = false;
+        item._saveFailed = true;
+        try { toast('⚠ Sin conexión — la cantidad no se guardó', 'warn', 3500); } catch(_){}
+        _mostrarDetalleSheet(_guiaActual, false);
+        throw e;
+      });
+    _qtyChains[id] = next;
+    return next;
   }
 
   function selectItem(newIdx) {
@@ -5855,16 +5893,19 @@ const GuiasView = (() => {
 
     const idDetalle = d.idDetalle;
     if (_selQty <= 0) {
-      d.observacion = 'ANULADO';
-      OfflineManager.addDetalleCache(d);
-      _avisarFalloDetalle(API.anularDetalle({ idDetalle }), 'la anulación');
-      toast('Ítem eliminado', 'warn', 1200);
+      // [v2.13.217] qty→0 = eliminar → flujo con undo flotante (4s).
+      _eliminarConUndo(d);
       return;
     }
     d.cantidadRecibida = _selQty;
     d.fechaVencimiento = _selVenc;
     OfflineManager.addDetalleCache(d);
-    if (qtyChanged)  _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }), 'la cantidad');
+    // [v2.13.218][FIX 40x #1+#2] cantidad por la cola serializada (marca/limpia _saving).
+    // Si d._local (offline/no sellado), _persistirCantidad es no-op → cae el camino de cola por localId.
+    if (qtyChanged) {
+      if (d.idDetalle && !d._local) _persistirCantidad(d);
+      else _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }), 'la cantidad');
+    }
     if (vencChanged) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
     toast('Guardado', 'ok', 1000);
   }
@@ -5927,12 +5968,113 @@ const GuiasView = (() => {
     const items = (_guiaActual?.detalle || []).filter(d => d.observacion !== 'ANULADO');
     const d = items[idx];
     if (!d) return;
-    d.observacion = 'ANULADO';
-    OfflineManager.addDetalleCache(d);
     _selIdx = -1;
+    _eliminarConUndo(d);
+  }
+
+  // ════════════════════════════════════════════════════════════════════
+  // [v2.13.217] ELIMINAR ÍTEM CON UNDO FLOTANTE (4s) — no borra "de una".
+  // Marca el ítem como ANULADO en memoria (re-render lo oculta) y DIFIERE el
+  // POST real (API.anularDetalle) 4s. Si el operador toca "Deshacer", se cancela
+  // el timer y se restaura el estado previo SIN tocar Supabase (nunca se envió).
+  // Pasado el plazo, recién dispara la anulación directa a Supabase. Preserva la
+  // idempotencia: anularDetalle apunta al idDetalle real; un ítem _local (aún no
+  // sellado) se quita del arreglo sin POST (no existe en el server todavía).
+  // ════════════════════════════════════════════════════════════════════
+  let _undoPend = null; // { d, prevObs, prevQty, timer }
+
+  function _eliminarConUndo(d) {
+    if (!d) return;
+    // Si hay un undo pendiente, sellarlo ya (no acumular).
+    _flushUndoPend();
+    const prevObs = d.observacion || '';
+    const prevQty = d.cantidadRecibida;
+    // Marcar anulado en memoria (oculto del render) y animar la fila saliendo.
+    const row = document.querySelector(`[data-det-id="${CSS.escape(String(d.idDetalle || ''))}"]`);
+    if (row) row.classList.add('det-row-out');
+    try { SoundFX.whoosh ? SoundFX.whoosh() : SoundFX.warn(); } catch(_){}
+    vibrate(20);
+
+    const aplicar = () => {
+      d.observacion = 'ANULADO';
+      d.cantidadRecibida = 0;
+      _mostrarDetalleSheet(_guiaActual, false);
+      requestAnimationFrame(() => _focusCapturaBar());
+    };
+    // Esperar el fade-out antes de re-render (si no hay row, aplicar ya).
+    if (row) setTimeout(aplicar, 280); else aplicar();
+
+    _undoPend = {
+      d, prevObs, prevQty,
+      timer: setTimeout(() => { _confirmarEliminar(d); }, 4000)
+    };
+    _mostrarUndoBar(d.descripcionProducto || d.codigoProducto || 'Ítem');
+  }
+
+  function _confirmarEliminar(d) {
+    // Se cumplió el plazo → anular de verdad (directo a Supabase) o quitar local.
+    _ocultarUndoBar();
+    if (!_undoPend || _undoPend.d !== d) { /* ya resuelto */ }
+    _undoPend = null;
+    d.observacion = 'ANULADO';
+    d.cantidadRecibida = 0;
+    try { OfflineManager.addDetalleCache(d); } catch(_){}
+    if (d.idDetalle && !d._local) {
+      _avisarFalloDetalle(API.anularDetalle({ idDetalle: d.idDetalle }), 'la anulación');
+    } else if (_guiaActual) {
+      // Ítem local sin sellar: simplemente quitarlo del arreglo (nunca llegó al server).
+      _guiaActual.detalle = (_guiaActual.detalle || []).filter(x => x !== d);
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+  }
+
+  function detUndoEliminar() {
+    if (!_undoPend) { _ocultarUndoBar(); return; }
+    clearTimeout(_undoPend.timer);
+    const { d, prevObs, prevQty } = _undoPend;
+    _undoPend = null;
+    // Restaurar estado previo en memoria (nunca se envió la anulación → nada que revertir en Supabase).
+    d.observacion = prevObs;
+    d.cantidadRecibida = prevQty;
+    _ocultarUndoBar();
     _mostrarDetalleSheet(_guiaActual, false);
-    _avisarFalloDetalle(API.anularDetalle({ idDetalle: d.idDetalle }), 'la anulación');
-    toast('Ítem eliminado', 'warn', 1200);
+    try { SoundFX.beep(); } catch(_){}
+    vibrate(12);
+    toast('↩ Restaurado', 'ok', 1400);
+    requestAnimationFrame(() => _focusCapturaBar());
+  }
+
+  // Si hay un undo en vuelo cuando se cierra el detalle / se inicia otro borrado,
+  // sellar la anulación pendiente para no dejarla colgada.
+  function _flushUndoPend() {
+    if (!_undoPend) return;
+    clearTimeout(_undoPend.timer);
+    const d = _undoPend.d;
+    _undoPend = null;
+    _confirmarEliminar(d);
+  }
+
+  let _undoBarTimer = null;
+  function _mostrarUndoBar(nombre) {
+    const bar = document.getElementById('detUndoBar');
+    const msg = document.getElementById('detUndoMsg');
+    if (!bar) return;
+    if (msg) msg.textContent = '🗑 ' + nombre;
+    bar.style.display = 'flex';
+    requestAnimationFrame(() => {
+      bar.style.opacity = '1';
+      bar.style.transform = 'translateX(-50%) translateY(0)';
+    });
+    clearTimeout(_undoBarTimer);
+    _undoBarTimer = setTimeout(() => _ocultarUndoBar(), 4000);
+  }
+  function _ocultarUndoBar() {
+    const bar = document.getElementById('detUndoBar');
+    if (!bar) return;
+    bar.style.opacity = '0';
+    bar.style.transform = 'translateX(-50%) translateY(20px)';
+    clearTimeout(_undoBarTimer);
+    setTimeout(() => { if (bar.style.opacity === '0') bar.style.display = 'none'; }, 220);
   }
 
   // (funciones antiguas del sheet — eliminadas en v1.0.40)
@@ -6047,7 +6189,9 @@ const GuiasView = (() => {
       }
     }
     if (qtyChanged) {
-      API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal })
+      // [v2.13.218][FIX 40x #1+#2] cantidad por la cola serializada (orden estricto por línea + _saving).
+      if (d.idDetalle && !d._local) _persistirCantidad(d);
+      else API.actualizarCantidadDetalle({ idDetalle: _editItemId, cantidadRecibida: qtyFinal })
         .then(r => _toastResultado(r, 'cantidad'))
         .catch(e => _toastResultado(null, 'cantidad', e));
     }
@@ -6907,32 +7051,14 @@ const GuiasView = (() => {
         _selQty = existing.cantidadRecibida;
         _selOrigQty = existing.cantidadRecibida;
       }
-      existing._saving = true;
-      existing._saveFailed = false;
       _mostrarDetalleSheet(_guiaActual, false);
-      vibrate(12);
-      SoundFX.beepDouble();
-      if (existing.idDetalle && !existing._local) {
-        API.actualizarCantidadDetalle({
-          idDetalle: existing.idDetalle,
-          cantidadRecibida: existing.cantidadRecibida
-        }).then(r => {
-          existing._saving = false;
-          if (r && r.ok) {
-            existing._saveFailed = false;
-            if (SoundFX.savedTick) SoundFX.savedTick();
-          } else if (!r || !r.offline) {
-            existing._saveFailed = true;
-          }
-          _mostrarDetalleSheet(_guiaActual, false);
-        }).catch(() => {
-          existing._saving = false;
-          existing._saveFailed = true;
-          _mostrarDetalleSheet(_guiaActual, false);
-        });
-      } else {
-        existing._saving = false;
-      }
+      // [v2.13.217] Sensorial: resalta + suma EN EL LUGAR (no card nueva).
+      // doble-tick + vibración + glow/shake + count-up + "+1"↗ flotante.
+      vibrate(10);
+      try { SoundFX.beepDouble(); } catch(_){}
+      _sensorialAutoSum(cb);
+      // [v2.13.218][FIX 40x #1+#2] write serializado por línea + _saving (lo marca el helper).
+      _persistirCantidad(existing);
       return true;
     }
 
@@ -6985,13 +7111,9 @@ const GuiasView = (() => {
           _guiaActual.detalle[idx] = itemFinal;
           _mostrarDetalleSheet(_guiaActual, false);
           OfflineManager.addDetalleCache(itemFinal);
-          // Si el local fue incrementado mientras GAS estaba en vuelo → sincronizar
-          if (localQty > gasQty) {
-            _avisarFalloDetalle(API.actualizarCantidadDetalle({
-              idDetalle: res.data.idDetalle,
-              cantidadRecibida: localQty
-            }), 'la cantidad');
-          }
+          // Si el local fue incrementado mientras GAS estaba en vuelo → sincronizar.
+          // [v2.13.218] Vía la cola serializada (itemFinal ya tiene idDetalle real y _local=false).
+          if (localQty > gasQty) _persistirCantidad(itemFinal);
         }
         _renderCamList(); // quitar ⏳
       } else if (!res.offline) {
@@ -7043,6 +7165,196 @@ const GuiasView = (() => {
     });
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // [v2.13.217] BARRA DE CAPTURA INTELIGENTE UNIFICADA
+  // El input vive SIEMPRE en el detalle de la guía abierta. Recibe:
+  //   • El scanner físico HID (escribe + Enter).
+  //   • Tipeo manual / pegado de código.
+  //   • Búsqueda por nombre (Enter resuelve por match único o muestra picker).
+  // Resuelve con _buscarCandidatos (regla de oro WH: canónico + equivalente) y
+  // ruta a _agregarProductoDirecto (que ya hace auto-suma idempotente DIRECTA a
+  // Supabase). Desconocido → botón inline "✨ crear nuevo con <código>" (quick PN).
+  // ════════════════════════════════════════════════════════════════════
+  let _detCapTimer = null;
+
+  // ¿Dispositivo con apuntador fino (PC/laptop, o tablet con scanner HID)?
+  // En esos el auto-foco es bienvenido (el scanner físico escribe ahí). En
+  // móviles puros (pointer:coarse, sin hover) NO auto-enfocamos para no abrir
+  // el teclado virtual; el operador toca la barra cuando quiere tipear/buscar.
+  const _esPunteroFino = (() => {
+    try { return window.matchMedia('(pointer:fine)').matches || window.matchMedia('(hover:hover)').matches; }
+    catch(_) { return false; }
+  })();
+
+  function _focusCapturaBar(force) {
+    const inp = document.getElementById('detCapturaInput');
+    if (!inp) return;
+    if (!force && !_esPunteroFino) return; // móvil: no robar foco / no abrir teclado
+    // No robar foco si un input inline de cantidad está activo, ni si el
+    // usuario está escribiendo en notas/comentario, ni si el modal PN está abierto.
+    const ae = document.activeElement;
+    if (ae && ae !== inp && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+    if (document.getElementById('modalProductoNuevo')?.classList.contains('open')) return;
+    if (document.getElementById('scannerModal')?.classList.contains('open')) return;
+    try { inp.focus({ preventScroll: true }); } catch(_) { try { inp.focus(); } catch(_){} }
+  }
+
+  // Glow + shake + count-up + "+1"↗ sobre la fila ya existente (auto-suma).
+  function _sensorialAutoSum(cb) {
+    requestAnimationFrame(() => {
+      const row = document.querySelector(`[data-det-cb="${CSS.escape(String(cb || ''))}"]`);
+      if (!row) return;
+      row.classList.remove('det-row-glow');
+      void row.offsetWidth; // reflow → reinicia animación
+      row.classList.add('det-row-glow');
+      const qtyEl = row.querySelector('.det-qty-val');
+      if (qtyEl) {
+        qtyEl.classList.remove('det-qty-count');
+        void qtyEl.offsetWidth;
+        qtyEl.classList.add('det-qty-count');
+      }
+      // "+1" flotante ascendente
+      const floatEl = document.createElement('span');
+      floatEl.className = 'det-plus-float';
+      floatEl.textContent = '+1';
+      row.appendChild(floatEl);
+      setTimeout(() => { try { floatEl.remove(); } catch(_){} }, 850);
+      setTimeout(() => { try { row.classList.remove('det-row-glow'); } catch(_){} }, 1600);
+    });
+  }
+
+  // Debounce: muestra/oculta el botón "crear nuevo" mientras se escribe a mano.
+  function detCapturaInput(val) {
+    clearTimeout(_detCapTimer);
+    const v = normCb(val);
+    if (!v) { _detOcultarUnknown(); return; }
+    // Solo previsualizar el estado "desconocido" para tipeo manual (≥4 chars),
+    // sin agregar nada. El submit real ocurre con Enter (o lectura del scanner).
+    _detCapTimer = setTimeout(() => {
+      if (v.length < 4) { _detOcultarUnknown(); return; }
+      const cand = _buscarCandidatos(v);
+      if (!cand.length) _detMostrarUnknown(v);
+      else _detOcultarUnknown();
+    }, 350);
+  }
+
+  function detCapturaKeydown(e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    clearTimeout(_detCapTimer);
+    const inp = e.target;
+    const raw = String(inp.value || '').trim();
+    inp.value = '';
+    _detOcultarUnknown();
+    if (raw) _capturaSubmit(raw);
+    // Mantener el foco para el siguiente escaneo (flujo sin manos). El usuario YA
+    // estaba escribiendo acá → force:true para preservar el foco aun en móvil.
+    requestAnimationFrame(() => _focusCapturaBar(true));
+  }
+
+  // Núcleo del ruteo de captura (compartido por scanner HID + tipeo + pegado).
+  function _capturaSubmit(rawCod) {
+    if (!_guiaActual) return;
+    const codStr = normCb(rawCod);
+    if (!codStr) return;
+    const cand = _buscarCandidatos(codStr);
+    const esIngreso = String(_guiaActual?.tipo || '').toUpperCase().startsWith('INGRESO');
+
+    if (!cand.length) {
+      // Desconocido → ofrecer crear nuevo (solo INGRESO). En SALIDA, error.
+      try { SoundFX.error(); } catch(_){}
+      vibrate([40, 20, 40]);
+      if (esIngreso) {
+        _detMostrarUnknown(codStr);
+      } else {
+        toast('⚠ ' + codStr + ' no está en el catálogo', 'warn', 3500);
+      }
+      return;
+    }
+    if (cand.length === 1 || cand[0]._exacto) {
+      // Match único/exacto → agregar o sumar (auto-suma en _agregarProductoDirecto).
+      const autoSum = _agregarProductoDirecto(cand[0], false);
+      // Sonido: doble-tick lo emite _agregarProductoDirecto en auto-suma; acá
+      // solo el tick de "nuevo agregado" (pop) cuando es la primera vez.
+      if (!autoSum) { try { SoundFX.beep(); } catch(_){} }
+      _detOcultarUnknown();
+      return;
+    }
+    // Prefijo → varios candidatos. Reusar el picker del scanner HID (mismo look),
+    // pero abriéndolo sobre el detalle (sin cámara).
+    _mostrarCapturaPicker(cand, codStr);
+  }
+
+  // Picker liviano para prefijos con múltiples coincidencias (sobre el detalle).
+  function _mostrarCapturaPicker(candidatos, codStr) {
+    const box = document.getElementById('detUnknownBox');
+    if (!box) { _capturaSubmit(candidatos[0]?._scannedCb || candidatos[0]?.codigoBarra || codStr); return; }
+    try { SoundFX.scanIncompleto && SoundFX.scanIncompleto(); } catch(_){}
+    vibrate(20);
+    box.style.display = 'block';
+    box.style.background = 'rgba(124,58,237,.06)';
+    box.style.border = '1px solid rgba(124,58,237,.3)';
+    box.style.flexDirection = 'column';
+    box.style.alignItems = 'stretch';
+    box.innerHTML = `
+      <p style="font-size:.72em;color:#a78bfa;font-weight:700;margin-bottom:8px">
+        Varias coincidencias · ${escHtml(codStr)} — elegí cuál:
+      </p>
+      <div style="max-height:200px;overflow-y:auto">
+      ${candidatos.map(p => {
+        const cb = String(p._scannedCb || p.codigoBarra || '');
+        return `<button onclick="GuiasView.capturaPick('${escAttr(cb)}')"
+          style="width:100%;text-align:left;padding:9px 11px;border-radius:10px;
+                 border:1px solid #1e293b;margin-bottom:6px;background:#1e293b;
+                 display:flex;align-items:center;gap:9px;cursor:pointer;
+                 -webkit-tap-highlight-color:transparent">
+          <div style="flex:1;min-width:0">
+            <p style="font-size:.84em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+            <p style="font-size:.68em;color:#64748b;font-family:monospace">${escHtml(cb)}</p>
+          </div>
+        </button>`;
+      }).join('')}
+      </div>`;
+  }
+
+  function capturaPick(scannedCb) {
+    const cand = _buscarCandidatos(scannedCb);
+    const prod = cand[0];
+    _detOcultarUnknown();
+    if (!prod) return;
+    const autoSum = _agregarProductoDirecto(prod, true);
+    if (!autoSum) { try { SoundFX.beep(); } catch(_){} }
+    requestAnimationFrame(() => _focusCapturaBar());
+  }
+
+  // Banner inline "código desconocido" → quick-add PN con ese código.
+  function _detMostrarUnknown(cod) {
+    const box = document.getElementById('detUnknownBox');
+    if (!box) return;
+    const guiaId = _guiaActual?.idGuia || '';
+    box.style.display = 'flex';
+    box.style.flexDirection = 'row';
+    box.style.alignItems = 'center';
+    box.style.background = '#2d0a0a';
+    box.style.border = '1px solid #7f1d1d';
+    box.innerHTML = `
+      <div style="flex:1;min-width:0">
+        <p style="font-size:.8em;font-weight:700;color:#f87171">⚠ Código no registrado</p>
+        <p style="font-size:.7em;color:#94a3b8;font-family:monospace;margin-top:1px">${escHtml(cod)}</p>
+      </div>
+      <button onclick="GuiasView.abrirModalPN('${escAttr(cod)}','${escAttr(guiaId)}');GuiasView._detOcultarUnknown()"
+              style="flex-shrink:0;background:#7c3aed;color:#fff;border:none;border-radius:9px;
+                     padding:8px 13px;font-size:.78em;font-weight:800;cursor:pointer;
+                     display:flex;align-items:center;gap:5px;-webkit-tap-highlight-color:transparent">
+        ✨ crear nuevo
+      </button>`;
+  }
+
+  function _detOcultarUnknown() {
+    const box = document.getElementById('detUnknownBox');
+    if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+  }
+
   // ── Controles de cantidad en la lista de sesión cámara ───────
 
   function camQtyPlus(cb) {
@@ -7054,25 +7366,8 @@ const GuiasView = (() => {
     );
     if (item) {
       item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
-      if (item.idDetalle && !item._local) {
-        item._saving = true;
-        item._saveFailed = false;
-        API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida })
-          .then(r => {
-            item._saving = false;
-            if (r && r.ok) {
-              if (SoundFX.savedTick) SoundFX.savedTick();
-            } else if (!r || !r.offline) {
-              item._saveFailed = true;
-            }
-            _mostrarDetalleSheet(_guiaActual, false);
-          })
-          .catch(() => {
-            item._saving = false;
-            item._saveFailed = true;
-            _mostrarDetalleSheet(_guiaActual, false);
-          });
-      }
+      // [v2.13.218][FIX 40x #1+#2] write serializado por línea + _saving (lo marca el helper).
+      _persistirCantidad(item);
       _mostrarDetalleSheet(_guiaActual, false);
     }
     _renderCamList();
@@ -7121,9 +7416,7 @@ const GuiasView = (() => {
       entry.qty--;
       if (item) {
         item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
-        if (item.idDetalle && !item._local) {
-          _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
-        }
+        _persistirCantidad(item); // [v2.13.218][FIX 40x #1+#2] cola serializada + _saving
         _mostrarDetalleSheet(_guiaActual, false);
       }
     }
@@ -7152,9 +7445,7 @@ const GuiasView = (() => {
     );
     if (item) {
       item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) + diff);
-      if (item.idDetalle && !item._local) {
-        _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
-      }
+      _persistirCantidad(item); // [v2.13.218][FIX 40x #1+#2] cola serializada + _saving
       _mostrarDetalleSheet(_guiaActual, false);
     }
     _renderCamList();
@@ -7169,9 +7460,7 @@ const GuiasView = (() => {
     );
     if (!item) return;
     item.cantidadRecibida = (parseFloat(item.cantidadRecibida) || 0) + 1;
-    if (item.idDetalle && !item._local) {
-      _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
-    }
+    _persistirCantidad(item); // [v2.13.218][FIX 40x #1+#2] cola serializada + _saving
     _mostrarDetalleSheet(_guiaActual, false);
     _renderCamList();
     SoundFX.beepDouble(); vibrate(8);
@@ -7185,9 +7474,7 @@ const GuiasView = (() => {
     const cur = parseFloat(item.cantidadRecibida) || 0;
     if (cur <= 1) return;
     item.cantidadRecibida = cur - 1;
-    if (item.idDetalle && !item._local) {
-      _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
-    }
+    _persistirCantidad(item); // [v2.13.218][FIX 40x #1+#2] cola serializada + _saving
     _mostrarDetalleSheet(_guiaActual, false);
     _renderCamList();
     vibrate(8);
@@ -7226,9 +7513,7 @@ const GuiasView = (() => {
       );
       if (item) {
         item.cantidadRecibida = Math.max(0, (parseFloat(item.cantidadRecibida) || 0) - 1);
-        if (item.idDetalle && !item._local) {
-          _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle: item.idDetalle, cantidadRecibida: item.cantidadRecibida }), 'la cantidad');
-        }
+        _persistirCantidad(item); // [v2.13.218][FIX 40x #1+#2] cola serializada + _saving
         _mostrarDetalleSheet(_guiaActual, false);
       }
     }
@@ -7809,6 +8094,9 @@ const GuiasView = (() => {
   async function confirmarCerrarGuia() {
     if (_cerrandoGuia) return;   // [v2.13.190] guard anti-doble-submit (evita doble POST de cierre)
     if (!_guiaActual) return;
+    // [v2.13.217] Sellar una eliminación con undo pendiente antes del cierre, para
+    // que el ítem en gracia no se cuente como activo en el cierre.
+    _flushUndoPend();
     const det = (_guiaActual.detalle || []).filter(d => d.observacion !== 'ANULADO');
     if (!det.length) { toast('Agrega al menos un ítem antes de cerrar', 'warn'); return; }
 
@@ -8264,6 +8552,8 @@ const GuiasView = (() => {
 
   // Auto-guardar comentario al cerrar el sheet de detalle
   function cerrarGuiaDetalle() {
+    // [v2.13.217] Sellar cualquier eliminación con undo en vuelo antes de salir.
+    _flushUndoPend();
     if (_guiaActual && _guiaActual.estado === 'ABIERTA') {
       const textoExtra = document.getElementById('guiaComentarioEdit')?.value || '';
       const nuevoComentario = _buildComentario(_tagsGuia, textoExtra);
@@ -8356,7 +8646,10 @@ const GuiasView = (() => {
     imprimirTicket,
     abrirModalPN, cerrarModalPN, _pnFotoSeleccionada, confirmarRegistrarPN,
     _pnCodigoChanged, _pnToggleAutoGen,
-    abrirPNSinCodigo, _ocultarPNOffer
+    abrirPNSinCodigo, _ocultarPNOffer,
+    // [v2.13.217] Barra de captura inteligente unificada + undo eliminar
+    detCapturaKeydown, detCapturaInput, capturaPick, _detOcultarUnknown,
+    detUndoEliminar
   };
 
   function imprimirTicket(idGuia) {

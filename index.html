@@ -854,6 +854,74 @@
     @keyframes camQtyPulse { 0%{transform:scale(1.4);color:#93c5fd} 100%{transform:scale(1);color:#fff} }
     .cam-row-pulse  { animation:camRowPulse .38s ease-out both; }
     .cam-qty-pulse  { animation:camQtyPulse .38s ease-out both; }
+    /* ── Detalle de guía — barra de captura unificada + sensorial ── */
+    @keyframes detRowGlow {
+      0%   { box-shadow:0 0 0 0 rgba(16,185,129,0);    background:rgba(16,185,129,.20); }
+      35%  { box-shadow:0 0 0 3px rgba(16,185,129,.55); background:rgba(16,185,129,.16); }
+      100% { box-shadow:0 0 0 0 rgba(16,185,129,0);    background:rgba(30,41,59,.4); }
+    }
+    @keyframes detRowShake {
+      0%,100% { transform:translateX(0); }
+      20%     { transform:translateX(-4px); }
+      40%     { transform:translateX(4px); }
+      60%     { transform:translateX(-2px); }
+      80%     { transform:translateX(2px); }
+    }
+    @keyframes detQtyCount {
+      0%   { transform:scale(1.55); color:#34d399; }
+      100% { transform:scale(1);    color:#fff; }
+    }
+    @keyframes detPlusFloat {
+      0%   { opacity:0; transform:translate(0,0) scale(.7); }
+      18%  { opacity:1; transform:translate(6px,-10px) scale(1.1); }
+      100% { opacity:0; transform:translate(14px,-34px) scale(1); }
+    }
+    @keyframes detRowFadeOut {
+      0%   { opacity:1; transform:translateX(0); background:rgba(239,68,68,.18); }
+      100% { opacity:0; transform:translateX(40px); background:rgba(239,68,68,0); }
+    }
+    @keyframes detRowAmber {
+      0%   { background:rgba(245,158,11,.22); }
+      100% { background:rgba(30,41,59,.4); }
+    }
+    .det-row-glow  { animation:detRowGlow 1.5s ease-out both, detRowShake .34s ease-out both; will-change:transform,box-shadow; }
+    .det-row-amber { animation:detRowAmber 1.2s ease-out both; }
+    .det-row-out   { animation:detRowFadeOut .3s ease-in both; will-change:transform,opacity; }
+    .det-qty-count { animation:detQtyCount .42s cubic-bezier(.22,1,.36,1) both; display:inline-block; will-change:transform; }
+    .det-plus-float {
+      position:absolute; right:14px; top:50%; pointer-events:none;
+      color:#34d399; font-weight:900; font-size:1rem; z-index:5;
+      animation:detPlusFloat .8s ease-out both; will-change:transform,opacity;
+    }
+    /* Barra de captura inteligente */
+    #detCapturaBar {
+      display:flex; align-items:center; gap:8px; width:100%;
+      background:#0f172a; border:1.5px solid rgba(124,58,237,.4);
+      border-radius:14px; padding:6px 6px 6px 12px; transition:border-color .18s,box-shadow .18s;
+    }
+    #detCapturaBar.is-focus { border-color:#7c3aed; box-shadow:0 0 0 3px rgba(124,58,237,.18); }
+    #detCapturaInput {
+      flex:1; min-width:0; background:transparent; border:none; outline:none;
+      color:#f1f5f9; font-size:16px; font-weight:600; letter-spacing:.02em;
+      padding:9px 0; -webkit-tap-highlight-color:transparent;
+    }
+    #detCapturaInput::placeholder { color:#475569; font-weight:500; letter-spacing:0; }
+    .det-cap-btn {
+      flex-shrink:0; width:44px; height:44px; border-radius:10px; border:none; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(124,58,237,.16); color:#c4b5fd;
+      -webkit-tap-highlight-color:transparent; transition:background .15s;
+    }
+    .det-cap-btn:active { background:rgba(124,58,237,.32); }
+    #detUnknownBox {
+      margin-top:8px; display:flex; align-items:center; gap:8px; padding:9px 12px;
+      border-radius:11px; background:#2d0a0a; border:1px solid #7f1d1d;
+      animation:slideInItem .2s ease-out both;
+    }
+    @media (prefers-reduced-motion:reduce) {
+      .det-row-glow, .det-row-amber, .det-row-out, .det-qty-count, .det-plus-float,
+      .cam-row-pulse, .cam-qty-pulse, .item-slide-in, #detUnknownBox { animation:none !important; }
+    }
     /* Modo envasador */
     .modo-badge { background:#1d4ed8;color:#fff;font-size:11px;font-weight:700;
                   border-radius:6px;padding:3px 8px;letter-spacing:.5px;cursor:pointer; }
@@ -8891,6 +8959,23 @@
 <div id="toast" class="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl text-sm font-semibold shadow-xl
      transition-all duration-300 pointer-events-none opacity-0"
      style="min-width:200px;text-align:center;max-width:320px;"></div>
+
+<!-- [v2.13.217] UNDO flotante (eliminar ítem de detalle con deshacer 4s) -->
+<div id="detUndoBar"
+     style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+            z-index:120;display:none;opacity:0;transition:opacity .2s,transform .2s;
+            background:#1e293b;border:1px solid #334155;border-radius:14px;
+            box-shadow:0 10px 30px rgba(0,0,0,.45);padding:10px 12px 10px 16px;
+            align-items:center;gap:14px;max-width:360px;width:calc(100% - 32px)">
+  <span id="detUndoMsg" style="flex:1;min-width:0;color:#e2e8f0;font-size:.85em;font-weight:600;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Ítem eliminado</span>
+  <button id="detUndoBtn" onclick="GuiasView.detUndoEliminar()"
+          style="flex-shrink:0;background:rgba(124,58,237,.18);color:#c4b5fd;border:none;
+                 border-radius:9px;padding:8px 15px;font-size:.82em;font-weight:800;cursor:pointer;
+                 display:flex;align-items:center;gap:6px;-webkit-tap-highlight-color:transparent">
+    ↩ Deshacer
+  </button>
+</div>
 
 <!-- ════════════════════════════════════════════════
      F2-F7 — MODALES Y SHEETS NUEVOS
