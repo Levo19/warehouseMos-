@@ -434,18 +434,34 @@ const OfflineManager = (() => {
     _syncing = true;
     _notificar();
 
-    // [40x cruce] Si la escritura directa está activa, reintentar vía API._postCola (post() directo, idempotente por el
-    // id sembrado del localId → la RPC de Supabase dedupea). NUNCA pegarle a GAS para estos ítems: GAS dedupea por su
-    // SYNC_LOG, que Supabase no comparte → un ítem que ya commiteó en Supabase se DUPLICARÍA al re-procesarse en GAS.
-    // Con el flag OFF (estado actual), el camino es idéntico al de antes (fetch a GAS).
-    // `API` es un const global (binding léxico, NO window.API) — se referencia bare con guard typeof, igual que
-    // api.js referencia OfflineManager. offline.js carga antes que api.js, pero esto corre en runtime → API ya existe.
-    const directoOn = !!(typeof API !== 'undefined' && API._escrituraDirectaActiva && API._escrituraDirectaActiva());
+    // [100x rollback-fix] La vía de reintento se decide POR ÍTEM, NO por un flag global al sincronizar.
+    //
+    // BUG corregido: antes mirábamos `API._escrituraDirectaActiva()` en tiempo de sync. Si un ítem se
+    // encolaba bajo escritura directa por TIMEOUT (la RPC PUDO commitear en Supabase y perderse la
+    // respuesta) y LUEGO se hacía rollback de la fase (apagar el flag / limpiar localStorage / cambiar
+    // de dispositivo) antes de vaciar la cola, `directoOn` veía false y mandaba ese ítem a GAS. GAS no
+    // tiene ese localId en su SYNC_LOG (la op nunca pasó por GAS) → lo EJECUTABA → DOBLE STOCK / DOBLE GUÍA.
+    //
+    // FIX: api.js sella el ítem al encolar (`params._viaDirecta = true`) SOLO cuando nace del timeout de
+    // escritura directa. Acá, un ítem así SIEMPRE se reintenta vía _postDirecto (idempotente por el id
+    // sembrado del localId → la RPC dedupea), aunque el flag global ya esté apagado por rollback.
+    //   • viaDirecta + API disponible → API._postCola(item.params) (dedup en Supabase).
+    //   • viaDirecta + API NO disponible (módulo no cargado) → NO ir a GAS (duplicaría): dejar 'error' y reintentar luego.
+    //   • legacy (sin la marca) → GAS, exactamente como hoy.
+    // Con la escritura directa nunca activada, ningún ítem lleva la marca → 100% GAS = comportamiento actual (INERTE).
     var huboEnvasado = false;
     for (const item of queue) {
       try {
+        const viaDirecta = !!(item._viaDirecta || (item.params && item.params._viaDirecta));
         let res;
-        if (directoOn) {
+        if (viaDirecta) {
+          // Ítem que pudo commitear en Supabase → SIEMPRE reintento directo (dedup), nunca GAS.
+          if (typeof API === 'undefined' || !API._postCola) {
+            // Módulo de escritura directa no disponible: no podemos reintentar directo y mandarlo a
+            // GAS duplicaría. Lo dejamos pendiente (marcado 'error') para reintentar cuando cargue.
+            _actualizarItemQueue(item.localId, 'error');
+            continue;
+          }
           res = await API._postCola(item.params);
         } else {
           res = await fetch(window.WH_CONFIG.gasUrl, {

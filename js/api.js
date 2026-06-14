@@ -776,7 +776,10 @@ const API = (() => {
 
     // Las RPCs de escritura SOLO corren si la escritura directa está activa (flag propio). Con la escritura OFF
     // pero la impresión ON, llegar acá significa "no era impresión cableada" → null → GAS (no se toca Supabase).
-    if (!_whEscrituraDirecta()) return null;
+    // [100x rollback-fix] EXCEPCIÓN: un ítem `_viaDirecta` (encolado por timeout de escritura directa, que PUDO
+    // commitear en Supabase) SIEMPRE debe reintentarse por las RPCs aunque el flag global ya esté apagado por
+    // rollback. La RPC es idempotente (dedup por el id sembrado del localId) → reintento seguro, no duplica.
+    if (!_whEscrituraDirecta() && !params._viaDirecta) return null;
 
     if (params.action === 'crearAjuste') {
       const out = await _sbRpcWH('crear_ajuste', { p: {
@@ -926,7 +929,10 @@ const API = (() => {
         origen: params.origen || '', id_lote: params.idLote || '', foto: fotoUrl
       } });
       if (!out || out.ok === false) return null;
-      try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }); } catch (_) {}
+      // [100x] guard de dedup (paridad con crearGuia/cerrarGuia/auditarProducto): en un reintento desde la
+      // cola la merma se dedupea (out.dedup=true) pero SIN este guard el contador de actividad se incrementaba
+      // de nuevo (inflaba la métrica). registrar_merma devuelve dedup:true cuando la fila ya existía. Verificado.
+      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }); } catch (_) {} }
       return out;
     }
     if (params.action === 'crearGuia') {
@@ -1334,15 +1340,32 @@ const API = (() => {
     // [PASO 5 · B5] Entra a _postDirecto si CUALQUIERA de los dos flags está activo: escritura directa
     // (RPCs) o impresión directa (Edge `imprimir`). Cada bloque dentro revalida su propio flag, así que
     // con solo el de impresión ON, las RPCs de escritura NO corren (devuelven null → GAS, sin tocar Supabase).
-    if ((_whEscrituraDirecta() || _whImpresionDirecta()) && navigator.onLine) {
+    // [100x rollback-fix] TAMBIÉN entra si el ÍTEM nació de escritura directa (`_viaDirecta`, sellado al
+    // encolar por timeout). Un ítem así PUDO commitear en Supabase → SIEMPRE debe reintentarse directo
+    // (la RPC dedupea por el id sembrado del localId), aunque el flag global ya esté apagado por rollback.
+    // Si fuera a GAS, GAS no tiene su localId en SYNC_LOG → lo ejecutaría → DOBLE STOCK / DOBLE GUÍA.
+    if ((_whEscrituraDirecta() || _whImpresionDirecta() || params._viaDirecta) && navigator.onLine) {
       _opsEnVuelo++; _emitOpsState();
       let timeoutDirecto = false;
       try { const d = await _postDirecto(params); if (d) return d; }
       catch (_) { timeoutDirecto = true; }
       finally { _opsEnVuelo--; _emitOpsState(); }
+      // [100x rollback-fix] Si llegamos acá con un ítem `_viaDirecta`, _postDirecto NO devolvió éxito
+      // (devolvió null o lanzó). Ir a GAS NUNCA es seguro para estos ítems (duplicaría: GAS no comparte el
+      // SYNC_LOG de Supabase). Lo dejamos en la cola para reintento DIRECTO posterior (sincronizar() lo verá
+      // 'error' por el _retry y volverá a llamar API._postCola → _postDirecto). Nunca cae al GAS de abajo.
+      if (params._viaDirecta) {
+        return { ok: false, error: timeoutDirecto ? 'timeout-directo' : 'no-routeable-directo', _retry: true };
+      }
       if (timeoutDirecto) {
         if (params._fromQueue) return { ok: false, error: 'timeout-directo', _retry: true };
-        const localId = OfflineManager.encolar(params.action, params);
+        // [100x rollback-fix] La RPC PUDO commitear en Supabase y perderse la respuesta.
+        // Sellamos la VÍA de reintento POR ÍTEM (no por flag global al sincronizar): este
+        // item DEBE reintentarse SIEMPRE vía _postDirecto (idempotente por el id sembrado del
+        // localId → la RPC dedupea), aunque la fase de escritura directa se apague (rollback,
+        // limpieza de localStorage, cambio de dispositivo) antes de que la cola se vacíe.
+        // Si fuera a GAS, GAS no tiene ese localId en su SYNC_LOG → lo ejecutaría → DOBLE STOCK.
+        const localId = OfflineManager.encolar(params.action, { ...params, _viaDirecta: true });
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
       // (si llegamos acá, _postDirecto devolvió null → seguir a GAS abajo, seguro)
