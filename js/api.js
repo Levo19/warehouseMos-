@@ -700,10 +700,84 @@ const API = (() => {
     try { return localStorage.getItem('wh_escritura_navegador') === '1' || window.WH_CONFIG?.escrituraNavegador === true; }
     catch (_) { return window.WH_CONFIG?.escrituraNavegador === true; }
   }
+
+  // [PASO 5 · B5] Gate PROPIO de la impresión directa por navegador (independiente de la escritura directa).
+  // INERTE por defecto: solo se activa con localStorage 'wh_impresion_navegador'='1' (o WH_CONFIG.impresionNavegador===true).
+  // Con el flag OFF, los casos de impresión de _postDirecto devuelven null → la impresión sigue 100% por GAS.
+  function _whImpresionDirecta() {
+    try { return localStorage.getItem('wh_impresion_navegador') === '1' || window.WH_CONFIG?.impresionNavegador === true; }
+    catch (_) { return window.WH_CONFIG?.impresionNavegador === true; }
+  }
+
+  // [PASO 5 · B5] Resuelve printerHint ('TICKET'|'ADHESIVO'|'ZPL') → printNodeId real en el CLIENTE.
+  // El GAS usa getPrinterNodeId(tipo,'ALMACEN') leyendo la hoja IMPRESORAS; acá replicamos eligiendo de los
+  // caches locales de impresoras. Orden de prioridad:
+  //   1) printerIdOverride explícito (PrintHub: el admin eligió una impresora concreta del ecosistema).
+  //   2) Impresora del cache (offline 'wh_impresoras' o ecosistema 'wh_printers_cache') que coincida en tipo,
+  //      preferiendo la de la zona del operador y la app warehouseMos; descarta las offline si hay estado.
+  // Devuelve String(printNodeId) o '' si no se puede resolver (→ el caller cae a GAS).
+  function _resolvePrinterId(hint, printerIdOverride) {
+    if (printerIdOverride != null && String(printerIdOverride).trim() !== '') {
+      return String(printerIdOverride).trim();
+    }
+    const tipo = String(hint || '').toUpperCase();
+    const miZona = String(window.WH_CONFIG?.zona || '').trim();
+
+    // Junta candidatos de ambos caches (sin duplicar por printNodeId).
+    const candidatos = [];
+    const _push = (arr) => {
+      (Array.isArray(arr) ? arr : []).forEach(p => {
+        const pid = String((p && (p.printNodeId || p.printnode_id)) || '').trim();
+        if (!pid) return;
+        candidatos.push({
+          pid,
+          tipo:    String(p.tipo || '').toUpperCase(),
+          idZona:  String(p.idZona || p.id_zona || '').trim(),
+          app:     String(p.appOrigen || p.app || '').toLowerCase(),
+          activo:  (p.activo == null) ? true : !!p.activo,
+          // estado solo lo trae el cache de ecosistema; el offline no → tratar como desconocido (no descartar)
+          online:  (p.state ? p.state === 'ONLINE' : (p.online == null ? null : !!p.online))
+        });
+      });
+    };
+    try {
+      if (typeof OfflineManager !== 'undefined' && OfflineManager.getImpresorasCache) _push(OfflineManager.getImpresorasCache());
+    } catch (_) {}
+    try { _push((window._whPrintersCache && window._whPrintersCache.data) || []); } catch (_) {}
+
+    if (!candidatos.length) return '';
+
+    const _coincideTipo = (c) => !tipo || c.tipo === tipo || (!c.tipo);
+    const elegibles = candidatos.filter(c => c.activo !== false && _coincideTipo(c) && c.online !== false);
+    if (!elegibles.length) return '';
+
+    // Puntaje: zona del operador > app warehouseMos > online conocido. El primero con mejor puntaje gana.
+    const _score = (c) => {
+      let s = 0;
+      if (miZona && c.idZona === miZona) s += 4;
+      if (!c.idZona) s += 1;                 // sin zona = comodín, mejor que zona ajena
+      if (c.app.indexOf('warehouse') >= 0) s += 2;
+      if (c.online === true) s += 1;
+      return s;
+    };
+    elegibles.sort((a, b) => _score(b) - _score(a));
+    return elegibles[0].pid;
+  }
   // Dispatcher: mapea una acción de escritura → su RPC wh.* (PASO 4). Devuelve {ok,...} o null (→ fallback GAS:
   // tanto si la acción no está cableada como si la RPC responde *_OFF / error).
   async function _postDirecto(params) {
     const lid = params.localId || _genLocalId();
+
+    // [PASO 5 · B5] IMPRESIÓN DIRECTA primero (gate PROPIO _whImpresionDirecta, independiente de la escritura).
+    // Se evalúa ANTES de las RPCs de escritura para que el flag de impresión pueda entrar a _postDirecto
+    // SIN activar la escritura directa. Cada caso revalida su flag; devuelve {ok:true} o null (→ GAS).
+    const _printResult = await _postDirectoImpresion(params, lid);
+    if (_printResult !== undefined) return _printResult;
+
+    // Las RPCs de escritura SOLO corren si la escritura directa está activa (flag propio). Con la escritura OFF
+    // pero la impresión ON, llegar acá significa "no era impresión cableada" → null → GAS (no se toca Supabase).
+    if (!_whEscrituraDirecta()) return null;
+
     if (params.action === 'crearAjuste') {
       const out = await _sbRpcWH('crear_ajuste', { p: {
         id_ajuste: 'AJ_' + lid, codigo_producto: String(params.codigoProducto || ''),
@@ -1061,6 +1135,61 @@ const API = (() => {
     return null;  // acción de escritura no cableada aún → GAS
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // [PASO 5 · B5] IMPRESIÓN DIRECTA — arma el ticket/etiqueta en el navegador (ImpresionDirecta) y lo manda a la
+  // Edge `imprimir` (vía _imprimirDirecto), en vez de saltar a GAS→PrintNode. INERTE por _whImpresionDirecta().
+  // Devuelve:
+  //   • undefined → la acción NO es de impresión cableada (el dispatcher sigue con las RPCs de escritura/GAS).
+  //   • { ok:true } → PrintNode aceptó (éxito directo).
+  //   • null       → flag OFF, módulo ausente, datos no resolubles, sin impresora, o PrintNode rechazó → FALLBACK a GAS.
+  // Solo se cablean las acciones autocontenidas en el front (o resolubles del cache). Las que el GAS resolvía de
+  // Sheets / fan-out multi-impresora / lotes orquestados en server NO se cablean (ver REPORTE).
+  // ════════════════════════════════════════════════════════════════════
+  async function _postDirectoImpresion(params, lid) {
+    const PRINT_ACTIONS = ['imprimirBienvenida', 'imprimirMembrete'];
+    if (PRINT_ACTIONS.indexOf(params.action) < 0) return undefined;   // no es impresión cableada
+    if (!_whImpresionDirecta()) return null;                          // flag OFF → GAS
+    if (typeof ImpresionDirecta === 'undefined') return null;         // módulo no cargado → GAS
+
+    if (params.action === 'imprimirBienvenida') {
+      if (!ImpresionDirecta.armarBienvenida) return null;
+      let armado;
+      try {
+        armado = ImpresionDirecta.armarBienvenida({
+          nombre: params.nombre, apellido: params.apellido, rol: params.rol,
+          horaInicio: params.horaInicio, empresa: params.empresa
+        });
+      } catch (_) { return null; }
+      if (!armado || !armado.base64) return null;
+      const pid = _resolvePrinterId(armado.printerHint, params.printerIdOverride);
+      if (!pid) return null;                                          // sin impresora resoluble → GAS
+      const ok = await _imprimirDirecto(pid, armado.base64, armado.title);
+      return ok ? { ok: true } : null;                               // PrintNode rechazó → GAS
+    }
+
+    if (params.action === 'imprimirMembrete') {
+      if (!ImpresionDirecta.armarMembreteStd) return null;
+      // El front manda idProducto + barcodes (JSON), NO nombre/sku (el GAS los leía de Sheets).
+      // Resolver descripción + skuBase del cache de productos (mismo patrón que registrarEnvasado).
+      const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+      const idp  = String(params.idProducto || '').trim();
+      const prod = idp ? prods.find(p => String(p.idProducto) === idp || String(p.codigoBarra) === idp || String(p.skuBase) === idp) : null;
+      const sku  = String((prod && (prod.skuBase || prod.idProducto)) || params.skuGrupal || idp || '').trim();
+      if (!sku) return null;                                          // sin sku resoluble → GAS
+      const nombre = String((prod && (prod.descripcion || prod.nombre)) || '').trim();
+      let armado;
+      try { armado = ImpresionDirecta.armarMembreteStd({ nombre, sku, barcodes: params.barcodes }); }
+      catch (_) { return null; }
+      if (!armado || !armado.base64) return null;
+      const pid = _resolvePrinterId(armado.printerHint, params.printerIdOverride);
+      if (!pid) return null;
+      const ok = await _imprimirDirecto(pid, armado.base64, armado.title);
+      return ok ? { ok: true } : null;
+    }
+
+    return null;
+  }
+
   // GET: network first, cache como fallback
   async function call(params) {
     const GAS_URL = _gasUrl();
@@ -1202,7 +1331,10 @@ const API = (() => {
     //   • _postDirecto LANZA (timeout/red) → la RPC PUDO commitear y perderse la respuesta. Caer a GAS DUPLICARÍA
     //     (GAS dedupea por su SYNC_LOG, que Supabase no comparte). → NO ir a GAS: encolar para reintento DIRECTO
     //     (la cola reintenta vía post() directo, idempotente por el id sembrado del localId → la RPC dedupea).
-    if (_whEscrituraDirecta() && navigator.onLine) {
+    // [PASO 5 · B5] Entra a _postDirecto si CUALQUIERA de los dos flags está activo: escritura directa
+    // (RPCs) o impresión directa (Edge `imprimir`). Cada bloque dentro revalida su propio flag, así que
+    // con solo el de impresión ON, las RPCs de escritura NO corren (devuelven null → GAS, sin tocar Supabase).
+    if ((_whEscrituraDirecta() || _whImpresionDirecta()) && navigator.onLine) {
       _opsEnVuelo++; _emitOpsState();
       let timeoutDirecto = false;
       try { const d = await _postDirecto(params); if (d) return d; }

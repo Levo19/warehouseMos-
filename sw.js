@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.200';
+const VERSION = '2.13.201';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -46,6 +46,7 @@ const LOCAL_ASSETS = [
   './version.json',
   './js/app.js',
   './js/api.js',
+  './js/impresion-directa.js',
   './js/offline.js',
   './js/scanner.js',
   './js/sounds.js',
