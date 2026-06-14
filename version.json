@@ -1,1 +1,1 @@
-{ "version": "2.13.212", "build": "20260614-fix-ingreso-directo(listado-guias-operacional-directo-supabase-cierra-gap-cutover+PN-registrar-guard-_pnSubmitting-stuck)" }
+{ "version": "2.13.214", "build": "20260614-PN-detalle-directo-Supabase(cutover-fix:la-linea-de-detalle-del-PN-en-guia-directa-G_L-ahora-se-escribe-a-wh.guia_detalle-via-agregarDetalleGuia-con-fecha_venc-para-el-lote;PN-sigue-yendo-a-GAS-para-MOS;gate-escritura-directa;idempotente-por-local_id;no-mueve-stock-hasta-cerrar)" }

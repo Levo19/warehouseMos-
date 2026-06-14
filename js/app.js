@@ -7508,81 +7508,194 @@ const GuiasView = (() => {
 
     cerrarModalPN();
     _ocultarPNOffer();
-    toast('Registrando producto nuevo...', 'ok', 2000);
 
-    try {
-      const res = await API.registrarPN(params);
-      if (res.ok || res.offline) {
-        const cod  = res.data?.codigoBarra || _pnCodigo || '';
+    // ════════════════════════════════════════════════════════════════════
+    // [v2.13.213] PERCEPCIÓN INSTANTÁNEA — flujo OPTIMISTA del producto nuevo.
+    // Antes: se hacía `await API.registrarPN(...)` ANTES de mostrar el ítem en
+    // el detalle. Como registrarProductoNuevo NO está cableado a Supabase
+    // (cae a GAS: UPSERT en hoja PRODUCTO_NUEVO + foto a Drive + sync 1:1 a
+    // GUIA_DETALLE → ~2-5s), la card recién aparecía al volver el GAS y quedaba
+    // pegada en "guardando…" (nacía con _local:true y nadie lo bajaba).
+    //   ⚠ CROSS-DOMAIN (verificado): MOS lee los PN desde la HOJA WH
+    //   (getProductosNuevosWarehouse → _abrirWhSheet('PRODUCTO_NUEVO')), NO desde
+    //   wh.producto_nuevo. Por eso el ruteo del PN DEBE seguir yendo a GAS para
+    //   que MOS los vea y apruebe. Solo optimizamos la PERCEPCIÓN: pintamos la
+    //   card YA, guardamos el PN en background, y bajamos/elevamos el indicador
+    //   según resulte. NO se cambia el ruteo ni el guardado real.
+    // ════════════════════════════════════════════════════════════════════
+    const codDisplay = cbAEnviar || '';
+    let optIdx = -1;
+    if (idGuia && _guiaActual?.idGuia === idGuia) {
+      if (!_guiaActual.detalle) _guiaActual.detalle = [];
+      // Idempotencia visual: reemplazar la línea PN existente del mismo código
+      // (doble registro del mismo producto) en vez de duplicar la card.
+      const existIdx = _guiaActual.detalle.findIndex(d =>
+        String(d.codigoProducto || '').toUpperCase() === String(codDisplay || '').toUpperCase()
+        && codDisplay
+        && (d._esPN || String(d.observacion || '').toUpperCase().indexOf('PN_') === 0));
+      const itemOpt = {
+        idDetalle: existIdx >= 0
+          ? _guiaActual.detalle[existIdx].idDetalle
+          : ('DL_PN_' + Date.now()),
+        idGuia,
+        codigoProducto: codDisplay,
+        descripcionProducto: (obs || codDisplay || '(nuevo)') + ' ⬡N',
+        cantidadEsperada: 0,
+        cantidadRecibida: cantidad,
+        precioUnitario: 0,
+        fechaVencimiento: fechaVenc,
+        observacion: 'PN_PENDIENTE',
+        idProductoNuevo: '',
+        // [v2.13.213] _local:true → (1) muestra el indicador "guardando…" y
+        // (2) lo PROTEGE del preserve-logic de getGuia (que re-inyecta solo los
+        // _local mientras el GAS aún no confirmó la línea en GUIA_DETALLE). En
+        // la reconciliación bajamos _local Y _saving (igual que el escaneo). El
+        // bug viejo era que el _local NUNCA se bajaba; acá sí.
+        _esPN: true, _local: true, _saving: true, _saveFailed: false
+      };
+      if (existIdx >= 0) { _guiaActual.detalle[existIdx] = itemOpt; optIdx = existIdx; }
+      else { _guiaActual.detalle.push(itemOpt); optIdx = _guiaActual.detalle.length - 1; }
+      _mostrarDetalleSheet(_guiaActual, false);
+    }
+
+    // Feedback inmediato (la card YA está en pantalla).
+    toast('✓ ' + (obs || codDisplay || 'Producto nuevo') + ' · guardando…', 'ok', 2200);
+    vibrate(15);
+
+    // El guard anti-doble-submit ya no necesita cubrir la llamada de red: el
+    // modal está cerrado y el ítem ya se pintó. Liberar de inmediato.
+    _pnSubmitting = false;
+
+    // Mantener foco en scanner si estaba abierto
+    if (document.getElementById('sheetScanInput')?.classList.contains('open')) {
+      setTimeout(() => _enfocarHid(), 250);
+    }
+
+    const _idGuiaPN = idGuia;
+    // Reconcilia la card optimista (por idProductoNuevo de respuesta, o por el
+    // idDetalle local) con el resultado del backend. Guard de guía como en
+    // _agregarProductoDirecto: si el operador cambió de guía, no tocar UI.
+    const _localDetId = (optIdx >= 0) ? _guiaActual.detalle[optIdx].idDetalle : null;
+    const _reubicar = () => {
+      if (!_guiaActual || _guiaActual.idGuia !== _idGuiaPN) return -1;
+      if (!Array.isArray(_guiaActual.detalle)) return -1;
+      return _guiaActual.detalle.findIndex(d => d.idDetalle === _localDetId);
+    };
+
+    // ── Guardado REAL en background (GAS, ruteo intacto). NO bloquea la UI. ──
+    API.registrarPN(params).then(res => {
+      const smeQuedo = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
+      if (res && (res.ok || res.offline)) {
+        const cod  = res.data?.codigoBarra || codDisplay || '';
         const idPN = res.data?.idProductoNuevo || ('PN_L_' + Date.now());
-        // [v2.13.50] Backend devuelve idempotente:true cuando el (codigoBarra,
-        // idGuia) ya existía como PENDIENTE — significa que el usuario hizo
-        // doble tap o reintentó. NO es error: el registro existe igual.
         const esIdempotente = !!res.data?.idempotente;
 
         // Persistir en cache local — solo si NO es idempotente (ya estaba)
         if (!esIdempotente) {
           const pnCache = OfflineManager.getPNCache();
-          pnCache.unshift({ idProductoNuevo: idPN, idGuia, codigoBarra: cod,
+          pnCache.unshift({ idProductoNuevo: idPN, idGuia: _idGuiaPN, codigoBarra: cod,
             cantidad, fechaVencimiento: fechaVenc, descripcion: obs, estado: 'PENDIENTE',
             fechaRegistro: new Date().toISOString() });
           OfflineManager.setPNCache(pnCache);
         }
 
-        toast(esIdempotente
-          ? `✓ Ya registrado · cantidad actualizada a ${cantidad}`
-          : `✓ Producto nuevo registrado · ${cod || idPN}`,
-          'ok', 3500);
-        vibrate(20);
+        // Reconciliar la card optimista: sellar código/idPN reales devueltos por
+        // el backend (el GAS pudo generar un código NLEV). Solo bajamos el
+        // indicador "guardando…" si la respuesta es CONFIRMADA por el server
+        // (res.ok && !res.offline); en puro offline la card sigue _local (la cola
+        // la reconciliará al sincronizar) — mismo criterio que _agregarProductoDirecto.
+        if (smeQuedo && _localDetId) {
+          const i = _reubicar();
+          if (i >= 0) {
+            const it = _guiaActual.detalle[i];
+            it.codigoProducto      = cod || it.codigoProducto;
+            it.descripcionProducto = (obs || cod || '(nuevo)') + ' ⬡N';
+            it.idProductoNuevo     = idPN;
+            if (res.ok && !res.offline) {
+              it._saving = false; it._saveFailed = false; it._local = false;
+              // Persistir en el cache del detalle para que un getGuia/silentRefresh
+              // posterior no haga parpadear la card (mismo patrón que el escaneo).
+              try { OfflineManager.addDetalleCache?.(it); } catch(_){}
+              if (SoundFX.savedTick) SoundFX.savedTick();
+            }
+            _mostrarDetalleSheet(_guiaActual, false);
+          }
+        }
 
-        // Si la guía está abierta en detalle → agregar / actualizar ítem
-        if (idGuia && _guiaActual?.idGuia === idGuia) {
-          if (!_guiaActual.detalle) _guiaActual.detalle = [];
-          // [v2.13.50] REEMPLAZAR si ya existe línea PN con mismo codigoBarra
-          // (idempotencia visual: el frontend NO duplica la card del producto)
-          const existIdx = _guiaActual.detalle.findIndex(d =>
-            String(d.codigoProducto || '').toUpperCase() === String(cod || '').toUpperCase()
-            && (d._esPN || String(d.observacion || '').toUpperCase().indexOf('PN_') === 0));
-          const itemOpt = {
-            idDetalle: existIdx >= 0
-              ? _guiaActual.detalle[existIdx].idDetalle
-              : ('DL_PN_' + Date.now()),
-            idGuia,
-            codigoProducto: cod,
-            descripcionProducto: (obs || cod || '(nuevo)') + ' ⬡N',
+        // ════════════════════════════════════════════════════════════════
+        // [v2.13.214] FIX cutover Supabase — la LÍNEA DE DETALLE del PN.
+        // Causa raíz: registrarProductoNuevo (GAS) hace una "sync 1:1" del PN a
+        // la hoja GUIA_DETALLE (modelo viejo). Pero las guías DIRECTAS 'G_L...'
+        // viven en wh.guia_detalle (Supabase), NO en el Sheet → la línea caía en
+        // un Sheet huérfano y NUNCA llegaba a Supabase. El front lee el detalle
+        // de Supabase → detalle vacío (el PN existía en wh.producto_nuevo, pero
+        // sin su línea en wh.guia_detalle).
+        //   FIX: con escritura directa ON, tras registrar el PN en GAS (que sigue
+        //   intacto, para que MOS lo apruebe leyendo la hoja), agregamos la línea
+        //   directo a wh.guia_detalle vía API.agregarDetalle (action
+        //   'agregarDetalleGuia', cableada al RPC agregar_detalle_guia). Esto:
+        //     (a) hace aparecer la línea en la guía directa,
+        //     (b) genera el lote con la fecha de vencimiento al CERRAR la guía.
+        //   Usamos el código REAL devuelto por GAS (`cod` = res.data.codigoBarra:
+        //   el que tipeó el operador, o un NLEV auto-generado por GAS).
+        //   La guía recién creada está ABIERTA → el RPC solo inserta la línea, NO
+        //   mueve stock (el stock se aplica al cerrar). Idempotente por local_id
+        //   en el RPC → un reintento/doble-tap no duplica la línea. Va en
+        //   background como el resto (no bloquea la UI optimista).
+        //   ⚠ Solo con escritura directa ON. Con OFF, el flujo viejo (GAS sync
+        //   Sheet) sigue, y agregar acá duplicaría la línea cuando el Sheet sea
+        //   la fuente → por eso el gate es obligatorio.
+        if (res.ok && !res.offline && API._escrituraDirectaActiva?.() && cod && _idGuiaPN) {
+          API.agregarDetalle({
+            idGuia:           _idGuiaPN,
+            codigoProducto:   cod,
             cantidadEsperada: 0,
             cantidadRecibida: cantidad,
-            precioUnitario: 0,
-            fechaVencimiento: fechaVenc,
-            observacion: 'PN_PENDIENTE',
-            idProductoNuevo: idPN,
-            _local: true, _esPN: true
-          };
-          if (existIdx >= 0) {
-            _guiaActual.detalle[existIdx] = itemOpt;
-          } else {
-            _guiaActual.detalle.push(itemOpt);
-          }
-          _mostrarDetalleSheet(_guiaActual, false);
+            precioUnitario:   0,
+            fechaVencimiento: fechaVenc || '',
+            observacion:      'PN_PENDIENTE'
+          }).then(rDet => {
+            const sigueAqui = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
+            if (sigueAqui && rDet && rDet.ok && rDet.data) {
+              // Sellar la card optimista con el idDetalle REAL de Supabase para que
+              // edición/anulación posteriores apunten a la fila real (no al DL_PN_ local)
+              // y un getGuia no la duplique.
+              const i = _reubicar();
+              if (i >= 0) {
+                const it = _guiaActual.detalle[i];
+                it.idDetalle = rDet.data.idDetalle || it.idDetalle;
+                if (rDet.data.idLote) it.idLote = rDet.data.idLote;
+                it._local = false; it._saving = false; it._saveFailed = false;
+                try { OfflineManager.addDetalleCache?.(it); } catch(_) {}
+                _mostrarDetalleSheet(_guiaActual, false);
+              }
+            }
+          }).catch(() => { /* la cola directa lo reintenta; no romper el optimista */ });
         }
 
         // Refrescar lista de guías para actualizar badge N
         if (typeof render === 'function' && typeof _filtrar === 'function') {
           render(_filtrar(todas, filtroActual));
         }
-
-        // Mantener foco en scanner si estaba abierto
-        if (document.getElementById('sheetScanInput')?.classList.contains('open')) {
-          setTimeout(() => _enfocarHid(), 250);
+      } else if (res && !res.offline) {
+        // GAS rechazó (no es timeout/offline) → marcar la card en error. NO la
+        // borramos: el indicador "⚠ no guardado" deja claro que falta reintentar
+        // (coherente con el flujo de escaneo) y no se pierde lo que tipeó.
+        if (smeQuedo && _localDetId) {
+          const i = _reubicar();
+          if (i >= 0) { _guiaActual.detalle[i]._saving = false; _guiaActual.detalle[i]._saveFailed = true; _mostrarDetalleSheet(_guiaActual, false); }
         }
-      } else {
-        toast('Error: ' + (res.error || 'No se pudo registrar'), 'warn', 4000);
+        toast('⚠ No se guardó el producto nuevo: ' + (res.error || 'reintenta'), 'warn', 4000);
+        try { vibrate?.([60, 80, 60]); } catch(_) {}
       }
-    } catch(e) {
-      toast('Error al registrar producto nuevo', 'warn', 3000);
-    } finally {
-      _pnSubmitting = false;
-    }
+    }).catch(() => {
+      const smeQuedo = _guiaActual && _guiaActual.idGuia === _idGuiaPN;
+      if (smeQuedo && _localDetId) {
+        const i = _reubicar();
+        if (i >= 0) { _guiaActual.detalle[i]._saving = false; _guiaActual.detalle[i]._saveFailed = true; _mostrarDetalleSheet(_guiaActual, false); }
+      }
+      toast('⚠ Sin conexión — el producto nuevo no se guardó', 'warn', 3500);
+    });
   }
 
   function abrirPNSinCodigo() {
