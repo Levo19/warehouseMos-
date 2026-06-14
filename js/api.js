@@ -812,7 +812,11 @@ const API = (() => {
         try { await _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'ENVASADO_REGISTRADO', p_cantidad: 1 }); } catch (_) {}
         try { await _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'UNIDADES_ENVASADAS', p_cantidad: unidades }); } catch (_) {}
       }
-      return out;  // NOTA: la impresión de etiquetas se dispara aparte (API.imprimirDirecto) — efecto secundario
+      // [shape-fix] el front lee res.data?.idEnvasado (app.js:8916). La RPC devuelve {ok,id_envasado,dedup} al nivel raíz →
+      // envolver al shape GAS {ok:true, data:{idEnvasado, unidadesProducidas, dedup?}, dedup?}. id determinista 'ENV_'+lid.
+      const _dataEnv = { idEnvasado: 'ENV_' + lid, unidadesProducidas: unidades };
+      if (out.dedup) _dataEnv.dedup = true;
+      return { ok: true, data: _dataEnv, dedup: !!out.dedup };  // NOTA: la impresión de etiquetas se dispara aparte (API.imprimirDirecto) — efecto secundario
     }
     if (params.action === 'aprobarPreingreso') {
       // ORQUESTADOR ATÓMICO (crear guía desde preingreso + marcar PROCESADO en 1 tx). Idempotente.
@@ -820,7 +824,13 @@ const API = (() => {
         id_preingreso: String(params.idPreingreso || ''), id_guia: 'G_' + lid, usuario: params.usuario || ''
       } });
       if (!out || out.ok === false) return null;
-      return out;
+      // [shape-fix] el front lee res.data.idGuia SIN optional-chaining (app.js:14645 y 15581) → si data falta, lanza.
+      // La RPC devuelve {ok,id_guia,dedup}. En dedup la guía ya existía con OTRO id → usar el que la RPC devuelve
+      // (out.id_guia/out.idGuia); si no, el determinista 'G_'+lid. Envolver al shape GAS {ok:true, data:{idGuia, dedup?}}.
+      const _idGuia = String(out.id_guia || out.idGuia || ('G_' + lid));
+      const _data = { idGuia: _idGuia };
+      if (out.dedup) _data.dedup = true;
+      return { ok: true, data: _data, dedup: !!out.dedup };
     }
     if (params.action === 'auditarProducto') {
       // ORQUESTADOR ATÓMICO en server (auditoría+ajuste en 1 tx — hallazgo 40x #4). Idempotente por id_auditoria.
@@ -950,7 +960,9 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       // tracking de actividad (best-effort) — solo si NO fue dedup (no contar reintentos)
       if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }); } catch (_) {} }
-      return out;
+      // [shape-fix] el front lee res.data?.idGuia (app.js:7634) y res.offline. La RPC devuelve {ok,id_guia,dedup}
+      // al nivel raíz → envolver al shape GAS {ok:true, data:{idGuia, estado:'ABIERTA'}}. idGuia = id determinista 'G_'+lid.
+      return { ok: true, data: { idGuia: 'G_' + lid, estado: 'ABIERTA' }, dedup: !!out.dedup };
     }
     if (params.action === 'cerrarGuia') {
       // orquestador: arma detalles desde la guía (get_guia_rls) → cerrar_guia (aplica stock+FIFO) → actividad.
@@ -964,8 +976,14 @@ const API = (() => {
       }));
       const out = await _sbRpcWH('cerrar_guia', { p: { id_guia: String(params.idGuia || ''), usuario: params.usuario || '', detalles } });
       if (!out || out.ok === false) return null;
-      if (!out.yaCerrada) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }); } catch (_) {} }
-      return out;
+      const _yaCerrada = !!(out.yaCerrada || out.ya_cerrada);
+      if (!_yaCerrada) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }); } catch (_) {} }
+      // [shape-fix] el front lee res.data?.montoTotal (app.js:7571). La RPC devuelve el monto al nivel raíz →
+      // envolver al shape GAS {ok:true, data:{idGuia, estado:'CERRADA', montoTotal, yaCerrada?}}. Tolerante al nombre de campo.
+      const _monto = (out.montoTotal != null ? out.montoTotal : (out.monto_total != null ? out.monto_total : (out.monto != null ? out.monto : 0)));
+      const _data = { idGuia: String(params.idGuia || ''), estado: 'CERRADA', montoTotal: parseFloat(_monto) || 0 };
+      if (_yaCerrada) _data.yaCerrada = true;
+      return { ok: true, data: _data };
     }
     if (params.action === 'reabrirGuia') {
       // Reverso de stock/lotes. Idempotente por estado (FOR UPDATE + anti doble-reverso en la RPC). La autorización
@@ -985,7 +1003,23 @@ const API = (() => {
         usuario: params.usuario || '', local_id: lid
       } });
       if (!out || out.ok === false) return null;
-      return out;
+      // [shape-fix] consumidor PESADO: el front hace itemFinal = {...res.data} y lee res.data.idDetalle,
+      // res.data.idGuia, res.data.cantidadRecibida, res.data.descripcionProducto (app.js:6903). La RPC devuelve
+      // {ok,...} al nivel raíz → reconstruir el shape GAS {ok:true, data:{...9 campos...}}. id determinista 'DET_'+lid;
+      // descripción desde el cache (mismo prodMap que getGuia); valores numéricos = los enviados (tolerante al echo RPC).
+      const _cod = String(params.codigoProducto || '');
+      const _pm = _prodMapWH();
+      return { ok: true, data: {
+        idDetalle: String(out.id_detalle || out.idDetalle || ('DET_' + lid)),
+        idGuia: String(params.idGuia || ''),
+        codigoProducto: _cod,
+        descripcionProducto: _pm[_cod] || _cod,
+        cantidadEsperada: (params.cantidadEsperada != null && params.cantidadEsperada !== '') ? (parseFloat(params.cantidadEsperada) || 0) : 0,
+        cantidadRecibida: (params.cantidadRecibida != null && params.cantidadRecibida !== '') ? (parseFloat(params.cantidadRecibida) || 0) : 0,
+        precioUnitario: (params.precioUnitario != null && params.precioUnitario !== '') ? (parseFloat(params.precioUnitario) || 0) : 0,
+        idLote: String(out.id_lote || params.idLote || ''),
+        fechaVencimiento: params.fechaVencimiento || ''
+      } };
     }
     if (params.action === 'crearPreingreso') {
       // El frontend genera idPreingreso estable ('PI'+ts) y lo pasa a ambos backends → idempotente en el cruce.
@@ -1000,7 +1034,9 @@ const API = (() => {
         fecha:         params.fecha || ''
       } });
       if (!out || out.ok === false) return null;
-      return out;
+      // [shape-fix] el front lee res.data?.idPreingreso (app.js:15827). La RPC devuelve {ok,id_preingreso,dedup} →
+      // envolver al shape GAS {ok:true, data:{idPreingreso}}. id = el front-generado que pasamos (idempotente en el cruce).
+      return { ok: true, data: { idPreingreso: String(out.id_preingreso || out.idPreingreso || params.idPreingreso || '') }, dedup: !!out.dedup };
     }
     if (params.action === 'actualizarCantidadDetalle') {
       // Edita cant_recibida de una línea. Si la guía está CERRADA, la RPC ajusta stock por el DELTA → NO idempotente
@@ -1080,7 +1116,17 @@ const API = (() => {
         id_mov_der: 'MOVEDD_' + lid, id_mov_base: 'MOVEDB_' + lid, local_id: lid
       } });
       if (!out || out.ok === false) return null;
-      return out;
+      // [shape-fix] el front lee res.data.udsNuevas, .udsViejas, .descripcion (app.js:9366). La RPC devuelve los
+      // valores al nivel raíz → envolver al shape GAS {ok:true, data:{...}}. Tolerante al nombre del echo RPC;
+      // fallback a lo que sabemos del cache (der.descripcion, env.unidadesProducidas) y el input (nuevasUnidades).
+      const _udsNuevas = (out.udsNuevas != null ? out.udsNuevas : (out.uds_nuevas != null ? out.uds_nuevas : (parseInt(params.nuevasUnidades) || 0)));
+      const _udsViejas = (out.udsViejas != null ? out.udsViejas : (out.uds_viejas != null ? out.uds_viejas : (env ? (parseFloat(env.unidadesProducidas) || 0) : 0)));
+      return { ok: true, data: {
+        idEnvasado: String(params.idEnvasado || ''),
+        udsViejas: parseFloat(_udsViejas) || 0,
+        udsNuevas: parseFloat(_udsNuevas) || 0,
+        descripcion: String(out.descripcion || (der && der.descripcion) || '')
+      } };
     }
     if (params.action === 'anularEnvasadoConClave') {
       // Anula un envasado (reverso EXACTO de registrar_envasado): -uds derivado, +cantBase base, anula lote+detalles.
@@ -1096,7 +1142,17 @@ const API = (() => {
         cod_producto_base: base ? String(base.codigoBarra) : '', motivo: params.motivo || '', usuario: params.usuario || ''
       } });
       if (!out || out.ok === false) return null;
-      return out;
+      // [shape-fix] el front lee res.data.cantBaseRestit, .udsAnuladas, .descripcion (app.js:9374). La RPC devuelve
+      // los valores al nivel raíz → envolver al shape GAS {ok:true, data:{...}}. Tolerante al echo; fallback al cache.
+      const _cantBase = (out.cantBaseRestit != null ? out.cantBaseRestit : (out.cant_base_restit != null ? out.cant_base_restit : (env ? (parseFloat(env.cantidadBase) || 0) : 0)));
+      const _udsAnul  = (out.udsAnuladas != null ? out.udsAnuladas : (out.uds_anuladas != null ? out.uds_anuladas : (env ? (parseFloat(env.unidadesProducidas) || 0) : 0)));
+      const _descEnv  = _resolverDescEnvasado();
+      return { ok: true, data: {
+        idEnvasado: String(params.idEnvasado || ''),
+        udsAnuladas: parseFloat(_udsAnul) || 0,
+        cantBaseRestit: parseFloat(_cantBase) || 0,
+        descripcion: String(out.descripcion || _descEnv(cbDer) || '')
+      } };
     }
     if (params.action === 'marcarAlertaRevisada') {
       // [Tanda 3] Marca una alerta de stock como revisada. NO toca stock. Idempotente natural (UPDATE a valor fijo).

@@ -1,1 +1,1 @@
-{ "version": "2.13.206", "build": "20260614-chat-fix(consultar_stock-incluye-productos-sin-stock-del-catalogo)+cutover-escritura-validado" }
+{ "version": "2.13.208", "build": "20260614-fix-shape-retorno-postDirecto(crearGuia+cerrarGuia+aprobarPreingreso+agregarDetalle+registrarEnvasado+crearPreingreso+corregir/anularEnvasado)" }
