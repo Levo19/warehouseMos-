@@ -185,6 +185,27 @@ const ChatAlmacen = (() => {
         const p = _prodMap()[String(s.codigoProducto)] || { descripcion: s.descripcion };
         return _matchProducto(p, q) || _norm(s.descripcion).includes(_norm(q));
       });
+      // [FIX chat] Incluir productos del CATÁLOGO que matchean la búsqueda pero NO tienen fila de stock
+      // (cantidad 0 / sin stock). Antes el chat decía "no tengo registro" de un producto que SÍ existe pero
+      // está en 0 — porque solo miraba la tabla de stock. Ahora reporta "0 unidades, sin stock".
+      try {
+        const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache)
+          ? (OfflineManager.getProductosCache() || []) : [];
+        const yaCods = new Set(filas.map(s => String(s.codigoProducto)));
+        prods.forEach(p => {
+          const cod = String(p.codigoBarra || p.idProducto || '');
+          if (cod && !yaCods.has(cod) && _matchProducto(p, q)) {
+            yaCods.add(cod);
+            filas.push({
+              codigoProducto: cod,
+              descripcion: p.descripcion || p.nombre || cod,
+              cantidadDisponible: 0,
+              stockMinimo: parseFloat(p.stockMinimo) || 0,
+              unidad: p.unidad || ''
+            });
+          }
+        });
+      } catch (_) {}
     }
     const items = filas.slice(0, MAX_ROWS).map(s => ({
       producto: s.descripcion || _descDe(s.codigoProducto),

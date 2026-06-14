@@ -1,1 +1,1 @@
-{ "version": "2.13.205", "build": "20260614-CUTOVER-escritura-directa-server-wide(escrituraNavegador=true+27-flags-ON)-impresion-OFF" }
+{ "version": "2.13.206", "build": "20260614-chat-fix(consultar_stock-incluye-productos-sin-stock-del-catalogo)+cutover-escritura-validado" }
