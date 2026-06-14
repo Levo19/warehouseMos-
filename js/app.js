@@ -3741,8 +3741,12 @@ const Dashboard = (() => {
     } catch(e) { toast('Sin conexión', 'warn'); }
   }
 
+  // [stock teórico · discrepancia] Lectura de las alertas de cuadre activas para que otras vistas (Productos)
+  // detecten descuadre por producto y enlacen al flujo de aceptar-teórico/auditoría existente (NO se duplica nada).
+  function getAlertasActivas() { return _alertasCache.slice(); }
+
   return { toggle, cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada,
-           setAlertaFiltro, buscarAlerta, auditarDesdeAlerta, aceptarTeorico };
+           setAlertaFiltro, buscarAlerta, auditarDesdeAlerta, aceptarTeorico, getAlertasActivas };
 })();
 
 // ════════════════════════════════════════════════
@@ -17405,6 +17409,83 @@ const ProductosView = (() => {
   function _s(id)          { return _stockMap[id] || { cantidadDisponible: 0, stockMinimo: 0, stockMaximo: 0 }; }
   function _buildMap(list) { (list || []).forEach(s => { _stockMap[s.codigoProducto || s.idProducto] = s; }); }
 
+  // ── Stock TEÓRICO / proyectado (etiquetado) ────────────────────────────
+  // El stock REAL se aplica al CERRAR la guía (no se toca). Esto es un overlay DERIVADO al vuelo
+  // (no persiste) que muestra lo que va a entrar/salir sin descuadrar el real:
+  //   proyectado = real + Σ(cant líneas de guías ABIERTAS de INGRESO) − Σ(cant de SALIDA)
+  // Se calcula del MISMO cache (guías + detalles) que ya usa _agrupar → offline-first, sin red extra,
+  // consistente con la RPC wh.stock_proyectado_rls (misma fórmula; el SQL es la versión autoritativa).
+  // Excluye ENVASADO (lo aplica Envasados aparte, igual que cerrar_guia). Cantidad de línea = cantRecibida (cae a esperada si 0).
+  let _proyMap = {};  // codigoBarra → { porRecibir, porSalir }
+  function _buildProyeccion() {
+    const detalles = OfflineManager.getGuiaDetalleCache();
+    const guias    = OfflineManager.getGuiasCache();
+    const gMap = {};
+    guias.forEach(g => { gMap[g.idGuia] = g; });
+    const EXC = { INGRESO_ENVASADO: 1, SALIDA_ENVASADO: 1 };
+    const map = {};
+    detalles.forEach(d => {
+      const cod = d.codigoProducto != null ? String(d.codigoProducto).trim() : '';
+      if (!cod) return;
+      const g = gMap[d.idGuia];
+      if (!g) return;
+      if (String(g.estado || '').toUpperCase() !== 'ABIERTA') return;
+      const tipo = String(g.tipo || '').toUpperCase();
+      if (EXC[tipo]) return;
+      const rec = parseFloat(d.cantidadRecibida);
+      const cant = (!isNaN(rec) && rec !== 0) ? rec : (parseFloat(d.cantidadEsperada) || 0);
+      if (!cant) return;
+      if (!map[cod]) map[cod] = { porRecibir: 0, porSalir: 0 };
+      if (tipo.indexOf('INGRESO') === 0) map[cod].porRecibir += cant;
+      else map[cod].porSalir += cant;
+    });
+    _proyMap = map;
+  }
+  // Proyección agregada de un conjunto de códigos (grupo) sobre el stock real dado
+  function _proyGrupo(codigos, stockReal) {
+    let porRecibir = 0, porSalir = 0;
+    (codigos || []).forEach(c => {
+      const p = _proyMap[c];
+      if (!p) return;
+      porRecibir += p.porRecibir || 0;
+      porSalir   += p.porSalir   || 0;
+    });
+    const tiene = porRecibir > 0 || porSalir > 0;
+    return { porRecibir, porSalir, tiene, proyectado: (stockReal || 0) + porRecibir - porSalir };
+  }
+  // [discrepancia] Chip de descuadre: si hay una alerta de cuadre ACTIVA (wh.alertas_stock, vía Dashboard)
+  // para algún código del grupo, muestra un chip que abre el modal de alertas (aceptar-teórico / auditoría
+  // existentes). NO duplica lógica: solo enlaza al flujo de corrección ya implementado.
+  function _alertaDe(codigos) {
+    let alertas = [];
+    try { alertas = (window.Dashboard && Dashboard.getAlertasActivas) ? Dashboard.getAlertasActivas() : []; } catch(_) { return null; }
+    if (!alertas.length) return null;
+    const set = new Set((codigos || []).map(String));
+    return alertas.find(a => set.has(String(a.codigoProducto))) || null;
+  }
+  function _chipDiscrepancia(codigos) {
+    const a = _alertaDe(codigos);
+    if (!a) return '';
+    const dif = parseFloat(a.diferencia) || 0;
+    return `<span class="tag-warn-cuadre text-xs flex-shrink-0"
+              onclick="event.stopPropagation();(window.Dashboard&&Dashboard.verTodasAlertas)&&Dashboard.verTodasAlertas()"
+              title="Descuadre de cuadre detectado (dif ${dif > 0 ? '+' : ''}${fmt(dif, 1)}). Toca para revisar / aceptar teórico.">
+              ⚖ DESCUADRE</span>`;
+  }
+
+  // HTML etiquetado del proyectado (real neutro · +verde por recibir · −ámbar por salir · proyectado)
+  function _proyEtiqueta(proy) {
+    if (!proy || !proy.tiene) return '';
+    const parts = [];
+    if (proy.porRecibir > 0) parts.push(`<span class="proy-in">+${fmt(proy.porRecibir)} por recibir</span>`);
+    if (proy.porSalir   > 0) parts.push(`<span class="proy-out">−${fmt(proy.porSalir)} por salir</span>`);
+    return `<div class="proy-etq">
+        <span class="proy-real">Real: ${fmt(proy._real != null ? proy._real : (proy.proyectado - proy.porRecibir + proy.porSalir))}</span>
+        ${parts.join('<span class="proy-dot">·</span>')}
+        <span class="proy-proj" title="Estimado al cerrar las guías abiertas">≈ ${fmt(proy.proyectado)}</span>
+      </div>`;
+  }
+
   // [Fix cutover Supabase] El stock que muestra esta vista DEBE venir del stock
   // EN VIVO (API.getStock → wh.stock_enriquecido vía lectura directa Supabase, o
   // getStockFlip por GAS), NO del cache wh_stock que puebla descargarOperacional
@@ -17483,6 +17564,7 @@ const ProductosView = (() => {
     const lotes    = (OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || []);
     const gMap = {};
     guias.forEach(gg => { gMap[gg.idGuia] = gg; });
+    _buildProyeccion();  // [stock teórico] overlay proyectado por código (mismo cache, sin red)
     const hace30   = Date.now() - 30 * 86400000;
     const en7dias  = Date.now() + 7 * 86400000;
     // codigoBarra → fecha último mov (epoch ms)
@@ -17543,7 +17625,11 @@ const ProductosView = (() => {
       const _dormido   = ultimoMov === 0 || ultimoMov < hace30;
       const _porVencer = porVencer;
 
-      return { skuBase: g.skuBase, base, children, stockTotal, bajoMin, _dormido, _porVencer };
+      // [stock teórico] proyección agregada del grupo (real intacto; esto es overlay)
+      const _proy = _proyGrupo(children.map(c => c.codigoBarra).filter(Boolean), stockTotal);
+      _proy._real = stockTotal;
+
+      return { skuBase: g.skuBase, base, children, stockTotal, bajoMin, _dormido, _porVencer, _proy };
     }).sort((a, b) => String(a.base.descripcion || '').localeCompare(String(b.base.descripcion || ''), 'es'));
   }
 
@@ -17649,6 +17735,7 @@ const ProductosView = (() => {
             <p class="font-bold text-sm leading-snug">${descRender}</p>
             ${g.bajoMin ? '<span class="tag-danger text-xs flex-shrink-0">⚠️ MÍN</span>' : ''}
             ${g.stockTotal === 0 ? '<span class="tag-danger text-xs flex-shrink-0">SIN STOCK</span>' : ''}
+            ${_chipDiscrepancia(codigos)}
           </div>
           ${hasChildren
             ? `<button onclick="event.stopPropagation();ProductosView.toggleGrupo('${sid}')"
@@ -17670,6 +17757,9 @@ const ProductosView = (() => {
         <div class="flex justify-between text-xs text-slate-600 mb-1">
           <span>Mín: ${fmt(mn)}</span><span>Máx: ${fmt(mx)}</span>
         </div>` : '<div class="mt-1.5"></div>'}
+
+      <!-- [stock teórico] Proyectado etiquetado: solo si hay guías abiertas con este producto. El número grande (arriba) sigue siendo el REAL. -->
+      ${_proyEtiqueta(g._proy)}
 
       <!-- Métricas almacenero -->
       <div class="flex items-center gap-3 text-xs mt-0.5">
@@ -17770,6 +17860,7 @@ const ProductosView = (() => {
       ${mx > 0 ? `
         <div class="bar-bg mt-1.5 mb-1"><div class="bar-fill ${baj ? 'bg-red-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'}" style="width:${pct.toFixed(0)}%"></div></div>
         <p class="text-xs text-slate-600">Mín: ${fmt(mn)} · Máx: ${fmt(mx)}</p>` : ''}
+      ${(() => { const py = _proyGrupo([c.codigoBarra], st); py._real = st; return _proyEtiqueta(py); })()}
       <div class="flex gap-2 mt-2 flex-wrap">
         <button onclick="ProductosView.verHistorial('${escAttr(c.codigoBarra)}','${escAttr(c.descripcion)}')"
                 class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1">
@@ -17995,6 +18086,27 @@ const ProductosView = (() => {
     setKpi('histStockActual', fmt(stockTotal));
     setKpi('histStockMin',    fmt(stockMin));
     setKpi('histKpiMovs',     movs30);
+
+    // [stock teórico] Resumen proyectado en el hero. Overlay del cache (mismas guías ABIERTAS), real intacto.
+    _buildProyeccion();
+    const _proyH = _proyGrupo(codigos, stockTotal); _proyH._real = stockTotal;
+    const _proyEl = document.getElementById('histProyeccion');
+    if (_proyEl) {
+      if (_proyH.tiene) {
+        const inH  = _proyH.porRecibir > 0 ? `<span class="proy-in">+${fmt(_proyH.porRecibir)} por recibir</span>` : '';
+        const outH = _proyH.porSalir   > 0 ? `<span class="proy-out">−${fmt(_proyH.porSalir)} por salir</span>` : '';
+        _proyEl.innerHTML = `
+          <span class="hist-proy-lbl">Proyectado (guías abiertas)</span>
+          <span class="hist-proy-row">
+            <span class="proy-real">Real ${fmt(stockTotal)}</span>${inH}${outH}
+            <span class="proy-proj">≈ ${fmt(_proyH.proyectado)}</span>
+          </span>`;
+        _proyEl.style.display = '';
+      } else {
+        _proyEl.innerHTML = '';
+        _proyEl.style.display = 'none';
+      }
+    }
 
     const local = _movimientosLocal(codigos);
     if (local.length) {

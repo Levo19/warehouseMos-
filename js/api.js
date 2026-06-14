@@ -504,6 +504,14 @@ const API = (() => {
         stockMinimo: prod.stockMinimo || 0, alerta: cantidad < (parseFloat(prod.stockMinimo) || 0)
       } };
     }
+    if (action === 'getStockProyectado') {
+      // [Stock teórico/proyectado] Overlay DERIVADO al vuelo (NO persistido): por producto con guías ABIERTAS,
+      // proyectado = real + Σ(ingresos abiertos) − Σ(salidas abiertas). El real NO se toca (se aplica al cerrar).
+      // La RPC ya enriquece (descripcion/min/max/unidad). Solo devuelve productos CON movimiento pendiente.
+      const out = await _sbRpcWH('stock_proyectado_rls', {});
+      if (!out || out.ok === false) throw new Error((out && out.error) || 'rpc proyectado error');
+      return out;  // {ok:true, data:[{codigoProducto,cantidadDisponible,porRecibir,porSalir,proyectado,...}]}
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
@@ -1564,6 +1572,8 @@ const API = (() => {
     getProducto:        (cod)    => call({ action: 'getProducto', codigo: cod }),
     getStock:           (p={})   => call({ action: 'getStock', ...p }),
     getStockProducto:   (cod)    => call({ action: 'getStockProducto', codigo: cod }),
+    // [Stock teórico/proyectado] real + Σ(ingresos abiertos) − Σ(salidas abiertos), DERIVADO al vuelo (no persiste).
+    getStockProyectado: (p={})   => call({ action: 'getStockProyectado', ...p }),
     getLotes:           (p={})   => call({ action: 'getLotesVencimiento', ...p }),
     crearProducto:      (p)      => post({ action: 'crearProducto', ...p }),
     actualizarProducto: (p)      => post({ action: 'actualizarProducto', ...p }),

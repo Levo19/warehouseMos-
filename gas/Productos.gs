@@ -87,6 +87,66 @@ function getStockProducto(codigo) {
   };
 }
 
+// [Stock teórico/proyectado] Fallback GAS de la RPC wh.stock_proyectado_rls.
+// El stock REAL se aplica al CERRAR guía (NO se toca acá). Esto SOLO calcula, al vuelo y sin persistir, el
+// overlay proyectado por producto que tenga líneas en guías ABIERTAS:
+//   proyectado = real + Σ(cant líneas ingreso abiertas) − Σ(cant líneas salida abiertas)
+// Excluye ENVASADO (lo aplica Envasados aparte). Cantidad de línea = cantRecibida (cae a cantEsperada si 0).
+// Devuelve solo productos CON movimiento pendiente (el front ya tiene el real de getStock).
+function getStockProyectado(params) {
+  var guias    = _sheetToObjects(getSheet('GUIAS'));
+  var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
+  var stock    = _sheetToObjects(getSheet('STOCK'));
+  var productos = _sheetToObjects(getProductosSheet());
+
+  var gMap = {};
+  guias.forEach(function(g){ gMap[g.idGuia] = g; });
+  var stockMap = {};
+  stock.forEach(function(s){ if (s.codigoProducto != null && stockMap[String(s.codigoProducto)] == null) stockMap[String(s.codigoProducto)] = parseFloat(s.cantidadDisponible) || 0; });
+  var prodMap = {};
+  productos.forEach(function(p){ if (p.codigoBarra) prodMap[String(p.codigoBarra)] = p; });
+
+  var EXC = { 'INGRESO_ENVASADO': true, 'SALIDA_ENVASADO': true };
+  var agg = {}; // cod → {porRecibir, porSalir}
+  detalles.forEach(function(d){
+    var cod = d.codigoProducto != null ? String(d.codigoProducto).trim() : '';
+    if (!cod) return;
+    var g = gMap[d.idGuia];
+    if (!g) return;
+    if (String(g.estado || '').toUpperCase() !== 'ABIERTA') return;
+    var tipo = String(g.tipo || '').toUpperCase();
+    if (EXC[tipo]) return;
+    var rec = parseFloat(d.cantidadRecibida);
+    var cant = (!isNaN(rec) && rec !== 0) ? rec : (parseFloat(d.cantidadEsperada) || 0);
+    if (!cant) return;
+    if (!agg[cod]) agg[cod] = { porRecibir: 0, porSalir: 0 };
+    if (tipo.indexOf('INGRESO') === 0) agg[cod].porRecibir += cant;
+    else agg[cod].porSalir += cant;
+  });
+
+  var out = [];
+  Object.keys(agg).forEach(function(cod){
+    var a = agg[cod];
+    if (!a.porRecibir && !a.porSalir) return;
+    var real = stockMap[cod] || 0;
+    var p = prodMap[cod] || {};
+    out.push({
+      codigoProducto:     cod,
+      cantidadDisponible: real,
+      porRecibir:         a.porRecibir,
+      porSalir:           a.porSalir,
+      proyectado:         real + a.porRecibir - a.porSalir,
+      descripcion:        p.descripcion || cod,
+      stockMinimo:        p.stockMinimo || 0,
+      stockMaximo:        p.stockMaximo || 0,
+      unidad:             p.unidad || '',
+      alertaMinimo:       real < (parseFloat(p.stockMinimo || 0) || 0)
+    });
+  });
+  out.sort(function(x, y){ return String(x.codigoProducto).localeCompare(String(y.codigoProducto)); });
+  return { ok: true, data: out };
+}
+
 function crearProducto(params) {
   return _conLock('crearProducto', function() { return _crearProductoImpl(params); });
 }

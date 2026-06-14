@@ -135,6 +135,7 @@ function _route(method, e) {
       // ── Stock ──────────────────────────────────────────────
       case 'getStock':              return getStockFlip(params);  // [Fase 1.D] flag FUENTE_DATOS (default sheets)
       case 'getStockProducto':      return getStockProducto(params.codigo);
+      case 'getStockProyectado':    return getStockProyectado(params);  // [Stock teórico] overlay proyectado (real intacto)
       case 'getHistorialStock':     return getHistorialStock(params);
       case 'imprimirHistorialStock':return imprimirHistorialStock(params);
 
