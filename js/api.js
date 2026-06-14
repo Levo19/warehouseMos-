@@ -1018,6 +1018,46 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;
     }
+    if (params.action === 'marcarAlertaRevisada') {
+      // [Tanda 3] Marca una alerta de stock como revisada. NO toca stock. Idempotente natural (UPDATE a valor fijo).
+      const out = await _sbRpcWH('marcar_alerta_revisada', { p: { id_alerta: String(params.idAlerta || '') } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
+      return out;
+    }
+    if (params.action === 'aceptarTeoricoAlerta') {
+      // [Tanda 3] Corrección one-click: crea AJUSTE (stock real → teórico) + marca revisada. SÍ TOCA STOCK por DELTA →
+      // NO idempotente natural → dedup por local_id + id_ajuste determinista. La RPC lee real/teórico de la propia alerta.
+      const out = await _sbRpcWH('aceptar_teorico_alerta', { p: {
+        id_alerta: String(params.idAlerta || ''), usuario: params.usuario || '',
+        id_ajuste: 'AJ_' + lid, id_stock_nuevo: 'STK_' + lid, id_mov: 'MOV_' + lid, local_id: lid
+      } });
+      if (!out || out.ok === false) return null;
+      // [paridad GAS] el GAS devuelve data:{idAlerta, ajusteAplicado, idAjuste?}; la RPC los pone en el nivel raíz →
+      // normalizar a la forma que espera app.js (res.data.ajusteAplicado).
+      if (out.ok && !out.data) {
+        out.data = { idAlerta: out.id_alerta, ajusteAplicado: out.ajusteAplicado || 0 };
+        if (out.idAjuste) out.data.idAjuste = out.idAjuste;
+      }
+      return out;
+    }
+    if (params.action === 'addCargadorDia') {
+      // [Tanda 3] +1 cargador del día. NO toca stock. Append no idempotente natural → dedup por id_log determinista.
+      const out = await _sbRpcWH('add_cargador_dia', { p: {
+        id_cargador: String(params.idCargador || ''), fecha: params.fecha || '', nombre: params.nombre || '',
+        usuario: params.usuario || '', device_id: params.deviceId || '', id_log: 'CLG_' + lid
+      } });
+      if (!out || out.ok === false) return null;
+      return out;   // ya viene { ok, data:{ idLog, conteo, fecha } } como el GAS
+    }
+    if (params.action === 'removeCargadorDia') {
+      // [Tanda 3] -1 cargador del día (marca el ACTIVO más reciente como ELIMINADO). NO toca stock. Es un -1 real →
+      // dedup por local_id (un reintento del mismo POST no debe quitar dos).
+      const out = await _sbRpcWH('remove_cargador_dia', { p: {
+        id_cargador: String(params.idCargador || ''), fecha: params.fecha || '', local_id: lid
+      } });
+      if (!out || out.ok === false) return null;
+      return out;   // { ok, data:{ conteo, fecha } } como el GAS
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 
@@ -1097,6 +1137,7 @@ const API = (() => {
     'crearAjuste', 'auditarProducto',
     'asignarAuditoria', 'ejecutarAuditoria',
     'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
+    'addCargadorDia', 'removeCargadorDia',   // [Tanda 3] dedup directo: id_log determinista (add) / -1 real (remove)
     'actualizarGuia', 'actualizarPickup', 'guardarProgresoPickup',
     'cerrarPickupConDespacho', 'liberarPickup', 'cerrarTurno'
   ]);

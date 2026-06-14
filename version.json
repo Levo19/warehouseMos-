@@ -1,1 +1,1 @@
-{ "version": "2.13.199", "build": "20260614-tanda2-mermas-envasado-directo(resolverMerma/corregirUnidadesEnvasado/anularEnvasadoConClave)+auditoria-40x+fixes(lock-guia-semanal,fila>cliente)" }
+{ "version": "2.13.200", "build": "20260614-tanda3-alertas-cargadores-directo(marcarAlertaRevisada/aceptarTeoricoAlerta/addCargadorDia/removeCargadorDia)+auditoria-40x+fix(guard-revisado-por-alerta)" }
