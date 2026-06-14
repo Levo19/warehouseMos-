@@ -16811,7 +16811,24 @@ const ProductosView = (() => {
 
   // ── helpers ────────────────────────────────────
   function _s(id)          { return _stockMap[id] || { cantidadDisponible: 0, stockMinimo: 0, stockMaximo: 0 }; }
-  function _buildMap(list) { list.forEach(s => { _stockMap[s.codigoProducto || s.idProducto] = s; }); }
+  function _buildMap(list) { (list || []).forEach(s => { _stockMap[s.codigoProducto || s.idProducto] = s; }); }
+
+  // [Fix cutover Supabase] El stock que muestra esta vista DEBE venir del stock
+  // EN VIVO (API.getStock → wh.stock_enriquecido vía lectura directa Supabase, o
+  // getStockFlip por GAS), NO del cache wh_stock que puebla descargarOperacional
+  // (que históricamente leía el Sheet congelado → ajustes directos no se veían y
+  // ALSOL salía 0 / SIN STOCK). Trae stock fresco, reconstruye _stockMap y
+  // re-renderiza. Si falla (offline/error), conserva lo que ya hay en el map
+  // (cache) — nunca deja la vista peor que antes.
+  async function _refrescarStockVivo() {
+    try {
+      const res = await API.getStock({ soloAlertas: false });
+      const data = res && res.ok && Array.isArray(res.data) ? res.data : null;
+      if (!data || !data.length) return false;
+      _buildMap(data);  // overwrite por codigoProducto con valores vivos
+      return true;
+    } catch (_) { return false; }
+  }
 
   // Rotación y último mov sobre un array de códigos (equivalencias del grupo)
   function _rotacionMulti(codigos) {
@@ -18127,9 +18144,20 @@ const ProductosView = (() => {
     _initAuditDia();
     _aplicarQuery();
 
+    // [Fix cutover Supabase] Stock EN VIVO inmediato: pisa el cache (que puede
+    // traer 0 del Sheet congelado) con el stock real de Supabase y re-renderiza.
+    _refrescarStockVivo().then(ok => {
+      if (!ok) return;
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      _actualizarBadge();
+      _aplicarQuery();
+    }).catch(() => {});
+
     // Refrescar datos en background — actualiza _grupos y re-renderiza si hubo cambios
-    OfflineManager.precargarOperacional().then(() => {
+    OfflineManager.precargarOperacional().then(async () => {
       _buildMap(OfflineManager.getStockCache());
+      // Stock vivo gana sobre el cache operacional (que puede estar congelado).
+      await _refrescarStockVivo();
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _actualizarBadge();
       _aplicarQuery();
@@ -18150,21 +18178,33 @@ const ProductosView = (() => {
       chipAll.classList.add('is-refreshing');
       setTimeout(() => chipAll.classList.remove('is-refreshing'), 800);
     }
-    // Solo usar diff si la vista de productos está visible y ya hubo render previo
-    const list = document.getElementById('listProductos');
-    const yaRenderizado = list && list.querySelector('.prod-card');
-    // [v2.13.68] Guard contra currentView undefined (cuando se llama desde
-    // offline/precarga antes que la app inicialice la variable global).
-    const _vistaProd = (typeof currentView !== 'undefined' && currentView === 'productos');
-    if (yaRenderizado && _vistaProd) {
-      const visibles = _aplicarFiltroChip(
-        _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
-      );
-      _renderDiff(visibles);
-      _renderMetrics();
-    } else {
-      _aplicarQuery();
-    }
+    // Render desde el estado actual (diff si la vista está visible).
+    const _repintar = () => {
+      const list = document.getElementById('listProductos');
+      const yaRenderizado = list && list.querySelector('.prod-card');
+      // [v2.13.68] Guard contra currentView undefined (cuando se llama desde
+      // offline/precarga antes que la app inicialice la variable global).
+      const _vistaProd = (typeof currentView !== 'undefined' && currentView === 'productos');
+      if (yaRenderizado && _vistaProd) {
+        const visibles = _aplicarFiltroChip(
+          _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
+        );
+        _renderDiff(visibles);
+        _renderMetrics();
+      } else {
+        _aplicarQuery();
+      }
+    };
+    _repintar();
+    // [Fix cutover Supabase] El cache wh_stock (descargarOperacional) puede estar
+    // congelado (Sheet). El stock vivo de Supabase debe GANAR: tras pintar desde
+    // cache, traemos el stock en vivo y, si difiere, reagrupamos y repintamos.
+    // Esto es lo que evita el "F5 vuelve a 0": el live pisa el 0 del cache.
+    _refrescarStockVivo().then(ok => {
+      if (!ok) return;
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      _repintar();
+    }).catch(() => {});
   }
 
   // ── Cámara inline de búsqueda ────────────────────────────────

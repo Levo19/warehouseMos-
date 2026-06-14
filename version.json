@@ -1,1 +1,1 @@
-{ "version": "2.13.209", "build": "20260614-fix-fecha-guias-cutover-supabase(parseLocalDate-safari-safe+offset-normalize+horaDesdeGuia-TZ-Lima+horaDesdeId-13digitos)" }
+{ "version": "2.13.210", "build": "20260614-fix-stock-cutover-supabase(productos-view-stock-vivo+descargarOperacional-getStockFlip+silentRefresh-live-gana-cache)" }

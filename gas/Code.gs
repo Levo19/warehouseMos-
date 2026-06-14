@@ -755,8 +755,20 @@ function descargarOperacional() {
   } catch(e) { errores.push('preingresos: ' + e.message); }
 
   try {
-    result.stock = _sheetToObjects(getSheet('STOCK'));
-  } catch(e) { errores.push('stock: ' + e.message); }
+    // [Fix cutover Supabase] El stock operacional DEBE respetar el flip
+    // FUENTE_DATOS (getStockFlip lee wh.stock_enriquecido si =supabase, con
+    // fallback a Sheets). Antes leía el Sheet directo (congelado tras el
+    // cutover) → los ajustes directos a wh.stock no se reflejaban y la vista
+    // de productos mostraba 0 / SIN STOCK. getStockFlip devuelve {ok,data:[...]}
+    // con el MISMO shape (codigoProducto + cantidadDisponible) que el Sheet.
+    var stockFlip = getStockFlip({ soloAlertas: 'false' });
+    result.stock = (stockFlip && stockFlip.ok && Array.isArray(stockFlip.data))
+      ? stockFlip.data
+      : _sheetToObjects(getSheet('STOCK'));
+  } catch(e) {
+    errores.push('stock: ' + e.message);
+    try { result.stock = _sheetToObjects(getSheet('STOCK')); } catch(e2) {}
+  }
 
   try {
     var ajustes = _sheetToObjects(getSheet('AJUSTES'));
