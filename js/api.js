@@ -1377,6 +1377,9 @@ const API = (() => {
     escposB64:          (str) => _escposB64(str),   // string ESC/POS/ZPL → base64 (= Utilities.base64Encode de GAS)
     // [PASO 5 · B5] Subir foto a Storage (máxima calidad). Devuelve {url, preview, path}. Para subirFotoGuia/Preingreso/etc.
     subirFotoStorage:   (tipo, id, base64, mime) => _subirFotoStorage(tipo, id, base64, mime),
+    // [Pregúntale a tu almacén] Acceso directo a la Edge `ia` (proxy a Claude). body={messages, system?, model?, max_tokens?, tools?}.
+    // READ-ONLY: el chat de almacén lo usa para el loop tool-use. Devuelve el JSON de Claude tal cual.
+    llamarEdgeIA:       (body) => _llamarEdgeIA(body),
 
     // Productos
     getProductos:       (p={})   => call({ action: 'getProductos', ...p }),

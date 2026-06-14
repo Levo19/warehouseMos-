@@ -1321,6 +1321,10 @@ const Session = (() => {
     const sideTools = document.getElementById('sideRowTools');
     if (sideTools) sideTools.style.display = esAdmin ? '' : 'none';
 
+    // [Pregúntale a tu almacén] FAB del chat IA — solo admin/master (es el dueño/gestor).
+    // ADITIVO: si el módulo falla, no afecta el resto del login.
+    try { if (typeof ChatAlmacen !== 'undefined') ChatAlmacen.init({ fab: esAdmin }); } catch (_) {}
+
     _mostrarApp();
     _iniciarTimerBloqueo();
 
