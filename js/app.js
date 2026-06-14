@@ -7476,6 +7476,12 @@ const GuiasView = (() => {
       }
       try { toast('⚠ Falta la descripción del producto', 'warn', 3000); } catch(_) {}
       try { vibrate?.([60, 80, 60]); } catch(_) {}
+      // [BUG B] CRÍTICO: liberar el guard antes de salir. Sin esto, _pnSubmitting
+      // quedaba en true tras una validación fallida y TODO click posterior a
+      // "Registrar" era mudo (entraba al guard de arriba y retornaba en silencio),
+      // aunque el operador ya hubiera completado la descripción. Síntoma exacto:
+      // "doy click en Registrar y no pasa nada".
+      _pnSubmitting = false;
       return;  // NO enviar al backend
     }
 

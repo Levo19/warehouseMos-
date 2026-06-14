@@ -537,7 +537,14 @@ const OfflineManager = (() => {
     _opLoading = true;
     _lastOpTs  = Date.now();
     try {
-      const r = await fetch(_gasUrl('descargarOperacional')).then(r => r.json()).catch(() => null);
+      // [BUG A · cutover] Pasar por API.descargarOperacional (no fetch crudo a GAS): así,
+      // si el dispositivo escribe/lee directo a Supabase, el operacional se trae DIRECTO y el
+      // listado de Guías ve sus propias guías directas 'G_L...' (antes el GAS stale nunca las
+      // mostraba). API.descargarOperacional cae a GAS solo ante fallo. Fallback al fetch crudo
+      // si API no está cargada (orden de scripts / arranque temprano).
+      const r = (typeof API !== 'undefined' && API.descargarOperacional)
+        ? await API.descargarOperacional().catch(() => null)
+        : await fetch(_gasUrl('descargarOperacional')).then(r => r.json()).catch(() => null);
       if (!r?.ok) return;
       const d = r.data;
       const changed = [];

@@ -408,6 +408,27 @@ const API = (() => {
     return _sbRowsToObjsFront(tabla, out.data);
   }
 
+  // [BUG A · cutover] descargarOperacional DIRECTO a Supabase. Cierra el agujero del cutover:
+  // un dispositivo con ESCRITURA directa crea guías 'G_L...' en Supabase, pero el cache operacional
+  // (que alimenta el listado de Guías) seguía leyéndose por GAS (descargarOperacional). Si el GAS no
+  // espejaba esas guías directas, NUNCA aparecían en el listado (ni tras F5). Acá traemos el operacional
+  // directo de Supabase reusando los MISMOS lectores ya probados (_sbLeerTablaWH + stock_enriquecido_rls),
+  // con el shape EXACTO que devuelve descargarOperacional de GAS: { ok, data:{ guias, detalles,
+  // preingresos, stock, ajustes, auditorias } }. Cualquier fallo LANZA → el llamador cae a GAS (seguro).
+  async function _descargarOperacionalDirecto() {
+    const [guias, detalles, preingresos, ajustes, auditorias, stockR] = await Promise.all([
+      _sbLeerTablaWH('guias'),
+      _sbLeerTablaWH('guia_detalle'),
+      _sbLeerTablaWH('preingresos'),
+      _sbLeerTablaWH('ajustes'),
+      _sbLeerTablaWH('auditorias'),
+      _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false })
+    ]);
+    // stock: mismo shape vivo que API.getStock (stock_enriquecido_rls) — gana al Sheet congelado.
+    const stock = (stockR && stockR.ok !== false && Array.isArray(stockR.data)) ? stockR.data : [];
+    return { ok: true, data: { guias, detalles, preingresos, stock, ajustes, auditorias } };
+  }
+
   // ── CATÁLOGO directo (mos.catalogo_wh_rls) — reemplaza descargarMaestros. Specs invertidos de _CAT_SPECS (MigracionCatalogo.gs).
   // bools de catálogo → 'bool10' (el front compara estado!=='0', esEnvasable==='1'). Sin pin/pin_hash/numero_cuenta/cci (la RPC ya los excluye).
   // adminPin NO viene acá (va por mos.verificar_clave_admin, F2). offline-first: el USO por-operación es contra el cache local.
@@ -1446,7 +1467,16 @@ const API = (() => {
   return {
     // Descarga maestros MOS → localStorage
     descargarMaestros:    ()     => call({ action: 'descargarMaestros' }),
-    descargarOperacional: ()     => call({ action: 'descargarOperacional' }),
+    // [BUG A · cutover] Si el dispositivo escribe Y/O lee directo a Supabase, el operacional
+    // (que alimenta el listado de Guías) DEBE leerse directo — si no, nunca vería sus propias
+    // guías directas 'G_L...' a través del GAS (cache stale). Ante cualquier fallo → GAS.
+    descargarOperacional: async () => {
+      if ((_whLecturaDirecta() || _whEscrituraDirecta()) && navigator.onLine) {
+        try { return await _descargarOperacionalDirecto(); }
+        catch (_) { /* cae a GAS abajo */ }
+      }
+      return call({ action: 'descargarOperacional' });
+    },
 
     // Dashboard
     getDashboard:       ()       => call({ action: 'getDashboard' }),
