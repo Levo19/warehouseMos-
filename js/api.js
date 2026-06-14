@@ -907,6 +907,21 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;
     }
+    if (params.action === 'crearPreingreso') {
+      // El frontend genera idPreingreso estable ('PI'+ts) y lo pasa a ambos backends → idempotente en el cruce.
+      // Fotos NO van acá (se suben aparte: subirFotoPreingreso → Storage → actualizarFotosPreingreso). RPC dedup por id_preingreso.
+      const out = await _sbRpcWH('crear_preingreso', { p: {
+        id_preingreso: String(params.idPreingreso || ''),
+        id_proveedor:  params.idProveedor || '',
+        cargadores:    typeof params.cargadores === 'string' ? params.cargadores : JSON.stringify(params.cargadores || []),
+        usuario:       params.usuario || '',
+        monto:         params.monto,
+        comentario:    params.comentario || '',
+        fecha:         params.fecha || ''
+      } });
+      if (!out || out.ok === false) return null;
+      return out;
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 

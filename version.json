@@ -1,1 +1,1 @@
-{ "version": "2.13.196", "build": "20260613-OCR-comprobante-directo(Edge-ia-vision+guardar_ocr_guia-RPC)+fix-cruce-fallback+auditoria-40x+Storage+catalogo+autorizacion" }
+{ "version": "2.13.197", "build": "20260614-crearPreingreso-directo(cablea-RPC-existente)+OCR-RPC-aplicada+impresion-bienvenida+fix-cruce+auditoria-40x" }
