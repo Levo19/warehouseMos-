@@ -4931,6 +4931,9 @@ const GuiasView = (() => {
   let _itemProd    = null;   // product object seleccionado
   let _itemQty     = 1;
   let _itemVenc    = '';
+  // [v2.13.223] Efectos de capa visual (no afectan datos/lógica)
+  let _animarEntrada = false; // stagger de entrada solo en 1er render tras entrar a la vista
+  let _glowTarget    = null;  // idGuia a resaltar con glow breve (recién creada/abierta)
 
   const TIPO_LABELS = {
     INGRESO_PROVEEDOR: 'Proveedor', INGRESO_JEFATURA: 'Jefatura',
@@ -4940,6 +4943,7 @@ const GuiasView = (() => {
 
   // Carga inicial: primero desde caché (instantáneo), luego refresca en bg
   async function cargar() {
+    _animarEntrada = true;   // [v2.13.223] entrada con stagger al entrar a la vista
     const cached = OfflineManager.getGuiasCache();
     if (cached.length) {
       todas = cached;
@@ -4960,6 +4964,7 @@ const GuiasView = (() => {
   // módulo (todas + _guiaActual) y re-renderiza. Lo llama _ejecutarReabrir (App),
   // que vive fuera de este módulo y no puede tocar _guiaActual directo.
   function marcarGuiaAbierta(idGuia) {
+    _glowTarget = idGuia;   // [v2.13.223] resaltar la guía recién reabierta
     const idx = todas.findIndex(g => g.idGuia === idGuia);
     if (idx >= 0) { todas[idx].estado = 'ABIERTA'; render(_filtrarYBuscar()); }
     if (_guiaActual?.idGuia === idGuia) {
@@ -5114,12 +5119,23 @@ const GuiasView = (() => {
     return p ? (p.nombre || idProveedor) : idProveedor;
   }
 
+  // [v2.13.223] Icono por tipo de guía (solo presentación, no afecta datos)
+  function _tipoIcono(tipo) {
+    if (tipo === 'SALIDA_MERMA') return '🗑';
+    if (tipo === 'SALIDA_ENVASADO' || tipo === 'INGRESO_ENVASADO') return '🔄';
+    if (tipo === 'INGRESO_JEFATURA' || tipo === 'SALIDA_JEFATURA') return '👤';
+    if (tipo && tipo.startsWith('INGRESO')) return '↓';
+    if (tipo && tipo.startsWith('SALIDA'))  return '↑';
+    return '•';
+  }
+
   function _renderGuiaCard(g) {
     const isEnvasado  = g.tipo === 'SALIDA_ENVASADO' || g.tipo === 'INGRESO_ENVASADO';
     const isMerma     = g.tipo === 'SALIDA_MERMA';
     const isIngreso   = g.tipo?.startsWith('INGRESO');
     const isAbierta   = g.estado === 'ABIERTA';
     const borderColor = isMerma ? '#dc2626' : isEnvasado ? '#475569' : isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
+    const tipoIco     = _tipoIcono(g.tipo);
     const tipoLabel   = (isMerma ? '🗑 ' : '') + (TIPO_LABELS[g.tipo] || g.tipo || '—');
     const provNombre  = _getProvNombre(g.idProveedor) || g.usuario || '—';
     const hora        = _horaDesdeGuia(g);
@@ -5144,11 +5160,17 @@ const GuiasView = (() => {
       </div>`;
     }
 
-    const chipBg  = isAbierta ? 'rgba(245,158,11,.15)' : isIngreso ? 'rgba(34,197,94,.15)' : 'rgba(59,130,246,.15)';
-    const chipCol = isAbierta ? '#fbbf24' : isIngreso ? '#4ade80' : '#60a5fa';
-    const estadoDot = isAbierta
-      ? `<span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0" title="Abierta"></span>`
-      : `<span style="width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;flex-shrink:0" title="Cerrada"></span>`;
+    // [v2.13.223] Badge de tipo con color/borde según naturaleza (ingreso/salida/merma)
+    const tipoCol = isMerma ? '#fca5a5' : isIngreso ? '#4ade80' : '#93c5fd';
+    const tipoBg  = isMerma ? 'rgba(220,38,38,.14)' : isIngreso ? 'rgba(34,197,94,.13)' : 'rgba(59,130,246,.13)';
+    const tipoBd  = isMerma ? 'rgba(220,38,38,.35)' : isIngreso ? 'rgba(34,197,94,.32)' : 'rgba(59,130,246,.32)';
+    // Badge de estado vivo (ABIERTA pulsa) / sólido neutro (CERRADA)
+    const estadoBadge = isAbierta
+      ? `<span class="gestado-badge gestado-abierta" title="Guía abierta"><span class="gestado-dot"></span>Abierta</span>`
+      : `<span class="gestado-badge gestado-cerrada" title="Guía cerrada"><span class="gestado-dot"></span>Cerrada</span>`;
+    // Indicador sutil: abierta de un día anterior
+    const staleChip = (isAbierta && g.fecha && _diaPeru(g.fecha) < _hoyPeru())
+      ? `<span class="gstale-chip" title="Abierta desde un día anterior">⏳ pendiente</span>` : '';
 
     const fotoTag = g.foto ? `<span class="pre-qtag pre-qtag-slate">📷</span>` : '';
     const preTag  = g.idPreingreso
@@ -5161,7 +5183,9 @@ const GuiasView = (() => {
     const numItems  = detItems.length;
     const totalUds  = detItems.reduce((s, d) => s + (parseFloat(d.cantidadRecibida) || 0), 0);
     const udsStr    = totalUds % 1 === 0 ? String(totalUds) : fmt(totalUds, 1);
-    const metaExtra = numItems > 0 ? ` · ${numItems} prod · ${udsStr} uds` : '';
+    const countPill = numItems > 0
+      ? `<span class="gcount-pill" title="${numItems} producto(s) · ${udsStr} unidad(es)">📦 <span class="gc-num">${numItems}</span> prod · <span class="gc-num">${udsStr}</span> uds</span>`
+      : '';
 
     const pnPend  = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
     const pnBadge = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
@@ -5192,12 +5216,13 @@ const GuiasView = (() => {
       ${fotoBlock}
       <div class="gcard-body">
         <div class="card-row-top">
-          <span class="card-tipo-chip" style="background:${chipBg};color:${chipCol}">${tipoLabel}</span>
-          <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${estadoDot}</div>
+          <span class="gtipo-badge" style="background:${tipoBg};color:${tipoCol};border-color:${tipoBd}"><span class="gt-ico">${tipoIco}</span>${escHtml(TIPO_LABELS[g.tipo] || g.tipo || '—')}</span>
+          <div class="flex items-center gap-2 flex-shrink-0">${pnBadge}${preTag}${estadoBadge}</div>
         </div>
         <p class="card-name" style="font-size:16px">${escHtml(provNombre)}</p>
+        <div class="flex items-center gap-1.5 flex-wrap" style="margin-top:1px">${countPill}${staleChip}</div>
         <div class="card-row-bottom">
-          <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}${metaExtra}</span>
+          <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}</span>
           <div class="card-actions">${waBtn}${printBtn}</div>
         </div>
       </div>
@@ -5280,6 +5305,31 @@ const GuiasView = (() => {
       }
     });
 
+    // [v2.13.223] Efectos de entrada (solo capa visual, no toca datos).
+    // Stagger sutil únicamente en el primer render tras entrar a la vista,
+    // para que el polling 60s no re-anime y distraiga.
+    if (_animarEntrada) {
+      _animarEntrada = false;
+      const cards = container.querySelectorAll('.guia-card:not(.card-optimistic)');
+      cards.forEach((c, i) => {
+        c.style.animationDelay = Math.min(i, 9) * 0.035 + 's';
+        c.classList.add('gc-enter');
+        c.addEventListener('animationend', () => {
+          c.classList.remove('gc-enter'); c.style.animationDelay = '';
+        }, { once:true });
+      });
+    }
+    // Glow breve para la guía recién creada/abierta
+    if (_glowTarget) {
+      const safe = String(_glowTarget).replace(/[^a-zA-Z0-9_-]/g, '_');
+      const el = document.getElementById('guia-' + safe);
+      _glowTarget = null;
+      if (el) {
+        el.classList.add('gc-glow');
+        el.addEventListener('animationend', () => el.classList.remove('gc-glow'), { once:true });
+      }
+    }
+
     _renderTabletPrePanel();
   }
 
@@ -5339,6 +5389,9 @@ const GuiasView = (() => {
 
   // Abre el detalle desde caché instantáneamente
   function verDetalle(idGuia) {
+    // [v2.13.223] Microfeedback sensorial al abrir una guía (no afecta datos)
+    try { window.SoundFX && SoundFX.click(); } catch(_) {}
+    try { vibrate(8); } catch(_) {}
     // 1. Buscar en caché local (instantáneo)
     const guias    = OfflineManager.getGuiasCache();
     const detalles = OfflineManager.getGuiaDetalleCache();
@@ -5470,23 +5523,28 @@ const GuiasView = (() => {
       // la vista de solo-lectura se arma por innerHTML arriba, no por classList.)
     } else {
 
-    // Lock button
-    const lockBtn = `
-      <button onclick="GuiasView.toggleEstadoGuia()"
-              style="display:flex;align-items:center;justify-content:center;
-                     width:36px;height:36px;border-radius:10px;border:1.5px solid
-                     ${abierta ? 'rgba(245,158,11,.6)' : 'rgba(100,116,139,.4)'};
-                     background:${abierta ? 'rgba(245,158,11,.12)' : 'rgba(30,41,59,.6)'};
-                     cursor:pointer;flex-shrink:0;transition:all .2s"
-              title="${abierta ? 'Cerrar guía' : 'Reabrir (admin)'}">
-        ${abierta
-          ? `<svg width="18" height="18" viewBox="0 0 16 16" fill="${'#fbbf24'}">
-               <path d="M8 1a2 2 0 0 1 2 2v2h.5A1.5 1.5 0 0 1 12 6.5V14a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 4 14V6.5A1.5 1.5 0 0 1 5.5 5H6V3a2 2 0 0 1 2-2zm0 1a1 1 0 0 0-1 1v2h2V3a1 1 0 0 0-1-1z"/>
-             </svg>`
-          : `<svg width="18" height="18" viewBox="0 0 16 16" fill="${'#64748b'}">
-               <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM5 8h6v5H5z"/>
-             </svg>`}
-      </button>`;
+    // [v2.13.223] Botón CERRAR GUÍA — hold-to-confirm (anillo de progreso) moderno
+    // + háptico; o REABRIR (admin) si está cerrada. La lógica (confirmarCerrarGuia /
+    // _pedirAdminPin) NO cambia: solo el control que la dispara.
+    const SVG_CHECK = `<svg class="cg-ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7"/></svg>`;
+    const SVG_REOPEN = `<svg class="cg-ico" viewBox="0 0 16 16" fill="currentColor"><path d="M11 1a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h5V3a3 3 0 0 1 6 0v3a.5.5 0 0 1-1 0V3a2 2 0 0 0-2-2z"/></svg>`;
+    const lockBtn = abierta
+      ? `<div class="closeg-wrap">
+           <div class="closeg-btn" id="btnCerrarGuia"
+                onpointerdown="GuiasView.cerrarHoldStart(event)"
+                onpointerup="GuiasView.cerrarHoldEnd(event)"
+                onpointerleave="GuiasView.cerrarHoldCancel()"
+                onpointercancel="GuiasView.cerrarHoldCancel()"
+                role="button" aria-label="Mantén presionado para cerrar la guía"
+                title="Mantén presionado para cerrar">
+             <span class="cg-fill" id="cgFill"></span>
+             ${SVG_CHECK}
+             <span class="cg-label" id="cgLabel">Cerrar guía</span>
+           </div>
+         </div>`
+      : `<div class="reopeng-btn" onclick="GuiasView.toggleEstadoGuia()" title="Reabrir (requiere admin)">
+           ${SVG_REOPEN}<span>Reabrir</span>
+         </div>`;
 
     const provNombreHdr = (() => {
       if (!g.idProveedor) return 'Sin proveedor';
@@ -6249,33 +6307,97 @@ const GuiasView = (() => {
   }
 
   // Toggle estado guía: abierta → cerrar; cerrada → pedir adminPin
+  // [v2.13.223] Para CERRAR usamos hold-to-confirm (ver cerrarHold*). Esta función
+  // queda como ruta de REABRIR (botón "Reabrir") y como fallback.
   function toggleEstadoGuia() {
     if (!_guiaActual) return;
     if (_guiaActual.estado === 'ABIERTA') {
-      // Double-tap confirm para cierre (acción irreversible sin admin)
-      const lockBtnEl = document.querySelector('[onclick="GuiasView.toggleEstadoGuia()"]');
-      if (lockBtnEl) {
-        if (!lockBtnEl._tapArmed) {
-          lockBtnEl._tapArmed = true;
-          lockBtnEl.style.background = 'rgba(245,158,11,.2)';
-          lockBtnEl.style.borderColor = '#f59e0b';
-          lockBtnEl.style.color = '#fde68a';
-          lockBtnEl.title = 'Toca de nuevo para confirmar cierre';
-          vibrate(15);
-          lockBtnEl._tapTimer = setTimeout(() => {
-            lockBtnEl._tapArmed = false;
-            lockBtnEl.style.cssText = '';
-            lockBtnEl.title = 'Cerrar guía';
-          }, 2500);
-          return;
-        }
-        clearTimeout(lockBtnEl._tapTimer);
-        lockBtnEl._tapArmed = false;
-        lockBtnEl.style.cssText = '';
-      }
-      confirmarCerrarGuia();
+      confirmarCerrarGuia();   // lógica/guard intactos
     } else {
       _pedirAdminPin(_guiaActual.idGuia);
+    }
+  }
+
+  // ── Hold-to-confirm del botón "Cerrar guía" (capa UX, no toca el guard) ──
+  const _CG_HOLD_MS = 850;
+  let _cgRAF = null, _cgStart = 0, _cgFired = false;
+
+  function _cgEl() { return document.getElementById('btnCerrarGuia'); }
+
+  function cerrarHoldStart(ev) {
+    try { ev && ev.preventDefault && ev.preventDefault(); } catch(_) {}
+    if (!_guiaActual || _guiaActual.estado !== 'ABIERTA') return;
+    const btn = _cgEl(); if (!btn) return;
+    cerrarHoldCancel();                 // reset por si quedó algo
+    _cgFired = false;
+    _cgStart = (window.performance && performance.now) ? performance.now() : Date.now();
+    btn.classList.add('holding');
+    const lbl = document.getElementById('cgLabel'); if (lbl) lbl.textContent = 'Mantén…';
+    try { window.SoundFX && SoundFX.click(); } catch(_) {}
+    try { vibrate(10); } catch(_) {}
+    // prefers-reduced-motion → confirmación inmediata al presionar (sin anillo largo)
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+    const fill = document.getElementById('cgFill');
+    const tick = () => {
+      const now = (window.performance && performance.now) ? performance.now() : Date.now();
+      const p = Math.min(1, (now - _cgStart) / _CG_HOLD_MS);
+      if (fill) fill.style.transform = 'scaleX(' + p + ')';
+      // pulsos hápticos crecientes mientras carga
+      if (p > 0.5 && !btn._hap50) { btn._hap50 = true; try { vibrate(12); } catch(_) {} }
+      if (p >= 1) { _cgComplete(); return; }
+      _cgRAF = requestAnimationFrame(tick);
+    };
+    if (reduce) { _cgComplete(); return; }
+    _cgRAF = requestAnimationFrame(tick);
+  }
+
+  function cerrarHoldEnd() {
+    // Soltó antes de completar → cancelar (a prueba de toques accidentales)
+    if (_cgFired) return;
+    cerrarHoldCancel();
+  }
+
+  function cerrarHoldCancel() {
+    if (_cgRAF) { cancelAnimationFrame(_cgRAF); _cgRAF = null; }
+    const btn = _cgEl();
+    if (btn) {
+      btn.classList.remove('holding');
+      btn._hap50 = false;
+      const fill = document.getElementById('cgFill'); if (fill) fill.style.transform = 'scaleX(0)';
+      const lbl = document.getElementById('cgLabel'); if (lbl && !_cgFired) lbl.textContent = 'Cerrar guía';
+    }
+  }
+
+  function _cgComplete() {
+    if (_cgFired) return;
+    _cgFired = true;
+    if (_cgRAF) { cancelAnimationFrame(_cgRAF); _cgRAF = null; }
+    const btn = _cgEl();
+    if (btn) { btn.classList.remove('holding'); btn._hap50 = false; }
+    try { vibrate([18, 30, 18]); } catch(_) {}
+    // Dispara la MISMA lógica de cierre (guard + reconciliación intactos).
+    confirmarCerrarGuia();
+  }
+
+  // Feedback sensorial post-resultado del cierre (lo invoca confirmarCerrarGuia).
+  function _cgFeedbackExito() {
+    try { window.SoundFX && SoundFX.done(); } catch(_) {}
+    try { vibrate([18, 40, 18, 40, 60]); } catch(_) {}
+    const btn = _cgEl();
+    if (btn) {
+      btn.classList.add('done');
+      const fill = document.getElementById('cgFill'); if (fill) fill.style.transform = 'scaleX(1)';
+      const lbl = document.getElementById('cgLabel'); if (lbl) lbl.textContent = '¡Cerrada!';
+    }
+  }
+  function _cgFeedbackBloqueo() {
+    try { window.SoundFX && SoundFX.warn(); } catch(_) {}
+    try { vibrate([60, 80, 60]); } catch(_) {}
+    cerrarHoldCancel();
+    const btn = _cgEl();
+    if (btn) {
+      btn.classList.add('blocked');
+      btn.addEventListener('animationend', () => btn.classList.remove('blocked'), { once:true });
     }
   }
 
@@ -8159,6 +8281,7 @@ const GuiasView = (() => {
         toast('Esperá: ' + enVuelo.length + ' ítem(s) aún guardándose. Reintentá en unos segundos.', 'warn', 3500);
       }
       try { vibrate?.([60, 80, 60]); } catch(_) {}
+      _cgFeedbackBloqueo();   // [v2.13.223] UX: shake + sonido de aviso en el botón
       return;
     }
 
@@ -8168,6 +8291,7 @@ const GuiasView = (() => {
 
     _cerrandoGuia = true;
     try {
+    _cgFeedbackExito();   // [v2.13.223] UX: checkmark animado + chime + háptico de éxito
     // Optimista: actualizar estado en UI inmediatamente
     _guiaActual.estado = 'CERRADA';
     // [v2.13.186] Parchear cache también (simétrico con reabrir) — sin esto un
@@ -8250,6 +8374,7 @@ const GuiasView = (() => {
         // navegable) y abrir su detalle para empezar a agregar productos.
         removeOptimisticGuia(tempId);
         toast(`Guía ${res.data.idGuia} creada`, 'ok');
+        _glowTarget = res.data.idGuia;   // [v2.13.223] resaltar la guía recién creada
         // Forzar fetch inmediato (ignora throttle) → cache con la guía real.
         OfflineManager.precargarOperacional(true).then(() => {
           const fresh = OfflineManager.getGuiasCache();
@@ -8671,6 +8796,7 @@ const GuiasView = (() => {
     seleccionarItemHid,
     _procesarCodigoEscaneado: _buscarCandidatos, _rescanear,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
+    cerrarHoldStart, cerrarHoldEnd, cerrarHoldCancel,
     confirmarCerrarGuia, crearGuia, nueva,
     toggleTagNueva,
     onFotoGuiaSeleccionada, copiarFotoDePreingreso, verFotoGuia,
