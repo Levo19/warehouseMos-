@@ -425,7 +425,12 @@ const API = (() => {
       _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false })
     ]);
     // stock: mismo shape vivo que API.getStock (stock_enriquecido_rls) — gana al Sheet congelado.
-    const stock = (stockR && stockR.ok !== false && Array.isArray(stockR.data)) ? stockR.data : [];
+    // [40x] LANZA si el RPC de stock fallo (igual que _sbLeerTablaWH lanza para las otras 5) -> el llamador
+    // cae a GAS. NUNCA devolver stock=[] con ok:true: pisaria el cache bueno con vacio.
+    if (!stockR || stockR.ok === false || !Array.isArray(stockR.data)) {
+      throw new Error('stock_enriquecido_rls fallo: ' + ((stockR && stockR.error) || 'shape invalido'));
+    }
+    const stock = stockR.data;
     return { ok: true, data: { guias, detalles, preingresos, stock, ajustes, auditorias } };
   }
 

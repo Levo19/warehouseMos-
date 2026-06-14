@@ -8124,16 +8124,15 @@ const GuiasView = (() => {
         const serverDet = (g && g.ok && g.data && Array.isArray(g.data.detalle)) ? g.data.detalle : null;
         if (serverDet) {
           // Índices de lo commiteado: por idDetalle exacto y por codigoProducto.
+          // [40x] Reconciliar SOLO por idDetalle EXACTO. El match laxo por codigoProducto daba falso
+          // positivo: si OTRA linea del mismo codigo ya estaba commiteada, bajaba el flag de una linea
+          // genuinamente en vuelo -> al cerrar se perderia su stock. Solo el id exacto es seguro.
           const idsServer = new Set(serverDet.map(s => String(s.idDetalle || '')).filter(Boolean));
-          const codsServer = new Set(serverDet
-            .filter(s => String(s.observacion || '') !== 'ANULADO')
-            .map(s => String(s.codigoProducto || '')).filter(Boolean));
           let reconciliadas = 0;
           (_guiaActual.detalle || []).forEach(d => {
             if (d.observacion === 'ANULADO') return;
             if (!(d._saving || d._local || d._saveFailed)) return;
-            const commit = idsServer.has(String(d.idDetalle || '')) ||
-                           codsServer.has(String(d.codigoProducto || ''));
+            const commit = idsServer.has(String(d.idDetalle || ''));
             if (commit) {
               d._local = false; d._saving = false; d._saveFailed = false;
               reconciliadas++;

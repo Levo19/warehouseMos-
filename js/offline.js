@@ -590,8 +590,16 @@ const OfflineManager = (() => {
         });
       }
 
-      if (d.guias       != null) { if (_hayDiff(d.guias,       KEYS.GUIAS))        { guardar(KEYS.GUIAS,        d.guias);       changed.push('guias'); }       else guardar(KEYS.GUIAS, d.guias); }
-      if (d.detalles    != null) { if (_hayDiff(d.detalles,    KEYS.GUIA_DETALLE)) { guardar(KEYS.GUIA_DETALLE, d.detalles);    changed.push('detalles'); }   else guardar(KEYS.GUIA_DETALLE, d.detalles); }
+      // [40x] No pisar cache bueno con un dataset VACÍO: un poll/RPC que devolvió [] no debe borrar
+      // datos previos. Solo persiste si trae filas, o si el cache ya estaba vacío.
+      const _persist = (key, arr, label) => {
+        if (arr == null) return;
+        if (!arr.length && (cargar(key) || []).length) return;   // vacío sobre lleno → skip
+        if (_hayDiff(arr, key)) { guardar(key, arr); changed.push(label); }
+        else guardar(key, arr);
+      };
+      _persist(KEYS.GUIAS,        d.guias,    'guias');
+      _persist(KEYS.GUIA_DETALLE, d.detalles, 'detalles');
       if (d.preingresos != null) {
         // Si hay subida de fotos en curso, omitir refresh de preingresos
         // (Fix #2). Si no, aplicar merge defensivo (Fix #1) y guardar.
@@ -600,13 +608,16 @@ const OfflineManager = (() => {
         } else {
           const viejos  = cargar(KEYS.PREINGRESOS) || [];
           const merged  = _mergePreingresos(d.preingresos, viejos);
-          if (_hayDiff(merged, KEYS.PREINGRESOS)) { guardar(KEYS.PREINGRESOS, merged); changed.push('preingresos'); }
-          else                                    { guardar(KEYS.PREINGRESOS, merged); }
+          // [40x] no pisar con vacío si había datos (el merge ya preserva, guard defensivo)
+          if (!(merged.length === 0 && viejos.length)) {
+            if (_hayDiff(merged, KEYS.PREINGRESOS)) { guardar(KEYS.PREINGRESOS, merged); changed.push('preingresos'); }
+            else                                    { guardar(KEYS.PREINGRESOS, merged); }
+          }
         }
       }
-      if (d.stock       != null) { if (_hayDiff(d.stock,       KEYS.STOCK))        { guardar(KEYS.STOCK,        d.stock);       changed.push('stock'); }       else guardar(KEYS.STOCK, d.stock); }
-      if (d.ajustes     != null) { if (_hayDiff(d.ajustes,     KEYS.AJUSTES))      { guardar(KEYS.AJUSTES,      d.ajustes);     changed.push('ajustes'); }     else guardar(KEYS.AJUSTES, d.ajustes); }
-      if (d.auditorias  != null) { if (_hayDiff(d.auditorias,  KEYS.AUDITORIAS_C)) { guardar(KEYS.AUDITORIAS_C, d.auditorias);  changed.push('auditorias'); }  else guardar(KEYS.AUDITORIAS_C, d.auditorias); }
+      _persist(KEYS.STOCK,        d.stock,      'stock');
+      _persist(KEYS.AJUSTES,      d.ajustes,    'ajustes');
+      _persist(KEYS.AUDITORIAS_C, d.auditorias, 'auditorias');
 
       window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } }));
     } catch(e) { console.warn('[Offline] Error en precarga operacional:', e); }
