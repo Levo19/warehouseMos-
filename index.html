@@ -6192,20 +6192,42 @@
 
   <!-- ── MERMAS ────────────────────────────────── -->
   <section id="view-mermas" class="view slide-up">
-    <!-- Tabs filtro -->
-    <div class="flex gap-1.5 mb-3 flex-wrap">
-      <button id="tabMermasProceso" onclick="MermasView.setFiltro('EN_PROCESO')"
-              class="merma-tab tab-active">En proceso (<span id="tabMermasNProceso">0</span>)</button>
-      <button id="tabMermasResueltas" onclick="MermasView.setFiltro('RESUELTA')"
-              class="merma-tab">Resueltas</button>
-      <button id="tabMermasDesechadas" onclick="MermasView.setFiltro('DESECHADA')"
-              class="merma-tab">Desechadas</button>
+    <!-- Columna principal: header + tabs + lista + registrar -->
+    <div id="mermasMainCol">
+      <div class="mermas-header">
+        <div class="mermas-header-top">
+          <h2 class="mermas-title">🗑 Mermas</h2>
+          <button id="mermasBtnCesta" onclick="MermasView.abrirCesta()"
+                  class="mermas-cesta-btn" title="Cesta de triage rápido">
+            <span>🧺</span><span class="mermas-cesta-lbl">Cesta</span>
+          </button>
+        </div>
+        <!-- Tabs filtro -->
+        <div class="mermas-tabs">
+          <button id="tabMermasProceso" onclick="MermasView.setFiltro('EN_PROCESO')"
+                  class="merma-tab tab-active">Pendientes (<span id="tabMermasNProceso">0</span>)</button>
+          <button id="tabMermasResueltas" onclick="MermasView.setFiltro('RESUELTA')"
+                  class="merma-tab">Solucionado</button>
+          <button id="tabMermasDesechadas" onclick="MermasView.setFiltro('DESECHADA')"
+                  class="merma-tab">Descartado</button>
+        </div>
+      </div>
+      <!-- Banda resumen colapsable (visible en móvil; en PC el aside la reemplaza) -->
+      <div id="mermasResumenBanda" class="mermas-resumen-banda" onclick="MermasView.toggleResumenBanda()">
+        <div class="mermas-resumen-banda-hd">
+          <span class="mermas-resumen-banda-ttl">📊 Resumen</span>
+          <span id="mermasResumenBandaQuick" class="mermas-resumen-banda-quick"></span>
+          <span id="mermasResumenBandaCaret" class="mermas-resumen-banda-caret">▾</span>
+        </div>
+        <div id="mermasResumenBandaBody" class="mermas-resumen-banda-body" style="display:none"></div>
+      </div>
+      <div id="listMermas" class="mermas-grid pb-20"></div>
+      <button onclick="MermasView.nueva()" class="mermas-fab" title="Registrar merma" aria-label="Registrar merma">
+        <span>+</span>
+      </button>
     </div>
-    <div id="listMermas" class="space-y-2 pb-20"></div>
-    <button onclick="MermasView.nueva()"
-            class="fixed bottom-24 right-4 w-14 h-14 bg-red-600 text-white text-2xl rounded-full shadow-lg flex items-center justify-center">
-      +
-    </button>
+    <!-- Panel resumen (columna derecha en PC) -->
+    <aside id="mermasResumenPanel" class="mermas-resumen-panel"></aside>
   </section>
   <style>
     .merma-tab {
@@ -6215,6 +6237,264 @@
     }
     .merma-tab.tab-active {
       border-color: rgba(239,68,68,.5); background: rgba(127,29,29,.2); color: #f87171;
+    }
+
+    /* ════════════════════════════════════════════════════
+       MERMAS v2 — vista full modernizada (lenguaje glass de Guías)
+       Móvil: 1 columna + banda resumen colapsable + FAB.
+       PC (≥900): grid 1fr/280px, panel resumen sticky a la derecha.
+    ════════════════════════════════════════════════════ */
+    .mermas-header { display:flex; flex-direction:column; gap:10px; margin-bottom:12px; }
+    .mermas-header-top {
+      display:flex; align-items:center; justify-content:space-between; gap:10px;
+    }
+    .mermas-title {
+      font-size:18px; font-weight:900; color:#f1f5f9; letter-spacing:.01em;
+      display:flex; align-items:center; gap:7px; margin:0;
+    }
+    .mermas-cesta-btn {
+      display:inline-flex; align-items:center; gap:6px;
+      padding:7px 13px; border-radius:11px;
+      background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3);
+      color:#fca5a5; font-size:12.5px; font-weight:800; cursor:pointer;
+      transition:background .15s, transform .1s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mermas-cesta-btn:active { transform:scale(.95); }
+    @media (hover:hover) and (pointer:fine) {
+      .mermas-cesta-btn:hover { background:rgba(239,68,68,.18); }
+    }
+    .mermas-tabs { display:flex; gap:8px; flex-wrap:wrap; }
+
+    /* Grid responsive de cards-ficha (auto-fill) */
+    .mermas-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fill, minmax(220px, 1fr));
+      gap:12px;
+      align-content:start;
+    }
+
+    /* Card "ficha de pérdida" — reutiliza el glass de .guia-card pero vertical */
+    .merma-card {
+      position:relative;
+      display:flex; flex-direction:column; gap:8px;
+      background:linear-gradient(135deg, rgba(30,41,59,.92), rgba(15,23,42,.95));
+      border-radius:14px; padding:13px 14px;
+      border:1px solid rgba(51,65,85,.55);
+      border-left:4px solid #475569;
+      box-shadow:0 2px 8px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.03);
+      transition:transform .12s, box-shadow .2s, border-color .2s;
+    }
+    .merma-card::after {
+      content:''; position:absolute; inset:0; border-radius:14px; pointer-events:none;
+      background:radial-gradient(120% 90% at 0% 0%, rgba(255,255,255,.04), transparent 55%);
+    }
+    /* Severidad por color de borde izquierdo */
+    .merma-card.sev-venc  { border-left-color:#dc2626; }
+    .merma-card.sev-aged  { border-left-color:#f59e0b; }
+    .merma-card.sev-norm  { border-left-color:#475569; }
+    /* Punto pulsante para vencidas (reusa lenguaje del dot de guías) */
+    .merma-card.sev-venc::before {
+      content:''; position:absolute; top:11px; right:11px;
+      width:8px; height:8px; border-radius:50%; background:#ef4444; z-index:2;
+      animation:mermaPulse 1.6s ease-in-out infinite;
+    }
+    @keyframes mermaPulse {
+      0%,100% { box-shadow:0 0 0 0 rgba(239,68,68,.7); opacity:1; }
+      55%     { box-shadow:0 0 0 6px rgba(239,68,68,0); opacity:.65; }
+    }
+    @media (hover:hover) and (pointer:fine) {
+      .merma-card:hover {
+        transform:translateY(-2px);
+        box-shadow:0 8px 22px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.05);
+        border-left-width:5px;
+      }
+    }
+    /* Entrada stagger sutil */
+    .merma-card.mc-enter { animation:mermaCardIn .32s cubic-bezier(.22,.61,.36,1) both; }
+    @keyframes mermaCardIn {
+      from { opacity:0; transform:translateY(10px) scale(.99); }
+      to   { opacity:1; transform:translateY(0)    scale(1); }
+    }
+    .merma-card-row { display:flex; align-items:flex-start; gap:10px; }
+    .merma-thumb {
+      width:54px; height:54px; border-radius:10px; flex-shrink:0;
+      background:#0f172a; border:1px solid rgba(51,65,85,.6);
+      overflow:hidden; display:flex; align-items:center; justify-content:center;
+      position:relative; cursor:pointer;
+    }
+    .merma-thumb img { width:100%; height:100%; object-fit:cover; }
+    .merma-thumb.placeholder {
+      background:linear-gradient(135deg, rgba(127,29,29,.3), rgba(15,23,42,.8));
+      color:#7f1d1d; font-size:22px; cursor:default;
+    }
+    .merma-card-name {
+      font-size:14.5px; font-weight:800; color:#f1f5f9; line-height:1.25;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    .merma-card-cod { font-size:10px; color:#64748b; font-family:ui-monospace,monospace; margin-top:2px; }
+    .merma-qty {
+      display:inline-flex; align-items:baseline; gap:3px;
+      font-size:18px; font-weight:900; color:#f87171; line-height:1; white-space:nowrap;
+    }
+    .merma-qty .mq-u { font-size:10px; font-weight:700; color:#fca5a5; }
+    .merma-badges { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .merma-badge {
+      display:inline-flex; align-items:center; gap:4px;
+      font-size:10px; font-weight:800; letter-spacing:.02em;
+      padding:3px 9px; border-radius:20px; line-height:1.4;
+      border:1px solid transparent;
+    }
+    .merma-badge-motivo { background:rgba(100,116,139,.16); color:#cbd5e1; border-color:rgba(100,116,139,.32); }
+    .merma-badge-venc   { background:rgba(220,38,38,.15); color:#fca5a5; border-color:rgba(220,38,38,.38); }
+    .merma-badge-aged   { background:rgba(245,158,11,.14); color:#fcd34d; border-color:rgba(245,158,11,.36); }
+    .merma-meta {
+      display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+      font-size:11px; color:#64748b;
+    }
+    .merma-meta .mm-resp {
+      padding:2px 8px; border-radius:999px;
+      background:rgba(100,116,139,.16); color:#94a3b8;
+    }
+    .merma-foot { font-size:10.5px; color:#64748b; margin-top:1px; }
+    .merma-foot .ok  { color:#34d399; }
+    .merma-foot .bad { color:#f87171; }
+    .merma-card-actions { display:flex; gap:6px; margin-top:2px; }
+    .merma-act {
+      flex:1; display:inline-flex; align-items:center; justify-content:center; gap:5px;
+      padding:8px 10px; border-radius:9px; border:1px solid transparent;
+      font-size:12px; font-weight:800; cursor:pointer; line-height:1;
+      transition:background .15s, transform .1s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .merma-act:active { transform:scale(.96); }
+    .merma-act-primary { background:linear-gradient(135deg,#3b82f6,#2563eb); color:#fff; }
+    .merma-act-ghost {
+      flex:0 0 auto; padding:8px 11px;
+      background:rgba(255,255,255,.05); color:#cbd5e1; border-color:rgba(71,85,105,.5);
+    }
+
+    /* FAB registrar (móvil) */
+    .mermas-fab {
+      position:fixed; bottom:96px; right:16px;
+      width:56px; height:56px; border-radius:50%; border:none; cursor:pointer;
+      background:linear-gradient(135deg,#ef4444,#b91c1c); color:#fff;
+      font-size:28px; font-weight:300; line-height:1;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 6px 20px rgba(239,68,68,.4);
+      transition:transform .12s, box-shadow .2s; z-index:40;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mermas-fab:active { transform:scale(.92); }
+    @media (hover:hover) and (pointer:fine) {
+      .mermas-fab:hover { transform:translateY(-2px); box-shadow:0 9px 26px rgba(239,68,68,.55); }
+    }
+
+    /* Banda resumen colapsable (móvil) */
+    .mermas-resumen-banda {
+      background:linear-gradient(135deg, rgba(30,41,59,.85), rgba(15,23,42,.9));
+      border:1px solid rgba(51,65,85,.5); border-radius:12px;
+      padding:11px 14px; margin-bottom:12px; cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mermas-resumen-banda-hd {
+      display:flex; align-items:center; gap:8px;
+      font-size:13px; font-weight:800; color:#e2e8f0;
+    }
+    .mermas-resumen-banda-quick { margin-left:auto; font-size:11.5px; color:#94a3b8; font-weight:700; }
+    .mermas-resumen-banda-caret { color:#64748b; font-size:12px; transition:transform .2s; }
+    .mermas-resumen-banda.open .mermas-resumen-banda-caret { transform:rotate(180deg); }
+    .mermas-resumen-banda-body { margin-top:10px; }
+
+    /* Panel resumen (PC) — oculto en móvil */
+    .mermas-resumen-panel { display:none; }
+
+    /* Contenido compartido del resumen (barras de motivo) */
+    .mr-block { display:flex; flex-direction:column; gap:13px; }
+    .mr-kpis { display:flex; gap:10px; }
+    .mr-kpi {
+      flex:1; background:rgba(15,23,42,.55); border:1px solid rgba(51,65,85,.45);
+      border-radius:11px; padding:10px 12px;
+    }
+    .mr-kpi-lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.06em; color:#64748b; font-weight:800; }
+    .mr-kpi-val { font-size:21px; font-weight:900; color:#f1f5f9; line-height:1.15; margin-top:3px; }
+    .mr-kpi-val.danger { color:#f87171; }
+    .mr-kpi-sub { font-size:10px; color:#64748b; margin-top:1px; }
+    .mr-motivos-ttl {
+      font-size:10px; text-transform:uppercase; letter-spacing:.06em;
+      color:#64748b; font-weight:800; margin-bottom:2px;
+    }
+    .mr-motivo { display:flex; flex-direction:column; gap:4px; }
+    .mr-motivo-hd {
+      display:flex; align-items:baseline; justify-content:space-between; gap:8px;
+      font-size:12px; color:#cbd5e1; font-weight:700;
+    }
+    .mr-motivo-hd .mr-pct { color:#94a3b8; font-weight:800; font-size:11px; }
+    .mr-bar { height:7px; border-radius:999px; background:rgba(51,65,85,.4); overflow:hidden; }
+    .mr-bar-fill {
+      height:100%; border-radius:999px;
+      background:linear-gradient(90deg,#f59e0b,#ef4444);
+      transition:width .5s cubic-bezier(.22,.61,.36,1);
+    }
+    .mr-empty { font-size:12px; color:#64748b; text-align:center; padding:8px 0; }
+    .mr-proc-btn {
+      width:100%; padding:10px; border-radius:10px; border:1px solid rgba(245,158,11,.4);
+      background:rgba(245,158,11,.12); color:#fcd34d; font-weight:800; font-size:12.5px;
+      cursor:pointer; transition:background .15s, transform .1s;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .mr-proc-btn:active { transform:scale(.97); }
+    @media (hover:hover) and (pointer:fine) {
+      .mr-proc-btn:hover { background:rgba(245,158,11,.2); }
+    }
+
+    @media (prefers-reduced-motion:reduce) {
+      .merma-card, .merma-card.mc-enter { animation:none !important; transition:none !important; }
+      .merma-card.sev-venc::before { animation:none !important; }
+      .mr-bar-fill { transition:none !important; }
+      .mermas-resumen-banda-caret { transition:none !important; }
+    }
+
+    /* ── PC (≥900px o landscape ≥768): grid 2 columnas, resumen a la derecha ── */
+    @media (min-width:768px) and (orientation:landscape), (min-width:900px) {
+      #view-mermas.active {
+        display:grid;
+        grid-template-columns:1fr 280px;
+        gap:16px; align-items:start;
+        height:calc(100vh - 88px); overflow:hidden;
+      }
+      #mermasMainCol {
+        min-width:0; display:flex; flex-direction:column;
+        height:100%; overflow:hidden;
+      }
+      #mermasMainCol .mermas-header { flex-shrink:0; }
+      #listMermas {
+        flex:1; overflow-y:auto; min-height:0; padding-bottom:16px;
+        grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
+      }
+      /* En PC el FAB y la banda colapsable estorban: el aside lo reemplaza */
+      .mermas-fab, #mermasResumenBanda { display:none !important; }
+      .mermas-resumen-panel {
+        display:block; position:sticky; top:0;
+        background:linear-gradient(135deg, rgba(30,41,59,.85), rgba(15,23,42,.92));
+        border:1px solid rgba(51,65,85,.5); border-radius:14px;
+        padding:16px 15px; max-height:calc(100vh - 88px); overflow-y:auto;
+      }
+      .mermas-resumen-panel .mr-panel-ttl {
+        font-size:11px; text-transform:uppercase; letter-spacing:.07em;
+        color:#94a3b8; font-weight:800; margin-bottom:13px;
+      }
+      .mermas-resumen-panel .mr-kpis { flex-direction:column; }
+      /* Botón registrar inline en PC (no FAB) */
+      .mermas-registrar-pc {
+        width:100%; margin-top:8px; padding:11px; border-radius:11px; border:none;
+        background:linear-gradient(135deg,#ef4444,#b91c1c); color:#fff;
+        font-weight:800; font-size:13px; cursor:pointer;
+        transition:transform .1s, box-shadow .2s;
+      }
+      .mermas-registrar-pc:active { transform:scale(.98); }
+      .mermas-registrar-pc:hover { box-shadow:0 6px 18px rgba(239,68,68,.4); }
     }
 
     /* ════════════════════════════════════════════════════
@@ -6570,6 +6850,19 @@
       border-top: 1px solid #1e293b;
     }
     .sheet-mermas-cesta.open { transform: translateY(0); }
+    /* PC: la cesta no se estira de borde a borde — centrada con ancho máximo cómodo */
+    @media (min-width:768px) and (orientation:landscape), (min-width:900px) {
+      .sheet-mermas-cesta {
+        left:50%; right:auto; transform:translateX(-50%) translateY(100%);
+        width:min(560px, 92vw);
+        border-top-left-radius:22px; border-top-right-radius:22px;
+        border-left:1px solid #1e293b; border-right:1px solid #1e293b;
+      }
+      .sheet-mermas-cesta.open { transform:translateX(-50%) translateY(0); }
+    }
+    @media (prefers-reduced-motion:reduce) {
+      .sheet-mermas-cesta { transition:none !important; }
+    }
     .mc-header {
       display: flex; align-items: center; justify-content: space-between;
       padding-bottom: 12px;

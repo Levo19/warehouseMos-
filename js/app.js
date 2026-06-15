@@ -17579,67 +17579,191 @@ const MermasView = (() => {
     if (el) el.textContent = enProceso;
   }
 
+  // Mapa de descripciones desde caché (compartido por _render y resumen)
+  function _descMap() {
+    const prods = OfflineManager.getProductosCache();
+    const map = {};
+    prods.forEach(p => {
+      if (p.codigoBarra) map[String(p.codigoBarra)] = p.descripcion;
+      if (p.idProducto)  map[String(p.idProducto)]  = p.descripcion;
+    });
+    return map;
+  }
+
   function _render() {
     const container = document.getElementById('listMermas');
     if (!container) return;
+    // Siempre refrescar el panel/banda resumen (deriva del set EN_PROCESO real)
+    _renderResumen();
     const filtradas = _all.filter(m => String(m.estado || '').toUpperCase() === _filtro);
     if (!filtradas.length) {
-      container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin mermas en esta categoría</p>';
+      const vacio = _filtro === 'EN_PROCESO' ? 'Sin mermas pendientes 🎉'
+                  : _filtro === 'RESUELTA'   ? 'Aún nada solucionado'
+                  : 'Nada descartado';
+      container.innerHTML = `<p class="mr-empty" style="grid-column:1/-1;padding:34px 0">${vacio}</p>`;
       return;
     }
-    // Resolver descripciones desde caché
-    const prods = OfflineManager.getProductosCache();
-    const descMap = {};
-    prods.forEach(p => {
-      if (p.codigoBarra) descMap[String(p.codigoBarra)] = p.descripcion;
-      if (p.idProducto)  descMap[String(p.idProducto)]  = p.descripcion;
-    });
+    const descMap = _descMap();
+    // Reduce-motion: sin stagger (cap a 0)
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
 
-    container.innerHTML = filtradas.map(m => {
-      const desc = descMap[String(m.codigoProducto || '').trim()] || m.codigoProducto;
+    container.innerHTML = filtradas.map((m, i) => {
+      const desc      = descMap[String(m.codigoProducto || '').trim()] || m.codigoProducto;
       const respLabel = String(m.responsable || m.origen || '—');
-      const fechaStr = m.fechaIngreso ? new Date(m.fechaIngreso).toLocaleDateString('es-PE') : '';
-      const safeId = escAttr(m.idMerma);
-      let actions = '';
+      const fechaStr  = m.fechaIngreso ? new Date(m.fechaIngreso).toLocaleDateString('es-PE') : '';
+      const safeId    = escAttr(m.idMerma);
+      // Severidad por antigüedad: vencida (rojo pulsante) · >7d (ámbar) · normal
+      const enProceso = String(m.estado || '').toUpperCase() === 'EN_PROCESO';
+      const sevClass  = (enProceso && m.vencida) ? 'sev-venc'
+                      : (enProceso && (m.diasEnProceso || 0) > 7) ? 'sev-aged'
+                      : 'sev-norm';
+      const fotoUrl   = m.foto ? _normalizeFotoMerma(m.foto) : '';
+      const thumb     = fotoUrl
+        ? `<div class="merma-thumb" onclick="MermasView.verFoto('${escAttr(m.foto)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.parentNode.classList.add('placeholder');this.remove()"></div>`
+        : `<div class="merma-thumb placeholder">🗑</div>`;
+
+      // Badges: motivo + antigüedad
+      const badges = [];
+      if (m.motivo) badges.push(`<span class="merma-badge merma-badge-motivo">${escHtml(m.motivo)}</span>`);
+      if (enProceso && m.vencida) badges.push(`<span class="merma-badge merma-badge-venc">⚠ ${m.diasEnProceso}d sin resolver</span>`);
+      else if (enProceso && (m.diasEnProceso || 0) > 7) badges.push(`<span class="merma-badge merma-badge-aged">${m.diasEnProceso}d</span>`);
+
+      // Acciones / footer según filtro
+      let bottom = '';
       if (_filtro === 'EN_PROCESO') {
-        actions = `
-          <div class="flex gap-1.5 mt-2">
-            <button onclick="MermasView.abrirResolver('${safeId}')"
-                    class="btn btn-sm btn-primary text-xs px-3 py-1.5 flex-1">Resolver</button>
-            ${m.foto ? `<button onclick="MermasView.verFoto('${escAttr(m.foto)}')"
-                       class="btn btn-sm btn-outline text-xs px-3 py-1.5">📷</button>` : ''}
+        bottom = `<div class="merma-card-actions">
+            <button onclick="MermasView.abrirResolver('${safeId}')" class="merma-act merma-act-primary">✓ Solucionar</button>
+            ${m.foto ? `<button onclick="MermasView.verFoto('${escAttr(m.foto)}')" class="merma-act merma-act-ghost" title="Ver foto">📷</button>` : ''}
           </div>`;
+      } else {
+        const parts = [];
+        if (m.cantidadReparada > 0) parts.push(`<span class="ok">✓ ${fmt(m.cantidadReparada, 1)} recuperadas</span>`);
+        if (m.cantidadDesechada > 0) parts.push(`<span class="bad">🗑 ${fmt(m.cantidadDesechada, 1)} descartadas</span>`);
+        if (m.idGuiaSalida) parts.push(`guía ${escHtml(m.idGuiaSalida)}`);
+        bottom = `${parts.length ? `<p class="merma-foot">${parts.join(' · ')}</p>` : ''}
+          ${m.observacionResolucion ? `<p class="merma-foot" style="font-style:italic">"${escHtml(m.observacionResolucion)}"</p>` : ''}`;
       }
-      let footer = '';
-      if (_filtro === 'RESUELTA' || _filtro === 'DESECHADA') {
-        footer = `
-          <p class="text-[10.5px] text-slate-500 mt-1">
-            ${m.cantidadReparada > 0 ? `<span class="text-emerald-400">✓ ${fmt(m.cantidadReparada, 1)} reparadas</span>` : ''}
-            ${m.cantidadReparada > 0 && m.cantidadDesechada > 0 ? ' · ' : ''}
-            ${m.cantidadDesechada > 0 ? `<span class="text-red-400">🗑 ${fmt(m.cantidadDesechada, 1)} desechadas</span>` : ''}
-            ${m.idGuiaSalida ? ` · guía ${escHtml(m.idGuiaSalida)}` : ''}
-          </p>
-          ${m.observacionResolucion ? `<p class="text-[10.5px] text-slate-500 mt-0.5 italic">"${escHtml(m.observacionResolucion)}"</p>` : ''}`;
-      }
+
+      const delay = reduce ? 0 : Math.min(i * 28, 320);
       return `
-      <div class="card-sm" style="${m.vencida ? 'border:1px solid rgba(245,158,11,.5);background:rgba(120,53,15,.08)' : ''}">
-        <div class="flex items-start justify-between gap-2 mb-1">
-          <div class="flex-1 min-w-0">
-            <p class="font-semibold text-sm text-slate-100 truncate">${escHtml(desc)}</p>
-            <p class="text-[10.5px] text-slate-500 font-mono">${escHtml(m.codigoProducto)}</p>
+      <div class="merma-card ${sevClass} ${reduce ? '' : 'mc-enter'}" style="${reduce ? '' : `animation-delay:${delay}ms`}">
+        <div class="merma-card-row">
+          ${thumb}
+          <div style="flex:1;min-width:0">
+            <div class="merma-card-name">${escHtml(desc)}</div>
+            <div class="merma-card-cod">${escHtml(m.codigoProducto)}</div>
           </div>
-          <span class="font-black text-base text-red-400 flex-shrink-0">${fmt(m.cantidadOriginal, 1)}</span>
+          <span class="merma-qty">−${fmt(m.cantidadOriginal, 1)}<span class="mq-u">und</span></span>
         </div>
-        <div class="flex items-center gap-2 text-[11px] text-slate-400">
-          <span class="px-2 py-0.5 rounded-full" style="background:rgba(100,116,139,.18)">${escHtml(respLabel)}</span>
-          <span>${escHtml(fechaStr)}</span>
-          ${m.vencida ? `<span class="text-amber-400 font-bold">⚠ ${m.diasEnProceso}d sin resolver</span>` : ''}
+        ${badges.length ? `<div class="merma-badges">${badges.join('')}</div>` : ''}
+        <div class="merma-meta">
+          <span class="mm-resp">📍 ${escHtml(respLabel)}</span>
+          ${fechaStr ? `<span>${escHtml(fechaStr)}</span>` : ''}
         </div>
-        ${m.motivo ? `<p class="text-[11px] text-slate-500 mt-1">${escHtml(m.motivo)}</p>` : ''}
-        ${footer}
-        ${actions}
+        ${bottom}
       </div>`;
     }).join('');
+  }
+
+  // Normaliza url de foto de merma (puede ser Drive o base64/url directa)
+  function _normalizeFotoMerma(f) {
+    const s = String(f || '');
+    try { if (typeof _normalizeDriveUrl === 'function') return _normalizeDriveUrl(s); } catch(_){}
+    return s;
+  }
+
+  // ── Panel/banda RESUMEN — derivado SOLO de registros reales EN_PROCESO ──
+  // No hay monto S/ en el modelo de mermas → resumimos por UNIDADES e ítems
+  // perdidos + desglose por motivo (conteo de unidades). NO inventa datos.
+  function _renderResumen() {
+    const pend = _all.filter(m => String(m.estado || '').toUpperCase() === 'EN_PROCESO');
+    const totalItems = pend.length;
+    let totalUnid = 0;
+    let vencidas = 0;
+    const porMotivo = {};
+    pend.forEach(m => {
+      const u = parseFloat(m.cantidadOriginal) || 0;
+      totalUnid += u;
+      if (m.vencida) vencidas++;
+      const mot = (String(m.motivo || '').trim()) || 'Sin motivo';
+      porMotivo[mot] = (porMotivo[mot] || 0) + u;
+    });
+    const motivos = Object.keys(porMotivo)
+      .map(k => ({ motivo: k, unid: porMotivo[k] }))
+      .sort((a, b) => b.unid - a.unid);
+    const maxU = motivos.length ? motivos[0].unid : 0;
+    const topMotivo = motivos.length ? motivos[0].motivo : '—';
+
+    // HTML del bloque resumen (compartido PC/móvil)
+    const barras = motivos.length
+      ? motivos.slice(0, 6).map(x => {
+          const pct = totalUnid > 0 ? Math.round((x.unid / totalUnid) * 100) : 0;
+          const w   = maxU > 0 ? Math.round((x.unid / maxU) * 100) : 0;
+          return `<div class="mr-motivo">
+            <div class="mr-motivo-hd"><span>${escHtml(x.motivo)}</span><span class="mr-pct">${fmt(x.unid, 1)} · ${pct}%</span></div>
+            <div class="mr-bar"><div class="mr-bar-fill" style="width:${w}%"></div></div>
+          </div>`;
+        }).join('')
+      : '<p class="mr-empty">Sin pendientes por desglosar</p>';
+
+    const bloque = `
+      <div class="mr-block">
+        <div class="mr-kpis">
+          <div class="mr-kpi">
+            <div class="mr-kpi-lbl">Unidades perdidas</div>
+            <div class="mr-kpi-val danger">${fmt(totalUnid, 1)}</div>
+            <div class="mr-kpi-sub">${totalItems} ítem${totalItems === 1 ? '' : 's'} pendiente${totalItems === 1 ? '' : 's'}</div>
+          </div>
+          <div class="mr-kpi">
+            <div class="mr-kpi-lbl">Top motivo</div>
+            <div class="mr-kpi-val" style="font-size:15px">${escHtml(topMotivo)}</div>
+            <div class="mr-kpi-sub">${vencidas} vencida${vencidas === 1 ? '' : 's'} (&gt;3d)</div>
+          </div>
+        </div>
+        <div>
+          <div class="mr-motivos-ttl">Por motivo</div>
+          <div style="display:flex;flex-direction:column;gap:11px">${barras}</div>
+        </div>
+        ${totalItems > 0 ? `<button class="mr-proc-btn" onclick="MermasView.procesar()">Procesar descartes</button>` : ''}
+      </div>`;
+
+    // PC: panel a la derecha
+    const panel = document.getElementById('mermasResumenPanel');
+    if (panel) panel.innerHTML = `<div class="mr-panel-ttl">📊 Resumen de pérdidas</div>${bloque}
+      <button class="mermas-registrar-pc" onclick="MermasView.nueva()">+ Registrar merma</button>`;
+
+    // Móvil: banda colapsable (quick stat siempre visible + cuerpo on demand)
+    const quick = document.getElementById('mermasResumenBandaQuick');
+    if (quick) quick.textContent = `${fmt(totalUnid, 1)} und · ${totalItems} ítem${totalItems === 1 ? '' : 's'}`;
+    const body = document.getElementById('mermasResumenBandaBody');
+    if (body) body.innerHTML = bloque;
+  }
+
+  function toggleResumenBanda() {
+    const banda = document.getElementById('mermasResumenBanda');
+    const body  = document.getElementById('mermasResumenBandaBody');
+    if (!banda || !body) return;
+    const abrir = !banda.classList.contains('open');
+    banda.classList.toggle('open', abrir);
+    body.style.display = abrir ? 'block' : 'none';
+    try { window.SoundFX && SoundFX.click(); } catch(_){}
+  }
+
+  // Abre la cesta de triage rápido (módulo aparte window.Mermas)
+  function abrirCesta() {
+    try { window.SoundFX && SoundFX.click(); } catch(_){}
+    if (window.Mermas && typeof Mermas.abrirCesta === 'function') Mermas.abrirCesta();
+    else toast('Cesta no disponible', 'warn');
+  }
+
+  // Procesar descartes — delega al flujo existente de la cesta (pide clave admin allí)
+  function procesar() {
+    if (window.Mermas && typeof Mermas.abrirCesta === 'function') {
+      Mermas.abrirCesta();
+      toast('Revisa los descartes y confirma el proceso', 'info', 3500);
+    } else {
+      toast('Abre la cesta para procesar', 'warn');
+    }
   }
 
   function nueva() {
@@ -17713,6 +17837,8 @@ const MermasView = (() => {
         usuario: window.WH_CONFIG?.usuario || ''
       });
       if (res.ok) {
+        try { window.SoundFX && SoundFX.done(); } catch(_){}
+        if (navigator.vibrate) navigator.vibrate(15);
         toast('✓ Merma registrada en proceso', 'ok');
         cerrarSheet('sheetMerma');
         cargar();
@@ -17778,6 +17904,8 @@ const MermasView = (() => {
         usuario: window.WH_CONFIG?.usuario || ''
       });
       if (res.ok) {
+        try { window.SoundFX && SoundFX.done(); } catch(_){}
+        if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
         const msgDesecho = des > 0 ? ` · ${fmt(des, 1)} a guía semanal` : '';
         toast(`✓ Resuelto${msgDesecho}`, 'ok', 4000);
         cerrarSheet('sheetResolverMerma');
@@ -17796,7 +17924,8 @@ const MermasView = (() => {
   }
 
   return { cargar, crear, nueva, setFiltro, onFotoSeleccionada,
-           abrirResolver, balancearResolucion, confirmarResolver, verFoto };
+           abrirResolver, balancearResolucion, confirmarResolver, verFoto,
+           abrirCesta, procesar, toggleResumenBanda };
 })();
 
 
