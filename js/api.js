@@ -1090,7 +1090,10 @@ const API = (() => {
     }
     if (params.action === 'subirFotoGuia') {
       // sube la foto a Storage (máxima calidad) y setea guias.foto con la URL. Réplica del flujo GAS.
-      const b64 = String(params.fotoBase || '').trim();
+      // [fix] el front envía `fotoBase64` (app.js:8662, paridad con GAS subirFotoGuia). Leer `params.fotoBase`
+      // (typo) dejaba b64 vacío → return null → fallback a GAS, que escribe la foto en el Sheet (no en Supabase,
+      // donde vive la guía G_L… directa) → foto nunca se persistía/mostraba. Todas las 7 guías directas tenían foto=''.
+      const b64 = String(params.fotoBase64 || params.fotoBase || '').trim();
       if (!b64) return null;
       let url;
       try { url = (await _subirFotoStorage('guias', String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg', lid)).url; } catch (_) { return null; }
