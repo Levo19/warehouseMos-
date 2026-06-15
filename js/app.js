@@ -8681,14 +8681,15 @@ const GuiasView = (() => {
 
     if (!fotos.length) { toast('El preingreso no tiene fotos', 'warn'); return; }
 
-    FotoPicker.abrir(_guiaActual.idPreingreso, fotos, async (fileId) => {
-      if (!fileId) return;  // canceló o eligió "sin foto"
+    FotoPicker.abrir(_guiaActual.idPreingreso, fotos, async (sel) => {
+      if (!sel) return;  // canceló o eligió "sin foto"
       const fotoEl = document.getElementById('guiaDetFotoSection');
       if (fotoEl) fotoEl.innerHTML = '<div class="flex justify-center py-3"><div class="spinner"></div></div>';
       const res = await API.copiarFotoDePreingreso({
         idGuia:       _guiaActual.idGuia,
         idPreingreso: _guiaActual.idPreingreso,
-        fileId
+        fotoUrl:      sel.url,    // directo: la guía referencia la misma URL pública del preingreso (no re-sube)
+        fileId:       sel.fileId  // fallback GAS legado: copia el archivo en Drive por fileId
       }).catch(() => ({ ok: false, error: 'Sin conexión' }));
       if (res.ok && res.data?.url) {
         _guiaActual.foto = res.data.url;
@@ -17082,9 +17083,9 @@ const PreingresosView = (() => {
       : [];
 
     if (fotosPI.length > 0) {
-      // Selector: el callback recibe fileId o null
-      FotoPicker.abrir(idPreingreso, fotosPI, (fileId) => {
-        _ejecutarCrearGuia(idPreingreso, idProveedor, fileId);
+      // Selector: el callback recibe { url, fileId } o null
+      FotoPicker.abrir(idPreingreso, fotosPI, (sel) => {
+        _ejecutarCrearGuia(idPreingreso, idProveedor, sel);
       });
     } else {
       _ejecutarCrearGuia(idPreingreso, idProveedor, null);
@@ -17096,7 +17097,7 @@ const PreingresosView = (() => {
   // es idempotente, pero esto evita el duplicado visual mientras viaja la red.
   const _aprobandoPI = new Set();
 
-  async function _ejecutarCrearGuia(idPreingreso, idProveedor, fileIdFoto) {
+  async function _ejecutarCrearGuia(idPreingreso, idProveedor, fotoSel) {
     if (_aprobandoPI.has(idPreingreso)) return;
     _aprobandoPI.add(idPreingreso);
     const tempId     = 'G_tmp_' + Date.now();
@@ -17112,11 +17113,12 @@ const PreingresosView = (() => {
       GuiasView.finalizeOptimisticGuia(tempId, res.data.idGuia, 'INGRESO_PROVEEDOR', provNombre);
 
       // Si el operador eligió una foto, copiarla a la guía en background
-      if (fileIdFoto) {
+      if (fotoSel && fotoSel.url) {
         API.copiarFotoDePreingreso({
           idGuia: res.data.idGuia,
           idPreingreso,
-          fileId: fileIdFoto
+          fotoUrl: fotoSel.url,    // directo: misma URL pública del preingreso (no re-sube)
+          fileId:  fotoSel.fileId  // fallback GAS legado
         }).catch(() => {});
       }
     } else {
@@ -20938,7 +20940,11 @@ const ConfigView = (() => {
 // FOTO PICKER — selector reutilizable de foto desde preingreso.
 // Uso: FotoPicker.abrir(idPreingreso, fotos, onSelect)
 //   fotos: array de URLs (col 'fotos' del preingreso)
-//   onSelect: (fileId | null) => void   (null = sin foto)
+//   onSelect: ({ url, fileId } | null) => void   (null = sin foto)
+//   [fix guías directas] el callback recibe la URL COMPLETA de la foto elegida (fuente de verdad para guías
+//   directas: la guía 'G_L…' en Supabase referencia la misma URL pública del preingreso, sin re-subir) + el
+//   fileId extraído (solo para el fallback GAS legado, que copia el archivo en Drive). Antes pasaba solo el
+//   fileId; para fotos en Storage (wh-fotos, sin '?id=') ese fileId salía '' → la copia fallaba.
 // ════════════════════════════════════════════════
 const FotoPicker = (() => {
   let _onSelect = null;
@@ -20960,9 +20966,9 @@ const FotoPicker = (() => {
     }
     if (arr.length === 1) {
       // Una sola foto: confirmar rápido sin abrir modal
-      const fid = _extractFileId(arr[0]);
+      const url = arr[0];
       if (await _whConfirm('El preingreso tiene 1 foto adjunta.\n\n¿Usarla en la guía?', { titulo: 'Foto preingreso' })) {
-        _onSelect(fid || null);
+        _onSelect(url ? { url, fileId: _extractFileId(url) } : null);
       } else {
         _onSelect(null);
       }
@@ -20975,9 +20981,8 @@ const FotoPicker = (() => {
     const grid = document.getElementById('selectorFotoPIGrid');
     if (grid) {
       grid.innerHTML = arr.map((url, i) => {
-        const fid = _extractFileId(url);
         return `
-        <button onclick="FotoPicker.elegir('${escAttr(fid)}')"
+        <button onclick="FotoPicker.elegir('${escAttr(url)}')"
                 style="aspect-ratio:1;border:2px solid #334155;border-radius:10px;
                        background:#0f172a;cursor:pointer;overflow:hidden;
                        padding:0;position:relative"
@@ -20995,9 +21000,9 @@ const FotoPicker = (() => {
     abrirSheet('sheetSelectorFotoPI');
   }
 
-  function elegir(fileId) {
+  function elegir(url) {
     cerrarSheet('sheetSelectorFotoPI');
-    if (_onSelect) _onSelect(fileId || null);
+    if (_onSelect) _onSelect(url ? { url, fileId: _extractFileId(url) } : null);
     _onSelect = null;
   }
 

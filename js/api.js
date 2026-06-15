@@ -1104,6 +1104,21 @@ const API = (() => {
       _ocrComprobanteGuia(String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg').catch(() => {});
       return { ok: true, data: { url } };
     }
+    if (params.action === 'copiarFotoDePreingreso') {
+      // Copia la foto elegida del preingreso a la guía. La foto del preingreso YA está en Storage (wh-fotos) o en
+      // Drive (legado), siempre como URL pública en wh.preingresos.fotos. NO re-subimos el archivo: la guía referencia
+      // la MISMA URL (la imagen es pública y compartida). Solo persistimos esa URL en guias.foto vía actualizar_foto_guia.
+      // [fix guías directas] sin este cableo el POST caía a GAS, que para una guía 'G_L…' (en Supabase, NO en el Sheet)
+      // no encontraba la fila → la foto copiada nunca persistía. Además FotoPicker._extractFileId('?id=') devuelve '' para
+      // URLs de Storage → el fileId que recibía GAS venía vacío → fallaba doble. El front nos pasa la URL completa en `fotoUrl`.
+      const idGuia  = String(params.idGuia || '');
+      const fotoUrl = String(params.fotoUrl || '').trim();
+      if (!idGuia || !fotoUrl) return null;   // sin la URL completa (p.ej. flujo viejo) → que GAS lo intente
+      const out = await _sbRpcWH('actualizar_foto_guia', { p: { id_guia: idGuia, foto: fotoUrl } });
+      if (!out || out.ok === false) return null;
+      // [shape] el front lee res.data?.url (app.js:8693). Réplica del shape GAS {ok:true,data:{url}}.
+      return { ok: true, data: { url: fotoUrl } };
+    }
     if (params.action === 'registrarMerma') {
       // foto OBLIGATORIA → sube a Storage (máxima calidad) y registra la merma directo (ya no depende de GAS/Drive).
       let fotoUrl = String(params.foto || '');
