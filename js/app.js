@@ -8786,8 +8786,12 @@ const GuiasView = (() => {
     if (idx >= 0) todas[idx].foto = '';
     _mostrarDetalleSheet(_guiaActual, false);
     toast('Foto eliminada', 'warn', 1500);
-    // Background: eliminar archivo + limpiar columna en sheet
-    if (match) API.eliminarFotoDrive({ fileId: match[1] }).catch(() => {});
+    // Background: eliminar archivo + limpiar columna en sheet.
+    // Foto NUEVA (Supabase Storage) → borrar el objeto por su URL/path (eliminarFotoDrive directo
+    // hace DELETE en wh-fotos). Foto VIEJA (Drive) → borrar por fileId. Sin esto, las fotos de guía
+    // en Storage (el flujo normal desde v2.13.234/235) quedaban huérfanas al eliminarse.
+    if (url.includes('wh-fotos')) API.eliminarFotoDrive({ path: url }).catch(() => {});
+    else if (match)              API.eliminarFotoDrive({ fileId: match[1] }).catch(() => {});
     // [v2.13.185] No silenciar el clear de la columna: si falla, la foto sigue en
     // el servidor y reaparecerá al refrescar → avisar para reintentar. (No revierto
     // local para no mostrar una imagen de Drive que quizá ya se borró.)
