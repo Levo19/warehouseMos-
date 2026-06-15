@@ -279,6 +279,17 @@ const API = (() => {
   // Es transparente: misma firma {ok,data}. NO toca escrituras ni el catálogo.
   const _readInflight = new Map();   // key -> Promise
   const _readCache    = new Map();   // key -> { ts, val }
+  // [perf v2.13.242 · FIX stale-tras-escritura] Tras una ESCRITURA directa que muta
+  // datos (guía creada/cerrada, ajuste, envasado, merma, preingreso…), el micro-cache
+  // de 4s DEBE invalidarse: si no, el refresh inmediato (precargarOperacional(true) /
+  // getStock) caía dentro de la ventana de 4s de una lectura PREVIA y devolvía el
+  // stock/guías VIEJOS (sin el cambio recién hecho) → el operador NO veía su cambio.
+  // Vacía solo el RESULTADO cacheado; NO toca las in-flight (esas ya están en red y se
+  // resuelven solas; vaciar el cache hace que la PRÓXIMA lectura abra un round-trip
+  // fresco). Barato (Map chico) y correcto: justo tras escribir querés datos frescos.
+  function _invalidarLecturas() {
+    try { _readCache.clear(); } catch (_) {}
+  }
   function _dedupRead(key, ttlMs, fn) {
     const inf = _readInflight.get(key);
     if (inf) return inf;                                   // (1) comparte la in-flight
@@ -1742,7 +1753,11 @@ const API = (() => {
     if ((_whEscrituraDirecta() || _whImpresionDirecta() || params._viaDirecta) && navigator.onLine) {
       _opsEnVuelo++; _emitOpsState();
       let timeoutDirecto = false, rechazoPermanente = false;
-      try { const d = await _postDirecto(params); if (d) return d; }
+      // [FIX stale-tras-escritura] Un éxito directo MUTÓ datos en Supabase → invalidar el
+      // micro-cache de lecturas ANTES de devolver, para que el refresh inmediato del front
+      // (precargarOperacional(true)/getStock/getDashboard) lea FRESCO y el operador vea su
+      // cambio al instante (guía/ajuste/envasado/merma/preingreso…), no la versión de hace <4s.
+      try { const d = await _postDirecto(params); if (d) { _invalidarLecturas(); return d; } }
       catch (e) { timeoutDirecto = true; rechazoPermanente = !!(e && e.permanente); }
       finally { _opsEnVuelo--; _emitOpsState(); }
       // [100x rollback-fix] Si llegamos acá con un ítem `_viaDirecta`, _postDirecto NO devolvió éxito
@@ -1761,6 +1776,10 @@ const API = (() => {
       // muestra "Error al subir foto, reintenta" en vez de un fantasma. NUNCA cae al fallback GAS para guías directas.
       if (rechazoPermanente) return { ok: false, error: 'rechazo-directo', _descartar: true };
       if (timeoutDirecto) {
+        // [FIX stale-tras-escritura] El timeout NO garantiza que NO commiteó: la RPC PUDO
+        // aplicar el cambio y perderse la respuesta. Invalidar el micro-cache para que el
+        // refresh del front no sirva datos de hace <4s que omitan ese posible cambio.
+        _invalidarLecturas();
         if (params._fromQueue) return { ok: false, error: 'timeout-directo', _retry: true };
         // [100x rollback-fix] La RPC PUDO commitear en Supabase y perderse la respuesta.
         // Sellamos la VÍA de reintento POR ÍTEM (no por flag global al sincronizar): este
