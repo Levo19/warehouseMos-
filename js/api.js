@@ -144,12 +144,34 @@ const API = (() => {
     const nombre = (nombreSeed != null && String(nombreSeed) !== '' ? String(nombreSeed) : (Date.now() + '_' + Math.random().toString(36).slice(2, 7))) + '.' + ext;
     const path = `${encodeURIComponent(tipo)}/${encodeURIComponent(id)}/${nombre}`;
     const bin = Uint8Array.from(atob(b64), ch => ch.charCodeAt(0));   // base64 → binario
+    // [v2.13.240] CAUSA RAÍZ del 400 "la foto no aparece": el header `x-upsert: true` hacía que Storage
+    // ejecutara INSERT … ON CONFLICT DO UPDATE. Ese camino evalúa la policy de UPDATE (USING) y necesita
+    // LEER la fila en conflicto, pero NO existe policy SELECT para `authenticated` en este bucket → la RLS
+    // rechaza el row → cuerpo {"statusCode":"403", "message":"new row violates row-level security policy"}
+    // que Storage envuelve como HTTP 400 (NO 403 visible) → parecía "payload mal formado". Verificado con curl:
+    // POST sin x-upsert = 200; POST con x-upsert = 400 RLS. El INSERT puro SÍ pasa (policy wh_fotos_insert).
+    // La idempotencia se conserva SIN upsert: el nombre es DETERMINÍSTICO por localId → un reintento al mismo
+    // path devuelve {"statusCode":"409","error":"Duplicate"} → lo tratamos como ÉXITO (la foto ya está ahí).
     const res = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/wh-fotos/${path}`, {
       method: 'POST',
-      headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': mime || 'image/jpeg', 'x-upsert': 'true' },  // [40x #1] upsert: reintento sobreescribe (idempotente)
+      headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': mime || 'image/jpeg' },
       body: bin
     }, 30000);   // 30s — fotos de alta resolución pesan
-    if (!res.ok) throw new Error('storage upload ' + res.status);
+    if (!res.ok) {
+      // El "status" REAL viene en el CUERPO JSON (Storage envuelve casi todo como HTTP 400). Leerlo para decidir.
+      const body = await res.json().catch(() => null);
+      const bodyCode = parseInt((body && body.statusCode), 10) || res.status;
+      // 409 Duplicate = el objeto YA existe en este path determinístico (reintento idempotente) → ÉXITO, no error.
+      if (bodyCode === 409 || (body && /duplicate/i.test(String(body.error || '')))) {
+        return { ok: true, path, url: `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`, preview: `${_SB_URL}/storage/v1/render/image/public/wh-fotos/${path}?width=800&quality=72` };
+      }
+      // [400-loop fix] 4xx (≠429) = rechazo DEFINITIVO de Storage (RLS, mime no permitido, path inválido, payload).
+      // Reintentarlo eternamente solo spamea. Marcamos `.permanente` → post()/cola lo DESCARTAN (no loop infinito).
+      // 429 y 5xx/red = transitorio → error normal (la cola reintenta).
+      const err = new Error('storage upload ' + bodyCode + (body && body.message ? ': ' + body.message : ''));
+      if (bodyCode >= 400 && bodyCode < 500 && bodyCode !== 429) err.permanente = true;
+      throw err;
+    }
     return {
       ok: true, path,
       url:     `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`,                          // original (ver detalle/zoom)
@@ -1095,10 +1117,29 @@ const API = (() => {
       // donde vive la guía G_L… directa) → foto nunca se persistía/mostraba. Todas las 7 guías directas tenían foto=''.
       const b64 = String(params.fotoBase64 || params.fotoBase || '').trim();
       if (!b64) return null;
+      // [v2.13.239] Una guía 'G_L…' nace DIRECTO en Supabase (no existe en el Sheet GUIAS). Para ella, el
+      // fallback a GAS de subirFotoGuia es INÚTIL y DAÑINO: GAS sube la foto a Drive y hace
+      // _actualizarColumnaGuia que busca la fila en el Sheet → no la encuentra → no escribe nada en guias.foto
+      // (de Supabase). El front mostraría la URL de Drive UNA vez y el siguiente getGuia (lectura directa) la
+      // borraría (foto='' en Supabase) = "la foto no aparece / desaparece". Por eso, si la subida a Storage
+      // FALLA (timeout/red) en una guía directa, NO devolvemos null (que iría a GAS): lanzamos un error
+      // TRANSITORIO → post() la encola para REINTENTO DIRECTO (idempotente por el id sembrado del localId →
+      // mismo path en Storage → x-upsert no duplica). Las guías legadas (no 'G_L…') sí caen a GAS como antes.
+      const _esDirecta = String(params.idGuia || '').indexOf('G_L') === 0;
       let url;
-      try { url = (await _subirFotoStorage('guias', String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg', lid)).url; } catch (_) { return null; }
+      try { url = (await _subirFotoStorage('guias', String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg', lid)).url; }
+      catch (e) { if (_esDirecta) throw (e instanceof Error ? e : new Error('storage upload falló')); return null; }
       const out = await _sbRpcWH('actualizar_foto_guia', { p: { id_guia: String(params.idGuia || ''), foto: url } });
-      if (!out || out.ok === false) return null;
+      if (!out || out.ok === false) {
+        // [v2.13.239] La subida a Storage SÍ ocurrió (la foto está en wh-fotos) pero la persistencia en
+        // guias.foto falló. En una guía directa, ir a GAS no la persistiría en Supabase → devolver error
+        // explícito (no null) para que el front avise "Error al subir foto" en vez de mostrar un fantasma
+        // que el próximo refresh borra. _OFF (flag apagado) sí debe caer a GAS (return null) — distinguir.
+        if (_esDirecta && out && out.ok === false && !/_OFF$/.test(String(out.error || ''))) {
+          return { ok: false, error: String(out.error || 'no se pudo guardar la foto') };
+        }
+        return null;
+      }
       // [B5] OCR del comprobante en BACKGROUND (fire-and-forget, igual que el disparo automático de GAS, Fotos.gs:59):
       // no bloquea el ok de la foto; persiste los campos SUNAT cuando Claude responde. Inerte si el flag OCR está OFF.
       _ocrComprobanteGuia(String(params.idGuia || ''), b64, params.mimeType || 'image/jpeg').catch(() => {});
@@ -1662,6 +1703,11 @@ const API = (() => {
         if (rechazoPermanente) return { ok: false, error: 'rechazo-directo', _descartar: true };
         return { ok: false, error: timeoutDirecto ? 'timeout-directo' : 'no-routeable-directo', _retry: true };
       }
+      // [v2.13.240 · 400-loop fix] Rechazo PERMANENTE en el PRIMER intento (no `_viaDirecta`): un 4xx definitivo
+      // de Storage (RLS/mime/path) NO commiteó nada (no hay riesgo de duplicado vía GAS, a diferencia de las RPC
+      // de stock). Encolarlo solo gastaría un reintento garantizado a fallar. Devolvemos el fallo limpio ya: el UI
+      // muestra "Error al subir foto, reintenta" en vez de un fantasma. NUNCA cae al fallback GAS para guías directas.
+      if (rechazoPermanente) return { ok: false, error: 'rechazo-directo', _descartar: true };
       if (timeoutDirecto) {
         if (params._fromQueue) return { ok: false, error: 'timeout-directo', _retry: true };
         // [100x rollback-fix] La RPC PUDO commitear en Supabase y perderse la respuesta.

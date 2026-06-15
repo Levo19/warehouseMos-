@@ -8663,13 +8663,26 @@ const GuiasView = (() => {
     ).then(res => {
       if (res.ok && !res.offline && res.data?.url) {
         _guiaActual.foto = res.data.url;
+        // [v2.13.239] Parejo con eliminarFotoGuia: sincronizar la URL en el cache de lista (`todas`)
+        // y en el cache offline de la guía. Sin esto, al cerrar y reabrir el detalle desde el cache
+        // (o al refrescar la lista) la foto recién subida no aparecía: solo se había escrito en
+        // `_guiaActual`, no en la fuente que repuebla la vista → "no aparece" hasta recargar todo.
+        const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+        if (idx >= 0) todas[idx].foto = res.data.url;
+        try { OfflineManager.patchGuiaCache(_guiaActual.idGuia, { foto: res.data.url }); } catch (_) {}
         _mostrarDetalleSheet(_guiaActual, false);
         toast('Foto guardada', 'ok', 1500);
+      } else if (res.offline) {
+        // [v2.13.239] La subida directa falló (red/timeout) y se encoló para REINTENTO DIRECTO
+        // (no se pierde, no va a GAS). NO mostramos un fantasma: la foto aparecerá cuando la cola
+        // sincronice y el siguiente refresh lea guias.foto. Avisar honestamente que está pendiente.
+        toast('Sin conexión: la foto se subirá al reconectar', 'warn', 3000);
+        _mostrarDetalleSheet(_guiaActual, false);
       } else {
-        toast('Error al subir foto', 'danger');
+        toast('Error al subir foto, reintenta', 'danger');
         _mostrarDetalleSheet(_guiaActual, false);
       }
-    }).catch(() => { toast('Error al subir foto', 'danger'); _mostrarDetalleSheet(_guiaActual, false); });
+    }).catch(() => { toast('Error al subir foto, reintenta', 'danger'); _mostrarDetalleSheet(_guiaActual, false); });
   }
 
   async function copiarFotoDePreingreso() {
@@ -8693,6 +8706,10 @@ const GuiasView = (() => {
       }).catch(() => ({ ok: false, error: 'Sin conexión' }));
       if (res.ok && res.data?.url) {
         _guiaActual.foto = res.data.url;
+        // [v2.13.239] Sincronizar el cache de lista + offline (parejo con onFotoGuiaSeleccionada).
+        const idx = todas.findIndex(g => g.idGuia === _guiaActual.idGuia);
+        if (idx >= 0) todas[idx].foto = res.data.url;
+        try { OfflineManager.patchGuiaCache(_guiaActual.idGuia, { foto: res.data.url }); } catch (_) {}
         _mostrarDetalleSheet(_guiaActual, false);
         toast('Foto copiada', 'ok', 1500);
       } else {
