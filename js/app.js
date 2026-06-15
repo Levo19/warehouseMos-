@@ -20053,16 +20053,14 @@ const ProductosView = (() => {
     _initAuditDia();
     _aplicarQuery();
 
-    // [Fix cutover Supabase] Stock EN VIVO inmediato: pisa el cache (que puede
-    // traer 0 del Sheet congelado) con el stock real de Supabase y re-renderiza.
-    _refrescarStockVivo().then(ok => {
-      if (!ok) return;
-      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
-      _actualizarBadge();
-      _repintarFondo();
-    }).catch(() => {});
-
-    // Refrescar datos en background — actualiza _grupos y re-renderiza si hubo cambios
+    // [perf v2.13.242] Refresco de fondo UNIFICADO. Antes había DOS cadenas en
+    // paralelo (un _refrescarStockVivo suelto + precargarOperacional que adentro
+    // volvía a llamar _refrescarStockVivo) → hasta 3 lecturas de stock + 3
+    // _agrupar() + 3 _repintarFondo() por entrada a la vista. Eso era el churn que
+    // trababa/fluctuaba el cambio de módulo (no la red: _agrupar es pesado con
+    // muchos productos). Ahora: una sola cadena, una reagrupación, un repintado.
+    // El dedup del API (stock_full 4s) ya colapsa stock_enriquecido entre esta
+    // llamada, precargarOperacional y getDashboard a UN round-trip compartido.
     OfflineManager.precargarOperacional().then(async () => {
       _buildMap(OfflineManager.getStockCache());
       // Stock vivo gana sobre el cache operacional (que puede estar congelado).
@@ -20070,7 +20068,17 @@ const ProductosView = (() => {
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _actualizarBadge();
       _repintarFondo();
-    }).catch(() => {});
+    }).catch(async () => {
+      // Si la precarga operacional falla, igual intentamos el stock vivo solo
+      // (cae al dedup/cache si está fresco) para no dejar 0 del Sheet congelado.
+      try {
+        if (await _refrescarStockVivo()) {
+          _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+          _actualizarBadge();
+          _repintarFondo();
+        }
+      } catch (_) {}
+    });
   }
 
   // Re-render desde caché sin spinner ni API call (llamado por wh:data-refresh).

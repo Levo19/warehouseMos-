@@ -268,6 +268,36 @@ const API = (() => {
     return p;
   }
 
+  // ── [perf v2.13.242] Dedup in-flight + micro-cache para LECTURAS pesadas ──
+  // Causa raíz de la ráfaga de ~17 leer_tabla_rls: getDashboard (7 RPCs),
+  // descargarOperacional (6 RPCs) y getStock (1 RPC) se disparaban en paralelo
+  // al navegar/arrancar/timer-60s SIN compartir round-trips, repitiendo las
+  // mismas tablas (guias/preingresos/auditorias) y stock_enriquecido varias
+  // veces en la misma ventana de tiempo. _dedupRead colapsa llamadas idénticas:
+  //   1. si hay una in-flight con la misma clave → devuelve ESA promesa (no abre red).
+  //   2. si terminó hace < ttl ms → devuelve el resultado cacheado (sin red).
+  // Es transparente: misma firma {ok,data}. NO toca escrituras ni el catálogo.
+  const _readInflight = new Map();   // key -> Promise
+  const _readCache    = new Map();   // key -> { ts, val }
+  function _dedupRead(key, ttlMs, fn) {
+    const inf = _readInflight.get(key);
+    if (inf) return inf;                                   // (1) comparte la in-flight
+    const hit = _readCache.get(key);
+    if (hit && (Date.now() - hit.ts) < ttlMs) {            // (2) micro-cache fresco
+      return Promise.resolve(hit.val);
+    }
+    const p = Promise.resolve().then(fn).then(val => {
+      _readCache.set(key, { ts: Date.now(), val });
+      _readInflight.delete(key);
+      return val;
+    }).catch(err => {
+      _readInflight.delete(key);                            // no cachear errores
+      throw err;
+    });
+    _readInflight.set(key, p);
+    return p;
+  }
+
   // Llama una RPC de LECTURA directo a PostgREST (apikey + Bearer + Profile). profile='wh' (default) o 'mos' (catálogo).
   async function _sbRpcWH(fn, args, profile) {
     const prof = profile || 'wh';
@@ -491,10 +521,26 @@ const API = (() => {
     });
   }
   // Lee una tabla wh.* completa directo (RPC genérica leer_tabla_rls, 1 request, sin límite) → shape-hoja.
-  async function _sbLeerTablaWH(tabla) {
-    const out = await _sbRpcWH('leer_tabla_rls', { p_tabla: tabla });
-    if (!out || out.ok === false) throw new Error((out && out.error) || 'leer_tabla error');
-    return _sbRowsToObjsFront(tabla, out.data);
+  // [perf v2.13.242] Dedup + micro-cache 4s: si getDashboard y descargarOperacional
+  // piden 'guias' en la misma ráfaga, se hace UNA sola leer_tabla_rls compartida.
+  // 4s << ciclo de refresh (60s) → no afecta frescura percibida.
+  function _sbLeerTablaWH(tabla) {
+    return _dedupRead('tabla:' + tabla, 4000, async () => {
+      const out = await _sbRpcWH('leer_tabla_rls', { p_tabla: tabla });
+      if (!out || out.ok === false) throw new Error((out && out.error) || 'leer_tabla error');
+      return _sbRowsToObjsFront(tabla, out.data);
+    });
+  }
+
+  // [perf v2.13.242] stock_enriquecido_rls (solo_alertas:false) es el RPC MÁS pesado
+  // (~48KB) y lo piden a la vez getStock, getDashboard, descargarOperacional y
+  // ProductosView._refrescarStockVivo (hasta 3x al entrar a Productos). Dedup+cache
+  // 4s colapsa esa ráfaga en UN solo round-trip compartido. Devuelve la respuesta
+  // CRUDA del RPC {ok,data:[...]} (igual que _sbRpcWH) para no cambiar a los callers.
+  function _sbStockEnriquecidoFull() {
+    return _dedupRead('stock_full', 4000, async () => {
+      return await _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false });
+    });
   }
 
   // [BUG A · cutover] descargarOperacional DIRECTO a Supabase. Cierra el agujero del cutover:
@@ -511,7 +557,7 @@ const API = (() => {
       _sbLeerTablaWH('preingresos'),
       _sbLeerTablaWH('ajustes'),
       _sbLeerTablaWH('auditorias'),
-      _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false })
+      _sbStockEnriquecidoFull()
     ]);
     // stock: mismo shape vivo que API.getStock (stock_enriquecido_rls) — gana al Sheet congelado.
     // [40x] LANZA si el RPC de stock fallo (igual que _sbLeerTablaWH lanza para las otras 5) -> el llamador
@@ -560,7 +606,7 @@ const API = (() => {
     if (action === 'getDashboard') {
       // Agregado de 8 datasets + KPIs. Trae todo en paralelo + cálculo réplica fiel de getDashboard (GAS).
       const [seR, lotes, guias, preingresos, mermas, auditorias, envasados] = await Promise.all([
-        _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false }),
+        _sbStockEnriquecidoFull(),
         _sbLeerTablaWH('lotes_vencimiento'), _sbLeerTablaWH('guias'), _sbLeerTablaWH('preingresos'),
         _sbLeerTablaWH('mermas'), _sbLeerTablaWH('auditorias'), _sbLeerTablaWH('envasados')
       ]);
@@ -571,7 +617,13 @@ const API = (() => {
       return { ok: true, data: _buildDashboardFront(productos, stockMap, lotes, guias, preingresos, mermas, auditorias, envasados) };
     }
     if (action === 'getStock') {
-      const out = await _sbRpcWH('stock_enriquecido_rls', { solo_alertas: String(params.soloAlertas) === 'true' });
+      // [perf v2.13.242] El full-stock (solo_alertas:false) pasa por el dedup compartido
+      // (ProductosView lo pide hasta 3x al entrar + descargarOperacional + getDashboard
+      // lo piden en la misma ráfaga). solo_alertas:true es chico y específico → directo.
+      const soloAlertas = String(params.soloAlertas) === 'true';
+      const out = soloAlertas
+        ? await _sbRpcWH('stock_enriquecido_rls', { solo_alertas: true })
+        : await _sbStockEnriquecidoFull();
       if (!out || out.ok === false) throw new Error((out && out.error) || 'rpc stock error');
       return out;  // {ok:true, data:[...]} — mismo shape que getStock por GAS
     }
@@ -643,7 +695,7 @@ const API = (() => {
     }
     if (action === 'getPendientesEnvasado') {
       // stock EN VIVO (stock_enriquecido) → stockMap {codigoProducto:cantidadDisponible} + productos cache → cálculo réplica fiel.
-      const se = await _sbRpcWH('stock_enriquecido_rls', { solo_alertas: false });
+      const se = await _sbStockEnriquecidoFull();
       if (!se || se.ok === false) throw new Error((se && se.error) || 'stock error');
       const stockMap = {};
       (se.data || []).forEach(s => { stockMap[s.codigoProducto] = parseFloat(s.cantidadDisponible) || 0; });

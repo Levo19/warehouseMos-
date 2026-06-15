@@ -30,6 +30,7 @@ const OfflineManager = (() => {
   // ── Estado ────────────────────────────────────────────────
   let _syncing       = false;
   let _opLoading     = false;  // guard: evitar llamadas concurrent a precargarOperacional
+  let _opInflight    = null;   // [perf v2.13.242] promesa operacional en vuelo → callers concurrentes la REUSAN
   let _lastOpTs      = 0;      // timestamp de la última llamada a precargarOperacional
   const OP_MIN_MS    = 15000;  // mínimo 15s entre llamadas operacionales
   let _masterInflight = null;  // [perf] promesa en vuelo → callers concurrentes la REUSAN (no dispara N fetch)
@@ -588,10 +589,16 @@ const OfflineManager = (() => {
 
   async function precargarOperacional(forzar = false) {
     if (!navigator.onLine) return;
-    if (_opLoading) return;
+    // [perf v2.13.242] Dedup in-flight: si ya hay una precarga operacional corriendo,
+    // los callers concurrentes (nav rápido entre módulos + timer 60s + visibilitychange +
+    // cada View.cargar) REUSAN esa promesa. Antes el guard `_opLoading` devolvía
+    // undefined → el caller leía cache STALE y, peor, "saltar rápido" encolaba intentos.
+    // Ahora coalescen en UNA descarga; sus .then leen el MISMO cache fresco.
+    if (_opInflight) return _opInflight;
     if (!forzar && Date.now() - _lastOpTs < OP_MIN_MS) return;
     _opLoading = true;
     _lastOpTs  = Date.now();
+    _opInflight = (async () => {
     try {
       // [BUG A · cutover] Pasar por API.descargarOperacional (no fetch crudo a GAS): así,
       // si el dispositivo escribe/lee directo a Supabase, el operacional se trae DIRECTO y el
@@ -675,9 +682,17 @@ const OfflineManager = (() => {
       _persist(KEYS.AJUSTES,      d.ajustes,    'ajustes');
       _persist(KEYS.AUDITORIAS_C, d.auditorias, 'auditorias');
 
-      window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } }));
+      // [perf v2.13.242] Solo notificar si REALMENTE cambió algo. Antes se
+      // disparaba wh:data-refresh en cada poll aunque `changed` fuera []; aunque
+      // los listeners filtran por dataset, el evento igual despierta a todos los
+      // handlers en cada ciclo. Sin cambios → no se molesta a nadie.
+      if (changed.length) {
+        window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } }));
+      }
     } catch(e) { console.warn('[Offline] Error en precarga operacional:', e); }
-    finally { _opLoading = false; }
+    finally { _opLoading = false; _opInflight = null; }
+    })();
+    return _opInflight;
   }
 
   // Inicia el refresh automático cada 60s (llamar desde App.init, antes del login)
