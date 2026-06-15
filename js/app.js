@@ -3882,9 +3882,10 @@ const App = (() => {
 
     // Tipo guía → mostrar/ocultar zona
     document.getElementById('guiaTipo')?.addEventListener('change', e => {
-      const isZona = e.target.value === 'SALIDA_ZONA';
+      const v = e.target.value;
+      const isZona = v === 'SALIDA_ZONA' || v === 'INGRESO_DEVOLUCION_ZONA';
       document.getElementById('guiaZonaRow').classList.toggle('hidden', !isZona);
-      const isIngProv = e.target.value === 'INGRESO_PROVEEDOR';
+      const isIngProv = v === 'INGRESO_PROVEEDOR';
       document.getElementById('guiaProvRow').classList.toggle('hidden', !isIngProv);
     });
 
@@ -4286,6 +4287,7 @@ const App = (() => {
       if (guiasRecientes.length) {
         const TIPO_SHORT = {
           INGRESO_PROVEEDOR:'Ingreso Prov.', INGRESO_JEFATURA:'Ing. Jefatura',
+          INGRESO_DEVOLUCION_ZONA:'Dev. Zona',
           SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
           SALIDA_JEFATURA:'Sal. Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
         };
@@ -4488,6 +4490,7 @@ const App = (() => {
     dashboard: {
       titulo: '📊 Dashboard · acción rápida',
       items: [
+        { ico:'⚡', tit:'Modo Envasador',  sub:'Envasar productos a granel', act:() => { try { irAEnvasador(); } catch(_){} } },
         { ico:'⚠', tit:'Ver alertas',     sub:'Stock bajo + diferencias', act:() => { nav('dashboard'); if (typeof Dashboard !== 'undefined' && Dashboard.verTodasAlertas) Dashboard.verTodasAlertas(); } },
         { ico:'🔄', tit:'Forzar sync',     sub:'Recargar datos del server', act:() => { OfflineManager.precargarOperacional?.(true); if (typeof toast === 'function') toast('Sincronizando…', 'info', 1500); } },
         { ico:'🏠', tit:'Ir al inicio',    sub:'Cargar Dashboard',           act:() => nav('dashboard') }
@@ -4498,6 +4501,7 @@ const App = (() => {
       items: [
         { ico:'📋', tit:'Nueva guía',         sub:'Ingreso o salida',          act:() => { nav('guias'); setTimeout(() => abrirTypePicker(), 180); } },
         { ico:'📥', tit:'Nuevo preingreso',   sub:'Recepción de proveedor',    act:() => { nav('preingresos'); setTimeout(() => { if (window.PreingresosView && PreingresosView.nuevo) PreingresosView.nuevo(); }, 200); } },
+        { ico:'⚡', tit:'Modo Envasador',     sub:'Envasar productos a granel', act:() => { try { irAEnvasador(); } catch(_){} } },
         { ico:'🛺', tit:'Cargadores del día', sub:'Sumar al resumen',          act:() => { if (window.Cargadores) Cargadores.abrir(); } },
         { ico:'🗑', tit:'Cesta de mermas',    sub:'Pendientes + procesar',     act:() => { if (window.Mermas) Mermas.abrirCesta(); } }
       ]
@@ -4632,14 +4636,14 @@ const App = (() => {
     const title = dir === 'INGRESO' ? '↓ INGRESO · ¿de dónde viene?' : '↑ SALIDA · ¿a dónde va?';
     const opts = dir === 'INGRESO'
       ? [
-          { tipo: 'INGRESO_PROVEEDOR',  ico: '🛺', titulo: 'De PROVEEDOR',         desc: 'Compra normal · catálogo proveedores' },
-          { tipo: 'INGRESO_JEFATURA',   ico: '👤', titulo: 'De JEFATURA',          desc: 'Devolución admin · admin+master MOS' },
+          { tipo: 'INGRESO_PROVEEDOR',  ico: '🚚', titulo: 'De PROVEEDOR',         desc: 'Compra normal · catálogo proveedores' },
+          { tipo: 'INGRESO_JEFATURA',   ico: '🧑‍💼', titulo: 'De JEFATURA',          desc: 'Devolución admin · admin+master MOS' },
           { tipo: 'INGRESO_DEVOLUCION_ZONA', ico: '📍', titulo: 'De ZONA (devolución)', desc: 'Material que regresa de una zona' }
         ]
       : [
           { tipo: 'SALIDA_ZONA',        ico: '📍', titulo: 'A ZONA (despacho)', desc: 'Lo más frecuente · catálogo de zonas' },
-          { tipo: 'SALIDA_JEFATURA',    ico: '👤', titulo: 'A JEFATURA',        desc: 'Entrega a admin · admin+master MOS' },
-          { tipo: 'SALIDA_DEVOLUCION',  ico: '🛺', titulo: 'Devol. a PROVEEDOR', desc: 'Casos especiales · catálogo proveedores' }
+          { tipo: 'SALIDA_JEFATURA',    ico: '🧑‍💼', titulo: 'A JEFATURA',        desc: 'Entrega a admin · admin+master MOS' },
+          { tipo: 'SALIDA_DEVOLUCION',  ico: '🚚', titulo: 'Devol. a PROVEEDOR', desc: 'Casos especiales · catálogo proveedores' }
         ];
     document.getElementById('subtypeTitle').textContent = title;
     const html = opts.map(o => `
@@ -5129,6 +5133,7 @@ const GuiasView = (() => {
 
   const TIPO_LABELS = {
     INGRESO_PROVEEDOR: 'Proveedor', INGRESO_JEFATURA: 'Jefatura',
+    INGRESO_DEVOLUCION_ZONA: 'Devolución de zona',
     SALIDA_ZONA: 'Zona',  SALIDA_DEVOLUCION: 'Devolución',
     SALIDA_JEFATURA: 'Jefatura', SALIDA_ENVASADO: 'Envasado', SALIDA_MERMA: 'Merma'
   };
@@ -8984,6 +8989,14 @@ const GuiasView = (() => {
     nueva();
     const sel = document.getElementById('guiaTipo');
     if (sel) {
+      // [fix] Guardia: si el <option> no existe, `sel.value = X` falla en silencio
+      // y el select se queda en el primer valor (INGRESO_PROVEEDOR) → la guía se
+      // creaba con el tipo equivocado. Verificamos que el tipo elegido exista.
+      const existe = Array.prototype.some.call(sel.options, o => o.value === subtipo);
+      if (!existe) {
+        if (typeof toast === 'function') toast('Tipo de guía no disponible: ' + subtipo, 'danger');
+        return;
+      }
       sel.value = subtipo;
       // Disparar el change handler para sincronizar UI (mostrar/ocultar zona/proveedor)
       sel.dispatchEvent(new Event('change'));
@@ -9234,6 +9247,7 @@ const GuiasView = (() => {
     const numItems  = detCache.filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO').length;
     const TIPO_LABELS_WA = {
       INGRESO_PROVEEDOR:'Ingreso Proveedor', INGRESO_JEFATURA:'Ingreso Jefatura',
+      INGRESO_DEVOLUCION_ZONA:'Ingreso Devolución de Zona',
       SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
       SALIDA_JEFATURA:'Salida Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
     };
