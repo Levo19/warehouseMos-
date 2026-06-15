@@ -5130,6 +5130,32 @@ const GuiasView = (() => {
   // [v2.13.223] Efectos de capa visual (no afectan datos/lógica)
   let _animarEntrada = false; // stagger de entrada solo en 1er render tras entrar a la vista
   let _glowTarget    = null;  // idGuia a resaltar con glow breve (recién creada/abierta)
+  // [perf] Índices precomputados UNA vez por render() y consumidos por _renderGuiaCard.
+  // Antes cada card filtraba el guia_detalle COMPLETO (≈99KB) y el cache PN entero →
+  // O(cards × detalle) = freeze del hilo con histórico largo. Ahora O(detalle + cards):
+  // se agrupan los detalles/PN por idGuia una sola vez y la card hace un lookup directo.
+  let _detPorGuia = null;  // Map<idGuia, [lineas no-ANULADO]>
+  let _pnPendPorGuia = null; // Map<idGuia, nº PN pendientes>
+  function _construirIndicesRender() {
+    const det = OfflineManager.getGuiaDetalleCache() || [];
+    const m = new Map();
+    for (let i = 0; i < det.length; i++) {
+      const d = det[i];
+      if (d.observacion === 'ANULADO') continue;
+      const k = d.idGuia;
+      let arr = m.get(k); if (!arr) { arr = []; m.set(k, arr); }
+      arr.push(d);
+    }
+    _detPorGuia = m;
+    const pn = OfflineManager.getPNCache() || [];
+    const mp = new Map();
+    for (let i = 0; i < pn.length; i++) {
+      const p = pn[i];
+      if (p.estado !== 'PENDIENTE') continue;
+      mp.set(p.idGuia, (mp.get(p.idGuia) || 0) + 1);
+    }
+    _pnPendPorGuia = mp;
+  }
 
   const TIPO_LABELS = {
     INGRESO_PROVEEDOR: 'Proveedor', INGRESO_JEFATURA: 'Jefatura',
@@ -5347,8 +5373,9 @@ const GuiasView = (() => {
 
     // Guías de envasado: card gris, solo lectura
     if (isEnvasado) {
-      const detCache = OfflineManager.getGuiaDetalleCache();
-      const numItems = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO').length;
+      // [perf] lookup directo al índice precomputado por render() (fallback al filtro
+      // global solo si la card se renderiza fuera de render(), p.ej. tras un evento suelto).
+      const numItems = (_detPorGuia ? (_detPorGuia.get(g.idGuia) || []) : OfflineManager.getGuiaDetalleCache().filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO')).length;
       return `
       <div class="guia-card" id="guia-${(g.idGuia||'').replace(/[^a-zA-Z0-9_-]/g,'_')}"
            style="border-left-color:#475569;opacity:.65;cursor:default"
@@ -5382,8 +5409,9 @@ const GuiasView = (() => {
              class="pre-qtag pre-qtag-blue" title="Ver preingreso" style="cursor:pointer;user-select:none">📋</span>`
       : '';
 
-    const detCache  = OfflineManager.getGuiaDetalleCache();
-    const detItems  = detCache.filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO');
+    // [perf] índice precomputado por render() (O(1) lookup) — fallback al filtro global
+    // si se renderiza una card aislada sin pasar por render().
+    const detItems  = _detPorGuia ? (_detPorGuia.get(g.idGuia) || []) : OfflineManager.getGuiaDetalleCache().filter(d => d.idGuia === g.idGuia && d.observacion !== 'ANULADO');
     const numItems  = detItems.length;
     const totalUds  = detItems.reduce((s, d) => s + (parseFloat(d.cantidadRecibida) || 0), 0);
     const udsStr    = totalUds % 1 === 0 ? String(totalUds) : fmt(totalUds, 1);
@@ -5391,7 +5419,7 @@ const GuiasView = (() => {
       ? `<span class="gcount-pill" title="${numItems} producto(s) · ${udsStr} unidad(es)">📦 <span class="gc-num">${numItems}</span> prod · <span class="gc-num">${udsStr}</span> uds</span>`
       : '';
 
-    const pnPend  = (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
+    const pnPend  = _pnPendPorGuia ? (_pnPendPorGuia.get(g.idGuia) || 0) : (OfflineManager.getPNCache() || []).filter(p => p.idGuia === g.idGuia && p.estado === 'PENDIENTE').length;
     const pnBadge = pnPend ? `<span style="background:#78350f;color:#fde68a;font-size:9px;font-weight:800;
       padding:2px 6px;border-radius:4px;flex-shrink:0;letter-spacing:.04em;cursor:pointer"
       onclick="event.stopPropagation();GuiasView.abrirModalPN('',${JSON.stringify(g.idGuia)})"
@@ -5436,6 +5464,9 @@ const GuiasView = (() => {
   function render(list) {
     const container = document.getElementById('listGuias');
     if (!container) return;
+    // [perf] Agrupa detalle (≈99KB) + PN por idGuia UNA sola vez para todas las cards
+    // de este render. Sin esto cada card escaneaba el detalle completo (O(cards×detalle)).
+    _construirIndicesRender();
     const optCards = Array.from(container.querySelectorAll('.card-optimistic'));
     if (!list.length) {
       // [v2.13.188] Distinguir "no hay" de "sin coincidencias" (filtro/búsqueda activos)
@@ -8741,7 +8772,9 @@ const GuiasView = (() => {
           const canvas = document.createElement('canvas');
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          // [perf foto] q 0.82→0.72: ~30-40% menos bytes a subir (la foto de comprobante
+          // sigue legible para humano y OCR). Subida mucho más rápida en 3G/celular.
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
           resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
         };
         img.src = ev.target.result;
@@ -17182,7 +17215,9 @@ const PreingresosView = (() => {
           const canvas = document.createElement('canvas');
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          // [perf foto] q 0.82→0.72: ~30-40% menos bytes a subir, foto de preingreso
+          // sigue legible (humano + OCR). Cada foto sube mucho más rápido.
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
           resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
         };
         img.src = ev.target.result;
