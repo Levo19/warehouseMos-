@@ -19618,16 +19618,28 @@ const ProductosView = (() => {
   let _cardSnapshots = new Map(); // skuBase → snapshot (string) para diff
 
   function _snapshotGrupo(g) {
-    // Campos que pueden cambiar entre refreshes y deben triggerear update
+    // Campos que pueden cambiar entre refreshes y deben triggerear update.
+    // [v2.13.236 AUDIT] Además de stockTotal, incluimos el stock POR HIJO y la
+    // proyección. Sin esto el diff dejaba cards STALE en dos casos reales:
+    //   • dos hijos que cambian en sentidos opuestos y se cancelan en el total
+    //     (total idéntico → snapshot idéntico → filas de hijos desplegados con
+    //     stock viejo).
+    //   • cambio en guías ABIERTAS (proyectado +recibir/−salir) sin tocar el real.
+    const childStock = g.children
+      .map(c => (_s(c.codigoBarra).cantidadDisponible || 0))
+      .join(',');
+    const p = g._proy || {};
     return [
       g.stockTotal,
+      childStock,
       g.bajoMin ? 1 : 0,
       g._dormido ? 1 : 0,
       g._porVencer ? 1 : 0,
       g.children.length,
       g.base.descripcion || '',
       g.base.stockMinimo || 0,
-      g.base.stockMaximo || 0
+      g.base.stockMaximo || 0,
+      (p.porRecibir || 0) + '/' + (p.porSalir || 0)
     ].join('·');
   }
 
