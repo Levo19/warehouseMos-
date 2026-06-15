@@ -543,6 +543,23 @@ const API = (() => {
     });
   }
 
+  // [CARGA INTELIGENTE Guías] Detalle operacional FILTRADO server-side (wh.guia_detalle_operacional):
+  // SOLO líneas de guías ABIERTA (cualquier edad → la proyección las necesita) + guías de los últimos
+  // _GD_DIAS días (cubren rotación 30d, último-mov, conteo de líneas de card y el detalle instantáneo
+  // al abrir una guía reciente). El detalle de guías CERRADAS viejas NO se precarga: verDetalle cae a
+  // getGuia (get_guia_rls per-guía) al abrirla; el Historial real sale de stock_movimientos
+  // (getHistorialStock, autoritativo); el chat usa getGuia per-guía. Acota el payload global (que crecía
+  // sin techo con el histórico) a una ventana rodante. Mismo shape que leer_tabla_rls('guia_detalle')
+  // → _sbRowsToObjsFront('guia_detalle', ...) sin cambios. Dedup 4s como el resto.
+  const _GD_DIAS = 60;
+  function _sbGuiaDetalleOperacional() {
+    return _dedupRead('guia_detalle_op:' + _GD_DIAS, 4000, async () => {
+      const out = await _sbRpcWH('guia_detalle_operacional', { p_dias: _GD_DIAS });
+      if (!out || out.ok === false) throw new Error((out && out.error) || 'guia_detalle_op error');
+      return _sbRowsToObjsFront('guia_detalle', out.data);
+    });
+  }
+
   // [perf v2.13.242] stock_enriquecido_rls (solo_alertas:false) es el RPC MÁS pesado
   // (~48KB) y lo piden a la vez getStock, getDashboard, descargarOperacional y
   // ProductosView._refrescarStockVivo (hasta 3x al entrar a Productos). Dedup+cache
@@ -564,7 +581,7 @@ const API = (() => {
   async function _descargarOperacionalDirecto() {
     const [guias, detalles, preingresos, ajustes, auditorias, stockR] = await Promise.all([
       _sbLeerTablaWH('guias'),
-      _sbLeerTablaWH('guia_detalle'),
+      _sbGuiaDetalleOperacional(),  // [CARGA INTELIGENTE] detalle filtrado (abiertas + últimos _GD_DIAS), NO el global
       _sbLeerTablaWH('preingresos'),
       _sbLeerTablaWH('ajustes'),
       _sbLeerTablaWH('auditorias'),
