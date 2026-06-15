@@ -258,7 +258,18 @@ const API = (() => {
       },
       body: JSON.stringify(args || {})
     }, 12000);
-    if (!res.ok) throw new Error('rpc directo HTTP ' + res.status);
+    if (!res.ok) {
+      // [400-loop fix] Distinguir un RECHAZO definitivo del servidor (HTTP 4xx:
+      // request mal formado / función con firma que no existe / args inválidos)
+      // de un fallo transitorio (timeout/red/5xx). Un 4xx NO commitea (PostgREST
+      // corre la función en una sola transacción que hace rollback ante error) →
+      // es SEGURO que la cola descarte el ítem en vez de reintentarlo para siempre.
+      // 408 (timeout) y 429 (rate limit) son transitorios → NO se marcan permanentes.
+      const e = new Error('rpc directo HTTP ' + res.status);
+      e.status = res.status;
+      e.permanente = (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429);
+      throw e;
+    }
     return res.json();
   }
 
@@ -1619,15 +1630,18 @@ const API = (() => {
     // Si fuera a GAS, GAS no tiene su localId en SYNC_LOG → lo ejecutaría → DOBLE STOCK / DOBLE GUÍA.
     if ((_whEscrituraDirecta() || _whImpresionDirecta() || params._viaDirecta) && navigator.onLine) {
       _opsEnVuelo++; _emitOpsState();
-      let timeoutDirecto = false;
+      let timeoutDirecto = false, rechazoPermanente = false;
       try { const d = await _postDirecto(params); if (d) return d; }
-      catch (_) { timeoutDirecto = true; }
+      catch (e) { timeoutDirecto = true; rechazoPermanente = !!(e && e.permanente); }
       finally { _opsEnVuelo--; _emitOpsState(); }
       // [100x rollback-fix] Si llegamos acá con un ítem `_viaDirecta`, _postDirecto NO devolvió éxito
       // (devolvió null o lanzó). Ir a GAS NUNCA es seguro para estos ítems (duplicaría: GAS no comparte el
       // SYNC_LOG de Supabase). Lo dejamos en la cola para reintento DIRECTO posterior (sincronizar() lo verá
       // 'error' por el _retry y volverá a llamar API._postCola → _postDirecto). Nunca cae al GAS de abajo.
+      // [400-loop fix] EXCEPTO si el servidor lo RECHAZÓ con un 4xx definitivo (no commiteó): reintentarlo
+      // eternamente solo spamea la consola. _descartar:true → la cola lo da por terminado sin mandarlo a GAS.
       if (params._viaDirecta) {
+        if (rechazoPermanente) return { ok: false, error: 'rechazo-directo', _descartar: true };
         return { ok: false, error: timeoutDirecto ? 'timeout-directo' : 'no-routeable-directo', _retry: true };
       }
       if (timeoutDirecto) {

@@ -471,6 +471,16 @@ const OfflineManager = (() => {
           }).then(r => r.json());
         }
 
+        // [400-loop fix] Un ítem `_viaDirecta` rechazado por el servidor con un 4xx
+        // definitivo (no commiteó) llega con `_descartar:true`. NO tiene sentido
+        // reintentarlo: lo damos por terminado ('synced' lo purga en limpiarSincronizados)
+        // para que no spamee la consola con POST .../rpc/... 400 en cada ciclo de sync.
+        // Solo descartamos ante un rechazo explícito del servidor, nunca ante timeout/red.
+        if (res && res._descartar) {
+          try { console.warn('[cola] ítem descartado por rechazo definitivo del servidor:', item.action, item.localId, res.error); } catch (_) {}
+          _actualizarItemQueue(item.localId, 'synced');
+          continue;
+        }
         _actualizarItemQueue(item.localId, (res && res.ok) ? 'synced' : 'error');
         if (res && res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
       } catch {

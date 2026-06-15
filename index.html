@@ -822,10 +822,14 @@
       border-top:1px solid rgba(148,163,184,.18);
       box-shadow:0 -18px 50px rgba(0,0,0,.55);
       padding:14px 16px calc(20px + env(safe-area-inset-bottom,0px));
-      transform:translateY(100%);transition:transform .3s ease;
+      transform:translateY(100%);transition:transform .3s ease,visibility .3s;
       max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+      /* Oculto por defecto: invisible y SIN capturar toques mientras esté
+         cerrado. Imprescindible en PC, donde el media query lo centra y el
+         transform NO lo saca de pantalla (antes bloqueaba toda la app). */
+      visibility:hidden;pointer-events:none;
     }
-    .cfg-sheet.open { transform:none; }
+    .cfg-sheet.open { transform:none;visibility:visible;pointer-events:auto; }
     .cfg-grab { width:42px;height:4px;background:#475569;border-radius:99px;margin:2px auto 12px; }
     .cfg-head { display:flex;align-items:center;gap:12px;margin-bottom:4px; }
     .cfg-head-av { width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
@@ -7828,6 +7832,15 @@
         <p style="font-size:13px;font-weight:800;color:#f1f5f9" id="sideUserMenuName">—</p>
         <p style="font-size:11px;color:#64748b;margin-top:3px">Operador activo</p>
       </div>
+      <button onclick="event.stopPropagation();App.closeSideUserMenu();ConfigPanel.abrir()"
+              style="width:100%;text-align:left;padding:13px 16px;font-size:13.5px;color:#cbd5e1;
+                     background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:10px;
+                     border-radius:10px;transition:background .12s"
+              onmouseenter="this.style.background='rgba(255,255,255,.06)'" onmouseleave="this.style.background='none'"
+              ontouchstart="this.style.background='rgba(255,255,255,.06)'" ontouchend="this.style.background='none'">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.376l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/></svg>
+        Configuración
+      </button>
       <button onclick="event.stopPropagation();App.closeSideUserMenu();Session.bloquear()"
               style="width:100%;text-align:left;padding:13px 16px;font-size:13.5px;color:#cbd5e1;
                      background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:10px;

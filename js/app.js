@@ -11029,7 +11029,8 @@ const ConfigPanel = (() => {
     if (!ov || !sh) return;
     _pintar();
     ov.classList.add('open');
-    sh.style.display = '';
+    // La visibilidad la gobierna la clase .open en CSS (visibility/pointer-events).
+    // No tocamos display para no romper la transición del slide/centrado.
     requestAnimationFrame(() => sh.classList.add('open'));
     try { if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click(); } catch (_) {}
     try { vibrate(8); } catch (_) {}
