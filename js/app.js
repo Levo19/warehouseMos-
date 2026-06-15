@@ -4146,7 +4146,7 @@ const App = (() => {
     if (st)  st.textContent = '';
     try {
       await OfflineManager.sincronizar();
-      await OfflineManager.precargar();
+      await OfflineManager.precargar('manual');  // sync explícito del usuario: ignora el piso anti-ráfaga
       if (st) st.textContent = '✅ Sincronizado ' + new Date().toLocaleTimeString('es-PE');
       toast('Sincronización completada', 'ok');
     } catch(e) {
@@ -18458,6 +18458,7 @@ const ProductosView = (() => {
   let _histTarget   = null;  // { codigo, nombre }
   let _queryActual  = '';    // búsqueda activa (para sobrevivir bg-refresh)
   let _renderGen    = 0;     // cancela chunks de render anteriores
+  let _renderChunking = false; // [perf] true mientras _render() pinta por chunks; _renderDiff espera para no duplicar cards
 
   // ── Estado de ajuste manual ───────────────────────────────
   let _ajusteTarget = null; // { codigoBarra, nombre }
@@ -18700,7 +18701,7 @@ const ProductosView = (() => {
   // Precomputa rotación y último movimiento UNA vez para todos los grupos (O(m+n), no O(m×n))
   function _render(grupos) {
     const el = document.getElementById('listProductos');
-    if (!grupos.length) { el.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>'; return; }
+    if (!grupos.length) { el.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>'; _cardSnapshots.clear(); return; }
 
     // Invalidar cualquier render chunked anterior
     const gen = ++_renderGen;
@@ -18722,20 +18723,31 @@ const ProductosView = (() => {
       if (fecha && new Date(fecha) >= hace30) cbCount[cb] = (cbCount[cb] || 0) + 1;
     });
 
+    // [v2.13.236 perf] Sembrar snapshots para que un _renderDiff posterior (refresh
+    // de fondo) reconozca estas cards como "sin cambios" y NO las reemplace/flashee.
+    // Sin esto, el primer refresh tras un _render completo repintaba TODO (parpadeo).
+    _cardSnapshots.clear();
+    grupos.forEach(g => {
+      const sid = g.skuBase.replace(/[^a-zA-Z0-9_-]/g, '_');
+      _cardSnapshots.set(sid, _snapshotGrupo(g));
+    });
+
     const CHUNK = 40;
     // Primer bloque: render síncrono — el usuario ve contenido de inmediato
     el.innerHTML = grupos.slice(0, CHUNK).map(g => _cardGrupo(g, cbCount, cbFecha)).join('');
 
-    if (grupos.length <= CHUNK) return;
+    if (grupos.length <= CHUNK) { _renderChunking = false; return; }
 
     // Bloques restantes: se agregan progresivamente sin bloquear el hilo principal
+    _renderChunking = true;
     let i = CHUNK;
     const renderNext = () => {
       if (gen !== _renderGen) return; // render más reciente en curso, cancelar
-      if (i >= grupos.length) return;
+      if (i >= grupos.length) { _renderChunking = false; return; }
       el.insertAdjacentHTML('beforeend', grupos.slice(i, i + CHUNK).map(g => _cardGrupo(g, cbCount, cbFecha)).join(''));
       i += CHUNK;
       if (i < grupos.length) setTimeout(renderNext, 0);
+      else _renderChunking = false;
     };
     setTimeout(renderNext, 0);
   }
@@ -19622,13 +19634,21 @@ const ProductosView = (() => {
   // Render con diff: si la card existe y su snapshot no cambió, no la toca.
   // Si cambió, reemplaza el HTML in-place + flash sutil.
   // Si es nuevo, append. Si desapareció, remove.
+  // Devuelve true si tocó el DOM (insertó/actualizó/quitó alguna card). El caller
+  // usa esto para NO disparar el pulso visual "refrescando" si nada cambió → cero parpadeo.
   function _renderDiff(grupos) {
     const list = document.getElementById('listProductos');
-    if (!list) return;
+    if (!list) return false;
+    // [perf] No diffear mientras _render() aún pinta cards por chunks: las cards
+    // pendientes no existen en el DOM todavía → _renderDiff las "añadiría" y luego
+    // el chunk las volvería a insertar (duplicados). Las snapshots ya están sembradas,
+    // así que el dato fresco quedará reflejado en el próximo refresh.
+    if (_renderChunking) return false;
     if (!grupos.length) {
-      list.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>';
+      const teniaCards = !!list.querySelector('.prod-card');
+      if (teniaCards) list.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin productos</p>';
       _cardSnapshots.clear();
-      return;
+      return teniaCards;
     }
 
     // Pre-cómputo de cbCount/cbFecha (usa la misma lógica que _render)
@@ -19663,6 +19683,7 @@ const ProductosView = (() => {
         const newCard = tmp.firstElementChild;
         list.appendChild(newCard);
         _cardSnapshots.set(sid, newSnap);
+        huboCambios++;
         return;
       }
       if (oldSnap === newSnap) {
@@ -19686,8 +19707,10 @@ const ProductosView = (() => {
       if (id && !newKeys.has(id)) {
         c.remove();
         _cardSnapshots.delete(id);
+        huboCambios++;
       }
     });
+    return huboCambios > 0;
   }
 
   // Helper para filtrar por query sin recargar todo el flow de buscar()
@@ -19937,6 +19960,30 @@ const ProductosView = (() => {
     });
   }
 
+  // [v2.13.236 perf] Repaint de fondo NO destructivo: si ya hay cards pintadas y
+  // estamos en Productos, usa _renderDiff (solo toca lo que cambió) en vez de
+  // _aplicarQuery (que hace innerHTML completo y "recarga todos los objetos" cada
+  // vez que un refresh de fondo resuelve → parpadeo + sensación de lentitud al
+  // entrar/saltar de módulo). Pulsa el chip solo si algo cambió.
+  function _repintarFondo() {
+    const list = document.getElementById('listProductos');
+    const yaRenderizado = list && list.querySelector('.prod-card');
+    const _vistaProd = (typeof currentView !== 'undefined' && currentView === 'productos');
+    if (yaRenderizado && _vistaProd && !_auditModo) {
+      const visibles = _aplicarFiltroChip(
+        _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
+      );
+      const cambio = _renderDiff(visibles);
+      _renderMetrics();
+      if (cambio) {
+        const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
+        if (chipAll) { chipAll.classList.add('is-refreshing'); setTimeout(() => chipAll.classList.remove('is-refreshing'), 800); }
+      }
+    } else {
+      _aplicarQuery();
+    }
+  }
+
   // ── Cargar ──────────────────────────────────────
   async function cargar() {
     // [Parte 1] Spinner SOLO si no hay nada que pintar todavía. Si ya tenemos
@@ -19965,7 +20012,7 @@ const ProductosView = (() => {
       if (!ok) return;
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _actualizarBadge();
-      _aplicarQuery();
+      _repintarFondo();
     }).catch(() => {});
 
     // Refrescar datos en background — actualiza _grupos y re-renderiza si hubo cambios
@@ -19975,7 +20022,7 @@ const ProductosView = (() => {
       await _refrescarStockVivo();
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _actualizarBadge();
-      _aplicarQuery();
+      _repintarFondo();
     }).catch(() => {});
   }
 
@@ -19987,13 +20034,17 @@ const ProductosView = (() => {
     const equivs = OfflineManager.getEquivalenciasCache();
     _buildMap(OfflineManager.getStockCache());
     _grupos = _agrupar(prods, equivs);
-    // Indicador sutil: chip "todos" parpadea brevemente
-    const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
-    if (chipAll) {
+    // [v2.13.236 perf] El pulso visual del chip "todos" SOLO se muestra si el
+    // re-render realmente tocó alguna card. Antes parpadeaba en cada refresh de
+    // fondo aunque el catálogo/stock fuera idéntico → "parpadea cada cierto tiempo".
+    const _pulsarChip = () => {
+      const chipAll = document.querySelector('#prodChipsRow [data-filter="all"]');
+      if (!chipAll) return;
       chipAll.classList.add('is-refreshing');
       setTimeout(() => chipAll.classList.remove('is-refreshing'), 800);
-    }
+    };
     // Render desde el estado actual (diff si la vista está visible).
+    // Devuelve true si tocó el DOM → el caller decide si pulsa el chip.
     const _repintar = () => {
       const list = document.getElementById('listProductos');
       const yaRenderizado = list && list.querySelector('.prod-card');
@@ -20004,13 +20055,15 @@ const ProductosView = (() => {
         const visibles = _aplicarFiltroChip(
           _queryActual ? _grupos.filter(g => _matchQuery(g, _queryActual)) : _grupos
         );
-        _renderDiff(visibles);
+        const cambio = _renderDiff(visibles);
         _renderMetrics();
+        return cambio;
       } else {
         _aplicarQuery();
+        return false; // primer pintado completo: sin pulso (no es un "refresh")
       }
     };
-    _repintar();
+    if (_repintar()) _pulsarChip();
     // [Fix cutover Supabase] El cache wh_stock (descargarOperacional) puede estar
     // congelado (Sheet). El stock vivo de Supabase debe GANAR: tras pintar desde
     // cache, traemos el stock en vivo y, si difiere, reagrupamos y repintamos.
@@ -20018,7 +20071,7 @@ const ProductosView = (() => {
     _refrescarStockVivo().then(ok => {
       if (!ok) return;
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
-      _repintar();
+      if (_repintar()) _pulsarChip(); // pulso solo si el stock vivo cambió algo en pantalla
     }).catch(() => {});
   }
 

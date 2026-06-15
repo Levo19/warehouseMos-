@@ -32,9 +32,18 @@ const OfflineManager = (() => {
   let _opLoading     = false;  // guard: evitar llamadas concurrent a precargarOperacional
   let _lastOpTs      = 0;      // timestamp de la última llamada a precargarOperacional
   const OP_MIN_MS    = 15000;  // mínimo 15s entre llamadas operacionales
-  let _masterLoading = false;  // guard: evitar llamadas concurrent a precargar (maestros)
-  let _lastMasterTs  = 0;      // timestamp de la última llamada a precargar
-  const MASTER_MIN_MS = 60000; // maestros: mínimo 60s (cambian poco)
+  let _masterInflight = null;  // [perf] promesa en vuelo → callers concurrentes la REUSAN (no dispara N fetch)
+  let _lastMasterTs  = 0;      // timestamp de la última llamada (que SÍ ejecutó) a precargar
+  const MASTER_MIN_MS = 60000; // maestros: mínimo 60s entre refresh background (cambian poco)
+  // [v2.13.236 perf] Piso DURO que incluso forzar=true respeta. Mata la "ráfaga" de
+  // descargarMaestros: login + welcome + init + reconexión disparaban precargar(true)
+  // espalda-con-espalda y cada uno bajaba el catálogo completo (lento + parseo que
+  // traba la nav). Solo el sync MANUAL del usuario (forzar==='manual') lo ignora.
+  const MASTER_HARD_MS = 8000;
+  // Firmas para detectar si productos/equivalencias REALMENTE cambiaron entre refreshes.
+  // Sin esto, cada precarga marcaba 'productos' como cambiado aunque el catálogo fuera
+  // idéntico → wh:data-refresh → ProductosView.silentRefresh → flash/parpadeo inútil.
+  const _masterSig = {};
   let _onStatusChange = null;
   let _opRefreshTimer = null;
 
@@ -325,12 +334,45 @@ const OfflineManager = (() => {
   // Intenta descargarMaestros (endpoint nuevo que trae las 4 tablas de MOS).
   // Si el GAS desplegado no lo conoce aún, degrada al endpoint legacy
   // getPersonalConPin para que el login siempre funcione.
+  // Firma barata y estable de un dataset (longitud + hash rodante del JSON). Evita
+  // guardar JSON.stringify gigante en memoria; suficiente para detectar "no cambió".
+  function _firma(arr) {
+    if (!arr) return 'null';
+    const s = JSON.stringify(arr);
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return arr.length + ':' + (h >>> 0);
+  }
+  // Marca cambio en `changed` SOLO si la firma del dataset difiere de la última vista.
+  function _guardarSiCambia(key, sigKey, arr, label, changed) {
+    if (arr == null) return;
+    const sig = _firma(arr);
+    // Idéntico a lo último visto Y ya hay algo persistido → no reescribir ni avisar a
+    // la UI (evita el flash + el costo de recomprimir un array grande en cada refresh).
+    if (_masterSig[sigKey] === sig && (cargar(key) || []).length) return;
+    _masterSig[sigKey] = sig;
+    guardar(key, arr);
+    if (label) changed.push(label);
+  }
+
+  // forzar: false = refresh background (throttle 60s) · true = forzado (respeta piso
+  // duro de 8s, mata ráfagas) · 'manual' = sync explícito del usuario (ignora todo piso).
   async function precargar(forzar = false) {
     if (!navigator.onLine) return;
-    if (_masterLoading) return;
-    if (!forzar && Date.now() - _lastMasterTs < MASTER_MIN_MS) return;
-    _masterLoading = true;
-    _lastMasterTs  = Date.now();
+    // [perf] Dedup in-flight: si ya hay una precarga corriendo, los callers
+    // concurrentes (login + welcome + init + reconexión) REUSAN esa promesa en
+    // vez de disparar otro descargarMaestros. Esto solo es la causa raíz de la ráfaga.
+    if (_masterInflight) return _masterInflight;
+    const ahora = Date.now();
+    if (forzar === 'manual') {
+      /* sync manual del usuario: sin piso */
+    } else if (forzar) {
+      if (ahora - _lastMasterTs < MASTER_HARD_MS) return; // piso duro: aún forzado, no en ráfaga
+    } else if (ahora - _lastMasterTs < MASTER_MIN_MS) {
+      return; // refresh background normal: throttle generoso (maestros cambian poco)
+    }
+    _lastMasterTs  = ahora;
+    _masterInflight = (async () => {
     try {
       const [maestros, stock, config] = await Promise.all([
         fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null),
@@ -345,8 +387,10 @@ const OfflineManager = (() => {
         const d = maestros.data;
         console.log('[Offline] personal recibido:', d?.personal?.length, 'registros');
         if (d.personal      != null) guardar(KEYS.PERSONAL,      d.personal);
-        if (d.productos     != null) { guardar(KEYS.PRODUCTOS,     d.productos);     maestrosChanged.push('productos'); }
-        if (d.equivalencias != null) { guardar(KEYS.EQUIVALENCIAS, d.equivalencias); maestrosChanged.push('equivalencias'); }
+        // [perf] Solo avisar 'productos'/'equivalencias' si REALMENTE cambiaron →
+        // sin esto, cada refresh repintaba+flasheaba ProductosView con datos idénticos.
+        _guardarSiCambia(KEYS.PRODUCTOS,     'productos',     d.productos,     'productos',     maestrosChanged);
+        _guardarSiCambia(KEYS.EQUIVALENCIAS, 'equivalencias', d.equivalencias, 'equivalencias', maestrosChanged);
         if (d.proveedores   != null) guardar(KEYS.PROVEEDORES,   d.proveedores);
         if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,    d.impresoras);
         if (d.zonas         != null) guardar(KEYS.ZONAS,         d.zonas);
@@ -362,7 +406,7 @@ const OfflineManager = (() => {
         ]);
         console.log('[Offline] legacy getPersonalConPin:', personal);
         if (personal?.ok)    guardar(KEYS.PERSONAL,    personal.data);
-        if (productos?.ok)   { guardar(KEYS.PRODUCTOS,   productos.data);   maestrosChanged.push('productos'); }
+        if (productos?.ok)   _guardarSiCambia(KEYS.PRODUCTOS, 'productos', productos.data, 'productos', maestrosChanged);
         if (proveedores?.ok) guardar(KEYS.PROVEEDORES, proveedores.data);
       }
 
@@ -377,8 +421,10 @@ const OfflineManager = (() => {
     } catch(e) {
       console.warn('[Offline] Error en precarga:', e);
     } finally {
-      _masterLoading = false;
+      _masterInflight = null;
     }
+    })();
+    return _masterInflight;
   }
 
   function _gasUrl(action) {
