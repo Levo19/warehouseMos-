@@ -3350,7 +3350,7 @@
       display: none;
       position: fixed; left:0; top:0; bottom:0; width:var(--sidebar-w); z-index:40;
       background:#0b1120; border-right:1px solid #1e293b;
-      grid-template-rows: repeat(7, 1fr);  /* 7 sectores iguales */
+      grid-template-rows: repeat(8, 1fr);  /* 8 sectores: +Envasador (v2.13.231) */
       align-items:stretch;
     }
 
@@ -3420,12 +3420,12 @@
     .side-btn-label { line-height:1; flex:1; }
     .side-btn svg { flex-shrink:0; }
 
-    /* ─── Sectores 5-6: Vacíos (reservados para menú) ─── */
-    .side-spacer { grid-row: 5 / 7; }  /* ocupa filas 5 y 6 */
+    /* ─── Sectores 6-7: Vacíos (reservados para menú) ─── */
+    .side-spacer { grid-row: 6 / 8; }  /* ocupa filas 6 y 7 */
 
-    /* ─── Sector 7: Tarjeta de usuario ───────────────── */
+    /* ─── Sector 8: Tarjeta de usuario ───────────────── */
     #sideUserCard {
-      grid-row: 7;
+      grid-row: 8;
       border-top:1px solid #1e293b;
       padding:0 14px;
       display:flex; flex-direction:row; align-items:center; gap:10px;
@@ -3453,7 +3453,7 @@
     #sideUserMenu {
       display:none; position:absolute;
       bottom:100%; left:0; right:0;
-      height:calc(2 * 100vh / 7);   /* exactamente 2 sectores */
+      height:calc(2 * 100vh / 8);   /* exactamente 2 sectores */
       background:linear-gradient(180deg,#0d1626 0%,#111827 100%);
       border:1px solid #1e3a5f;
       border-bottom:none;
@@ -3514,6 +3514,16 @@
 
       /* KPIs del dashboard: 4 columnas */
       #view-dashboard > div:first-child { grid-template-columns:repeat(4,1fr) !important; }
+      #kpiGrid { grid-template-columns:repeat(4,1fr) !important; }
+
+      /* Dashboard v2.13.231 — aprovechar ancho en PC */
+      /* Estado del día: chips fluidos, sin scroll (caben en una fila) */
+      #dashEstadoDia { flex-wrap:wrap; overflow:visible; }
+      .dash-chip { flex:1 1 0; min-width:140px; justify-content:flex-start; }
+      /* Accesos rápidos: 5 columnas (una por acción) */
+      .dash-quick-grid { grid-template-columns:repeat(5,1fr); }
+      .dash-quick { min-height:84px; }
+      .dash-quick-ico { font-size:1.6rem; }
 
       /* Sheets más altas en tablet */
       .bottom-sheet { max-height:88vh; }
@@ -3676,6 +3686,8 @@
     display:flex; align-items:center; justify-content:center; padding:0 5px;
   }
   .side-badge[data-hidden="true"] { display:none; }
+  /* Badge Envasador = "por envasar" → ámbar (no rojo de alerta) */
+  .side-badge-env { background:#f59e0b; color:#0b1120; }
 
   /* ── Skeleton loader ── */
   .skel {
@@ -3733,6 +3745,119 @@
   .kpi-card.kpi-warn   { border-left:3px solid #f59e0b; }
   .kpi-card.kpi-ok     { border-left:3px solid #22c55e; }
   .kpi-card.kpi-info   { border-left:3px solid #3b82f6; }
+
+  /* ═══════════════════════════════════════════════════════
+     DASHBOARD v2.13.231 — Estado del día + Accesos rápidos
+     Lenguaje glass coherente (guías/mermas): borde fino,
+     hover-lift, pill de conteo, sensorial sutil.
+  ═══════════════════════════════════════════════════════ */
+  .dash-section { margin-bottom:14px; }
+  .dash-section-hdr {
+    display:flex; align-items:center; gap:6px; margin-bottom:8px;
+    padding:0 2px;
+  }
+  .dash-section-ico { font-size:.95rem; line-height:1; }
+  .dash-section-lbl {
+    font-size:11px; font-weight:800; color:#64748b;
+    text-transform:uppercase; letter-spacing:.08em;
+  }
+
+  /* ── Banda estado del día: chips scroll-x en móvil ── */
+  .dash-estado-row {
+    display:flex; gap:8px; overflow-x:auto; padding-bottom:4px;
+    scrollbar-width:none; -webkit-overflow-scrolling:touch;
+    scroll-snap-type:x proximity;
+  }
+  .dash-estado-row::-webkit-scrollbar { display:none; }
+  .dash-chip {
+    flex:0 0 auto; scroll-snap-align:start;
+    display:inline-flex; align-items:center; gap:8px;
+    padding:9px 13px; border-radius:14px;
+    background:rgba(30,41,59,.55);
+    border:1px solid rgba(148,163,184,.16);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    -webkit-tap-highlight-color:transparent;
+    transition:transform .12s, border-color .15s, background .15s;
+  }
+  .dash-chip[role="button"], .dash-chip[onclick] { cursor:pointer; }
+  .dash-chip:active { transform:scale(.96); }
+  .dash-chip-num {
+    font-size:18px; font-weight:900; line-height:1; color:#e2e8f0;
+  }
+  .dash-chip-lbl {
+    font-size:10.5px; font-weight:700; color:#94a3b8;
+    text-transform:uppercase; letter-spacing:.04em; line-height:1.15;
+  }
+  .dash-chip-ico { font-size:.95rem; line-height:1; }
+  /* Acentos por tipo (borde fino izquierdo) */
+  .dash-chip.dc-blue   { border-left:3px solid rgba(96,165,250,.6); }
+  .dash-chip.dc-green  { border-left:3px solid rgba(52,211,153,.6); }
+  .dash-chip.dc-amber  { border-left:3px solid rgba(251,191,36,.6); }
+  .dash-chip.dc-violet { border-left:3px solid rgba(167,139,250,.6); }
+  .dash-chip.dc-blue   .dash-chip-num { color:#93c5fd; }
+  .dash-chip.dc-green  .dash-chip-num { color:#6ee7b7; }
+  .dash-chip.dc-amber  .dash-chip-num { color:#fcd34d; }
+  .dash-chip.dc-violet .dash-chip-num { color:#c4b5fd; }
+  /* Skeleton del estado del día */
+  .dash-chip-skel {
+    width:96px; height:38px; border:none;
+    background:linear-gradient(90deg,#1e293b 25%,#273549 50%,#1e293b 75%);
+    background-size:200% 100%;
+    animation:skelShimmer 1.5s ease-in-out infinite;
+  }
+
+  /* ── Accesos rápidos: grid 2-col móvil ── */
+  .dash-quick-grid {
+    display:grid; grid-template-columns:repeat(2,1fr); gap:8px;
+  }
+  .dash-quick {
+    position:relative;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:6px; padding:14px 10px; min-height:74px;
+    border-radius:16px; cursor:pointer;
+    background:rgba(30,41,59,.55);
+    border:1px solid rgba(148,163,184,.16);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    color:#cbd5e1;
+    -webkit-tap-highlight-color:transparent;
+    transition:transform .12s, border-color .15s, background .15s, box-shadow .15s;
+  }
+  .dash-quick:hover {
+    transform:translateY(-2px);
+    border-color:rgba(96,165,250,.4);
+    box-shadow:0 6px 18px -8px rgba(59,130,246,.35);
+  }
+  .dash-quick:active { transform:scale(.95); }
+  .dash-quick-ico { font-size:1.4rem; line-height:1; }
+  .dash-quick-lbl {
+    font-size:11px; font-weight:800; letter-spacing:.02em;
+    color:#94a3b8; text-align:center;
+  }
+  /* Acceso Envasador destacado (acción diaria estrella) */
+  .dash-quick-env {
+    background:linear-gradient(135deg, rgba(245,158,11,.14), rgba(217,119,6,.08));
+    border-color:rgba(251,191,36,.4);
+  }
+  .dash-quick-env .dash-quick-ico { filter:drop-shadow(0 0 8px rgba(251,191,36,.5)); }
+  .dash-quick-env .dash-quick-lbl { color:#fcd34d; }
+  .dash-quick-env:hover {
+    border-color:rgba(251,191,36,.7);
+    box-shadow:0 6px 18px -8px rgba(245,158,11,.45);
+  }
+  .dash-quick-badge {
+    position:absolute; top:7px; right:9px;
+    min-width:18px; height:18px; border-radius:9px;
+    background:#f59e0b; color:#0b1120; font-size:10px; font-weight:900;
+    display:flex; align-items:center; justify-content:center; padding:0 5px;
+    line-height:1; box-shadow:0 0 0 2px rgba(11,17,32,.9);
+  }
+  .dash-quick-badge[data-hidden="true"] { display:none; }
+
+  @media (prefers-reduced-motion:reduce) {
+    .dash-chip, .dash-quick { transition:none; }
+    .dash-quick:hover { transform:none; }
+    .dash-chip-skel { animation:none; }
+  }
 
   /* ── Filter chips row ── */
   .chip-row {
@@ -5574,6 +5699,56 @@
             class="w-2 h-2 rounded-full bg-blue-400" title="Actualizando…"></span>
     </div>
 
+    <!-- ════ ESTADO DEL DÍA — banda de chips (datos reales del día) ════ -->
+    <div class="dash-section">
+      <div class="dash-section-hdr">
+        <span class="dash-section-ico">🕘</span>
+        <span class="dash-section-lbl">Hoy</span>
+      </div>
+      <div id="dashEstadoDia" class="dash-estado-row" aria-label="Estado del día">
+        <!-- chips inyectados por renderDashboard; los que no tienen dato se omiten -->
+        <div class="dash-chip dash-chip-skel"></div>
+        <div class="dash-chip dash-chip-skel"></div>
+        <div class="dash-chip dash-chip-skel"></div>
+      </div>
+    </div>
+
+    <!-- ════ ACCESOS RÁPIDOS — fila prominente ════ -->
+    <div class="dash-section">
+      <div class="dash-section-hdr">
+        <span class="dash-section-ico">⚡</span>
+        <span class="dash-section-lbl">Accesos rápidos</span>
+      </div>
+      <div class="dash-quick-grid">
+        <button class="dash-quick" onclick="App.qaNuevaGuia()">
+          <span class="dash-quick-ico">➕</span>
+          <span class="dash-quick-lbl">Nueva guía</span>
+        </button>
+        <button class="dash-quick dash-quick-env" onclick="App.irAEnvasador()">
+          <span class="dash-quick-ico">⚡</span>
+          <span class="dash-quick-lbl">Envasador</span>
+          <span id="dashQuickEnvBadge" class="dash-quick-badge" data-hidden="true">0</span>
+        </button>
+        <button class="dash-quick" onclick="App.qaPreingreso()">
+          <span class="dash-quick-ico">📥</span>
+          <span class="dash-quick-lbl">Preingreso</span>
+        </button>
+        <button class="dash-quick" onclick="App.qaDespacho()">
+          <span class="dash-quick-ico">🚚</span>
+          <span class="dash-quick-lbl">Despacho</span>
+        </button>
+        <button class="dash-quick" onclick="App.qaMerma()">
+          <span class="dash-quick-ico">🗑</span>
+          <span class="dash-quick-lbl">Merma</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ════ ALERTAS — KPIs clicables (segunda zona) ════ -->
+    <div class="dash-section-hdr" style="margin-top:2px">
+      <span class="dash-section-ico">🚨</span>
+      <span class="dash-section-lbl">Alertas</span>
+    </div>
     <!-- KPIs: 4 tarjetas clicables v2 -->
     <div id="kpiGrid" class="grid grid-cols-2 gap-2 mb-3">
       <div class="kpi-card kpi-danger cursor-pointer" onclick="Dashboard.toggle('venc')">
@@ -7593,8 +7768,20 @@
     </button>
   </div>
 
-  <!-- ── Sector 4: Productos ── -->
+  <!-- ── Sector 4: Envasador (acceso nivel 1 + badge pendientes) ── -->
   <div class="side-mod-row" style="grid-row:4">
+    <button class="nav-btn side-btn nav-btn-v3" data-view="envasador" data-nav="envasador"
+            onclick="App.irAEnvasador()" title="Modo Envasador">
+      <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+      </svg>
+      <span class="side-btn-label">Envasador</span>
+      <span id="sideBadgeEnv" class="side-badge side-badge-env" data-hidden="true">0</span>
+    </button>
+  </div>
+
+  <!-- ── Sector 5: Productos ── -->
+  <div class="side-mod-row" style="grid-row:5">
     <button class="nav-btn side-btn nav-btn-v3" data-view="productos" data-nav="productos"
             data-lp="productos" onclick="App.nav('productos')">
       <span style="position:relative;display:inline-flex;flex-shrink:0">
@@ -7612,7 +7799,7 @@
   </div>
 
   <!-- ── Sector 4b: Logs (solo MASTER / ADMINISTRADOR) ── -->
-  <div id="sideRowLogs" class="side-mod-row" style="grid-row:4;display:none">
+  <div id="sideRowLogs" class="side-mod-row" style="grid-row:5;display:none">
     <button class="nav-btn side-btn" data-view="logs" onclick="App.nav('logs')">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1h12zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2H2z"/>
@@ -7623,7 +7810,7 @@
   </div>
 
   <!-- ── Sector 4c: Diagnóstico (solo MASTER / ADMINISTRADOR) ── -->
-  <div id="sideRowDiag" class="side-mod-row" style="grid-row:4;display:none">
+  <div id="sideRowDiag" class="side-mod-row" style="grid-row:5;display:none">
     <button class="nav-btn side-btn" data-view="diagnostico" onclick="App.nav('diagnostico')">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M5 0a.5.5 0 0 1 .5.5V2h5V.5a.5.5 0 0 1 1 0V2h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-10a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h1V.5A.5.5 0 0 1 5 0zM4.5 3a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-7z"/>
@@ -7634,7 +7821,7 @@
   </div>
 
   <!-- [v2.13.126 FIX] ── Sector 4d: Herramientas (Calibrar impresora + Colas) ── -->
-  <div id="sideRowTools" class="side-mod-row" style="grid-row:4;display:none">
+  <div id="sideRowTools" class="side-mod-row" style="grid-row:5;display:none">
     <button class="nav-btn side-btn" data-view="tools" onclick="App.nav('tools')" title="Herramientas: Calibrar impresora, colas de membretes">
       <svg width="22" height="22" viewBox="0 0 16 16" fill="currentColor">
         <path d="M0 1a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V1zm6 4.5V4H4v1.5h2zm0 3V7H4v1.5h2zm0 3V10H4v1.5h2zm6-6V4H8v1.5h4zm0 3V7H8v1.5h4zm0 3V10H8v1.5h4z"/>

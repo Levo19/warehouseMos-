@@ -797,6 +797,23 @@ function _resumenCargadoresDia(items) {
   return { carretas, llenas, medias, vacias };
 }
 
+// [v2.13.231] Cuenta cargadores DISTINTOS activos en un set de preingresos
+// (por id/nombre). Para el chip "cargadores" de la banda Estado del Día.
+function _contarCargadoresDistintos(items) {
+  const ids = new Set();
+  (items || []).forEach(p => {
+    let arr = [];
+    try { arr = JSON.parse(p.cargadores || '[]'); } catch {}
+    if (!Array.isArray(arr)) return;
+    arr.forEach(c => {
+      if (!c || typeof c !== 'object') return;
+      const k = c.idCargador || c.id || c.nombre;
+      if (k) ids.add(String(k));
+    });
+  });
+  return ids.size;
+}
+
 // Filtra preingresos de un día (key=YYYY-MM-DD) usando la fecha LOCAL del
 // cliente, igual que el pill del header. Centralizado para garantizar que
 // pill y modal vean exactamente la misma data.
@@ -4041,6 +4058,23 @@ const App = (() => {
     try { DespachoView.renderFlotante(); } catch(_){}
   }
 
+  // [v2.13.231] Entrada de nivel 1 al Envasador (sidebar + acceso rápido dashboard).
+  // Garantiza que el MODO quede activo (indicador + botón "Salir") sin togglear-off
+  // si ya estás dentro. toggleModoEnvasador sigue siendo el switch ON/OFF clásico.
+  function irAEnvasador() {
+    if (modoEnvasador) { nav('envasador'); return; }
+    toggleModoEnvasador();   // pasa a ON → setea indicador + nav('envasador')
+  }
+
+  // ── Accesos rápidos del dashboard (reusan handlers existentes del long-press) ──
+  function qaNuevaGuia() { nav('guias'); setTimeout(() => { try { abrirTypePicker(); } catch(_){} }, 180); }
+  function qaPreingreso() {
+    nav('preingresos');
+    setTimeout(() => { try { if (window.PreingresosView && PreingresosView.nuevo) PreingresosView.nuevo(); } catch(_){} }, 200);
+  }
+  function qaDespacho() { nav('despacho'); }
+  function qaMerma()    { nav('mermas'); setTimeout(() => { try { if (window.MermasView && MermasView.nueva) MermasView.nueva(); } catch(_){} }, 180); }
+
   function toggleModoEnvasador() {
     modoEnvasador = !modoEnvasador;
     const ind = document.getElementById('modoIndicador');
@@ -4215,6 +4249,23 @@ const App = (() => {
       document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
     }
 
+    // [v2.13.231] Badge "por envasar" en sidebar + acceso rápido del dashboard.
+    // Solo con dato real (no en el esqueleto derivado, para no pintar 0 falso).
+    if (!d._derivado) {
+      const _setBadgeEnv = (id, n) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = n > 9 ? '9+' : String(n);
+        el.dataset.hidden = n === 0 ? 'true' : 'false';
+      };
+      _setBadgeEnv('sideBadgeEnv', pendEnv.length);
+      _setBadgeEnv('dashQuickEnvBadge', pendEnv.length);
+    }
+
+    // [v2.13.231] Banda ESTADO DEL DÍA — chips con datos REALES del día (TZ Perú).
+    // Solo se muestran chips con dato disponible; los ausentes se omiten (sin 0 falso).
+    _renderEstadoDia({ pendEnv, derivado: !!d._derivado });
+
     // Alertas de cuadre stock (en background, no bloquea render)
     // Solo en el render fresco para no disparar la consulta dos veces.
     if (!esCache) Dashboard.cargarAlertasStock();
@@ -4307,6 +4358,65 @@ const App = (() => {
           <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen || ''}</p>
         </div>
         <span class="tag-warn text-xs">${fmt(m.cantidadOriginal, 1)}</span>
+      </div>`).join('');
+  }
+
+  // [v2.13.231] Construye la banda "Estado del día" con datos REALES derivados
+  // de los caches que el dashboard ya tiene en mano (guías + preingresos del día
+  // en TZ Perú) más el conteo "por envasar" del dashboardData. Cada chip se omite
+  // si su dato no está disponible — nunca se pinta un 0 falso.
+  function _renderEstadoDia({ pendEnv = [], derivado = false } = {}) {
+    const cont = document.getElementById('dashEstadoDia');
+    if (!cont) return;
+    const hoyKey = _hoyPeru();
+    const chips = [];
+
+    // 1) Guías creadas hoy + despachadas hoy (cache de guías, fecha TZ Perú).
+    const guias = OfflineManager.getGuiasCache() || [];
+    const guiasHoy = guias.filter(g => g.fecha && _diaPeru(g.fecha) === hoyKey);
+    if (guiasHoy.length) {
+      chips.push({ cls:'dc-blue', ico:'📋', num: guiasHoy.length,
+                   lbl: guiasHoy.length === 1 ? 'guía creada' : 'guías creadas',
+                   onclick: "App.nav('guias')" });
+      // Despachadas = guías de SALIDA cerradas hoy.
+      const despachadas = guiasHoy.filter(g =>
+        String(g.tipo || '').startsWith('SALIDA') && g.estado === 'CERRADA').length;
+      if (despachadas > 0) {
+        chips.push({ cls:'dc-green', ico:'✅', num: despachadas, lbl:'despachadas',
+                     onclick: "App.nav('guias')" });
+      }
+    }
+
+    // 2) Cargadores distintos activos hoy (preingresos del día).
+    try {
+      const pres = _preingresosDeFecha(OfflineManager.getPreingresosCache() || [], hoyKey);
+      const nCarg = _contarCargadoresDistintos(pres);
+      if (nCarg > 0) {
+        chips.push({ cls:'dc-violet', ico:'🛺', num: nCarg,
+                     lbl: nCarg === 1 ? 'cargador' : 'cargadores' });
+      }
+    } catch(_) {}
+
+    // 3) Por envasar (dato real del dashboardData; omitir en esqueleto derivado).
+    if (!derivado && pendEnv.length) {
+      chips.push({ cls:'dc-amber', ico:'⚡', num: pendEnv.length, lbl:'por envasar',
+                   onclick: "App.irAEnvasador()" });
+    }
+
+    // Si todavía no hay ningún dato real (primer arranque sin caches), mantener
+    // los skeletons que ya están en el DOM en vez de vaciar la banda.
+    if (!chips.length) {
+      if (!cont.querySelector('.dash-chip-skel')) {
+        cont.innerHTML = '<p class="text-xs text-slate-500" style="padding:4px 2px">Sin actividad registrada hoy</p>';
+      }
+      return;
+    }
+
+    cont.innerHTML = chips.map(c => `
+      <div class="dash-chip ${c.cls}"${c.onclick ? ` role="button" tabindex="0" onclick="${c.onclick}"` : ''}>
+        <span class="dash-chip-ico">${c.ico}</span>
+        <span class="dash-chip-num">${c.num}</span>
+        <span class="dash-chip-lbl">${escHtml(c.lbl)}</span>
       </div>`).join('');
   }
 
@@ -4964,7 +5074,8 @@ const App = (() => {
   }
 
   return { init, nav, abrirMas, navMas,
-           toggleModoEnvasador,
+           toggleModoEnvasador, irAEnvasador,
+           qaNuevaGuia, qaPreingreso, qaDespacho, qaMerma,
            toggleUserMenu, closeUserMenu,
            toggleSideUserMenu, closeSideUserMenu,
            syncForzado, checkUpdate,
