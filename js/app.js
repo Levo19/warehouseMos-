@@ -3950,6 +3950,16 @@ const App = (() => {
       ProductosView.cerrarProdCamara();
     }
 
+    // [perf] Detener timers de la vista que ABANDONAMOS (polling de fondo que de
+    // otro modo sigue corriendo y suma carga acumulada). Robusto: si la vista no
+    // expone detener(), no pasa nada. currentView aún es la vista SALIENTE aquí.
+    if (currentView && currentView !== viewName) {
+      try {
+        if (currentView === 'despacho')  DespachoView.detener();
+        if (currentView === 'envasador') EnvasadorView.detener();
+      } catch(_){}
+    }
+
     closeUserMenu();
     // [v2.13.189] Backstop: navegar siempre libera el scroll del fondo (un sheet
     // de la vista anterior no debe dejar el body bloqueado en la nueva vista).
@@ -4134,6 +4144,14 @@ const App = (() => {
     } catch(_) { return null; }
   }
 
+  // [perf] El widget "Mi horario" se arranca UNA sola vez. SeguridadSystem es
+  // externo (no vive en este repo) y arrancarWidgetMiHorario crea su propio
+  // interval; si lo llamáramos en cada render del dashboard (cache + fresh, +
+  // cada nav, + pull-to-refresh) acumularía un timer por visita → leak. Como
+  // solo existe "arrancar" (no un "refrescar" separado), el guard once es la
+  // forma correcta: el widget ya se auto-actualiza con su propio interval.
+  let _segWidgetArrancado = false;
+
   async function cargarDashboard() {
     loading('kpiGrid', false);
     // 1) Pintado inmediato desde cache (no bloquea con la red)
@@ -4157,10 +4175,13 @@ const App = (() => {
     const esCache = !!(opts && opts.cache);
     const { alertas = {}, kpis = {}, contadores = {} } = d;
 
-    // [v2.13.121] Widget "Mi horario" — pulse glow + countdown
+    // [v2.13.121] Widget "Mi horario" — pulse glow + countdown.
+    // [perf] Once: arrancar el interval del widget UNA vez, no en cada render
+    // (evita acumular un timer por visita/refresh; ver _segWidgetArrancado).
     try {
-      if (window.SeguridadSystem && window.SeguridadSystem.arrancarWidgetMiHorario) {
+      if (!_segWidgetArrancado && window.SeguridadSystem && window.SeguridadSystem.arrancarWidgetMiHorario) {
         window.SeguridadSystem.arrancarWidgetMiHorario('segWidgetHorario');
+        _segWidgetArrancado = true;
       }
     } catch(_) {}
 
@@ -10417,6 +10438,13 @@ const EnvasadorView = (() => {
     }, 120_000);
   }
 
+  // [perf] Detener el polling de catálogo al ABANDONAR la vista. nav() lo llama
+  // al cambiar de módulo para que el interval de 120s no siga corriendo en
+  // segundo plano sumando carga (patrón simétrico a pauseCamera del despacho).
+  function detener() {
+    if (_timer) { clearInterval(_timer); _timer = null; }
+  }
+
   // [v2.13.116] Historial: 14 días, agrupado por día nombrado, con buscador
   // que filtra por producto + usuario.
   let _histQuery = '';
@@ -10586,7 +10614,7 @@ const EnvasadorView = (() => {
     return tokens.every(t => desc.includes(t));
   }
 
-  return { cargar, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh,
+  return { cargar, detener, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh,
            searchToggle, searchInput, searchVoice,
            buscarHistorial };
 })();
@@ -11037,6 +11065,16 @@ const DespachoView = (() => {
     badgeUpdate();
     // Sync con backend en background — detecta si fue cerrado por otro/timeout
     if (pSaved) _sincronizarPickupActivo();
+  }
+
+  // [perf] Detener los polls de listas sombra al ABANDONAR la vista despacho.
+  // nav() lo llama al cambiar de módulo: sin esto, el panel (15s) y el progreso
+  // (20s) siguen corriendo en segundo plano. La cámara se pausa aparte vía
+  // pauseCamera() (ya lo hace nav). Robusto: no rompe si algo no existe.
+  function detener() {
+    try { _lsStopPanelSync(); } catch(_){}
+    try { _lsStopProgresoSync(); } catch(_){}
+    try { if (_despStatusTimer) { clearTimeout(_despStatusTimer); _despStatusTimer = null; } } catch(_){}
   }
 
   // ── Render del checklist inline (en view-despacho, debajo de cám/scan) ──
@@ -14504,6 +14542,9 @@ const DespachoView = (() => {
       }
     }, 20000);
   }
+  function _lsStopProgresoSync() {
+    if (_lsProgresoTimer) { clearInterval(_lsProgresoTimer); _lsProgresoTimer = null; }
+  }
 
   // [v2.13.13] Identificar SKUs — NO toca el cart. Solo resuelve qué producto
   // del catálogo corresponde a cada item de la sombra (igual que pickup pre-resolved).
@@ -15003,7 +15044,7 @@ const DespachoView = (() => {
     }
   }
 
-  return { cargar, pauseCamera,
+  return { cargar, detener, pauseCamera,
            abrirDespCamara, cerrarDespCamara, cerrarDespYFinalizar,
            toggleDespTorch, despSetZoom,
            cerrarDespPicker, seleccionarItemDesp,
@@ -15321,6 +15362,17 @@ const PreingresosView = (() => {
     </div>`;
   }
 
+  // [perf] Registry de intervals de auto-rotación de fotos. Sin esto, cada
+  // re-render rápido (navegar/clickear < 2.7s) deja vivos los timers de los
+  // cards viejos hasta su próximo tick (cuando recién el guard isConnected los
+  // mata) → coexisten N generaciones de timers y la app se va poniendo lenta,
+  // auto-sanándose en reposo. Limpiamos EAGER (antes de reasignar innerHTML).
+  let _fotoRotTimers = [];
+  function _limpiarFotoRotTimers() {
+    _fotoRotTimers.forEach(id => clearInterval(id));
+    _fotoRotTimers.length = 0;
+  }
+
   // [Parte 2] Auto-rotación de fotos en los cards de preingreso.
   // Cambia la foto activa con fade cada 2.7s; pausa al hover/tap; respeta
   // prefers-reduced-motion (no rota, deja la primera). Guarda el índice actual
@@ -15337,7 +15389,8 @@ const PreingresosView = (() => {
       el._rotIdx = 0;
       let timer = null;
       const tick = () => {
-        // Si el card fue reemplazado por un re-render, parar el timer (evita leak).
+        // Red de seguridad: si el card fue reemplazado por un re-render y no se
+        // limpió eagerly, parar el timer (la limpieza EAGER es _limpiarFotoRotTimers).
         if (!el.isConnected) { if (timer) { clearInterval(timer); timer = null; } return; }
         const prev = el._rotIdx;
         el._rotIdx = (el._rotIdx + 1) % imgs.length;
@@ -15346,7 +15399,7 @@ const PreingresosView = (() => {
         dots[prev]?.classList.remove('on');
         dots[el._rotIdx]?.classList.add('on');
       };
-      const start = () => { if (!timer) timer = setInterval(tick, 2700); };
+      const start = () => { if (!timer) { timer = setInterval(tick, 2700); _fotoRotTimers.push(timer); } };
       const stop  = () => { if (timer) { clearInterval(timer); timer = null; } };
       el.addEventListener('mouseenter', stop);
       el.addEventListener('mouseleave', start);
@@ -15358,6 +15411,9 @@ const PreingresosView = (() => {
   function _renderPreingresos(list) {
     const container = document.getElementById('listPreingresos');
     if (!container) return;
+    // [perf] Matar EAGER los timers de auto-rotación de la generación anterior
+    // ANTES de reasignar innerHTML (evita apilamiento de intervals).
+    _limpiarFotoRotTimers();
     const optCards = Array.from(container.querySelectorAll('.card-optimistic'));
     if (!list.length) {
       container.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin preingresos</p>';
@@ -17051,6 +17107,9 @@ const PreingresosView = (() => {
   function renderTppList() {
     const container = document.getElementById('tppList');
     if (!container || !container.offsetParent) return;
+    // [perf] Matar EAGER los timers de auto-rotación de la generación anterior
+    // ANTES de reasignar innerHTML (evita apilamiento de intervals).
+    _limpiarFotoRotTimers();
     const todos = OfflineManager.getPreingresosCache();
     let list = _tppFiltro ? todos.filter(p => p.estado === _tppFiltro) : todos;
     if (_tppBusq) list = list.filter(p =>

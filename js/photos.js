@@ -145,8 +145,7 @@
   }
 
   // ── Miniruleta (carousel autoplay) ──
-  // Renderiza HTML del carousel. El caller debe meterlo en el DOM e invocar
-  // initCarousels() para activarlos.
+  // Renderiza HTML del carousel.
   function carouselHTML(urls, opts) {
     opts = opts || {};
     if (!urls || !urls.length) return '';
@@ -161,41 +160,9 @@
     `;
   }
 
-  function initCarousels(root) {
-    root = root || document;
-    root.querySelectorAll('.pcarousel[data-pcarousel]').forEach(el => {
-      if (el._inited) return;
-      el._inited = true;
-      const urls = (el.getAttribute('data-urls') || '').split('|').filter(Boolean);
-      if (urls.length < 2) return;
-      let idx = 0;
-      const img  = el.querySelector('.pcar-img');
-      const dots = el.querySelectorAll('.pcar-dots span');
-      const tick = () => {
-        idx = (idx + 1) % urls.length;
-        img.src = urls[idx];
-        dots.forEach((d, j) => d.classList.toggle('on', j === idx));
-      };
-      let timer = setInterval(tick, 4000);
-      el.addEventListener('mouseenter', () => clearInterval(timer));
-      el.addEventListener('mouseleave', () => { timer = setInterval(tick, 4000); });
-      el.addEventListener('click', e => {
-        e.stopPropagation();
-        lightbox(urls, idx);
-      });
-      let startX = 0;
-      el.addEventListener('touchstart', e => { startX = e.touches[0].clientX; clearInterval(timer); });
-      el.addEventListener('touchend',   e => {
-        const dx = e.changedTouches[0].clientX - startX;
-        if (Math.abs(dx) > 30) {
-          idx = (idx + (dx < 0 ? 1 : -1) + urls.length) % urls.length;
-          img.src = urls[idx];
-          dots.forEach((d, j) => d.classList.toggle('on', j === idx));
-        }
-        timer = setInterval(tick, 4000);
-      });
-    });
-  }
+  // [perf] initCarousels eliminada: estaba exportada pero NUNCA se llamaba, y su
+  // tick no tenía guard isConnected → habría sido un leak no-recuperable si
+  // alguien la cableaba. La auto-rotación viva es _initFotoRot (app.js).
 
   // ── Compresión client-side antes de subir ──
   function comprimir(file) {
@@ -303,7 +270,7 @@
   }
 
   window.Photos = {
-    lightbox, carouselHTML, initCarousels,
+    lightbox, carouselHTML,
     comprimir, subir,
     abrirPickerFuente, cerrarPickerFuente,
     // v2.11.3 — robustez Drive
