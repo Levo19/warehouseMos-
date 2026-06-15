@@ -133,9 +133,25 @@ function _whAlert(msg, opts) {
 let _userActivated = false;
 document.addEventListener('pointerdown', () => { _userActivated = true; }, { once: true });
 
+// Gate de vibración (panel de configuración del operador).
+// Persistente en localStorage('wh_vibrate_enabled'); default ON (solo '0' apaga).
+function _vibrateOn() {
+  try { return localStorage.getItem('wh_vibrate_enabled') !== '0'; }
+  catch (_) { return true; }
+}
+
 function vibrate(ms = 10) {
+  if (!_vibrateOn()) return;
   if (_userActivated && navigator.vibrate) navigator.vibrate(ms);
 }
+// Helper unificado para los puntos que hoy llaman navigator.vibrate() directo
+// (alertas fuertes de pickup/cierre). Respeta el mismo gate.
+function _vibrateRaw(pattern) {
+  if (!_vibrateOn()) return;
+  if (_userActivated && navigator.vibrate) { try { navigator.vibrate(pattern); } catch (_) {} }
+}
+window._vibrateRaw = _vibrateRaw;
+window._vibrateOn = _vibrateOn;
 
 // ════════════════════════════════════════════════
 // VOZ — Web Speech API para anuncios audibles en almacén
@@ -194,10 +210,8 @@ function mostrarAlertaPickupNuevo(pickup) {
     try { SoundFX.pickupAlerta(); } catch(_){}
     ciclos++;
   }, 1700);
-  // Vibración fuerte: 3 pulsos de 400ms con pausas
-  if (_userActivated && navigator.vibrate) {
-    navigator.vibrate([400, 200, 400, 200, 600]);
-  }
+  // Vibración fuerte: 3 pulsos de 400ms con pausas (respeta gate de config)
+  _vibrateRaw([400, 200, 400, 200, 600]);
   // Anuncio por voz — un poco después del primer beep para que se entienda
   // Ejemplo: "¡Pedido nuevo para zona ZONA-01! 23 productos."
   setTimeout(() => {
@@ -10865,6 +10879,395 @@ const PrintHub = (() => {
   return { imprimir, elegir, cancelar, _avisar, toggleZona, toggleTipo };
 })();
 window.PrintHub = PrintHub;
+
+// ════════════════════════════════════════════════════════════════════
+// CONFIG PANEL — Panel de configuración del operador
+// Bottom-sheet (móvil) / modal (PC) accesible desde el menú del avatar.
+// Cablea funciones EXISTENTES (PrintHub/MembreteSystem/OfflineManager/
+// DeviceAuth/SoundFX/vibrate). Toggles persistentes en localStorage.
+// ════════════════════════════════════════════════════════════════════
+const ConfigPanel = (() => {
+  const LS_PRINTER  = 'wh_default_printer';        // {id, nombre}
+  const LS_SOUND    = 'wh_sound_enabled';          // '0' | '1'  (lo lee SoundFX)
+  const LS_VIBRATE  = 'wh_vibrate_enabled';        // '0' | '1'  (lo lee vibrate())
+  const LS_FONT     = 'wh_font_scale';             // '0.9' .. '1.3'
+  const LS_CONTRAST = 'wh_high_contrast';          // '0' | '1'
+  const FONT_MIN = 0.85, FONT_MAX = 1.35, FONT_STEP = 0.1;
+
+  // ── Preferencias visuales: aplicar al cargar (idempotente) ───────────
+  function aplicarPreferencias() {
+    // Escala de fuente
+    let scale = parseFloat(localStorage.getItem(LS_FONT));
+    if (!scale || isNaN(scale)) scale = 1;
+    scale = Math.min(FONT_MAX, Math.max(FONT_MIN, scale));
+    document.documentElement.style.setProperty('--wh-font-scale', String(scale));
+    // Alto contraste
+    const hc = localStorage.getItem(LS_CONTRAST) === '1';
+    document.body.classList.toggle('wh-high-contrast', hc);
+  }
+
+  function _esAdmin() {
+    try {
+      const s = (typeof Session !== 'undefined' && Session.getSesion) ? Session.getSesion() : null;
+      const rol = String((s && s.rol) || '').toUpperCase();
+      return rol === 'MASTER' || rol === 'ADMINISTRADOR';
+    } catch (_) { return false; }
+  }
+
+  // ── Abrir / cerrar ───────────────────────────────────────────────────
+  function abrir() {
+    const ov = document.getElementById('overlayConfig');
+    const sh = document.getElementById('sheetConfig');
+    if (!ov || !sh) return;
+    _pintar();
+    ov.classList.add('open');
+    sh.style.display = '';
+    requestAnimationFrame(() => sh.classList.add('open'));
+    try { if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click(); } catch (_) {}
+    try { vibrate(8); } catch (_) {}
+  }
+  function cerrar() {
+    const ov = document.getElementById('overlayConfig');
+    const sh = document.getElementById('sheetConfig');
+    if (sh) sh.classList.remove('open');
+    setTimeout(() => { if (ov) ov.classList.remove('open'); }, 260);
+  }
+
+  // ── Pintar estado actual del panel ───────────────────────────────────
+  function _pintar() {
+    // Cabecera (avatar + nombre + rol)
+    try {
+      const s = (typeof Session !== 'undefined' && Session.getSesion) ? Session.getSesion() : null;
+      const av = document.getElementById('cfgAvatar');
+      const nm = document.getElementById('cfgName');
+      const rl = document.getElementById('cfgRole');
+      if (s) {
+        const ini = (String(s.nombre || '?')[0] || '?') + (String(s.apellido || '')[0] || '');
+        if (av) { av.textContent = ini.toUpperCase(); if (s.color) av.style.background = s.color; }
+        if (nm) nm.textContent = [s.nombre, s.apellido].filter(Boolean).join(' ') || '—';
+        if (rl) rl.textContent = String(s.rol || 'Operador');
+      }
+    } catch (_) {}
+
+    // Impresora: cargar selector desde cache + pre-seleccionar guardada
+    _pintarImpresoras();
+
+    // Conexión
+    _pintarConexion();
+
+    // Sonido / vibración
+    const cs = document.getElementById('cfgSound');
+    if (cs) cs.checked = localStorage.getItem(LS_SOUND) !== '0';
+    const cv = document.getElementById('cfgVibrate');
+    if (cv) cv.checked = localStorage.getItem(LS_VIBRATE) !== '0';
+
+    // Fuente / contraste
+    _pintarFont();
+    const cc = document.getElementById('cfgContrast');
+    if (cc) cc.checked = localStorage.getItem(LS_CONTRAST) === '1';
+
+    // Dispositivo
+    _pintarDispositivo();
+
+    // Avanzado (solo admin/master)
+    const advWrap = document.getElementById('cfgAdvWrap');
+    if (advWrap) advWrap.style.display = _esAdmin() ? '' : 'none';
+    if (_esAdmin()) _pintarAvanzado();
+  }
+
+  // ── 🖨 Impresora ─────────────────────────────────────────────────────
+  function _pintarImpresoras() {
+    const sel = document.getElementById('cfgPrinterSel');
+    if (!sel) return;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(LS_PRINTER) || 'null'); } catch (_) {}
+    // Base: opción "Almacén (por defecto)" siempre
+    let html = '<option value="">🏭 Almacén (por defecto)</option>';
+    let imps = [];
+    try {
+      const raw = localStorage.getItem('wh_printers_cache');
+      if (raw) { const c = JSON.parse(raw); imps = (c && c.data) || []; }
+    } catch (_) {}
+    // Solo adhesivos (es la impresora de etiquetas del operador)
+    const adh = imps.filter(p => String(p.tipo || '').toUpperCase() === 'ADHESIVO');
+    (adh.length ? adh : imps).forEach(p => {
+      const id = String(p.printNodeId || '');
+      if (!id) return;
+      const nom = (p.nombre || 'Impresora') + (p.zonaNombre ? ' · ' + p.zonaNombre : '');
+      html += `<option value="${id}">🏷 ${nom.replace(/"/g, '')}</option>`;
+    });
+    sel.innerHTML = html;
+    if (saved && saved.id) sel.value = String(saved.id);
+    // Refrescar lista del ecosistema en bg para que tenga opciones frescas
+    if (typeof API !== 'undefined' && API.getImpresorasEcosistema) {
+      API.getImpresorasEcosistema().then(r => {
+        const arr = (r && r.ok && r.data) || [];
+        if (!arr.length) return;
+        try {
+          localStorage.setItem('wh_printers_cache', JSON.stringify({ ts: Date.now(), data: arr }));
+        } catch (_) {}
+        // Re-pintar solo si el panel sigue abierto
+        const sh = document.getElementById('sheetConfig');
+        if (sh && sh.classList.contains('open')) _pintarImpresoras();
+      }).catch(() => {});
+    }
+  }
+
+  function guardarImpresora(id) {
+    const sel = document.getElementById('cfgPrinterSel');
+    const nombre = sel ? (sel.options[sel.selectedIndex] || {}).text : '';
+    try {
+      if (id) localStorage.setItem(LS_PRINTER, JSON.stringify({ id: String(id), nombre }));
+      else    localStorage.removeItem(LS_PRINTER);
+    } catch (_) {}
+    if (typeof toast === 'function') toast(id ? 'Impresora guardada' : 'Usando impresora del almacén', 'ok', 2000);
+    try { vibrate(8); } catch (_) {}
+  }
+
+  // Lee el override de impresora guardado (para flujos de impresión).
+  function getImpresoraDefault() {
+    try {
+      const s = JSON.parse(localStorage.getItem(LS_PRINTER) || 'null');
+      return (s && s.id) ? String(s.id) : '';
+    } catch (_) { return ''; }
+  }
+
+  function calibrarDrift() {
+    cerrar();
+    if (window.MembreteSystem && window.MembreteSystem.abrirCalibrador) {
+      setTimeout(() => window.MembreteSystem.abrirCalibrador(), 280);
+    } else if (typeof toast === 'function') {
+      toast('Calibrador no disponible', 'error');
+    }
+  }
+
+  function testPrint() {
+    // Test real: imprime una etiqueta de prueba reusando el flujo existente
+    // (PrintHub → API.imprimirEtiqueta). Respeta selector de impresora.
+    if (typeof PrintHub === 'undefined' || !PrintHub.imprimir) {
+      if (typeof toast === 'function') toast('Impresión no disponible', 'error');
+      return;
+    }
+    const hoy = new Date();
+    const params = {
+      codigoBarra: 'TEST-PRINT',
+      descripcion: 'PRUEBA DE IMPRESION',
+      unidades: 1,
+      fechaImpresion: hoy.toISOString()
+    };
+    const ov = getImpresoraDefault();
+    cerrar();
+    setTimeout(() => {
+      if (ov) {
+        // Impresora fija elegida → enviar directo sin abrir el selector
+        if (typeof toast === 'function') toast('Enviando etiqueta de prueba…', 'ok', 2500);
+        Promise.resolve(API.imprimirEtiqueta(Object.assign({}, params, { printerIdOverride: ov })))
+          .then(r => {
+            if (r && r.ok === false) toast('Error al imprimir: ' + (r.error || ''), 'error', 5000);
+            else if (typeof toast === 'function') toast('✅ Etiqueta de prueba enviada', 'ok');
+          })
+          .catch(e => { if (typeof toast === 'function') toast('Error: ' + (e.message || e), 'error', 5000); });
+      } else {
+        // Sin impresora fija → dejar que el operador elija (modal de PrintHub)
+        PrintHub.imprimir('imprimirEtiqueta', params, 'Test print')
+          .then(r => { if (r && r.ok === false) toast('Error: ' + (r.error || ''), 'error', 5000); })
+          .catch(() => {});
+      }
+    }, 280);
+  }
+
+  function reimprimirLote() {
+    cerrar();
+    if (window.MembreteSystem && window.MembreteSystem.abrirHistorialLotes) {
+      setTimeout(() => window.MembreteSystem.abrirHistorialLotes(''), 280);
+    } else if (typeof toast === 'function') {
+      toast('Historial de lotes no disponible', 'error');
+    }
+  }
+
+  // ── 📡 Conexión ──────────────────────────────────────────────────────
+  function _pintarConexion() {
+    const pill = document.getElementById('cfgConnPill');
+    const sub  = document.getElementById('cfgSyncSub');
+    let pending = 0;
+    try { pending = (OfflineManager.getQueue && OfflineManager.getQueue().length) || 0; } catch (_) {}
+    const online = navigator.onLine;
+    if (pill) {
+      if (!online) { pill.className = 'cfg-pill cfg-pill-warn'; pill.textContent = 'Sin conexión'; }
+      else if (pending > 0) { pill.className = 'cfg-pill cfg-pill-warn'; pill.textContent = pending + ' por sync'; }
+      else { pill.className = 'cfg-pill cfg-pill-ok'; pill.textContent = 'En línea'; }
+    }
+    if (sub) {
+      let last = '';
+      try { last = localStorage.getItem('wh_last_sync_ts') || ''; } catch (_) {}
+      sub.textContent = online
+        ? (pending > 0 ? pending + ' operaciones pendientes' : 'Supabase/GAS conectado')
+        : 'Trabajando offline';
+    }
+  }
+
+  function forzarRecarga() {
+    if (typeof App !== 'undefined' && App.syncForzado) {
+      App.syncForzado();
+      try { localStorage.setItem('wh_last_sync_ts', String(Date.now())); } catch (_) {}
+      setTimeout(_pintarConexion, 800);
+      if (typeof toast === 'function') toast('Recargando datos…', 'ok', 2000);
+    } else if (typeof toast === 'function') {
+      toast('No disponible', 'error');
+    }
+  }
+
+  function diagnostico() {
+    const box = document.getElementById('cfgDiagBox');
+    const txt = document.getElementById('cfgDiagText');
+    if (!box || !txt) return;
+    const online = navigator.onLine;
+    let pending = 0;
+    try { pending = (OfflineManager.getQueue && OfflineManager.getQueue().length) || 0; } catch (_) {}
+    const gas = (window.WH_CONFIG && WH_CONFIG.gasUrl) ? 'OK' : 'sin URL';
+    const lines = [
+      'Red: ' + (online ? 'online ✅' : 'offline ⚠'),
+      'Backend (GAS): ' + gas,
+      'Cola offline: ' + pending + ' op' + (pending === 1 ? '' : 's'),
+      'Dispositivo: ' + (_estadoDispositivo() || 'verificando…')
+    ];
+    txt.innerHTML = lines.join('<br>');
+    box.style.display = '';
+    try { vibrate(8); } catch (_) {}
+  }
+
+  // ── 🔔 Sonidos / Vibración ───────────────────────────────────────────
+  function toggleSound(on) {
+    try { localStorage.setItem(LS_SOUND, on ? '1' : '0'); } catch (_) {}
+    if (typeof SoundFX !== 'undefined' && SoundFX.setEnabled) SoundFX.setEnabled(on);
+    // Feedback inmediato (suena solo si se acaba de activar)
+    if (on) { try { SoundFX.beep && SoundFX.beep(); } catch (_) {} }
+    if (typeof toast === 'function') toast(on ? 'Sonidos activados' : 'Sonidos silenciados', 'ok', 1800);
+  }
+  function toggleVibrate(on) {
+    try { localStorage.setItem(LS_VIBRATE, on ? '1' : '0'); } catch (_) {}
+    if (on) { try { vibrate(20); } catch (_) {} }
+    if (typeof toast === 'function') toast(on ? 'Vibración activada' : 'Vibración desactivada', 'ok', 1800);
+  }
+
+  // ── 👁 Accesibilidad ─────────────────────────────────────────────────
+  function _pintarFont() {
+    let scale = parseFloat(localStorage.getItem(LS_FONT));
+    if (!scale || isNaN(scale)) scale = 1;
+    const sub = document.getElementById('cfgFontSub');
+    if (sub) {
+      const lbl = scale <= 0.9 ? 'Pequeño' : scale >= 1.2 ? 'Grande' : scale > 1 ? 'Mediano' : 'Normal';
+      sub.textContent = lbl + ' (' + Math.round(scale * 100) + '%)';
+    }
+  }
+  function _aplicarFont(scale) {
+    scale = Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(scale * 100) / 100));
+    document.documentElement.style.setProperty('--wh-font-scale', String(scale));
+    try { localStorage.setItem(LS_FONT, String(scale)); } catch (_) {}
+    _pintarFont();
+    try { vibrate(8); } catch (_) {}
+  }
+  function fontStep(dir) {
+    let scale = parseFloat(localStorage.getItem(LS_FONT));
+    if (!scale || isNaN(scale)) scale = 1;
+    _aplicarFont(scale + dir * FONT_STEP);
+  }
+  function fontReset() { _aplicarFont(1); }
+
+  function toggleContrast(on) {
+    document.body.classList.toggle('wh-high-contrast', on);
+    try { localStorage.setItem(LS_CONTRAST, on ? '1' : '0'); } catch (_) {}
+    if (typeof toast === 'function') toast(on ? 'Alto contraste activado' : 'Contraste normal', 'ok', 1800);
+    try { vibrate(8); } catch (_) {}
+  }
+
+  // ── 📱 Mi dispositivo ────────────────────────────────────────────────
+  function _estadoDispositivo() {
+    try {
+      if (window.DeviceAuth && window.DeviceAuth.estado) {
+        const e = window.DeviceAuth.estado();
+        return (e && e.estado) || '';
+      }
+    } catch (_) {}
+    return '';
+  }
+  function _pintarDispositivo() {
+    const idEl = document.getElementById('cfgDeviceId');
+    if (idEl) {
+      let id = '';
+      try { id = (window._getDeviceIdWH && window._getDeviceIdWH()) || ''; } catch (_) {}
+      idEl.textContent = id ? (id.length > 16 ? id.slice(0, 16) + '…' : id) : 'sin id';
+    }
+    const pill = document.getElementById('cfgDevicePill');
+    if (pill) {
+      const est = _estadoDispositivo();
+      if (est === 'ACTIVO') { pill.className = 'cfg-pill cfg-pill-ok'; pill.textContent = 'Aprobado'; }
+      else if (est === 'PENDIENTE_APROBACION') { pill.className = 'cfg-pill cfg-pill-warn'; pill.textContent = 'Pendiente'; }
+      else if (est) { pill.className = 'cfg-pill cfg-pill-warn'; pill.textContent = est.toLowerCase(); }
+      else { pill.className = 'cfg-pill cfg-pill-off'; pill.textContent = '—'; }
+    }
+    const ver = document.getElementById('cfgVersion');
+    if (ver) {
+      fetch('./version.json').then(r => r.json()).then(v => {
+        ver.textContent = v.version || '—';
+      }).catch(() => { ver.textContent = '—'; });
+    }
+  }
+  function buscarUpdate() {
+    const box = document.getElementById('cfgUpdateBox');
+    const txt = document.getElementById('cfgUpdateText');
+    if (box) box.style.display = '';
+    if (txt) txt.textContent = 'Buscando actualización…';
+    if (window._SWCheck) {
+      Promise.resolve(window._SWCheck()).then(() => {
+        if (txt) txt.textContent = 'Verificado ' + new Date().toLocaleTimeString('es-PE') +
+          '. Si hay versión nueva aparecerá un aviso.';
+      }).catch(() => { if (txt) txt.textContent = 'No se pudo verificar.'; });
+    } else if (typeof App !== 'undefined' && App.checkUpdate) {
+      App.checkUpdate();
+      if (txt) txt.textContent = 'Verificando…';
+    } else {
+      if (txt) txt.textContent = 'Service Worker no disponible en este entorno.';
+    }
+  }
+
+  // ── ▸ Avanzado (admin/master) ────────────────────────────────────────
+  function toggleAvanzado() {
+    const body = document.getElementById('cfgAdvBody');
+    const chev = document.getElementById('cfgAdvChevron');
+    if (!body) return;
+    const open = body.classList.toggle('open');
+    if (chev) chev.textContent = open ? '▾' : '▸';
+    if (open) _pintarAvanzado();
+  }
+  function _pintarAvanzado() {
+    fetch('./version.json').then(r => r.json()).then(v => {
+      const el = document.getElementById('cfgAdvVersion');
+      if (el) el.textContent = (v.version || '—') + (v.build ? ' · ' + v.build : '');
+    }).catch(() => {});
+    const gas = document.getElementById('cfgAdvGas');
+    if (gas) gas.textContent = (window.WH_CONFIG && WH_CONFIG.gasUrl) || '—';
+    const q = document.getElementById('cfgAdvQueue');
+    if (q) {
+      let pending = 0;
+      try { pending = (OfflineManager.getQueue && OfflineManager.getQueue().length) || 0; } catch (_) {}
+      q.className = 'cfg-pill ' + (pending > 0 ? 'cfg-pill-warn' : 'cfg-pill-ok');
+      q.textContent = pending + ' op' + (pending === 1 ? '' : 's');
+    }
+  }
+
+  return {
+    abrir, cerrar, aplicarPreferencias, getImpresoraDefault,
+    guardarImpresora, calibrarDrift, testPrint, reimprimirLote,
+    forzarRecarga, diagnostico,
+    toggleSound, toggleVibrate,
+    fontStep, fontReset, toggleContrast,
+    buscarUpdate, toggleAvanzado
+  };
+})();
+window.ConfigPanel = ConfigPanel;
+// Aplicar preferencias visuales (fuente/contraste) lo antes posible.
+try { ConfigPanel.aplicarPreferencias(); } catch (_) {}
 
 // ════════════════════════════════════════════════════════════════════
 // [v2.13.39] Keypad táctil DELEGADO para inputs de clave admin

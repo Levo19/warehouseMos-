@@ -806,6 +806,123 @@
                     border-radius:20px 20px 0 0;z-index:50;padding:16px;
                     transform:translateY(100%);transition:transform .3s ease;max-height:92vh;overflow-y:auto; }
     .bottom-sheet.open { transform:none; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       PANEL DE CONFIGURACIÓN DEL OPERADOR
+       Bottom-sheet en móvil · modal centrado en PC. Lenguaje glass
+       coherente con guías/mermas. Sin dvh (vh). prefers-reduced-motion.
+       ═══════════════════════════════════════════════════════════════ */
+    .cfg-overlay { position:fixed;inset:0;background:rgba(2,6,23,.62);
+                   backdrop-filter:blur(6px);z-index:70;display:none; }
+    .cfg-overlay.open { display:block; }
+    .cfg-sheet {
+      position:fixed;bottom:0;left:0;right:0;z-index:71;
+      background:linear-gradient(180deg,#111827,#0b1220);
+      border-radius:22px 22px 0 0;
+      border-top:1px solid rgba(148,163,184,.18);
+      box-shadow:0 -18px 50px rgba(0,0,0,.55);
+      padding:14px 16px calc(20px + env(safe-area-inset-bottom,0px));
+      transform:translateY(100%);transition:transform .3s ease;
+      max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    }
+    .cfg-sheet.open { transform:none; }
+    .cfg-grab { width:42px;height:4px;background:#475569;border-radius:99px;margin:2px auto 12px; }
+    .cfg-head { display:flex;align-items:center;gap:12px;margin-bottom:4px; }
+    .cfg-head-av { width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
+                   justify-content:center;font-weight:900;color:#fff;font-size:14px;flex-shrink:0; }
+    .cfg-head-info { flex:1;min-width:0; }
+    .cfg-head-name { font-weight:800;font-size:1rem;color:#f1f5f9;line-height:1.15; }
+    .cfg-head-role { font-size:.72rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.04em; }
+    .cfg-close { background:rgba(148,163,184,.12);border:none;color:#cbd5e1;
+                 width:34px;height:34px;border-radius:10px;font-size:18px;cursor:pointer;flex-shrink:0; }
+    .cfg-close:active { transform:scale(.92); }
+    .cfg-section {
+      background:rgba(30,41,59,.55);border:1px solid rgba(148,163,184,.12);
+      border-radius:14px;padding:13px 13px 12px;margin-top:11px;
+    }
+    .cfg-sec-tit { display:flex;align-items:center;gap:7px;font-weight:800;
+                   font-size:.82rem;color:#e2e8f0;margin-bottom:9px; }
+    .cfg-sec-tit .cfg-ico { font-size:1rem; }
+    .cfg-row { display:flex;align-items:center;justify-content:space-between;gap:10px;
+               padding:7px 0;font-size:.85rem;color:#cbd5e1; }
+    .cfg-row + .cfg-row { border-top:1px solid rgba(148,163,184,.08); }
+    .cfg-row-label { display:flex;flex-direction:column;gap:1px;min-width:0; }
+    .cfg-row-sub { font-size:.7rem;color:#94a3b8; }
+    .cfg-select { background:#0f172a;border:1px solid #334155;color:#e2e8f0;
+                  border-radius:9px;padding:7px 9px;font-size:.8rem;max-width:58%; }
+    .cfg-btnrow { display:flex;flex-wrap:wrap;gap:7px;margin-top:9px; }
+    .cfg-btn {
+      flex:1 1 auto;min-width:calc(50% - 4px);
+      display:inline-flex;align-items:center;justify-content:center;gap:6px;
+      padding:9px 10px;border-radius:10px;font-size:.78rem;font-weight:700;
+      background:linear-gradient(180deg,rgba(51,65,85,.6),rgba(30,41,59,.6));
+      border:1px solid rgba(148,163,184,.22);color:#e2e8f0;cursor:pointer;
+      -webkit-tap-highlight-color:transparent;transition:transform .12s,background .15s;
+    }
+    .cfg-btn:active { transform:scale(.96); }
+    .cfg-btn.cfg-btn-amber { border-color:rgba(251,191,36,.4);color:#fcd34d;
+                             background:linear-gradient(180deg,rgba(120,53,15,.35),rgba(69,26,3,.4)); }
+    .cfg-btn-full { flex-basis:100%;min-width:100%; }
+    /* Toggle switch */
+    .cfg-switch { position:relative;width:44px;height:25px;flex-shrink:0;cursor:pointer; }
+    .cfg-switch input { position:absolute;opacity:0;width:0;height:0; }
+    .cfg-switch .cfg-track { position:absolute;inset:0;background:#334155;border-radius:99px;
+                             transition:background .2s; }
+    .cfg-switch .cfg-thumb { position:absolute;top:3px;left:3px;width:19px;height:19px;
+                             background:#cbd5e1;border-radius:50%;transition:transform .2s,background .2s; }
+    .cfg-switch input:checked + .cfg-track { background:#16a34a; }
+    .cfg-switch input:checked + .cfg-track + .cfg-thumb { transform:translateX(19px);background:#fff; }
+    /* Stepper de fuente A− A A+ */
+    .cfg-font-steps { display:flex;gap:6px;align-items:center; }
+    .cfg-font-btn { width:36px;height:34px;border-radius:9px;border:1px solid rgba(148,163,184,.25);
+                    background:rgba(15,23,42,.7);color:#e2e8f0;font-weight:800;cursor:pointer; }
+    .cfg-font-btn:active { transform:scale(.93); }
+    .cfg-font-btn.cfg-fmid { font-size:1rem; }
+    .cfg-font-btn.cfg-fsm  { font-size:.78rem; }
+    .cfg-font-btn.cfg-flg  { font-size:1.2rem; }
+    .cfg-pill { font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap; }
+    .cfg-pill-ok   { background:rgba(34,197,94,.16);color:#4ade80;border:1px solid rgba(34,197,94,.3); }
+    .cfg-pill-warn { background:rgba(251,191,36,.16);color:#fbbf24;border:1px solid rgba(251,191,36,.35); }
+    .cfg-pill-off  { background:rgba(148,163,184,.14);color:#94a3b8;border:1px solid rgba(148,163,184,.25); }
+    .cfg-mono { font-family:ui-monospace,Menlo,monospace;font-size:.72rem;color:#cbd5e1;
+                word-break:break-all; }
+    .cfg-adv-toggle { width:100%;text-align:left;background:none;border:none;color:#94a3b8;
+                      font-size:.8rem;font-weight:700;padding:9px 2px;cursor:pointer;
+                      display:flex;align-items:center;gap:6px;margin-top:6px; }
+    .cfg-adv-body { display:none;margin-top:4px; }
+    .cfg-adv-body.open { display:block; }
+
+    /* Escala de fuente global (accesibilidad) */
+    :root { --wh-font-scale: 1; }
+    body { font-size: calc(1rem * var(--wh-font-scale)); }
+
+    /* Alto contraste (almacén con polvo/luz) */
+    body.wh-high-contrast {
+      --wh-hc: 1;
+      filter: contrast(1.18) brightness(1.06);
+    }
+    body.wh-high-contrast .cfg-section,
+    body.wh-high-contrast .card { border-color: rgba(203,213,225,.4) !important; }
+    body.wh-high-contrast .cfg-row,
+    body.wh-high-contrast .text-slate-400,
+    body.wh-high-contrast .text-slate-500 { color:#e2e8f0 !important; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cfg-sheet, .cfg-btn, .cfg-switch .cfg-track,
+      .cfg-switch .cfg-thumb, .cfg-font-btn { transition: none !important; }
+    }
+    /* PC: modal centrado en vez de bottom-sheet */
+    @media (min-width: 768px) {
+      .cfg-overlay { background:rgba(2,6,23,.72); }
+      .cfg-sheet {
+        top:50%;left:50%;right:auto;bottom:auto;
+        transform:translate(-50%,-46%);
+        width:460px;max-width:92vw;max-height:86vh;
+        border-radius:18px;border:1px solid rgba(148,163,184,.18);
+      }
+      .cfg-sheet.open { transform:translate(-50%,-50%); }
+      .cfg-grab { display:none; }
+    }
     /* Overlay de carga DENTRO de un bottom-sheet (para operaciones en
        proceso que no deben interrumpirse). Cubre todo el contenido del
        sheet con backdrop blur + spinner moderno + mensaje contextual. */
@@ -5377,6 +5494,15 @@
           <span class="text-xs text-slate-400" id="umStatusLabel">—</span>
         </div>
         <div class="um-divider"></div>
+        <!-- Acción: abrir panel de configuración -->
+        <button onclick="App.closeUserMenu();ConfigPanel.abrir()" class="um-btn">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
+            <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.376l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/>
+          </svg>
+          Configuración
+        </button>
+        <div class="um-divider"></div>
         <!-- Acción: bloquear -->
         <button onclick="App.closeUserMenu();Session.bloquear()" class="um-btn">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -7355,14 +7481,9 @@
                 style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.4);color:#fbbf24">
           🔧 Calibrar impresora
         </button>
-        <!-- [v2.13.138] Tools simplificado a 2 botones: alertas + lotes globales.
-             El filtrado por tipo se hace DENTRO del modal con tabs. -->
-        <button onclick="window.MembreteSystem && MembreteSystem.abrirAlertasPrecio && MembreteSystem.abrirAlertasPrecio()"
-                class="px-3 py-2 rounded-lg text-xs font-semibold active:scale-95 transition-transform"
-                style="background:linear-gradient(135deg,#7f1d1d,#450a0a);border:1px solid rgba(248,113,113,.5);color:#fca5a5"
-                title="Productos cuyo precio cambió y necesitan reimpresión">
-          🚨 Alertas precio
-        </button>
+        <!-- [v2.13.138] Filtrado por tipo se hace DENTRO del modal con tabs.
+             [config-panel] "Alertas precio" RETIRADO del flujo del operador:
+             en almacén no manejan precios. Si admin lo necesita, va por MOS. -->
         <button onclick="window.MembreteSystem && MembreteSystem.abrirHistorialLotes('')"
                 class="px-3 py-2 rounded-lg text-xs font-semibold active:scale-95 transition-transform"
                 style="background:linear-gradient(135deg,#1e293b,#0a1424);border:1px solid rgba(251,191,36,.45);color:#fbbf24"
@@ -9593,6 +9714,174 @@
       <span><span class="act-sheet-tit">Cargador del día</span>
         <span class="act-sheet-sub">Sumar al resumen</span></span>
     </button>
+  </div>
+</div>
+
+<!-- ═══ PANEL DE CONFIGURACIÓN DEL OPERADOR ═══════════════════════════
+     Bottom-sheet en móvil / modal centrado en PC. Se abre desde el menú
+     del avatar (⚙ Configuración). Toda la lógica vive en ConfigPanel (app.js).
+     ════════════════════════════════════════════════════════════════════ -->
+<div class="cfg-overlay" id="overlayConfig" onclick="ConfigPanel.cerrar()"></div>
+<div class="cfg-sheet" id="sheetConfig" role="dialog" aria-label="Configuración">
+  <div class="cfg-grab"></div>
+
+  <!-- Cabecera: avatar + nombre + rol + cerrar -->
+  <div class="cfg-head">
+    <div class="cfg-head-av" id="cfgAvatar" style="background:#475569">?</div>
+    <div class="cfg-head-info">
+      <div class="cfg-head-name" id="cfgName">—</div>
+      <div class="cfg-head-role" id="cfgRole">Operador</div>
+    </div>
+    <button class="cfg-close" onclick="ConfigPanel.cerrar()" aria-label="Cerrar">✕</button>
+  </div>
+
+  <!-- 🖨 IMPRESORA DE ADHESIVOS -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">🖨</span> Impresora de adhesivos</div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Predeterminada</span>
+        <span class="cfg-row-sub">Se usa al imprimir etiquetas</span>
+      </div>
+      <select class="cfg-select" id="cfgPrinterSel" onchange="ConfigPanel.guardarImpresora(this.value)">
+        <option value="">🏭 Almacén (por defecto)</option>
+      </select>
+    </div>
+    <div class="cfg-btnrow">
+      <button class="cfg-btn cfg-btn-amber" onclick="ConfigPanel.calibrarDrift()">🔧 Calibrar drift</button>
+      <button class="cfg-btn" onclick="ConfigPanel.testPrint()">🧪 Test print</button>
+      <button class="cfg-btn cfg-btn-full" onclick="ConfigPanel.reimprimirLote()">🔁 Reimprimir lote…</button>
+    </div>
+  </div>
+
+  <!-- 📡 CONEXIÓN -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">📡</span> Conexión</div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Estado</span>
+        <span class="cfg-row-sub" id="cfgSyncSub">—</span>
+      </div>
+      <span class="cfg-pill cfg-pill-off" id="cfgConnPill">—</span>
+    </div>
+    <div class="cfg-btnrow">
+      <button class="cfg-btn" onclick="ConfigPanel.forzarRecarga()">⟳ Forzar recarga</button>
+      <button class="cfg-btn" onclick="ConfigPanel.diagnostico()">🩺 Diagnóstico</button>
+    </div>
+    <div class="cfg-row" id="cfgDiagBox" style="display:none">
+      <div class="cfg-mono" id="cfgDiagText" style="flex:1"></div>
+    </div>
+  </div>
+
+  <!-- 🔔 SONIDOS / VIBRACIÓN -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">🔔</span> Sonidos y vibración</div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Sonidos</span>
+        <span class="cfg-row-sub">Beeps de escaneo y alertas</span>
+      </div>
+      <label class="cfg-switch">
+        <input type="checkbox" id="cfgSound" onchange="ConfigPanel.toggleSound(this.checked)">
+        <span class="cfg-track"></span><span class="cfg-thumb"></span>
+      </label>
+    </div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Vibración</span>
+        <span class="cfg-row-sub">Feedback táctil (Android)</span>
+      </div>
+      <label class="cfg-switch">
+        <input type="checkbox" id="cfgVibrate" onchange="ConfigPanel.toggleVibrate(this.checked)">
+        <span class="cfg-track"></span><span class="cfg-thumb"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 👁 ACCESIBILIDAD -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">👁</span> Visualización</div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Tamaño de texto</span>
+        <span class="cfg-row-sub" id="cfgFontSub">Normal</span>
+      </div>
+      <div class="cfg-font-steps">
+        <button class="cfg-font-btn cfg-fsm" onclick="ConfigPanel.fontStep(-1)" aria-label="Más pequeño">A−</button>
+        <button class="cfg-font-btn cfg-fmid" onclick="ConfigPanel.fontReset()" aria-label="Normal">A</button>
+        <button class="cfg-font-btn cfg-flg" onclick="ConfigPanel.fontStep(1)" aria-label="Más grande">A+</button>
+      </div>
+    </div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Alto contraste</span>
+        <span class="cfg-row-sub">Más legible con polvo o luz fuerte</span>
+      </div>
+      <label class="cfg-switch">
+        <input type="checkbox" id="cfgContrast" onchange="ConfigPanel.toggleContrast(this.checked)">
+        <span class="cfg-track"></span><span class="cfg-thumb"></span>
+      </label>
+    </div>
+  </div>
+
+  <!-- 📱 MI DISPOSITIVO -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">📱</span> Mi dispositivo</div>
+    <div class="cfg-row">
+      <div class="cfg-row-label">
+        <span>Estado</span>
+        <span class="cfg-row-sub cfg-mono" id="cfgDeviceId">—</span>
+      </div>
+      <span class="cfg-pill cfg-pill-off" id="cfgDevicePill">—</span>
+    </div>
+    <div class="cfg-row">
+      <div class="cfg-row-label"><span>Versión</span></div>
+      <span class="cfg-mono" id="cfgVersion">—</span>
+    </div>
+    <div class="cfg-btnrow">
+      <button class="cfg-btn cfg-btn-full" onclick="ConfigPanel.buscarUpdate()">⬆ Buscar actualización</button>
+    </div>
+    <div class="cfg-row" id="cfgUpdateBox" style="display:none">
+      <div class="cfg-row-sub" id="cfgUpdateText" style="flex:1"></div>
+    </div>
+  </div>
+
+  <!-- ❓ AYUDA -->
+  <div class="cfg-section">
+    <div class="cfg-sec-tit"><span class="cfg-ico">❓</span> Ayuda</div>
+    <div class="cfg-row" style="display:block">
+      <span class="cfg-row-sub" style="line-height:1.5">
+        ¿Algo no funciona? Avisa al encargado del almacén. Para problemas de
+        impresión usa <b>Test print</b>; si la app va lenta o desactualizada,
+        usa <b>Forzar recarga</b> o <b>Buscar actualización</b>.
+      </span>
+    </div>
+  </div>
+
+  <!-- ▸ AVANZADO (admin/master) -->
+  <div id="cfgAdvWrap" style="display:none">
+    <button class="cfg-adv-toggle" onclick="ConfigPanel.toggleAvanzado()">
+      <span id="cfgAdvChevron">▸</span> Avanzado
+    </button>
+    <div class="cfg-adv-body" id="cfgAdvBody">
+      <div class="cfg-section" style="margin-top:0">
+        <div class="cfg-row">
+          <div class="cfg-row-label"><span>Versión completa</span></div>
+          <span class="cfg-mono" id="cfgAdvVersion" style="max-width:55%;text-align:right">—</span>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-row-label"><span>GAS endpoint</span></div>
+          <span class="cfg-mono" id="cfgAdvGas" style="max-width:55%;text-align:right">—</span>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-row-label"><span>Cola offline</span></div>
+          <span class="cfg-pill cfg-pill-off" id="cfgAdvQueue">—</span>
+        </div>
+        <div class="cfg-btnrow">
+          <button class="cfg-btn cfg-btn-full" onclick="ConfigPanel.cerrar();App.nav('tools')">🛠 Abrir Herramientas (dev)</button>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 

@@ -4,7 +4,17 @@ const SoundFX = (() => {
   let _ctx = null;
   let _comp = null;
 
+  // ── Gate de sonido (panel de configuración del operador) ──────────
+  // El operador puede silenciar TODOS los efectos desde Configuración.
+  // Preferencia persistente en localStorage('wh_sound_enabled').
+  // Default: ON (si no hay valor guardado, suena). Solo '0' silencia.
+  function _soundOn() {
+    try { return localStorage.getItem('wh_sound_enabled') !== '0'; }
+    catch (_) { return true; }
+  }
+
   function _getCtx() {
+    if (!_soundOn()) return null;     // gate central: ningún tono se sintetiza si está OFF
     if (!_ctx) {
       try { _ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
     }
@@ -201,6 +211,12 @@ const SoundFX = (() => {
     productoVerificado: () => {
       _tone(2000, 0.08, 'sine', 0.5);
       setTimeout(() => _tone(2800, 0.14, 'sine', 0.6), 90);
+    },
+
+    // ── Control del gate de sonido (panel de configuración) ──────────
+    isEnabled: () => _soundOn(),
+    setEnabled: (on) => {
+      try { localStorage.setItem('wh_sound_enabled', on ? '1' : '0'); } catch (_) {}
     }
   };
 })();
