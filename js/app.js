@@ -1377,17 +1377,14 @@ const Session = (() => {
     const sideMnNm = document.getElementById('sideUserMenuName');
     if (sideMnNm) sideMnNm.textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
 
-    // Mostrar acceso a Logs y Diagnóstico según rol
+    // Mostrar "Auditoría de stock" (antes "Logs") en el sidebar según rol.
+    // Tests/Diagnóstico y Tools ya NO viven en el sidebar (ruido dev para el operador):
+    //   · Diagnóstico → solo por consola: App.nav('diagnostico').
+    //   · Herramientas (dev) → Config ▸ Avanzado ▸ "Abrir Herramientas (dev)" (admin-gated).
     const rolUp = String(sesionActual.rol || '').toUpperCase();
     const esAdmin  = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR');
-    const esMaster = (rolUp === 'MASTER');
     const sideLogs = document.getElementById('sideRowLogs');
-    if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';   // logs: admin + master
-    const sideDiag = document.getElementById('sideRowDiag');
-    if (sideDiag) sideDiag.style.display = esMaster ? '' : 'none';  // diagnóstico: solo MASTER
-    // [v2.13.126 FIX] Tools (Calibrar impresora + Colas): visible para admin/master
-    const sideTools = document.getElementById('sideRowTools');
-    if (sideTools) sideTools.style.display = esAdmin ? '' : 'none';
+    if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';   // auditoría: admin + master
 
     // [Pregúntale a tu almacén] FAB del chat IA — solo admin/master (es el dueño/gestor).
     // ADITIVO: si el módulo falla, no afecta el resto del login.
@@ -16878,7 +16875,10 @@ const PreingresosView = (() => {
     @keyframes pavUp{from{transform:translateY(28px);opacity:.4}to{transform:translateY(0);opacity:1}}
     @keyframes pavFade{from{opacity:0}to{opacity:1}}
     @keyframes pavPulse{0%,100%{opacity:1}50%{opacity:.25}}
-    @keyframes pavBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}`;
+    @keyframes pavBar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+    @media (prefers-reduced-motion:reduce){
+      #previewAvisoOverlay,#previewAvisoOverlay.pav-closing,.pav-card,.pav-dot,.pav-bar{animation:none}
+    }`;
     document.head.appendChild(st);
   }
 
