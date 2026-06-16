@@ -5150,15 +5150,30 @@
     }, 10000);
   })();
   </script>
-  <script src="https://levo19.github.io/MOS/assets/auth/device-auth.js?v=1.0.19"></script>
+  <script src="https://levo19.github.io/MOS/assets/auth/device-auth.js?v=1.0.20"></script>
   <script src="https://levo19.github.io/MOS/assets/auth/extensor-horario.js?v=1.0.1"></script>
   <script>
   (function(){
     var MOS_URL = (window.WH_CONFIG && window.WH_CONFIG.mosGasUrl) ||
                   'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
     if (!window.DeviceAuth) return;
+    // [AUTH DIRECTO] Config Supabase que WH ya usa para sus datos (mint-wh /
+    // leer_tabla_rls / stock_enriquecido_rls). Misma URL + anon key públicas que
+    // js/api.js (_SB_URL/_SB_ANON). Al pasarlas a DeviceAuth.init, el módulo
+    // (v1.0.19) habilita el path DIRECTO: mos.verificar_dispositivo por REST anon
+    // (con app:'warehouseMos'), instantáneo, sin el cold-start de MOS GAS que
+    // causaba el "Conectando con MOS" largo. Fail-closed + fallback a GAS intactos.
+    var SB_URL  = 'https://rzbzdeipbtqkzjqdchqk.supabase.co';
+    var SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnpkZWlwYnRxa3pqcWRjaHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzYwMDQsImV4cCI6MjA5NjQ1MjAwNH0.MAlSdz_ugGUZoaU5st6dA_gb_x_IiUL0TXxH176kY9k';
+    // Flag DIRECTO por default ON en WH (la config Supabase ya está presente). El
+    // módulo igual exige _sbBase()+sbAnon antes de intentar el directo; sin red
+    // Supabase cae a GAS. Override manual: localStorage 'mos_device_auth_directo'='0'
+    // NO desactiva (el flag lee '1'); para forzar GAS, quita sbUrl/sbAnon de arriba.
+    try { if (localStorage.getItem('mos_device_auth_directo') == null) localStorage.setItem('mos_device_auth_directo', '1'); } catch(_){}
     DeviceAuth.init({
       mosGasUrl: MOS_URL,
+      sbUrl: SB_URL,
+      sbAnon: SB_ANON,
       app: 'warehouseMos',
       isMaster: false,  // WH acepta admin O master in-situ
       storageKeys: {
