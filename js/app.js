@@ -1231,8 +1231,9 @@ const Session = (() => {
 
     // 1. Validar PIN localmente (instantáneo si hay caché)
     const _dbgPersonal = OfflineManager.getPersonalCache();
-    console.log('[Login] PIN ingresado:', pinIntento, '| Personal en caché:', _dbgPersonal.length, 'registros');
-    if (_dbgPersonal.length > 0) console.log('[Login] Primer registro de muestra:', JSON.stringify(_dbgPersonal[0]).substring(0, 200));
+    // [SEGURIDAD] NO loguear el PIN ingresado ni los PINs del personal en consola
+    // (quedaban en texto plano visibles en DevTools). Solo conteo + resultado por nombre.
+    console.log('[Login] intento de login | Personal en caché:', _dbgPersonal.length, 'registros');
     let localOp = OfflineManager.validarPinLocal(pinIntento);
     console.log('[Login] validarPinLocal result:', localOp ? localOp.nombre : null);
 
