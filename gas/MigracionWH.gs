@@ -311,12 +311,39 @@ var _WH_SYNC_TAILS = {
   pedidos_cliente_items:99999, pedidos_cliente_adj:99999
 };
 
+// [fix sombra atrasada] El sync recorría SIEMPRE _WH_ORDEN de 0 a N sin
+// presupuesto de tiempo. Cuando la corrida pasa de 6 min (GAS la mata),
+// las tablas del FINAL del orden (sesiones #12, desempeno #13) NUNCA se
+// alcanzaban → su sombra quedaba congelada en silencio mientras las del
+// inicio (guias/stock/envasados) sí refrescaban. Dos defensas:
+//   1) Presupuesto de tiempo (5 min) → corta limpio antes del kill de GAS.
+//   2) OFFSET ROTATIVO (solo incremental): cada corrida arranca en un punto
+//      distinto del orden, así toda tabla se alcanza en a lo sumo unas pocas
+//      corridas aunque alguna muera temprano. Idempotente (upsert) → rotar no
+//      duplica ni pierde nada.
+var _WH_SYNC_TIME_BUDGET = 5*60*1000;   // < 6 min límite GAS
+
 function _syncWHImpl(full){
+  var t0=Date.now();
   var resumen={};
-  _WH_ORDEN.forEach(function(tabla){
+  var props=PropertiesService.getScriptProperties();
+  var N=_WH_ORDEN.length;
+
+  // offset rotativo: solo para el incremental. El full (nocturno/resync manual)
+  // arranca en 0 para que reconciliarWH evalúe un barrido completo y coherente.
+  var startOff=0;
+  if(!full){
+    startOff=parseInt(props.getProperty('WHSYNC_ROT')||'0',10); if(isNaN(startOff)) startOff=0;
+    startOff=((startOff%N)+N)%N;
+  }
+
+  var alcanzadas=0, cortePorTiempo=false;
+  for(var k=0;k<N;k++){
+    if(Date.now()-t0 > _WH_SYNC_TIME_BUDGET){ cortePorTiempo=true; resumen._cortePorTiempo='tras '+alcanzadas+'/'+N+' tablas'; break; }
+    var tabla=_WH_ORDEN[(startOff+k)%N];
     var cfg=_WH_SPECS[tabla];
     try{
-      if(!getSheet(cfg.sheet)){ return; }
+      if(!getSheet(cfg.sheet)){ alcanzadas++; continue; }
       var rows=_whBuildRows(tabla);
       var tail=_WH_SYNC_TAILS[tabla]||300;
       var slice = (full || rows.length<=tail) ? rows : rows.slice(rows.length-tail);
@@ -327,11 +354,30 @@ function _syncWHImpl(full){
         if(r.ok) up+=lote.length; else err.push('lote '+i+': HTTP '+r.code+' '+(r.error||''));
       }
       resumen[tabla]={sync:up, de:slice.length, errores:err};
-    }catch(e){ resumen[tabla]={error:String(e&&e.message||e)}; }
-  });
+      alcanzadas++;
+    }catch(e){ resumen[tabla]={error:String(e&&e.message||e)}; alcanzadas++; }
+  }
+
+  // Avanzar el offset rotativo por las tablas que SÍ se alcanzaron este ciclo.
+  // Si la corrida murió antes (sin guardar), la próxima reanuda donde quedó.
+  if(!full){ try{ props.setProperty('WHSYNC_ROT', String((startOff+alcanzadas)%N)); }catch(eR){} }
+
+  resumen._meta={full:!!full, desde:startOff, alcanzadas:alcanzadas, total:N, cortePorTiempo:cortePorTiempo, ms:Date.now()-t0};
   Logger.log(JSON.stringify(resumen,null,2));
   return resumen;
 }
+// [resync puntual] Re-sincroniza COMPLETAS sesiones+desempeno desde la hoja a la
+// sombra (las 2 tablas que la corrida incremental dejaba atrás). Backfill por tabla
+// con presupuesto propio, independiente del orden global → no depende de que el
+// barrido completo llegue al final. Idempotente. Sin params: corre y devuelve resumen.
+function resyncSesionesWH(){
+  var a=migrarWH({soloTabla:'sesiones'});
+  var b=migrarWH({soloTabla:'desempeno'});
+  var out={sesiones:a.sesiones||a, desempeno:b.desempeno||b};
+  Logger.log(JSON.stringify(out,null,2));
+  return out;
+}
+
 function syncWHReciente(){ return _syncWHImpl(false); }   // 15 min: solo cola reciente (barato)
 function syncWHCompleto(){ var r=_syncWHImpl(true); try{ reconciliarDiarioWH(); }catch(e){ Logger.log('recon WH falló: '+e); } return r; }   // recon pegada al sync nocturno (sin trigger extra)
 
