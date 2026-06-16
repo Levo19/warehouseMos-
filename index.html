@@ -5186,12 +5186,88 @@
         // Compat con cache viejo basado en TS
         try { localStorage.setItem('wh_device_auth_date', String(Date.now())); } catch(_){}
         try { localStorage.setItem('wh_device_auth_id', DeviceAuth.deviceId()); } catch(_){}
+        // [v2.13.252 FIX CUELGUE OVERLAY] DEFENSA DURA DE WH: en cuanto el modulo
+        // declara ACTIVO (llama onAuth) LEVANTAMOS el gate por nuestra cuenta, sin
+        // depender de que el _ocultarOverlay del modulo gane su carrera con el DOM.
+        // Sintoma real: el directo daba ACTIVO (RPC 200) pero el overlay
+        // "Verificando dispositivo / Conectando con MOS" quedaba ETERNO porque el
+        // unblock del modulo no aterrizaba. Aqui quitamos da-pre-block + el overlay
+        // del modulo + desarmamos el watchdog WH. Idempotente (correr 2x no rompe).
+        _whLevantarGate('onAuth');
       },
       onAprobado: function() {
         // Reload tras detectar aprobacion remota (in-situ ya hace reload propio)
         setTimeout(function(){ location.reload(); }, 800);
       }
     });
+
+    // [v2.13.252] Helper unico para LEVANTAR el gate de WH (idempotente). Quita el
+    // pre-block del <html> (que vuelve la app visible) + remueve el overlay del
+    // modulo si quedo pegado. NO toca cache ni genera UUID nuevo.
+    window._whLevantarGate = function(origen) {
+      try { document.documentElement.classList.remove('da-pre-block'); } catch(_){}
+      try { var ov = document.getElementById('deviceAuthOverlay'); if (ov && ov.parentNode) ov.parentNode.removeChild(ov); } catch(_){}
+      try { var fb = document.getElementById('da-fatal-fallback'); if (fb && fb.parentNode) fb.parentNode.removeChild(fb); } catch(_){}
+      try { document.body && document.body.classList.remove('da-blocked'); } catch(_){}
+      if (window._whGateWatchdog) { clearTimeout(window._whGateWatchdog); window._whGateWatchdog = null; }
+      try { var rb = document.getElementById('whGateRetry'); if (rb && rb.parentNode) rb.parentNode.removeChild(rb); } catch(_){}
+    };
+
+    // [v2.13.252] WATCHDOG WH INDEPENDIENTE del modulo. El watchdog del modulo solo
+    // dispara mientras _state.estado==='VERIFICANDO'; si el modulo resolvio ACTIVO
+    // internamente pero el unblock del DOM se perdio (carrera/_appendCuandoListo/
+    // re-render tardio que re-agrega da-pre-block), el modulo NO se cree colgado y
+    // su watchdog nunca actua → la app queda tapada para siempre. Este watchdog WH
+    // es el cinturon-y-tirantes: a los 15s, si el <html> SIGUE con da-pre-block:
+    //   - si el modulo YA esta ACTIVO → levantamos el gate (era una carrera) → entra.
+    //   - si NO esta ACTIVO → mostramos boton "Reintentar" que re-dispara la
+    //     verificacion (DeviceAuth.forzarReVerify) SIN borrar cache (no genera UUID
+    //     nuevo no-aprobado). FAIL-CLOSED: nunca autoriza por su cuenta.
+    window._whGateWatchdog = setTimeout(function() {
+      window._whGateWatchdog = null;
+      // Si el gate ya se levanto, nada que hacer.
+      if (!document.documentElement.classList.contains('da-pre-block')) return;
+      var est = (window.DeviceAuth && DeviceAuth.estado && DeviceAuth.estado()) || {};
+      if (est.estado === 'ACTIVO') {
+        // El modulo resolvio ACTIVO pero el unblock se perdio → era una carrera.
+        _whLevantarGate('watchdog-activo');
+        return;
+      }
+      // No-ACTIVO y seguimos tapados: ofrecer Reintentar (NO borra cache).
+      if (document.getElementById('whGateRetry')) return;
+      var box = document.createElement('div');
+      box.id = 'whGateRetry';
+      box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:100000;display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 16px calc(20px + env(safe-area-inset-bottom));background:linear-gradient(0deg,#0c1426,rgba(12,20,38,.92));visibility:visible;font-family:system-ui,-apple-system,sans-serif';
+      box.innerHTML = '<p style="margin:0;font-size:13px;color:#cbd5e1;text-align:center;max-width:340px">La verificacion esta tardando mas de lo normal. Tu acceso NO se ha perdido.</p>'
+        + '<button id="whGateRetryBtn" style="padding:13px 26px;border-radius:12px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-weight:800;border:0;cursor:pointer;font-size:15px">🔄 Reintentar</button>';
+      // El propio html.da-pre-block oculta todo menos overlays del modulo; este box
+      // necesita ser visible aun con da-pre-block puesto.
+      box.classList.add('da-insitu-overlay'); // whitelisted por el CSS da-pre-block
+      document.documentElement.appendChild(box);
+      var btn = box.querySelector('#whGateRetryBtn');
+      btn.addEventListener('click', function() {
+        btn.disabled = true; btn.textContent = '⏳ Reintentando...';
+        try { if (box.parentNode) box.parentNode.removeChild(box); } catch(_){}
+        // Re-disparar verificacion SIN tocar cache (forzarReVerify re-consulta el
+        // server con el MISMO deviceId; jamas genera uno nuevo). Re-armar watchdog.
+        var p = (window.DeviceAuth && DeviceAuth.forzarReVerify) ? DeviceAuth.forzarReVerify() : Promise.resolve();
+        Promise.resolve(p).then(function(estado) {
+          if (estado === 'ACTIVO') _whLevantarGate('retry');
+        }).catch(function(){});
+        // Re-armar el watchdog largo por si el reintento tampoco resuelve: a los 12s
+        // re-ofrece el boton (o levanta el gate si el modulo ya quedo ACTIVO).
+        if (window._whGateWatchdog) { clearTimeout(window._whGateWatchdog); }
+        window._whGateWatchdog = setTimeout(function reWatch() {
+          window._whGateWatchdog = null;
+          if (!document.documentElement.classList.contains('da-pre-block')) return;
+          var e2 = (window.DeviceAuth && DeviceAuth.estado && DeviceAuth.estado()) || {};
+          if (e2.estado === 'ACTIVO') { _whLevantarGate('rewatch-activo'); return; }
+          // Seguimos tapados → volver a mostrar el mismo box de reintento.
+          if (!document.getElementById('whGateRetry')) document.documentElement.appendChild(box);
+          btn.disabled = false; btn.textContent = '🔄 Reintentar';
+        }, 12000);
+      });
+    }, 15000);
   })();
   </script>
 </head>

@@ -1850,6 +1850,11 @@ const Session = (() => {
       if (e === 'ACTIVO') {
         _verifEstado = 'ACTIVO';
         _ocultarPantallaVerif();
+        // [v2.13.252] DEFENSA: el boot ve ACTIVO via polling → levantar el gate de
+        // WH por nuestra cuenta (idempotente) por si el _ocultarOverlay del modulo
+        // no aterrizo (carrera DOM). Sin esto el overlay "Verificando dispositivo"
+        // podia quedar ETERNO pese a que el directo ya dio ACTIVO.
+        try { if (window._whLevantarGate) window._whLevantarGate('boot-poll'); } catch(_) {}
         return 'ACTIVO';
       }
       // Estados terminales NO autorizados — el módulo ya muestra su overlay
