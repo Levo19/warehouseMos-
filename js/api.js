@@ -1278,18 +1278,16 @@ const API = (() => {
       return { ok: true, data: { idGuia: 'G_' + lid, estado: 'ABIERTA' }, dedup: !!out.dedup };
     }
     if (params.action === 'cerrarGuia') {
-      // orquestador: arma detalles desde la guía (get_guia_rls) → cerrar_guia (aplica stock+FIFO) → actividad.
-      // Idempotente: si ya CERRADA, la RPC devuelve yaCerrada (no reaplica stock).
-      const g = await _sbRpcWH('get_guia_rls', { p_id: String(params.idGuia || '') });
-      if (!g || g.ok === false) return null;
-      const detalle = _sbRowsToObjsFront('guia_detalle', g.detalle || []);
-      const detalles = detalle.map(d => ({
-        codigo_producto: d.codigoProducto, cantidad_recibida: d.cantidadRecibida,
-        precio_unitario: d.precioUnitario, id_lote: d.idLote, fecha_vencimiento: d.fechaVencimiento
-      }));
-      const out = await _sbRpcWH('cerrar_guia', { p: { id_guia: String(params.idGuia || ''), usuario: params.usuario || '', detalles } });
+      // [152 · FIX DOBLE-CONTEO] Usa la RPC IDEMPOTENTE wh.cerrar_guia_idempotente(p_id_guia):
+      // lee wh.guia_detalle, aplica SOLO delta = cant_recibida − cantidad_aplicada por línea,
+      // SETEA cantidad_aplicada y escribe kardex único (MOVID_<guia>#<linea>). Recerrar tras
+      // un reabrir (que ya NO resetea cantidad_aplicada) da delta 0 → no dobla. Antes esta
+      // ruta usaba wh.cerrar_guia(jsonb) que dejaba cantidad_aplicada=0 → el cron de inactividad
+      // re-aplicaba el total = DOBLE CONTEO. La firma es texto plano (no envoltura {p}).
+      // Idempotente: si ya CERRADA/AUTOCERRADA, la RPC devuelve lineasSaltadas (no reaplica).
+      const out = await _sbRpcWH('cerrar_guia_idempotente', { p_id_guia: String(params.idGuia || '') });
       if (!out || out.ok === false) return null;
-      const _yaCerrada = !!(out.yaCerrada || out.ya_cerrada);
+      const _yaCerrada = String(out.eraEstado || '').toUpperCase() === 'CERRADA' || String(out.eraEstado || '').toUpperCase() === 'AUTOCERRADA' || !!(out.yaCerrada || out.ya_cerrada);
       if (!_yaCerrada) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }); } catch (_) {} }
       // [shape-fix] el front lee res.data?.montoTotal (app.js:7571). La RPC devuelve el monto al nivel raíz →
       // envolver al shape GAS {ok:true, data:{idGuia, estado:'CERRADA', montoTotal, yaCerrada?}}. Tolerante al nombre de campo.
@@ -1299,8 +1297,10 @@ const API = (() => {
       return { ok: true, data: _data };
     }
     if (params.action === 'reabrirGuia') {
-      // Reverso de stock/lotes. Idempotente por estado (FOR UPDATE + anti doble-reverso en la RPC). La autorización
-      // admin (REABRIR_GUIA) se valida ANTES en el flujo. id_guia real (no generado).
+      // [152 · INVARIANTE] reabrir NUNCA toca stock y NUNCA resetea cantidad_aplicada (solo estado=ABIERTA +
+      // ultima_actividad). El stock aplicado se preserva → al recerrar (idempotente) delta = cant_recibida −
+      // cantidad_aplicada = 0 sin editar → NO dobla. Idempotente por estado (FOR UPDATE). La autorización admin
+      // (REABRIR_GUIA) se valida ANTES en el flujo. id_guia real (no generado).
       const out = await _sbRpcWH('reabrir_guia', { p: { id_guia: String(params.idGuia || ''), usuario: params.usuario || '' } });
       if (!out || out.ok === false) return null;
       return out;
