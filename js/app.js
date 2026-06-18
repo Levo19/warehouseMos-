@@ -1131,6 +1131,30 @@ const Session = (() => {
   const MIN_INACTIVIDAD         = 5;   // minutos — bloqueo subsecuente
   const MIN_INACTIVIDAD_PRIMERA = 15;  // minutos — primer bloqueo de la sesión
   let _yaSeBloqueoUnaVez = false;
+  // [v2.13.266 UX] Heartbeat de actividad: marca de tiempo (ms) de la última
+  // interacción real del usuario, persistida en localStorage. Permite que un
+  // RELOAD de la pestaña que ocurre mientras el operador está ACTIVO (recargó
+  // a propósito, vino una actualización, F5, etc.) restaure DIRECTO a la app
+  // en vez de caer al lock screen — la causa del "inicio sesión y me pide PIN
+  // al toque". Si en cambio pasó tiempo de inactividad (mismo umbral que el
+  // bloqueo por inactividad), el reload SÍ aterriza bloqueado (seguridad intacta:
+  // el PIN de desbloqueo sigue siendo obligatorio tras inactividad real).
+  const _LAST_ACT_KEY = 'wh_last_activity';
+  function _marcarActividad() {
+    try { localStorage.setItem(_LAST_ACT_KEY, String(Date.now())); } catch (_) {}
+  }
+  function _msDesdeUltimaActividad() {
+    try {
+      const t = parseInt(localStorage.getItem(_LAST_ACT_KEY), 10);
+      return Number.isFinite(t) ? (Date.now() - t) : Infinity;
+    } catch (_) { return Infinity; }
+  }
+  function _minInactividadActual() {
+    const override = parseInt(localStorage.getItem('wh_min_inactividad'), 10);
+    return (override && override > 0)
+      ? override
+      : (_yaSeBloqueoUnaVez ? MIN_INACTIVIDAD : MIN_INACTIVIDAD_PRIMERA);
+  }
 
   function _hoy() {
     return new Date().toISOString().split('T')[0];
@@ -1144,10 +1168,18 @@ const Session = (() => {
       const fechaDia = saved.fechaDia || null;
 
       if (fechaDia === hoy) {
-        // Misma jornada en este dispositivo → restaurar y bloquear
+        // Misma jornada en este dispositivo → restaurar sesión.
+        // [v2.13.266 UX] NO bloquear de inmediato si el operador estaba ACTIVO
+        // hace poco (reload a propósito / F5 / update). Solo aterrizar en el lock
+        // si pasó el umbral de inactividad (= comportamiento de bloqueo normal).
+        // Esto elimina el "inicio sesión y me pide PIN al toque" tras un reload.
+        // Seguridad intacta: si hubo inactividad real, el PIN sigue siendo obligatorio.
         sesionActual = saved;
         _aplicarSesion();
-        bloquear();
+        const idleMin = _msDesdeUltimaActividad() / 60000;
+        if (idleMin >= _minInactividadActual()) {
+          bloquear();
+        }
         return;
       }
 
@@ -1214,13 +1246,17 @@ const Session = (() => {
     if (pinBuffer.length >= 4) return;
     pinBuffer += d;
     _actualizarPuntos('pin', pinBuffer.length);
-    if (pinBuffer.length === 4) setTimeout(() => _intentarLogin(), 150);
+    // [v2.13.266] Feedback inmediato por tecla (consistente con el lock screen).
+    try { SoundFX.click(); } catch (_) {}
+    vibrate(8);
+    if (pinBuffer.length === 4) setTimeout(() => _intentarLogin(), 120);
   }
 
   function pinAtras() {
     if (pinBuffer.length > 0) {
       pinBuffer = pinBuffer.slice(0, -1);
       _actualizarPuntos('pin', pinBuffer.length);
+      vibrate(8);
     }
   }
 
@@ -1327,6 +1363,10 @@ const Session = (() => {
 
   // bienvenidaImpresa: true = ya se imprimió el ticket hoy → no imprimir
   function _postLogin(sesionAnterior, bienvenidaImpresa) {
+    // [v2.13.266] Chime de bienvenida + vibración al entrar (feedback de éxito).
+    try { SoundFX.welcome(); } catch (_) {}
+    vibrate(25);
+    _marcarActividad();
     if (sesionAnterior) _mostrarAvisoSesionAnterior(sesionAnterior);
     // Welcome screen estilo MosExpress (con stats + pre-carga)
     if (typeof Welcome !== 'undefined' && sesionActual) {
@@ -1501,14 +1541,20 @@ const Session = (() => {
 
   function _resetTimerBloqueo() {
     clearTimeout(lockTimer);
+    // [v2.13.266] Heartbeat: cada interacción refresca la marca de actividad.
+    // Solo cuenta si NO está bloqueado (en el lock las teclas no son "actividad
+    // de trabajo" — la cuenta de inactividad para el restore no debe reiniciarse
+    // tecleando en el propio lock screen).
+    if (!_estaBloqueado()) _marcarActividad();
     // [v2.13.162 UX] Si admin sobreescribió, prioridad a su config. Sino:
     //   - Primer bloqueo de la sesión: 15 min (más relajado)
     //   - Bloqueos siguientes: 5 min (más estricto)
-    const override = parseInt(localStorage.getItem('wh_min_inactividad'));
-    const min = (override && override > 0)
-      ? override
-      : (_yaSeBloqueoUnaVez ? MIN_INACTIVIDAD : MIN_INACTIVIDAD_PRIMERA);
+    const min = _minInactividadActual();
     lockTimer = setTimeout(() => bloquear(), min * 60 * 1000);
+  }
+  function _estaBloqueado() {
+    const el = document.getElementById('lockScreen');
+    return !!(el && el.style.display !== 'none' && el.style.display !== '');
   }
 
   function bloquear() {
@@ -1530,7 +1576,11 @@ const Session = (() => {
     // Init reloj, frase rotante y partículas en el lock screen
     _initLockEnhancements();
 
-    document.getElementById('lockScreen').style.display = 'flex';
+    // [v2.13.266] Limpiar la clase de salida por si un desbloqueo previo no la
+    // removió (evita que el lock quede invisible con opacity:0 al re-bloquear).
+    const _ls = document.getElementById('lockScreen');
+    _ls.classList.remove('wh-lock-out');
+    _ls.style.display = 'flex';
 
     clearInterval(lockInterval);
     lockInterval = setInterval(() => {
@@ -1672,13 +1722,17 @@ const Session = (() => {
     if (lockPinBuffer.length >= 4) return;
     lockPinBuffer += d;
     _actualizarPuntos('lpin', lockPinBuffer.length);
-    if (lockPinBuffer.length === 4) setTimeout(() => _intentarDesbloqueo(), 150);
+    // [v2.13.266] Feedback inmediato por tecla: tic suave + vibración corta.
+    try { SoundFX.click(); } catch (_) {}
+    vibrate(8);
+    if (lockPinBuffer.length === 4) setTimeout(() => _intentarDesbloqueo(), 120);
   }
 
   function lockAtras() {
     if (lockPinBuffer.length > 0) {
       lockPinBuffer = lockPinBuffer.slice(0, -1);
       _actualizarPuntos('lpin', lockPinBuffer.length);
+      vibrate(8);
     }
   }
 
@@ -1687,21 +1741,35 @@ const Session = (() => {
     lockPinBuffer = '';
     _actualizarPuntos('lpin', 0);
 
-    // Validación 100% local — solo acepta el PIN del usuario activo
+    // Validación 100% local — solo acepta el PIN del usuario activo (instantáneo).
     const personal = OfflineManager.getPersonalCache();
     const ok = personal.find(p =>
       String(p.pin) === String(pin) && p.idPersonal === sesionActual.idPersonal
     );
 
     if (ok) {
+      // [v2.13.266] Desbloqueo: chime de éxito + vibración + fade de salida suave.
+      try { SoundFX.savedTick(); } catch (_) {}
+      vibrate(20);
       clearInterval(lockInterval);
       if (_lockQuoteInterval) { clearInterval(_lockQuoteInterval); _lockQuoteInterval = null; }
-      document.getElementById('lockScreen').style.display = 'none';
+      _marcarActividad();
+      const ls = document.getElementById('lockScreen');
+      ls.classList.add('wh-lock-out');
+      setTimeout(() => {
+        ls.style.display = 'none';
+        ls.classList.remove('wh-lock-out');
+      }, 260);
       _resetTimerBloqueo();
-      _activarWakeLock(); // re-activar por si el SO lo libero al bloquear
+      _activarWakeLock(); // re-activar por si el SO lo liberó al bloquear
     } else {
-      document.getElementById('lockError').textContent = '❌ PIN incorrecto';
-      setTimeout(() => { document.getElementById('lockError').textContent = ''; }, 2000);
+      // [v2.13.266] PIN errado: shake + buzzer + vibración de error, mensaje claro.
+      try { SoundFX.buzzer(); } catch (_) {}
+      _vibrateRaw([40, 60, 40]);
+      const card = document.getElementById('lockCard');
+      if (card) { card.classList.remove('wh-shake'); void card.offsetWidth; card.classList.add('wh-shake'); }
+      document.getElementById('lockError').textContent = 'PIN incorrecto · intenta de nuevo';
+      setTimeout(() => { document.getElementById('lockError').textContent = ''; }, 2200);
     }
   }
 
@@ -1892,10 +1960,14 @@ const Session = (() => {
     const isLock = prefix === 'lpin';
     for (let i = 0; i < 4; i++) {
       const el = document.getElementById(prefix + i);
-      if (el) {
+      if (!el) continue;
+      if (isLock) {
+        // [v2.13.266] El lock usa .wh-pin-dot (estilado en CSS) + .filled.
+        el.className = 'wh-pin-dot' + (i < n ? ' filled' : '');
+      } else {
         el.className = i < n
-          ? (isLock ? 'w-4 h-4 rounded-full bg-amber-500 transition-all' : 'w-4 h-4 rounded-full bg-sky-400 transition-all')
-          : (isLock ? 'w-4 h-4 rounded-full border-2 border-amber-900 transition-all' : 'w-4 h-4 rounded-full border-2 border-slate-600 transition-all');
+          ? 'w-4 h-4 rounded-full bg-sky-400 transition-all'
+          : 'w-4 h-4 rounded-full border-2 border-slate-600 transition-all';
       }
     }
   }
@@ -1908,7 +1980,9 @@ const Session = (() => {
     _liberarWakeLock();
     _limpiarSesion();
     sesionActual = null;
-    document.getElementById('lockScreen').style.display = 'none';
+    const _ls = document.getElementById('lockScreen');
+    _ls.classList.remove('wh-lock-out');
+    _ls.style.display = 'none';
     _ocultarApp();
     mostrarLogin();
   }
