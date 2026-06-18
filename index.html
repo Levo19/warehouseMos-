@@ -6011,7 +6011,11 @@
       </div>
     </div>
 
-    <!-- Alertas de cuadre stock (auditoría diaria 22:00) -->
+    <!-- [REMOVIDO 2026-06-18] Módulo "Alertas de cuadre de stock" deshabilitado:
+         es diagnóstico redundante con el "Log de errores" de MOS (mos.stock_diferencias,
+         100% Supabase). Generación apagada (pg_cron wh-auditar-cuadre desagendado) y
+         lectura neutralizada (Dashboard.cargarAlertasStock no-op). Bloque comentado para
+         reversibilidad. NO afecta el flujo de auditoría que SÍ mueve stock (auditarProducto).
     <div id="cardAlertasStock" class="card mb-3" style="display:none;border:1.5px solid rgba(239,68,68,.4);background:rgba(127,29,29,.08)">
       <div class="flex items-center justify-between mb-2">
         <span class="font-bold text-red-400">⚠ Alertas de cuadre de stock</span>
@@ -6022,17 +6026,19 @@
       <button onclick="Dashboard.verTodasAlertas()" id="btnVerTodasAlertas"
               class="text-xs text-red-300 underline w-full text-center" style="display:none">Ver todas →</button>
     </div>
+    -->
 
   </section>
 
-  <!-- ── SHEET: detalle alertas de cuadre ─────────── -->
+  <!-- ── SHEET: detalle alertas de cuadre [REMOVIDO 2026-06-18 — ver nota arriba] ─────────── -->
+  <!--
   <div class="sheet-overlay" id="overlayAlertasStock" onclick="cerrarSheet('sheetAlertasStock')"></div>
   <div class="bottom-sheet" id="sheetAlertasStock" style="max-height:90vh;overflow-y:auto">
     <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-3"></div>
     <p class="font-bold text-base mb-1">Alertas de cuadre de stock</p>
     <p id="alertasStockSub" class="text-xs text-slate-400 mb-3"></p>
 
-    <!-- Búsqueda -->
+    [Búsqueda]
     <div class="mb-2">
       <input id="alertaSearchInput" type="text"
              placeholder="🔍 Buscar producto o código..."
@@ -6042,7 +6048,7 @@
                     font-size:.85em;outline:none"/>
     </div>
 
-    <!-- Filtros chips -->
+    [Filtros chips]
     <div class="flex gap-1.5 mb-3 flex-wrap">
       <button id="chipAlertasTodas" onclick="Dashboard.setAlertaFiltro('todas')"
               class="alerta-chip chip-active">Todas</button>
@@ -6064,6 +6070,7 @@
       border-color: rgba(239,68,68,.5); background: rgba(127,29,29,.2); color: #f87171;
     }
   </style>
+  -->
 
   <!-- ── MODO ENVASADOR ────────────────────────── -->
   <section id="view-envasador" class="view slide-up">

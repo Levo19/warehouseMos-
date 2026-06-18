@@ -3470,7 +3470,17 @@ const Dashboard = (() => {
   // ── Alertas de cuadre stock (auditoría diaria 22:00) ──────
   let _alertasCache = [];
 
+  // [REMOVIDO 2026-06-18] Módulo de "Alertas de cuadre de stock" deshabilitado por
+  // redundante: es diagnóstico (real vs teórico, no corrige stock) y el "Log de errores"
+  // de MOS (mos.stock_diferencias, 100% Supabase) cubre lo mismo para almacén, más limpio.
+  // Generación apagada (pg_cron wh-auditar-cuadre desagendado). Al dejar cargarAlertasStock
+  // en no-op, _alertasCache queda siempre vacío → el widget del dashboard nunca se muestra,
+  // el chip DESCUADRE de Productos nunca aparece y la sheet nunca se abre. El resto de
+  // funciones se conservan (dead code inocuo) para reversibilidad. NO afecta auditarProducto.
+  const _ALERTAS_CUADRE_ON = false;
+
   async function cargarAlertasStock() {
+    if (!_ALERTAS_CUADRE_ON) return;   // módulo desactivado (ver nota arriba)
     try {
       const res = await API.getAlertasStock({ soloPendientes: true });
       if (!res.ok) return;
