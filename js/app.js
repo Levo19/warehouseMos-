@@ -1156,8 +1156,13 @@ const Session = (() => {
       : (_yaSeBloqueoUnaVez ? MIN_INACTIVIDAD : MIN_INACTIVIDAD_PRIMERA);
   }
 
+  // [fix TZ] El día de la jornada se calcula SIEMPRE en hora de Perú (America/Lima),
+  // igual que el resto de la app (_hoyPeru/_diaPeru) y el backend GAS. Antes usaba
+  // toISOString() (UTC): a las 19:00 Perú (00:00 UTC) la sesión del MISMO día se veía
+  // como "otro día" → forzaba login + cerrarTurno(forzado) en medio de un turno de noche.
+  // Guardado y comparación usan la misma base, así que un turno real de ayer SÍ pide login.
   function _hoy() {
-    return new Date().toISOString().split('T')[0];
+    return _hoyPeru();
   }
 
   async function init() {
@@ -5130,7 +5135,21 @@ const GuiasView = (() => {
     const fresh = OfflineManager.getGuiasCache();
     if (!fresh.length) return;
     todas = fresh;
+    // [fix scroll] render() reemplaza todo el innerHTML de #listGuias → en tablet
+    // (contenedor scrolleable) el scrollTop volvía a 0 cada 60s, sacando al operador
+    // de donde estaba leyendo. Guardamos la posición ANTES del re-render y la
+    // restauramos DESPUÉS (en mobile #listGuias no scrollea, queda en 0 = no-op;
+    // ahí scrollea el window, que el polling no toca). La ventana expandida (_visibles)
+    // no se resetea aquí, así que la altura del listado se conserva.
+    const cont    = document.getElementById('listGuias');
+    const prevTop = cont ? cont.scrollTop : 0;
     render(_filtrarYBuscar());
+    if (cont && prevTop > 0) {
+      // El render puede pintar en chunks (rAF); restaurar tras el frame mantiene la
+      // posición en el caso síncrono y no estorba en el chunked (los chunks se añaden
+      // al final, debajo del viewport, sin mover lo ya leído).
+      requestAnimationFrame(() => { cont.scrollTop = prevTop; });
+    }
     // Parpadeo sutil del indicador
     const dot = document.getElementById('guiasRefreshDot');
     if (dot) { dot.style.opacity = '1'; setTimeout(() => { dot.style.opacity = '0'; }, 1200); }
@@ -5162,13 +5181,42 @@ const GuiasView = (() => {
     return r;
   }
 
+  // [fix búsqueda] Debounce + mínimo de caracteres. Antes buscar() corría en CADA
+  // tecla con render síncrono NO ventaneado (la búsqueda desactiva la ventana de 80):
+  // teclear una letra común matchea cientos de guías → freeze. Ahora:
+  //  - El toggle del botón limpiar es inmediato (barato, UI responsiva).
+  //  - Con <2 caracteres NO se busca: se vuelve a la vista ventaneada normal (window de 80).
+  //  - Con ≥2 caracteres el render pesado + scrollIntoView va detrás de un debounce ~180ms.
+  let _busqDebounce = null;
+  const _BUSQ_DEBOUNCE_MS = 180;
+  const _BUSQ_MIN = 2;
+
   function buscar(q) {
+    const raw = (q || '').trim();
+    // Toggle inmediato de los botones limpiar (sin esperar al debounce).
+    const cl = document.getElementById('clearBuscarGuia');
+    if (cl) cl.style.display = raw ? 'flex' : 'none';
+    const clT = document.getElementById('clearGuiaTabletSearch');
+    if (clT) clT.style.display = raw ? 'flex' : 'none';
+
+    clearTimeout(_busqDebounce);
+
+    // <2 caracteres (incluye vacío) → no es búsqueda: volver a la vista ventaneada.
+    if (raw.length < _BUSQ_MIN) {
+      if (_busquedaQ) {                 // venía de una búsqueda activa → limpiarla
+        _busquedaQ = '';
+        _visibles  = _PAGE;
+        render(_filtrarYBuscar());
+      }
+      return;
+    }
+
+    _busqDebounce = setTimeout(() => _ejecutarBusqueda(raw), _BUSQ_DEBOUNCE_MS);
+  }
+
+  function _ejecutarBusqueda(q) {
     _visibles = _PAGE;   // [perf] nueva búsqueda → reinicia la ventana de render
     _busquedaQ = (q || '').trim();
-    const cl = document.getElementById('clearBuscarGuia');
-    if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
-    const clT = document.getElementById('clearGuiaTabletSearch');
-    if (clT) clT.style.display = _busquedaQ ? 'flex' : 'none';
     const lista = _filtrarYBuscar();
     render(lista);
 
@@ -5206,6 +5254,7 @@ const GuiasView = (() => {
   }
 
   function buscarClear() {
+    clearTimeout(_busqDebounce);   // [fix] cancela búsqueda pendiente del debounce
     _visibles = _PAGE;   // [perf] reinicia la ventana de render
     _busquedaQ = '';
     const inp = document.getElementById('inputBuscarGuia');
