@@ -1064,7 +1064,12 @@ const API = (() => {
       const cod = String(params.codigoBarra || '').trim();
       const der = prods.find(p => String(p.codigoBarra) === cod);
       if (!der || !der.codigoProductoBase) return null;  // no resoluble → GAS
-      const base = prods.find(p => String(p.idProducto) === der.codigoProductoBase || String(p.codigoBarra) === der.codigoProductoBase);
+      // [FIX envasado-directo] El catálogo guarda codigoProductoBase como skuBase del granel
+      // (ej "LEV1155"), NO como idProducto/codigoBarra. Antes solo se buscaba por idProducto/codigoBarra
+      // → base=undefined SIEMPRE → return null → TODO el envasado caía a GAS (0 filas directas). Mismo
+      // orden de resolución que GAS (_registrarEnvasadoImpl: skuBase || idProducto) + codigoBarra como red.
+      const claveBase = String(der.codigoProductoBase).trim();
+      const base = prods.find(p => String(p.skuBase) === claveBase || String(p.idProducto) === claveBase || String(p.codigoBarra) === claveBase);
       const factor = parseFloat(der.factorConversionBase) || 0;
       const unidades = parseInt(params.unidadesProducidas) || 0;
       if (!base || factor <= 0 || unidades <= 0) return null;  // datos incompletos → GAS
