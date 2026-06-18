@@ -1129,6 +1129,29 @@ const API = (() => {
       if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }); } catch (_) {} }
       return out;
     }
+    if (params.action === 'asignarAuditoria') {
+      // Asigna una auditoría (fila AUDITORIAS estado ASIGNADA con el stock_sistema VIGENTE de wh.stock).
+      // NO mueve stock. Idempotente por id_auditoria. El id lo siembra el localId → reintento no duplica fila.
+      const out = await _sbRpcWH('asignar_auditoria', { p: {
+        id_auditoria: 'AUD_' + lid, codigo_producto: String(params.codigoProducto || ''),
+        usuario: params.usuario || ''
+      } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
+      // [shape] el front lee res.data?.idAuditoria (paridad con GAS asignarAuditoria → data:{idAuditoria}).
+      return { ok: true, data: { idAuditoria: String(out.idAuditoria || out.id_auditoria || ('AUD_' + lid)) }, dedup: !!out.dedup };
+    }
+    if (params.action === 'ejecutarAuditoria') {
+      // Registra el conteo físico sobre una auditoría ASIGNADA (estado→EJECUTADA, diff/resultado). NO mueve stock
+      // (el path que mueve stock es auditarProducto, ya directo). Idempotente NATURAL por estado (EJECUTADA→dedup).
+      const out = await _sbRpcWH('ejecutar_auditoria', { p: {
+        id_auditoria: String(params.idAuditoria || ''), stock_fisico: params.stockFisico,
+        observacion: params.observacion || '', usuario: params.usuario || ''
+      } });
+      if (!out || out.ok === false) return null;
+      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }); } catch (_) {} }
+      // [shape] el front lee res.data?.diferencia/resultado (paridad con GAS ejecutarAuditoria → data:{idAuditoria,diferencia,resultado}).
+      return { ok: true, data: { idAuditoria: String(params.idAuditoria || ''), diferencia: (out.diferencia != null ? out.diferencia : 0), resultado: String(out.resultado || '') }, dedup: !!out.dedup };
+    }
     if (params.action === 'actualizarFotosPreingreso' || params.action === 'actualizarPreingreso') {
       // PATCH del preingreso (whitelist: id_proveedor/monto/comentario/fotos/cargadores) — solo los campos presentes.
       const p = { id_preingreso: String(params.idPreingreso || '') };
@@ -1314,6 +1337,36 @@ const API = (() => {
       const _data = { idGuia: String(params.idGuia || ''), estado: 'CERRADA', montoTotal: parseFloat(_monto) || 0 };
       if (_yaCerrada) _data.yaCerrada = true;
       return { ok: true, data: _data };
+    }
+    if (params.action === 'crearDespachoRapido') {
+      // ORQUESTADOR ATÓMICO de la PARTE DE DATOS del despacho rápido (guía + detalle + cierre de stock + kardex)
+      // en UNA transacción server-side (wh.crear_despacho_rapido). Replica _crearDespachoRapidoImpl SIN la impresión:
+      // el front dispara imprimirTicketGuia aparte (queda en GAS→PrintNode, irreducible). Idempotente por id_guia
+      // sembrado del localId → un reintento/doble-tap re-envía el MISMO id → la RPC dedupea (no duplica guía/stock/kardex).
+      // El stock se aplica con UPDATE atómico (cantidad += signo·delta), money-safe. items: [{codigoBarra, cantidad}].
+      const items = (Array.isArray(params.items) ? params.items : []).map(it => ({
+        codigo_barra: String(it.codigoBarra || '').trim(), cantidad: parseFloat(it.cantidad) || 0
+      }));
+      const gid = 'G_' + lid;
+      const out = await _sbRpcWH('crear_despacho_rapido', { p: {
+        id_guia: gid, tipo: params.tipo || 'SALIDA_ZONA', id_zona: params.idZona || '',
+        usuario: params.usuario || '', comentario: params.nota || params.comentario || '',
+        items, local_id: lid
+      } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS (no commiteó → fallback seguro)
+      // tracking (best-effort) — solo en la creación real, no en reintentos dedupados
+      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }); } catch (_) {} }
+      // [shape-fix] el front (app.js ~13275) lee res.data.idGuia, res.data.errores, res.data.esperados/items.
+      // La RPC devuelve {ok,idGuia,items,errores} al nivel raíz → envolver al shape GAS. impresion:{ok:false,omitido}
+      // porque la impresión la dispara el front por separado (imprimir:false). dedup propagado para coherencia.
+      const _idGuia = String(out.idGuia || out.id_guia || gid);
+      return { ok: true, data: {
+        idGuia: _idGuia,
+        errores: Array.isArray(out.errores) ? out.errores : [],
+        items: (out.items != null ? out.items : items.length),
+        esperados: items.length,
+        impresion: { ok: false, error: 'omitido' }
+      }, dedup: !!out.dedup };
     }
     if (params.action === 'reabrirGuia') {
       // [152 · INVARIANTE] reabrir NUNCA toca stock y NUNCA resetea cantidad_aplicada (solo estado=ABIERTA +
