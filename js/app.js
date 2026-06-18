@@ -3754,6 +3754,15 @@ const App = (() => {
       if (currentView === 'envasados' && changed.includes('envasados'))   EnvasadosView.cargar();
     });
 
+    // [v2.13.263 FIX ⏳ sync pegado] Reconciliación de un envasado optimista →
+    // id real (o deshecho). EnvasadosView ya re-renderizó su propia lista
+    // (#listEnvasados) en el .then(); acá refrescamos el historial de Modo
+    // Envasador (#listEnvasadorHistorial), que NO se enteraba del cambio y
+    // dejaba el badge "⏳ sync" pegado hasta que el operador navegaba.
+    window.addEventListener('wh:envasado-reconciliado', () => {
+      try { if (currentView === 'envasador' && EnvasadorView.reconciliarHistorial) EnvasadorView.reconciliarHistorial(); } catch(_){}
+    });
+
     // Pull-to-refresh en la vista principal — también dispara OpLog.flush()
     // para que el operador pueda forzar reconciliación de ops pendientes.
     const mainContent = document.getElementById('mainContent');
@@ -9851,6 +9860,15 @@ const EnvasadosView = (() => {
     // este envasado (el POST va en background). Antes esto hacía
     // "parpadear" la lista. Sólo re-renderizamos local desde cache.
     _renderDesdeCache();
+    // [v2.13.263 OPTIMISTA INSTANTÁNEO] Celebración (confetti + sonido + banner
+    // deshacer) AL INSTANTE del click, sin esperar al backend. Antes el confetti
+    // y el banner aparecían sólo en el .then() del POST (~20s por el path GAS) →
+    // el operador no veía feedback de "guardado". El banner arranca apuntando al
+    // id OPTIMISTA; cuando el backend confirma con el id real, se repunta (abajo).
+    // [perf] El botón se libera YA: la operación es 100% background.
+    _celebrarEnvasado(idEnvOptimista, prod.descripcion || cbDerivado, producidas);
+    btn.disabled = false;
+    btn.textContent = 'Registrar envasado';
 
     // Patch stock cache local
     if (cbBaseStr) OfflineManager.patchStockCache(cbBaseStr, -cantBase);
@@ -9861,11 +9879,22 @@ const EnvasadosView = (() => {
     // Antes no existía esto: el patch de stock quedaba aplicado aunque el
     // envasado no se guardara, divergiendo el cache local del real.
     function _rollbackOptimista(motivo) {
+      // [v2.13.263] Si el operador YA tocó Deshacer mientras era optimista, el
+      // stock ya fue revertido y el optimista ya se removió del cache (en
+      // anular()). Un rollback acá lo revertiría DOBLE → no tocar stock/cache,
+      // sólo limpiar el flag pendiente (no hay registro real que anular: el
+      // backend falló). Net: nada persistió, cache coherente.
+      if (_envDeshacerPendiente.has(idEnvOptimista)) {
+        _envDeshacerPendiente.delete(idEnvOptimista);
+        _emitirEnvasadoReconciliado();
+        return;
+      }
       try {
         if (cbBaseStr) OfflineManager.patchStockCache(cbBaseStr, +cantBase);
         OfflineManager.patchStockCache(cbDerivado, -producidas);
         OfflineManager.removerEnvasadoCache(idEnvOptimista);
         _renderDesdeCache();
+        _emitirEnvasadoReconciliado();
         window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
       } catch(_) {}
       toast('⚠ Envasado revertido · ' + motivo + ' · volvé a intentar', 'danger', 7000);
@@ -9911,8 +9940,31 @@ const EnvasadosView = (() => {
         }
         return;
       }
-      // Reemplazar el envasado optimista con el idEnvasado REAL del backend
+      // Reemplazar el envasado optimista con el idEnvasado REAL del backend.
       const idReal = res.data?.idEnvasado || idEnvOptimista;
+
+      // [v2.13.263] ¿El operador ya tocó "↺ Deshacer" mientras el id era
+      // optimista? Entonces el registro SÍ se creó en el backend → hay que
+      // anularlo de verdad (no re-inyectar). El stock local YA fue revertido
+      // por el deshacer; sólo limpiamos el optimista del cache y disparamos la
+      // anulación real contra el backend (idempotente / con su propia red de
+      // seguridad). Evita el stock fantasma y no manda un ENV_OPT_* al server.
+      if (_envDeshacerPendiente.has(idEnvOptimista)) {
+        _envDeshacerPendiente.delete(idEnvOptimista);
+        OfflineManager.removerEnvasadoCache(idEnvOptimista);
+        _renderDesdeCache();
+        _emitirEnvasadoReconciliado();
+        if (idReal && idReal !== idEnvOptimista) {
+          API.anularEnvasadoManual({
+            idEnvasado: idReal,
+            usuario:    window.WH_CONFIG?.usuario || 'manual',
+            motivo:     'deshacer inmediato (envasado optimista)'
+          }).then(() => OfflineManager.precargarOperacional(true).catch(() => {}))
+            .catch(() => toast('⚠ No se pudo deshacer en el servidor — revisá el historial', 'danger', 6000));
+        }
+        return;
+      }
+
       if (idReal !== idEnvOptimista) {
         OfflineManager.removerEnvasadoCache(idEnvOptimista);
         OfflineManager.inyectarEnvasadoCache({
@@ -9933,19 +9985,48 @@ const EnvasadosView = (() => {
           idGuiaIngreso:          res.data.idGuiaIngreso || ''
         });
         _renderDesdeCache();
+        // [v2.13.263 FIX ⏳ sync pegado] Avisar REACTIVAMENTE a TODAS las vistas
+        // que muestran envasados (EnvasadosView e historial de EnvasadorView) que
+        // este optimista ya tiene id real → re-renderizan y el badge "⏳ sync"
+        // desaparece SIN requerir navegar. Antes sólo se re-renderizaba
+        // EnvasadosView (#listEnvasados); si el operador estaba en el historial
+        // de Modo Envasador, el badge quedaba pegado hasta cambiar de vista.
+        _emitirEnvasadoReconciliado();
+        // [v2.13.263] Repuntar el botón "Deshacer" del banner al id REAL: ahora
+        // sí se puede anular contra el backend (el optimista no existía allá).
+        _repuntarBannerDeshacer(idEnvOptimista, idReal);
       }
       OfflineManager.precargarOperacional(true).catch(() => {});
-
-      // 🎉 Celebración + banner deshacer
-      _celebrarEnvasado(idReal, prod.descripcion || cbDerivado, producidas);
-      // El lote de impresión ya se disparó ANTES (línea 8688 aprox) — corre
-      // en paralelo y no depende del registro del envasado.
+      // El lote de impresión ya se disparó ANTES — corre en paralelo y no
+      // depende del registro del envasado. La celebración (confetti + banner)
+      // YA se mostró al instante del click (no se repite acá).
     }).catch((e) => {
       _rollbackOptimista('sin conexión');
-    }).finally(() => {
-      btn.disabled = false;
-      btn.textContent = 'Registrar envasado';
     });
+    // [v2.13.263] El botón ya se liberó al instante (operación 100% background);
+    // no hay .finally() que esperar al backend.
+  }
+
+  // [v2.13.263] Notifica a las vistas de envasado que el cache cambió tras
+  // reconciliar un optimista → re-render reactivo (limpia el badge ⏳ sync).
+  function _emitirEnvasadoReconciliado() {
+    try { window.dispatchEvent(new CustomEvent('wh:envasado-reconciliado')); } catch(_){}
+  }
+
+  // [v2.13.263] Si el banner "Deshacer" sigue abierto apuntando al id optimista,
+  // lo repunta al id real para que el ↺ pueda anular contra el backend.
+  function _repuntarBannerDeshacer(idOptimista, idReal) {
+    try {
+      const banner = document.getElementById('envBannerDeshacer');
+      if (!banner || !banner.classList.contains('is-open')) return;
+      const btn = banner.querySelector('.env-banner-btn');
+      if (!btn) return;
+      const oc = btn.getAttribute('onclick') || '';
+      if (oc.indexOf(idOptimista) >= 0) {
+        const idAttr = String(idReal).replace(/'/g, '&#39;');
+        btn.setAttribute('onclick', `EnvasadosView._dispararDeshacer('${idAttr}')`);
+      }
+    } catch(_){}
   }
 
   // Anular un envasado individual (error de captura, corrección manual).
@@ -9953,6 +10034,33 @@ const EnvasadosView = (() => {
   // backend, y hace rollback si el backend falla.
   async function anular(idEnvasado, codigoDerivado, unidades) {
     if (!idEnvasado) return;
+
+    // [v2.13.263] DESHACER sobre un envasado AÚN optimista (id ENV_OPT_*): el
+    // backend todavía no confirmó el id real, así que NO podemos mandarle el
+    // ENV_OPT_* (no existe allá). Revertimos stock + removemos del cache local
+    // de inmediato y marcamos la intención; cuando el .then() del registro
+    // reconcilie ese optimista, disparará la anulación REAL contra el backend.
+    // Sin confirm: el ↺ Deshacer ya ES la confirmación (acción de un solo tap).
+    if (String(idEnvasado).indexOf('ENV_OPT_') === 0) {
+      const cacheOpt = OfflineManager.getEnvasadosCache();
+      const envOpt = cacheOpt.find(e => e.idEnvasado === idEnvasado);
+      if (envOpt) {
+        const cbB = String(envOpt.codigoProductoBase || '');
+        const cbD = String(envOpt.codigoProductoEnvasado || codigoDerivado || '');
+        const cB  = parseFloat(envOpt.cantidadBase) || 0;
+        const u   = parseFloat(envOpt.unidadesProducidas || unidades) || 0;
+        if (cbB) OfflineManager.patchStockCache(cbB, +cB);
+        if (cbD) OfflineManager.patchStockCache(cbD, -u);
+        OfflineManager.removerEnvasadoCache(idEnvasado);
+        _renderDesdeCache();
+        _emitirEnvasadoReconciliado();
+        window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
+      }
+      _envDeshacerPendiente.set(idEnvasado, true);
+      toast('↺ Envasado deshecho · stock revertido', 'ok', 3000);
+      return;
+    }
+
     if (!await _whConfirm('¿Anular este envasado?\n\nRevierte el stock consumido y producido. El registro queda como ANULADO en el historial.', { danger: true, titulo: 'Anular envasado', okText: 'Anular' })) return;
     // Buscar la entrada en cache para hacer rollback exacto si falla
     const cache = OfflineManager.getEnvasadosCache();
@@ -10000,6 +10108,13 @@ const EnvasadosView = (() => {
   // El operador tiene 12s para deshacer si se equivocó — un click anula
   // todo (revierte stock + marca ANULADO).
   let _bannerDeshacerTimer = null;
+  // [v2.13.263] Mapa de "deshacer" pedidos sobre un envasado AÚN optimista
+  // (el operador tocó ↺ antes de que el backend confirmara el id real).
+  //   optimistaId → true  (intención de anular pendiente de reconciliación)
+  // Cuando el .then() reconcilia ese optimista, en vez de re-inyectarlo dispara
+  // la anulación REAL contra el backend (el registro SÍ se creó allá). Evita
+  // mandar un id ENV_OPT_* al backend (que no existe) y evita stock fantasma.
+  const _envDeshacerPendiente = new Map();
   function _celebrarEnvasado(idReal, descripcion, uds) {
     try {
       if (typeof SoundFX !== 'undefined') {
@@ -10762,9 +10877,28 @@ const EnvasadorView = (() => {
     return tokens.every(t => desc.includes(t));
   }
 
+  // [v2.13.263] Re-render REACTIVO del historial desde el cache local. Lo llama
+  // el listener de 'wh:envasado-reconciliado' cuando un envasado optimista pasó
+  // a id real (o fue deshecho). Si el panel de historial está visible, refresca
+  // la lista desde el cache → el badge "⏳ sync" desaparece sin navegar. Si el
+  // operador está en el catálogo (no historial), no hace nada (no hay badge ahí).
+  function reconciliarHistorial() {
+    try {
+      const panel = document.getElementById('envHistorialPanel');
+      if (!panel || panel.classList.contains('hidden')) return;
+      const container = document.getElementById('listEnvasadorHistorial');
+      if (!container) return;
+      const fd = _fechaDesde14Dias();
+      _histCacheLista = OfflineManager.getEnvasadosCache()
+        .filter(e => String(e.fecha || '').substring(0, 10) >= fd);
+      _renderEnvasadosPorDia(_histCacheLista, container, { modo: 'historial14d', query: _histQuery });
+      _renderLiquidacionSemanaEnvasado(_histCacheLista);
+    } catch(_){}
+  }
+
   return { cargar, detener, toggleUrgFilter, verHistorial, verCatalogo, envasar, silentRefresh,
            searchToggle, searchInput, searchVoice,
-           buscarHistorial };
+           buscarHistorial, reconciliarHistorial };
 })();
 
 // ════════════════════════════════════════════════

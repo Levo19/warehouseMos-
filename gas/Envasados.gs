@@ -50,6 +50,149 @@ function _calcBarcodeAdaptativo(codigo) {
   };
 }
 
+// ════════════════════════════════════════════════════════════════════
+// _catalogoProductosWH — catálogo de productos SUPABASE-FIRST (con fallback Hoja).
+// ────────────────────────────────────────────────────────────────────
+// MOTIVO: el catálogo MOS es directo-puro a `mos.productos` (sync Hoja→Supabase OFF),
+// por lo que la Hoja PRODUCTOS_MASTER está CONGELADA y NO recibe cambios como el
+// factorConversionBase. El frontend ya lee el catálogo vía `mos.catalogo_wh_rls`
+// (js/api.js → _sbDescargarMaestros), pero el flujo de ENVASADO en GAS leía la Hoja
+// congelada → `factorConversionBase` venía null → "factorConversionBase no configurado"
+// y revertía el envasado. Esta función reusa la MISMA RPC (`mos.catalogo_wh_rls`) y
+// mapea snake_case→camelCase con el MISMO spec que el front (_CAT_SPECS_LEC.productos),
+// devolviendo objetos idénticos en shape a `_sheetToObjects(getProductosSheet())`.
+//
+// FALLBACK: ante CUALQUIER fallo de Supabase (red/RPC/forma) cae a la Hoja, igual que
+// _filasLecturaWH. Nunca rompe el envasado por falta de red (solo arriesga factor stale,
+// que es el estado previo a este fix). Cache 15s para no golpear la RPC en ráfagas.
+//
+// USO: en TODA lectura de catálogo del flujo de envasado que dependa de
+// factorConversionBase / codigoProductoBase (registrar/editar/corregir).
+// ════════════════════════════════════════════════════════════════════
+// Spec productos (snake_case → camelCase + tipo) — copia EXACTA de _CAT_SPECS_LEC.productos (js/api.js).
+var _CAT_PRODUCTOS_SPEC_WH = [
+  ['id_producto','idProducto','text'],['sku_base','skuBase','text'],['codigo_barra','codigoBarra','text'],
+  ['descripcion','descripcion','text'],['marca','marca','text'],['id_categoria','idCategoria','text'],
+  ['unidad','unidad','text'],['precio_venta','precioVenta','num'],['precio_costo','precioCosto','num'],
+  ['cod_tributo','Cod_Tributo','text'],['igv_porcentaje','IGV_Porcentaje','num'],['cod_sunat','Cod_SUNAT','text'],
+  ['tipo_igv','Tipo_IGV','int'],['unidad_medida','Unidad_Medida','text'],['estado','estado','bool10'],
+  ['es_envasable','esEnvasable','bool10'],['codigo_producto_base','codigoProductoBase','text'],
+  ['factor_conversion','factorConversion','num'],['factor_conversion_base','factorConversionBase','num'],
+  ['merma_esperada_pct','mermaEsperadaPct','num'],['stock_minimo','stockMinimo','num'],
+  ['stock_maximo','stockMaximo','num'],['zona','zona','text'],['fecha_creacion','fechaCreacion','date'],
+  ['creado_por','creadoPor','text'],['modo_venta','modoVenta','text'],['margen_pct','margenPct','num'],
+  ['precio_tope','precioTope','num'],['foto_url','fotoUrl','text'],['historial_cambios','historialCambios','json'],
+  ['segmentos_precio','segmentos_precio','json'],['tipo_producto','tipoProducto','text']
+];
+function _catValWH(v, t) {
+  if (t === 'bool10') return (v === true || v === 't' || v === 'true' || v === 1 || v === '1') ? '1' : '0';
+  if (v == null) return '';
+  if (t === 'num' || t === 'int') { var n = (typeof v === 'number') ? v : parseFloat(v); return isNaN(n) ? '' : n; }
+  if (t === 'json') return (typeof v === 'object') ? JSON.stringify(v) : String(v);
+  return String(v);  // 'date' incluido: yyyy-MM-dd ya viene como string desde la RPC; el flujo de envasado no usa fechas del catálogo.
+}
+// ════════════════════════════════════════════════════════════════════
+// _lookupEnvasadoPuntual — búsqueda PUNTUAL del derivado + su base (perf).
+// ────────────────────────────────────────────────────────────────────
+// MOTIVO: _catalogoProductosWH() baja los 2368 productos (~0.5-1 MB JSON vía
+// mos.catalogo_wh_rls) sólo para encontrar 1 derivado + su base → latencia
+// innecesaria en el flujo de ENVASADO (que es el path lento de ~20s). Esta
+// función hace 2 consultas PUNTUALES a mos.productos (service_role, bypassa
+// RLS) trayendo ~2 filas en vez de 2368:
+//   1) derivado por codigo_barra = codigoBarra
+//   2) base por sku_base = codigoProductoBase (fallback id_producto)
+//
+// Devuelve objetos en el MISMO shape camelCase que _catalogoProductosWH()
+// (mapeo con _CAT_PRODUCTOS_SPEC_WH) para que _registrarEnvasadoImpl no note
+// diferencia. Sólo trae las columnas que el envasado necesita.
+//
+// FALLBACK: ante CUALQUIER fallo (red/RPC/forma/no-encontrado) devuelve null →
+// el caller cae a _catalogoProductosWH() (catálogo completo + fallback Hoja),
+// que es el comportamiento previo a este fix. NUNCA rompe ni cambia la
+// correctitud del envasado; sólo es un atajo de performance.
+//
+// Retorna: { prodDerivado, prodBase } | null
+// ════════════════════════════════════════════════════════════════════
+var _CAT_PROD_SELECT_WH = 'id_producto,sku_base,codigo_barra,descripcion,unidad,codigo_producto_base,factor_conversion,factor_conversion_base,merma_esperada_pct';
+function _mapProdRowWH(row) {
+  if (!row) return null;
+  var o = {};
+  for (var s = 0; s < _CAT_PRODUCTOS_SPEC_WH.length; s++) {
+    o[_CAT_PRODUCTOS_SPEC_WH[s][1]] = _catValWH(row[_CAT_PRODUCTOS_SPEC_WH[s][0]], _CAT_PRODUCTOS_SPEC_WH[s][2]);
+  }
+  return o;
+}
+function _lookupEnvasadoPuntual(codigoBarra) {
+  try {
+    var cb = String(codigoBarra || '').trim();
+    if (!cb) return null;
+    // 1) Derivado por codigo_barra.
+    var rDer = _sbSelect('mos.productos', {
+      select:  _CAT_PROD_SELECT_WH,
+      filters: { codigo_barra: 'eq.' + cb },
+      limit:   1
+    });
+    if (!rDer || !rDer.ok || !Array.isArray(rDer.data) || !rDer.data.length) return null;
+    var prodDerivado = _mapProdRowWH(rDer.data[0]);
+    var claveBase = String(prodDerivado.codigoProductoBase || '').trim();
+    if (!claveBase) return null;
+    // 2) Base: PRIMERO por sku_base = claveBase (caso normal: codigoProductoBase
+    //    es el sku_base del granel). Si no hay match, fallback por id_producto.
+    //    Dos consultas `eq.` simples (operador ya probado) — evita depender del
+    //    encoding de `or=`. La 2da sólo corre si la 1ra no encontró.
+    var rBase = _sbSelect('mos.productos', {
+      select:  _CAT_PROD_SELECT_WH,
+      filters: { sku_base: 'eq.' + claveBase },
+      limit:   1
+    });
+    var baseRow = (rBase && rBase.ok && Array.isArray(rBase.data) && rBase.data.length) ? rBase.data[0] : null;
+    if (!baseRow) {
+      var rBase2 = _sbSelect('mos.productos', {
+        select:  _CAT_PROD_SELECT_WH,
+        filters: { id_producto: 'eq.' + claveBase },
+        limit:   1
+      });
+      baseRow = (rBase2 && rBase2.ok && Array.isArray(rBase2.data) && rBase2.data.length) ? rBase2.data[0] : null;
+    }
+    if (!baseRow) return null;
+    var prodBase = _mapProdRowWH(baseRow);
+    return { prodDerivado: prodDerivado, prodBase: prodBase };
+  } catch (e) {
+    Logger.log('[lookupEnvasadoPuntual] cae a catálogo completo: ' + (e && e.message));
+    return null;
+  }
+}
+
+function _catalogoProductosWH() {
+  // Cache corto (15s) — el envasado puede leer el catálogo varias veces por request.
+  try {
+    var cache = CacheService.getScriptCache();
+    var hit = cache.get('WH_CAT_PRODS');
+    if (hit) { var parsed = JSON.parse(hit); if (Array.isArray(parsed) && parsed.length) return parsed; }
+  } catch (_) {}
+  try {
+    var r = _sbRpc('mos', 'catalogo_wh_rls', {});
+    if (r && r.ok && r.data && r.data.ok && Array.isArray(r.data.productos)) {
+      var out = r.data.productos.map(function (row) {
+        var o = {};
+        for (var s = 0; s < _CAT_PRODUCTOS_SPEC_WH.length; s++) {
+          o[_CAT_PRODUCTOS_SPEC_WH[s][1]] = _catValWH(row[_CAT_PRODUCTOS_SPEC_WH[s][0]], _CAT_PRODUCTOS_SPEC_WH[s][2]);
+        }
+        return o;
+      });
+      if (out.length) {
+        try { CacheService.getScriptCache().put('WH_CAT_PRODS', JSON.stringify(out), 15); } catch (_) {}
+        return out;
+      }
+    }
+    Logger.log('[catalogoProductosWH] RPC sin productos → fallback Hoja. ' + (r && r.error ? r.error : ''));
+  } catch (e) {
+    Logger.log('[catalogoProductosWH] cae a Hoja: ' + (e && e.message));
+  }
+  // FALLBACK seguro: la Hoja (catálogo congelado). No rompe el envasado si no hay red.
+  return _sheetToObjects(getProductosSheet());
+}
+
 function getEnvasados(params) {
   var rows = _filasLecturaWH('envasados', 'ENVASADOS');   // [PASO 3] sombra Supabase + fallback Sheets
   if (params.estado)     rows = rows.filter(function(r){ return String(r.estado) === String(params.estado); });
@@ -93,7 +236,8 @@ function getEnvasados(params) {
 function getPendientesEnvasado() {
   // [Cutover lectura WH] stock de la fuente vigente (Supabase si flip ON, fallback hoja):
   // tras la escritura directa la hoja STOCK queda atrás → leerla daría "pendientes" falsos.
-  var productos = _sheetToObjects(getProductosSheet());
+  // Catálogo también de Supabase (Hoja congelada no trae codigoProductoBase/stockMin/Max al día).
+  var productos = _catalogoProductosWH();
   var stock     = _filasStockWH();
 
   var stockMap = {};
@@ -157,22 +301,38 @@ function _registrarEnvasadoImpl(params) {
     }
   } catch(_) {}
 
-  var productos = _sheetToObjects(getProductosSheet());
+  // [PERF v2.13.263] Búsqueda PUNTUAL del derivado + su base (2 filas vía
+  // mos.productos) en vez de bajar los 2368 productos. Si la consulta puntual
+  // falla por CUALQUIER motivo → fallback al catálogo completo (mos.catalogo_wh_rls
+  // → Hoja), idéntico al comportamiento previo. Esto NO cambia la correctitud:
+  // el shape de prodDerivado/prodBase es el MISMO (mapeo _CAT_PRODUCTOS_SPEC_WH).
+  // [FIX factor stale] El catálogo viene de Supabase (no de la Hoja CONGELADA),
+  // por eso trae el factorConversionBase actualizado.
+  var prodDerivado, prodBase, claveBase;
+  var _puntual = _lookupEnvasadoPuntual(codigoBarra);
+  if (_puntual && _puntual.prodDerivado && _puntual.prodBase) {
+    prodDerivado = _puntual.prodDerivado;
+    prodBase     = _puntual.prodBase;
+    claveBase    = String(prodDerivado.codigoProductoBase || '').trim();
+  } else {
+    // Fallback: catálogo completo (mos.catalogo_wh_rls) con fallback a la Hoja.
+    var productos = _catalogoProductosWH();
 
-  // 1. Buscar derivado por codigoBarra
-  var prodDerivado = productos.find(function(p) {
-    return String(p.codigoBarra).trim() === codigoBarra;
-  });
-  if (!prodDerivado) return { ok: false, error: 'Producto envasado no encontrado: ' + codigoBarra };
+    // 1. Buscar derivado por codigoBarra
+    prodDerivado = productos.find(function(p) {
+      return String(p.codigoBarra).trim() === codigoBarra;
+    });
+    if (!prodDerivado) return { ok: false, error: 'Producto envasado no encontrado: ' + codigoBarra };
 
-  // 2. Buscar base por skuBase === codigoProductoBase del derivado (fallback idProducto)
-  var claveBase = String(prodDerivado.codigoProductoBase || '').trim();
-  if (!claveBase) return { ok: false, error: 'El producto no tiene codigoProductoBase configurado' };
+    // 2. Buscar base por skuBase === codigoProductoBase del derivado (fallback idProducto)
+    claveBase = String(prodDerivado.codigoProductoBase || '').trim();
+    if (!claveBase) return { ok: false, error: 'El producto no tiene codigoProductoBase configurado' };
 
-  var prodBase = productos.find(function(p) {
-    return String(p.skuBase).trim() === claveBase || String(p.idProducto).trim() === claveBase;
-  });
-  if (!prodBase) return { ok: false, error: 'Producto base no encontrado: ' + claveBase };
+    prodBase = productos.find(function(p) {
+      return String(p.skuBase).trim() === claveBase || String(p.idProducto).trim() === claveBase;
+    });
+    if (!prodBase) return { ok: false, error: 'Producto base no encontrado: ' + claveBase };
+  }
 
   // 3. Calcular cantidad base consumida: unidades × factorConversionBase
   var factorBase = parseFloat(prodDerivado.factorConversionBase) || 0;
@@ -1788,7 +1948,7 @@ function corregirEnvasadosManuales() {
   var iGi    = hdrs.indexOf('idGuiaIngreso');
   var iObs   = hdrs.indexOf('observacion');
 
-  var productos = _sheetToObjects(getProductosSheet());
+  var productos = _catalogoProductosWH();   // [FIX factor stale] catálogo Supabase, no la Hoja congelada
   var reporte = { fechaDesde: FECHA_DESDE, procesados: [], saltados: [], errores: [] };
   var nowStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
 
@@ -2004,8 +2164,8 @@ function _corregirUnidadesEnvasadoImpl(params) {
     return { ok: false, error: 'No se puede editar un envasado anulado' };
   }
 
-  // 3. Resolver productos y factor
-  var productos = _sheetToObjects(getProductosSheet());
+  // 3. Resolver productos y factor — catálogo Supabase (Hoja congelada no trae factorConversionBase).
+  var productos = _catalogoProductosWH();
   var cbDerivado = String(fila[iDer] || '');
   var cbBase     = String(fila[iBase] || '');
   var prodDer = productos.find(function(p){ return String(p.codigoBarra) === cbDerivado; });
