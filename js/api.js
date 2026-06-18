@@ -1486,6 +1486,31 @@ const API = (() => {
         descripcion: String(out.descripcion || _descEnv(cbDer) || '')
       } };
     }
+    if (params.action === 'anularEnvasadoManual') {
+      // [envasado-directo] ANULACIÓN RÁPIDA (sin clave admin) desde la lista/historial y desde el "↺ Deshacer
+      // inmediato". GAS la resuelve contra la HOJA ENVASADOS, pero con el sync OFF la hoja está CONGELADA y NO
+      // contiene los envasados creados DIRECTO ('ENV_L…') → GAS devolvía "Envasado no encontrado" → el front
+      // hacía rollback del stock revertido y el envasado quedaba COMPLETADO con stock inflado (no anulable).
+      // Misma RPC IDEMPOTENTE que anularEnvasadoConClave (wh.anular_envasado): reverso EXACTO de registrar_envasado
+      // (-uds derivado, +cantBase base, anula lote+detalles), idempotente NATURAL por estado (yaAnulado → no
+      // re-revierte; FOR UPDATE serializa). La autorización de esta vía es el propio confirm del operador (no clave).
+      // La RPC usa los cod de la FILA como fuente de verdad; le pasamos los del cache como respaldo.
+      const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+      const env = (typeof OfflineManager !== 'undefined' && OfflineManager.getEnvasadosCache) ? (OfflineManager.getEnvasadosCache() || []).find(e => String(e.idEnvasado) === String(params.idEnvasado)) : null;
+      const cbDer = env ? String(env.codigoProductoEnvasado || '') : '';
+      const cbBaseEnv = env ? String(env.codigoProductoBase || '') : '';
+      const base = prods.find(p => String(p.codigoBarra) === cbBaseEnv || String(p.skuBase) === cbBaseEnv || String(p.idProducto) === cbBaseEnv);
+      const out = await _sbRpcWH('anular_envasado', { p: {
+        id_envasado: String(params.idEnvasado || ''), cod_producto_envasado: cbDer,
+        cod_producto_base: base ? String(base.codigoBarra) : '', motivo: params.motivo || 'anulación manual', usuario: params.usuario || 'manual'
+      } });
+      if (!out || out.ok === false) return null;   // *_OFF o error → GAS (legado, solo si el flag está apagado)
+      // [shape] el front solo lee res.ok (app.js:10091) / fire-and-forget (app.js:9958). Réplica del shape GAS
+      // {ok:true, data:{idEnvasado, yaAnulado?}}. La RPC devuelve {ok,yaAnulado?,id_envasado} al nivel raíz.
+      const _data = { idEnvasado: String(params.idEnvasado || '') };
+      if (out.yaAnulado || out.ya_anulado) _data.yaAnulado = true;
+      return { ok: true, data: _data };
+    }
     if (params.action === 'marcarAlertaRevisada') {
       // [Tanda 3] Marca una alerta de stock como revisada. NO toca stock. Idempotente natural (UPDATE a valor fijo).
       const out = await _sbRpcWH('marcar_alerta_revisada', { p: { id_alerta: String(params.idAlerta || '') } });
@@ -1704,7 +1729,7 @@ const API = (() => {
   const _IDEMPOTENT_ACTIONS = new Set([
     'agregarDetalleGuia', 'actualizarCantidadDetalle', 'actualizarFechaVencimiento',
     'anularDetalle', 'cerrarGuia', 'reabrirGuia', 'crearGuia', 'crearDespachoRapido',
-    'registrarEnvasado', 'corregirUnidadesEnvasado', 'anularEnvasadoConClave',
+    'registrarEnvasado', 'corregirUnidadesEnvasado', 'anularEnvasadoConClave', 'anularEnvasadoManual',
     'registrarMerma', 'resolverMerma',
     'registrarProductoNuevo', 'aprobarProductoNuevo',
     'crearPreingreso', 'aprobarPreingreso', 'actualizarPreingreso',

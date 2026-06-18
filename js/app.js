@@ -9920,7 +9920,10 @@ const EnvasadosView = (() => {
 
     // [v2.13.108] Si imprimir=true, NO le decimos al backend que imprima
     // directo (el método viejo manda 1 sola request a PrintNode → drift).
-    // GAS en segundo plano
+    // [envasado-directo] El registro va navegador→Supabase vía la RPC atómica
+    // wh.registrar_envasado (1 llamada, ~rápida, idempotente por id_envasado);
+    // el id real vuelve como 'ENV_L…'. Solo cae a GAS si el flag de escritura
+    // directa estuviera apagado. La impresión de etiquetas se maneja aparte (lote).
     API.registrarEnvasado({
       codigoBarra:        prod.codigoBarra,
       unidadesProducidas: producidas,
