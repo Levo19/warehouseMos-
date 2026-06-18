@@ -190,34 +190,79 @@ function _guardarAlertasStock(alertas, fechaAud) {
   }
   filasABorrar.forEach(function(f) { sheet.deleteRow(f); });
 
-  // Agregar las nuevas
-  if (!alertas.length) return;
-  var rows = alertas.map(function(a) {
-    return [
-      'AL' + new Date().getTime() + Math.floor(Math.random() * 1000),
-      fechaAud,
-      String(a.codigoProducto),
-      String(a.descripcion),
-      a.stockReal,
-      a.stockTeorico,
-      a.diferencia,
-      'NO',
-      ''
-    ];
+  // Agregar las nuevas. [MIGRACIÓN] Se generan los ids AL... UNA vez y se usan EN AMBOS lados
+  // (Hoja y Supabase) → mismos ids, sin divergencia.
+  if (!alertas.length) {
+    // Igual hay que purgar la sombra (la auditoría no encontró diferencias → 0 pendientes nuevas).
+    try {
+      if (typeof _whGuardarAlertasStockDirecto === 'function')
+        _whGuardarAlertasStockDirecto(fechaAud, []);
+    } catch(_eA) {}
+    return;
+  }
+  var alertasConId = alertas.map(function(a){
+    return {
+      idAlerta:       'AL' + new Date().getTime() + Math.floor(Math.random() * 1000),
+      codigoProducto: String(a.codigoProducto),
+      descripcion:    String(a.descripcion),
+      stockReal:      a.stockReal,
+      stockTeorico:   a.stockTeorico,
+      diferencia:     a.diferencia
+    };
+  });
+  var rows = alertasConId.map(function(a) {
+    return [ a.idAlerta, fechaAud, a.codigoProducto, a.descripcion, a.stockReal, a.stockTeorico, a.diferencia, 'NO', '' ];
   });
   var nextRow = sheet.getLastRow() + 1;
   sheet.getRange(nextRow, 1, rows.length, rows[0].length).setValues(rows);
   sheet.getRange(nextRow, 2, rows.length, 1).setNumberFormat('dd/MM/yyyy HH:mm');
   sheet.getRange(nextRow, 3, rows.length, 1).setNumberFormat('@');
+
+  // [MIGRACIÓN] Espejar el patrón purga-y-reescribe a Supabase (RPC atómica): borra las NO revisadas
+  // de la sombra e inserta estas con los MISMOS ids. Best-effort (NUNCA rompe la auditoría).
+  try {
+    if (typeof _whGuardarAlertasStockDirecto === 'function')
+      _whGuardarAlertasStockDirecto(fechaAud, alertasConId);
+  } catch(_eA) { Logger.log('[alertas→sb] ' + (_eA && _eA.message)); }
+}
+
+// [MIGRACIÓN] Wrapper a wh.guardar_alertas_stock (purga no-revisadas + inserta nuevas, atómico).
+// Gateado por el master GAS WH_ESCRITURA_DIRECTA (igual que el resto de escrituras directas) para
+// no escribir Supabase desde flota vieja sin que el dueño haya activado el cutover.
+function _whGuardarAlertasStockDirecto(fechaAud, alertasConId) {
+  try {
+    if (typeof _whEscrituraDirectaON !== 'function' || !_whEscrituraDirectaON()) return { handled: false };
+    var fechaStr = (fechaAud instanceof Date)
+      ? Utilities.formatDate(fechaAud, 'America/Lima', "yyyy-MM-dd'T'HH:mm:ss")
+      : String(fechaAud || '');
+    var r = _sbRpc('wh', 'guardar_alertas_stock', { p: { fecha: fechaStr, alertas: alertasConId || [] } });
+    if (r && r.ok && r.data && r.data.ok) {
+      Logger.log('[alertas→sb] borradas=' + r.data.borradas + ' insertadas=' + r.data.insertadas);
+      return { handled: true, data: r.data };
+    }
+    Logger.log('[alertas→sb] NO-OK: ' + JSON.stringify(r && (r.data || r.error)));
+    return { handled: false };
+  } catch(e) { Logger.log('[alertas→sb] excepción: ' + (e && e.message)); return { handled: false }; }
 }
 
 // ============================================================
 // Endpoints para el frontend
 // ============================================================
 function getAlertasStock(params) {
-  // [PASO 3 · REVERTIDO 20x] NO flipear: _guardarAlertasStock BORRA fisicamente las no-revisadas en cada
-  // auditoria (deleteRow) y reescribe con ids nuevos. La sombra (upsert sin delete) acumula huerfanos →
-  // la lectura directa devolveria alertas obsoletas. Se queda en Sheets hasta tener purga equivalente.
+  params = params || {};
+  // [MIGRACIÓN · FLIP] Ya hay purga-equivalente en Supabase (wh.guardar_alertas_stock borra las
+  // no-revisadas y reinserta, igual que la Hoja) → la sombra ya NO acumula huérfanos. Cuando el flip
+  // FUENTE_DATOS(getAlertasStock) está en 'supabase', leemos de wh.get_alertas_stock; si falla → Sheets.
+  if (typeof _fuenteDatos === 'function' && _fuenteDatos('getAlertasStock') === 'supabase') {
+    try {
+      var solo = (params.soloPendientes === true || params.soloPendientes === 'true');
+      var r = _sbRpc('wh', 'get_alertas_stock', { p: { soloPendientes: solo } });
+      if (r && r.ok && r.data && r.data.ok && Array.isArray(r.data.data)) {
+        return { ok: true, data: r.data.data };
+      }
+    } catch(e) { /* cae a Sheets */ }
+  }
+  // Sheets (default + fallback)
   var ss = SpreadsheetApp.openById(SS_ID);
   var sheet = ss.getSheetByName('ALERTAS_STOCK');
   if (!sheet) return { ok: true, data: [] };

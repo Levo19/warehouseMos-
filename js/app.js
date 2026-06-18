@@ -19232,6 +19232,10 @@ const ProductosView = (() => {
       // [BUG 2] Las líneas de guías ABIERTAS se etiquetan como pendientes (aún no
       // movieron stock); las aplicadas muestran su saldo real.
       const esPend = !!m._pendiente;
+      // REGLA DE COLORES: el COLOR (clase is-*) sigue el estado/signo →
+      //   NARANJA (is-pend) si la guía sigue ABIERTA; al cerrar pasa a VERDE (ingreso/INC) o ROJO (salida/DEC).
+      //   La ETIQUETA (lbl) y el signo conservan el tipo real del movimiento (Ingreso/Salida/Ajuste/Inicial).
+      const colorCat = esPend ? 'pend' : cat;
       const tipoChip = esPend
         ? `<span class="hist-mov-tipo" style="background:rgba(251,146,60,.18);color:#fb923c">⏳ pendiente (guía abierta)</span>`
         : `<span class="hist-mov-tipo" style="background:rgba(15,23,42,.6);color:#94a3b8">${lbl}</span>`;
@@ -19243,10 +19247,10 @@ const ProductosView = (() => {
         lotesHtml = `<div class="hist-lotes-wrap is-salida">${m.lotesConsumidos.map(l => _renderLoteChip(l, l.cantidad)).join('')}</div>`;
       }
       return `
-        <div class="hist-timeline-row is-${cat}">
+        <div class="hist-timeline-row is-${colorCat}">
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline justify-between gap-2">
-              <span class="hist-mov-amount is-${cat}">${sign}${fmt(m.cantidad)}</span>
+              <span class="hist-mov-amount is-${colorCat}">${sign}${fmt(m.cantidad)}</span>
               <span class="hist-mov-fecha">${fmtFecha(m.fecha)}</span>
             </div>
             <p class="hist-mov-meta">

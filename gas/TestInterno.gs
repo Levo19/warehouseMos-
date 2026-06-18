@@ -99,15 +99,17 @@ function runInternalTests(params) {
          'yaCerrada=true, diff=0',
          'yaCerrada=' + (rC2.data && rC2.data.yaCerrada) + ', diff=' + (stockDesp4 - stockAntes4));
 
-    // ── TEST 5: reabrirGuia — stock vuelve al valor pre-cierre ──
+    // ── TEST 5: reabrirGuia — [CIERRE IDEMPOTENTE] NO revierte stock ──
+    // Nuevo modelo delta-reconciliación: lo aplicado se queda aplicado;
+    // reabrir solo cambia estado y refresca ultimaActividad. Stock NO cambia.
     var stockAntes5 = _getStockProducto(codigoBarra).cantidad;
     var rR = reabrirGuia({ idGuia: idGuiaTest });
     var stockDesp5 = _getStockProducto(codigoBarra).cantidad;
     var diff5 = stockDesp5 - stockAntes5;
-    _add('TEST 5: reabrir — stock revertido +15',
-         rR.ok && Math.abs(diff5 - 15) <= 0.01,
+    _add('TEST 5: reabrir — stock NO cambia (delta-reconciliación)',
+         rR.ok && Math.abs(diff5) <= 0.01,
          'diff=' + diff5,
-         '+15', diff5);
+         '0', diff5);
 
     // ── TEST 6: reabrir idempotente — segunda llamada NO debe sumar más ──
     var stockAntes6 = _getStockProducto(codigoBarra).cantidad;
@@ -119,16 +121,21 @@ function runInternalTests(params) {
          'yaAbierta=true, diff=0',
          'yaAbierta=' + (rR2.yaAbierta) + ', diff=' + (stockDesp6 - stockAntes6));
 
-    // ── TEST 7: cerrar otra vez tras reabrir + edit a 7 → stock debe bajar 7 ──
+    // ── TEST 7: cerrar tras reabrir + edit a 7 → solo se aplica el DELTA ──
+    // [CIERRE IDEMPOTENTE] Guía SALIDA_ZONA. Ya se aplicó 15 (cantidadAplicada=15)
+    // y NO se revirtió al reabrir. Editar a 7 estando ABIERTA NO mueve stock ni
+    // cambia cantidadAplicada. Al cerrar: delta = 7 − 15 = −8 (en unidades de guía);
+    // como es SALIDA el stock se mueve por −(−8) = +8 → stock SUBE 8 (devuelve la
+    // sobre-salida). Esto es exactamente lo que evita la duplicación del bug LOPESA.
     var rEd2 = actualizarCantidadDetalle({ idDetalle: idDetTest, cantidadRecibida: 7 });
     var stockAntes7 = _getStockProducto(codigoBarra).cantidad;
     var rC3 = cerrarGuia(idGuiaTest, 'sistema-test', null);
     var stockDesp7 = _getStockProducto(codigoBarra).cantidad;
     var diff7 = stockDesp7 - stockAntes7;
-    _add('TEST 7: cerrar tras reabrir+edit a 7',
-         rC3.ok && Math.abs(diff7 - (-7)) <= 0.01,
+    _add('TEST 7: cerrar tras reabrir+edit a 7 (solo delta +8)',
+         rC3.ok && Math.abs(diff7 - 8) <= 0.01,
          'edit→7, cerró, diff=' + diff7,
-         '-7', diff7);
+         '+8', diff7);
 
     // ── TEST 8: anular detalle en guía cerrada — stock se devuelve ──
     var stockAntes8 = _getStockProducto(codigoBarra).cantidad;
@@ -149,6 +156,48 @@ function runInternalTests(params) {
          'yaAnulado=' + rAn2.yaAnulado + ' diff=' + (stockDesp9 - stockAntes9),
          'yaAnulado=true, diff=0',
          'yaAnulado=' + rAn2.yaAnulado + ', diff=' + (stockDesp9 - stockAntes9));
+
+    // ── TEST 10: BUG LOPESA — cerrar → reabrir → recerrar SIN editar = delta 0 ──
+    // Reproduce exactamente el bug: una guía nueva con cantidad, cerrarla aplica el
+    // delta; reabrir + recerrar SIN tocar nada NO debe volver a aplicarlo.
+    // Stock neto entre el pre-cierre y el segundo cierre = -cantidad UNA sola vez.
+    var idGuiaL = null;
+    try {
+      var resGL = crearGuia({ tipo: 'SALIDA_ZONA', idZona: 'TEST', usuario: 'sistema-test',
+                              comentario: '[TEST LOPESA] eliminar' });
+      idGuiaL = resGL.data.idGuia;
+      agregarDetalleGuia({ idGuia: idGuiaL, codigoProducto: codigoBarra, cantidadEsperada: 72, cantidadRecibida: 72 });
+      var sA = _getStockProducto(codigoBarra).cantidad;
+      cerrarGuia(idGuiaL, 'sistema-test', null);           // aplica -72
+      var sTrasCierre1 = _getStockProducto(codigoBarra).cantidad;
+      reabrirGuia({ idGuia: idGuiaL });                    // NO revierte
+      cerrarGuia(idGuiaL, 'sistema-test', null);           // delta 0 (no re-aplica)
+      var sTrasCierre2 = _getStockProducto(codigoBarra).cantidad;
+      var netoTotal = sTrasCierre2 - sA;                   // debe ser -72 (no -144)
+      var reaplico  = sTrasCierre2 - sTrasCierre1;          // debe ser 0
+      _add('TEST 10: LOPESA cerrar→reabrir→recerrar = -72 una sola vez',
+           Math.abs(netoTotal - (-72)) <= 0.01 && Math.abs(reaplico) <= 0.01,
+           'neto=' + netoTotal + ' · re-aplicado=' + reaplico,
+           'neto=-72 · re-aplicado=0',
+           'neto=' + netoTotal + ' · re-aplicado=' + reaplico);
+    } catch(eL) {
+      _add('TEST 10: LOPESA', false, eL.message);
+    } finally {
+      // limpieza de la guía LOPESA: reabrir para devolver stock, borrar rastro
+      try {
+        if (idGuiaL) {
+          var infoL = _getGuiaInfo(idGuiaL);
+          if (infoL && String(infoL.estado).toUpperCase() === 'CERRADA') {
+            // devolver el -72 aplicado: anular el detalle (cerrada) devuelve stock
+            var detsL = _sheetToObjects(getSheet('GUIA_DETALLE')).filter(function(d){ return d.idGuia === idGuiaL; });
+            detsL.forEach(function(d){ try { anularDetalle({ idDetalle: d.idDetalle }); } catch(e){} });
+          }
+          _borrarMovimientosTest(idGuiaL);
+          _borrarDetallesGuia(idGuiaL);
+          _borrarFilaGuia(idGuiaL);
+        }
+      } catch(eCL) { Logger.log('[TEST 10 cleanup] ' + eCL.message); }
+    }
 
   } catch(eAll) {
     _add('EXCEPTION', false, eAll.message);
@@ -279,7 +328,9 @@ function _borrarMovimientosTest(idGuia) {
   for (var i = 1; i < data.length; i++) {
     var ori = String(data[i][idxOrigen] || '');
     var op  = String(data[i][idxOp] || '');
-    var esTest = (idGuia && ori === String(idGuia))
+    // origen del cierre idempotente = idGuia + '#idDetalle@qty' → match por prefijo.
+    var matchGuia = idGuia && (ori === String(idGuia) || ori.indexOf(String(idGuia) + '#') === 0);
+    var esTest = matchGuia
               || (op === 'TEST_CLEANUP')
               || /test/i.test(op);
     if (esTest) aBorrar.push(i + 1);

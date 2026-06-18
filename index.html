@@ -33,11 +33,15 @@
       mosGasUrl: 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec',
       usuario:   localStorage.getItem('wh_usuario') || 'operador',
       version:   '1.0.5',
-      // [CUTOVER B6] Flags server-wide (todos los dispositivos). lecturaNavegador: lectura directa a Supabase
-      // (validada en prod 2026-06-13). escritura/impresión siguen OFF → todo eso cae a GAS hasta activar.
-      // Rollback de lectura: poner false + deploy. El control fino de escritura de stock es por WH_*_DIRECTO (server).
+      // [CUTOVER B6] Flags server-wide (todos los dispositivos). El cutover de DATOS está COMPLETO:
+      //   lecturaNavegador  = true  → lectura directa a Supabase (validada en prod 2026-06-13).
+      //   escrituraNavegador= true  → escritura directa a Supabase server-wide (2026-06-14; 40+ flags WH_*_DIRECTO=1 server-side).
+      //   impresionNavegador= false → SOLO la impresión sigue por GAS (no es path de datos/dinero; se valida físicamente aparte).
+      // Verificado 100x el 2026-06-18: lecturas y escrituras (ajustes/guías/envasado/cierre/auditorías) aterrizan
+      // directo en Supabase desde front Y GAS; cron idempotente de autocierre activo; sin doble-conteo.
+      // Rollback: poner el flag en false + deploy. El control fino de escritura de stock es por WH_*_DIRECTO (server).
       lecturaNavegador:   true,
-      escrituraNavegador: true,   // [CUTOVER 2026-06-14] escritura directa server-wide (sombra sin drift + 27 flags ON)
+      escrituraNavegador: true,
       impresionNavegador: false   // impresión queda en GAS hasta validar físicamente en impresora
     };
   </script>
@@ -473,17 +477,20 @@
       content:'';position:absolute;left:-7px;top:14px;width:12px;height:12px;border-radius:50%;
       border:2px solid #1e293b;box-shadow:0 0 0 2px rgba(15,23,42,.5);
     }
+    /* REGLA DE COLORES: VERDE=ingreso/INC/inicial · ROJO=salida/DEC · NARANJA=guía abierta (pendiente). */
     .hist-timeline-row.is-ingreso::before    { background:#10b981; }
-    .hist-timeline-row.is-salida::before     { background:#fb923c; }
-    .hist-timeline-row.is-ajuste-inc::before { background:#3b82f6; }
-    .hist-timeline-row.is-ajuste-dec::before { background:#f59e0b; }
-    .hist-timeline-row.is-ini::before        { background:#8b5cf6; }
+    .hist-timeline-row.is-salida::before     { background:#ef4444; }
+    .hist-timeline-row.is-ajuste-inc::before { background:#10b981; }
+    .hist-timeline-row.is-ajuste-dec::before { background:#ef4444; }
+    .hist-timeline-row.is-ini::before        { background:#10b981; }
+    .hist-timeline-row.is-pend::before       { background:#fb923c; }
     .hist-mov-amount { font-size:1.2em;font-weight:900;letter-spacing:-.02em; }
     .hist-mov-amount.is-ingreso    { color:#34d399; }
-    .hist-mov-amount.is-salida     { color:#fb923c; }
-    .hist-mov-amount.is-ajuste-inc { color:#60a5fa; }
-    .hist-mov-amount.is-ajuste-dec { color:#fbbf24; }
-    .hist-mov-amount.is-ini        { color:#a78bfa; }
+    .hist-mov-amount.is-salida     { color:#f87171; }
+    .hist-mov-amount.is-ajuste-inc { color:#34d399; }
+    .hist-mov-amount.is-ajuste-dec { color:#f87171; }
+    .hist-mov-amount.is-ini        { color:#34d399; }
+    .hist-mov-amount.is-pend       { color:#fb923c; }
     .hist-mov-tipo {
       display:inline-block;font-size:.6em;font-weight:800;letter-spacing:.04em;
       padding:1px 6px;border-radius:4px;margin-right:6px;
@@ -670,12 +677,13 @@
       content:'';position:absolute;left:-5px;top:11px;width:8px;height:8px;border-radius:50%;
       background:rgba(99,102,241,.7);border:2px solid #0f172a;
     }
+    /* REGLA DE COLORES: VERDE=entrada/ingreso · ROJO=salida (naranja queda reservado para pendientes en el kardex). */
     .prod-timeline-item.is-entrada::before { background:#34d399; }
-    .prod-timeline-item.is-salida::before  { background:#fb923c; }
+    .prod-timeline-item.is-salida::before  { background:#ef4444; }
     .prod-timeline-fecha { font-size:.66em;color:#64748b;letter-spacing:.04em; }
     .prod-timeline-tipo  { font-size:.78em;font-weight:800; }
     .prod-timeline-tipo.is-entrada { color:#34d399; }
-    .prod-timeline-tipo.is-salida  { color:#fb923c; }
+    .prod-timeline-tipo.is-salida  { color:#f87171; }
     .prod-timeline-meta  { font-size:.7em;color:#94a3b8; }
     /* Botones de acción del sheet detalle */
     .prod-detail-actions {

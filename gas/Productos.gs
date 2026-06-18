@@ -94,9 +94,12 @@ function getStockProducto(codigo) {
 // Excluye ENVASADO (lo aplica Envasados aparte). Cantidad de línea = cantRecibida (cae a cantEsperada si 0).
 // Devuelve solo productos CON movimiento pendiente (el front ya tiene el real de getStock).
 function getStockProyectado(params) {
-  var guias    = _sheetToObjects(getSheet('GUIAS'));
-  var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
-  var stock    = _sheetToObjects(getSheet('STOCK'));
+  // [Cutover lectura WH] Fuente vigente (Supabase si flip ON, fallback hoja). El stock
+  // (vía getStockFlip) DEBE venir de la misma fuente que getStock, sino el overlay
+  // proyectado se sumaría sobre un real viejo. PRODUCTOS = catálogo MOS (hoja).
+  var guias    = _filasLecturaWH('guias', 'GUIAS');
+  var detalles = _filasLecturaWH('guia_detalle', 'GUIA_DETALLE');
+  var stock    = _filasStockWH();
   var productos = _sheetToObjects(getProductosSheet());
 
   var gMap = {};
@@ -1671,7 +1674,48 @@ function _auditarProductoImpl(params) {
     return ajId;
   }
 
-  if (stockInfo.fila < 0) {
+  // [ESCRITURA DIRECTA WH · Fase 1] Si el gate WH_ESCRITURA_DIRECTA + el flag
+  // server-side WH_AUDITAR_PRODUCTO_DIRECTO están ON, wh.auditar_producto es la
+  // FUENTE DE VERDAD: registra auditoría EJECUTADA + ajusta el stock al físico por
+  // la diferencia (UPDATE atómico cantidad+delta), todo en UNA transacción,
+  // idempotente por id_auditoria. En ese caso SALTAMOS la mutación de stock de la
+  // Hoja (_actualizarStock / crear fila STOCK) para no aplicar dos veces; la fila
+  // de AJUSTES de la Hoja SÍ se escribe (coherencia Hoja) con el MISMO id que usa
+  // la RPC ('AJ'+audId) → su dual-write no duplica la fila de wh.ajustes.
+  // Gate OFF / RPC fallida → fallback al camino de hoy (idéntico).
+  var stockAuditDirecto = false;
+  if (typeof _whAuditarProductoDirecto === 'function') {
+    try {
+      var rAud = _whAuditarProductoDirecto({
+        idAuditoria: audId, codigoBarra: codigoBarra, stockFisico: stockFisico,
+        usuario: String(params.usuario || ''), observacion: String(params.observacion || ''),
+        idAjuste: 'AJ' + audId, idStockNuevo: 'STK' + audId, idMov: 'MOV' + audId
+      });
+      if (rAud && rAud.handled) {
+        stockAuditDirecto = true;
+        Logger.log('[auditar] escritura DIRECTA Supabase OK audId=' + audId + ' → ' + JSON.stringify(rAud.data));
+      } else if (rAud && rAud.fallback) {
+        Logger.log('[auditar] escritura directa falló (' + rAud.error + ') → FALLBACK. audId=' + audId);
+      }
+    } catch(_eAuD) { Logger.log('[auditar] _whAuditarProductoDirecto excepción: ' + (_eAuD && _eAuD.message)); }
+  }
+
+  if (stockAuditDirecto) {
+    // La RPC ya ajustó stock + insertó wh.ajustes ('AJ'+audId). Escribimos SOLO la fila
+    // de AJUSTES en la Hoja (coherencia), con el MISMO id, SIN dual-write (ya existe en
+    // Supabase) y SIN tocar STOCK de la Hoja (lo refleja el sync de lectura desde Supabase).
+    if (Math.abs(diff) > 0.5 || (stockInfo.fila < 0 && stockFisico > 0)) {
+      var ajTipoD = stockInfo.fila < 0 ? 'INI' : (diff > 0 ? 'INC' : 'DEC');
+      var ajCantD = stockInfo.fila < 0 ? stockFisico : Math.abs(diff);
+      var ajMotD  = stockInfo.fila < 0 ? 'Stock inicial (auditoria)' : 'Auditoria diaria';
+      var ajValsD = ['AJ' + audId, codigoBarra, ajTipoD, ajCantD, ajMotD,
+                     String(params.usuario || ''), audId, new Date()];
+      var ajNextD = ajSheet.getLastRow() + 1;
+      if (ajColCod > 0) ajSheet.getRange(ajNextD, ajColCod).setNumberFormat('@');
+      ajSheet.getRange(ajNextD, 8).setNumberFormat('dd/MM/yyyy HH:mm');
+      ajSheet.getRange(ajNextD, 1, 1, ajValsD.length).setValues([ajValsD]);
+    }
+  } else if (stockInfo.fila < 0) {
     // Sin registro previo → stock inicial, siempre registrar en AJUSTES como INI
     if (stockFisico > 0) _writeAjuste('INI', stockFisico, 'Stock inicial (auditoria)');
     // Crear fila STOCK
@@ -1701,6 +1745,8 @@ function _auditarProductoImpl(params) {
   // Si diff ≤ 0.5: stock cuadra, solo queda en AUDITORIAS, sin tocar AJUSTES
 
   // [WH F2 p2 · R4] dual-write de la auditoría directa (best-effort)
+  // OJO: si stockAuditDirecto, la RPC ya insertó wh.auditorias EJECUTADA → este
+  // dual-write upsertea la misma fila (mismo audId) sin duplicar (idempotente por PK).
   try { if (typeof _dualWriteAuditoriaWH === 'function') _dualWriteAuditoriaWH(audId); } catch(_eDW) {}
 
   return {
@@ -1739,23 +1785,56 @@ function crearAjuste(params) {
   sheet.getRange(nextRow, 8).setNumberFormat('dd/MM/yyyy HH:mm');
   sheet.getRange(nextRow, 1, 1, ajVals.length).setValues([ajVals]);
 
-  _actualizarStock(codigoBarra, delta, {
-    tipoOperacion: 'AJUSTE_MANUAL',
-    origen:        id,
-    usuario:       String(params.usuario || ''),
-    observacion:   String(params.motivo || '')
-  });
+  // [ESCRITURA DIRECTA WH · Fase 1] Si el gate WH_ESCRITURA_DIRECTA + el flag
+  // server-side WH_CREAR_AJUSTE_DIRECTO están ON, wh.crear_ajuste es la FUENTE DE
+  // VERDAD: aplica el delta de forma ATÓMICA (UPDATE cantidad+delta, nunca
+  // read-modify-write) e inserta ajuste + movimiento, idempotente por id_ajuste.
+  // En ese caso SALTAMOS _actualizarStock (sino el stock se aplicaría dos veces:
+  // RPC + Hoja/dual-write). La fila de AJUSTES en la Hoja ya se escribió arriba
+  // (coherencia Hoja). Gate OFF / RPC fallida → fallback al camino de hoy.
+  var stockAplicadoDirecto = false;
+  var stockNuevoDirecto = null;
+  if (typeof _whCrearAjusteDirecto === 'function') {
+    try {
+      var rAj = _whCrearAjusteDirecto({
+        idAjuste: id, codigoProducto: codigoBarra, tipo: tipo, cantidad: cant,
+        motivo: String(params.motivo || ''), usuario: String(params.usuario || ''),
+        idAuditoria: String(params.idAuditoria || ''),
+        idStockNuevo: 'STK' + id, idMov: 'MOV' + id, fecha: ''
+      });
+      if (rAj && rAj.handled) {
+        stockAplicadoDirecto = true;
+        if (rAj.data && rAj.data.stockNuevo != null) stockNuevoDirecto = parseFloat(rAj.data.stockNuevo);
+        Logger.log('[crearAjuste] escritura DIRECTA Supabase OK id=' + id + ' → ' + JSON.stringify(rAj.data));
+      } else if (rAj && rAj.fallback) {
+        Logger.log('[crearAjuste] escritura directa falló (' + rAj.error + ') → FALLBACK. id=' + id);
+      }
+    } catch(_eAjD) { Logger.log('[crearAjuste] _whCrearAjusteDirecto excepción: ' + (_eAjD && _eAjD.message)); }
+  }
 
-  // [WH F2 p2 · R3] dual-write del ajuste a la sombra (best-effort; el stock ya se espejó en _actualizarStock)
-  try {
-    if (typeof _dualWriteWH === 'function') {
-      _dualWriteWH('ajustes', { idAjuste: id, codigoProducto: codigoBarra, tipoAjuste: tipo,
-        cantidadAjuste: cant, motivo: String(params.motivo || ''), usuario: String(params.usuario || ''),
-        idAuditoria: String(params.idAuditoria || ''), fecha: ajVals[7] });
-    }
-  } catch(_eDW) {}
+  if (!stockAplicadoDirecto) {
+    _actualizarStock(codigoBarra, delta, {
+      tipoOperacion: 'AJUSTE_MANUAL',
+      origen:        id,
+      usuario:       String(params.usuario || ''),
+      observacion:   String(params.motivo || '')
+    });
 
-  return { ok: true, data: { idAjuste: id, stockNuevo: _getStockProducto(codigoBarra).cantidad } };
+    // [WH F2 p2 · R3] dual-write del ajuste a la sombra (best-effort; el stock ya se espejó en _actualizarStock)
+    try {
+      if (typeof _dualWriteWH === 'function') {
+        _dualWriteWH('ajustes', { idAjuste: id, codigoProducto: codigoBarra, tipoAjuste: tipo,
+          cantidadAjuste: cant, motivo: String(params.motivo || ''), usuario: String(params.usuario || ''),
+          idAuditoria: String(params.idAuditoria || ''), fecha: ajVals[7] });
+      }
+    } catch(_eDW) {}
+  }
+
+  // Cuando el stock lo aplicó la RPC, la Hoja STOCK NO refleja el delta (se saltó
+  // _actualizarStock) → devolver el stockNuevo que reportó la RPC; sino, leer la Hoja.
+  var stockNuevoOut = (stockAplicadoDirecto && stockNuevoDirecto != null)
+    ? stockNuevoDirecto : _getStockProducto(codigoBarra).cantidad;
+  return { ok: true, data: { idAjuste: id, stockNuevo: stockNuevoOut } };
 }
 
 // ── Proveedores ─────────────────────────────────────────────

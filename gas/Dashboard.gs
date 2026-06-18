@@ -9,14 +9,20 @@ function getDashboard() {
   var limAlerta        = new Date(hoy); limAlerta.setDate(hoy.getDate() + diasAlerta);
   var limCritico       = new Date(hoy); limCritico.setDate(hoy.getDate() + diasAlertaCrit);
 
+  // [Cutover lectura WH] PRODUCTOS_MASTER es catálogo MOS (no stock WH) → sigue en la hoja.
+  // Todo lo WH-owned se lee de la fuente vigente (Supabase si el flip está ON, con fallback
+  // a hoja): el stock vía getStockFlip y el resto vía _filasLecturaWH. ANTES estas lecturas
+  // iban al Sheet directo, que tras la escritura directa queda atrás (el cierre/ajuste aplican
+  // el stock solo en Supabase) → el dashboard mostraba "stock bajo mínimo"/"pendiente envasado"
+  // calculado sobre stock VIEJO.
   var productos  = _sheetToObjects(getProductosSheet());
-  var stock      = _sheetToObjects(getSheet('STOCK'));
-  var lotes      = _sheetToObjects(getSheet('LOTES_VENCIMIENTO'));
-  var guias      = _sheetToObjects(getSheet('GUIAS'));
-  var preingresos= _sheetToObjects(getSheet('PREINGRESOS'));
-  var mermas     = _sheetToObjects(getSheet('MERMAS'));
-  var auditorias = _sheetToObjects(getSheet('AUDITORIAS'));
-  var envasados  = _sheetToObjects(getSheet('ENVASADOS'));
+  var stock      = _filasStockWH();
+  var lotes      = _filasLecturaWH('lotes_vencimiento', 'LOTES_VENCIMIENTO');
+  var guias      = _filasLecturaWH('guias', 'GUIAS');
+  var preingresos= _filasLecturaWH('preingresos', 'PREINGRESOS');
+  var mermas     = _filasLecturaWH('mermas', 'MERMAS');
+  var auditorias = _filasLecturaWH('auditorias', 'AUDITORIAS');
+  var envasados  = _filasLecturaWH('envasados', 'ENVASADOS');
 
   // Índices rápidos
   var stockMap = {};

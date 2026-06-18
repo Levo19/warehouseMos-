@@ -98,6 +98,9 @@ function crearDevolucionZona(params) {
     '', '', ''
   ]);
 
+  // [MIGRACIÓN GAP] espejo a wh.devoluciones_zona (best-effort)
+  try { if (typeof _dualWriteDevolucionZonaWH === 'function') _dualWriteDevolucionZonaWH(idDev); } catch(_eDZ) {}
+
   // Notificar a operadores WH
   try {
     _notificarMOS(
@@ -341,6 +344,9 @@ function confirmarRecepcionDevolucion(params) {
       sh.getRange(fila, h.indexOf('fotoAlmacen') + 1).setValue(String(params.fotoAlmacen));
     }
 
+    // [MIGRACIÓN GAP] espejo del estado RECEPCIONADO + payloads a wh.devoluciones_zona (best-effort)
+    try { if (typeof _dualWriteDevolucionZonaWH === 'function') _dualWriteDevolucionZonaWH(idDev); } catch(_eDZ) {}
+
     // Push al vendedor + a MOS admins si hay diferencias
     if (diferencias.resumen.totalItemsConDiferencia > 0 || diferencias.resumen.totalConCambioDeEstado > 0) {
       try {
@@ -388,6 +394,8 @@ function reconciliarDevolucionZona(params) {
     sh.getRange(fila, h.indexOf('revisadoPor')   + 1).setValue(String(params.revisadoPor || ''));
     sh.getRange(fila, h.indexOf('fechaRevision') + 1).setValue(new Date());
     sh.getRange(fila, h.indexOf('notaAdminMOS')  + 1).setValue(String(params.nota || ''));
+    // [MIGRACIÓN GAP] espejo del estado RECONCILIADO a wh.devoluciones_zona (best-effort)
+    try { if (typeof _dualWriteDevolucionZonaWH === 'function') _dualWriteDevolucionZonaWH(idDev); } catch(_eDZ) {}
     return { ok: true, data: { idDevolucion: idDev, estado: 'RECONCILIADO' } };
   }
   return { ok: false, error: 'Devolución no encontrada' };

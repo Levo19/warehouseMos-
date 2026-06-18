@@ -160,7 +160,10 @@ function getHistorialGuia(params) {
     var movSheet = getSheet('STOCK_MOVIMIENTOS');
     if (movSheet) {
       var movs = _sheetToObjects(movSheet).filter(function(m) {
-        return String(m.origen || '') === idGuia;
+        // El cierre idempotente registra origen = idGuia + '#idDetalle@qty' (clave única
+        // por guía/línea/versión, evita duplicar el log). Match exacto O por prefijo.
+        var ori = String(m.origen || '');
+        return ori === idGuia || ori.indexOf(idGuia + '#') === 0;
       });
       movs.forEach(function(m) {
         eventos.push({

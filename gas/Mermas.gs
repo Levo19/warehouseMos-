@@ -213,9 +213,11 @@ function procesarEliminacionMermas(params) {
 
 // ── Cesta agrupada por sección (frontend) ──
 function getMermasCesta(params) {
-  var sheet = getSheet('MERMAS');
-  _ensureColumnasMerma(sheet);
-  var rows = _sheetToObjects(sheet);
+  // [Cutover lectura WH] Misma fuente que getMermas/getMermasEnProceso: sombra Supabase si
+  // el flip está ON (fallback hoja). _ensureColumnasMerma se mantiene para garantizar el
+  // schema de la hoja (no afecta la lectura directa, que usa el spec).
+  _ensureColumnasMerma(getSheet('MERMAS'));
+  var rows = _filasLecturaWH('mermas', 'MERMAS');
   var pendientes  = [];
   var descartado  = [];
   var solucionado = [];

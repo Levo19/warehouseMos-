@@ -86,13 +86,17 @@ var _WH_SPECS = {
     ['ocr_razon_social','OCR_Razon_Social','text'],['ocr_serie','OCR_Serie','text'],['ocr_numero','OCR_Numero','text'],
     ['ocr_fecha_comprobante','OCR_Fecha_Comprobante','date'],['ocr_total','OCR_Total','num'],['ocr_subtotal','OCR_Subtotal','num'],
     ['igv_recuperable','IGV_Recuperable','num'],['ocr_confidence','OCR_Confidence','num'],['ocr_notas','OCR_Notas','text'],
-    ['ocr_fecha_proceso','OCR_Fecha_Proceso','date']
+    ['ocr_fecha_proceso','OCR_Fecha_Proceso','date'],
+    // [AUTO-CIERRE] reloj de inactividad (= now() al crear/editar línea/reabrir)
+    ['ultima_actividad','ultimaActividad','date']
   ]},
   guia_detalle: { sheet:'GUIA_DETALLE', onConflict:'id_guia,linea', keyHeader:'idGuia', lineaBy:'id_guia', spec:[
     ['id_guia','idGuia','text'],['cod_producto','codigoProducto','text'],['cant_esperada','cantidadEsperada','num'],
     ['cant_recibida','cantidadRecibida','num'],['precio_unitario','precioUnitario','num'],['id_lote','idLote','text'],
     ['observacion','observacion','text'],['id_producto_nuevo','idProductoNuevo','text'],
-    ['id_detalle','idDetalle','text'],['fecha_vencimiento','fechaVencimiento','date']
+    ['id_detalle','idDetalle','text'],['fecha_vencimiento','fechaVencimiento','date'],
+    // [CIERRE IDEMPOTENTE] lo último que YA impactó el stock por esta línea (default 0)
+    ['cantidad_aplicada','cantidadAplicada','num']
   ]},
   stock: { sheet:'STOCK', onConflict:'id_stock', keyHeader:'idStock', spec:[
     ['id_stock','idStock','text'],['cod_producto','codigoProducto','text'],['cantidad_disponible','cantidadDisponible','num'],
@@ -208,12 +212,41 @@ var _WH_SPECS = {
   pedidos_cliente_adj: { sheet:'PedidosClienteAdj', onConflict:'id_pedido,linea', keyHeader:'idPedido', lineaBy:'id_pedido', spec:[
     ['id_pedido','idPedido','text'],['tipo','tipo','text'],['nombre_archivo','nombreArchivo','text'],
     ['url_drive','urlDrive','text'],['ts','ts','date']
-  ]}
+  ]},
+  // [MIGRACIÓN GAP] DEVOLUCIONES_ZONA → wh.devoluciones_zona (PK id_devolucion). Payloads JSON → jsonb.
+  devoluciones_zona: { sheet:'DEVOLUCIONES_ZONA', onConflict:'id_devolucion', keyHeader:'idDevolucion', spec:[
+    ['id_devolucion','idDevolucion','text'],['fecha_inicio','fechaInicio','date'],['zona_origen','zonaOrigen','text'],
+    ['vendedor','vendedor','text'],['id_dispositivo_origen','idDispositivoOrigen','text'],
+    ['fecha_recepcion','fechaRecepcion','date'],['operador_almacen','operadorAlmacen','text'],
+    ['id_dispositivo_wh','idDispositivoWH','text'],['estado','estado','text'],
+    ['payload_zona','payload_zona','json'],['payload_almacen','payload_almacen','json'],
+    ['diferencias_json','diferenciasJson','json'],['id_guia_ingreso_generada','idGuiaIngresoGenerada','text'],
+    ['foto_zona','fotoZona','text'],['foto_almacen','fotoAlmacen','text'],
+    ['revisado_por','revisadoPor','text'],['fecha_revision','fechaRevision','date'],['nota_admin_mos','notaAdminMOS','text']
+  ]},
+  // [MIGRACIÓN GAP] LOTES_HISTORIAL (log append-only sin PK natural) → wh.lotes_historial.
+  // id_hist DETERMINISTA = md5(ts|idLote|cod|guia|accion|cantidad) en cfg.post → re-sync NO duplica.
+  lotes_historial: { sheet:'LOTES_HISTORIAL', onConflict:'id_hist', keyHeader:'id_hist', spec:[
+    ['ts','ts','date'],['id_lote','idLote','text'],['cod_producto','codigoProducto','text'],
+    ['id_guia','idGuia','text'],['accion','accion','text'],['cantidad','cantidad','num'],
+    ['motivo','motivo','text'],['usuario','usuario','text']
+  ], post:function(r,o){ r.id_hist = _whLoteHistId(r); return r; } }
 };
+
+// [MIGRACIÓN GAP] id determinista del evento de historial de lote (idempotencia de la sombra).
+// Usa los campos NORMALIZADOS de la fila pg (r), así sheet y dual-write producen el MISMO hash.
+function _whLoteHistId(r){
+  var base = [r.ts||'', r.id_lote||'', r.cod_producto||'', r.id_guia||'', r.accion||'',
+              (r.cantidad==null?'':String(r.cantidad))].join('|');
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, base, Utilities.Charset.UTF_8);
+  var hex = bytes.map(function(b){ var v=(b<0?b+256:b).toString(16); return v.length===1?'0'+v:v; }).join('');
+  return hex;
+}
 
 var _WH_ORDEN=['guias','guia_detalle','stock','stock_movimientos','lotes_vencimiento','mermas','auditorias',
   'ajustes','envasados','preingresos','producto_nuevo','sesiones','desempeno','pickups','ops_log','cargadores_log',
-  'listas_sombra','lotes_adhesivo','alertas_stock','config','clientes','pedidos_cliente','pedidos_cliente_items','pedidos_cliente_adj'];
+  'listas_sombra','lotes_adhesivo','alertas_stock','config','clientes','pedidos_cliente','pedidos_cliente_items','pedidos_cliente_adj',
+  'devoluciones_zona','lotes_historial'];
 
 var _WH_TIME_BUDGET = 4.5*60*1000;   // < 6 min límite GAS
 var _WH_BATCH = 100;
@@ -308,7 +341,8 @@ var _WH_SYNC_TAILS = {
   mermas:99999, auditorias:600, ajustes:600, envasados:400, preingresos:300, producto_nuevo:99999,
   sesiones:400, desempeno:400, pickups:99999, ops_log:500, cargadores_log:99999, listas_sombra:99999,
   lotes_adhesivo:300, alertas_stock:600, config:99999, clientes:99999, pedidos_cliente:99999,
-  pedidos_cliente_items:99999, pedidos_cliente_adj:99999
+  pedidos_cliente_items:99999, pedidos_cliente_adj:99999,
+  devoluciones_zona:99999, lotes_historial:1500
 };
 
 // [fix sombra atrasada] El sync recorría SIEMPRE _WH_ORDEN de 0 a N sin
@@ -323,11 +357,30 @@ var _WH_SYNC_TAILS = {
 //      duplica ni pierde nada.
 var _WH_SYNC_TIME_BUDGET = 5*60*1000;   // < 6 min límite GAS
 
+// [CUTOVER · PASO 5] Lista de tablas EXCLUIDAS del sync Hoja→Supabase.
+// Una vez que la escritura directa de WH es la fuente de verdad en Supabase, el
+// sync NO debe re-upsertear esas tablas desde la Hoja (las pisaría y revertiría
+// lo que la RPC escribió → el cruce que hacía ver la guía ② ABIERTA). Se lee de
+// la Script Property WH_SYNC_OFF_TABLAS (CSV de nombres pg, ej.
+// 'stock,guias,guia_detalle,ajustes,stock_movimientos,envasados,auditorias').
+// Vacío (default) = sync de TODO (comportamiento histórico). Sólo afecta el sync;
+// las lecturas/escrituras directas son independientes. Idempotente y reversible:
+// vaciar la property reactiva el sync de esas tablas al instante.
+function _whSyncOffSet(){
+  try{
+    var raw=String(PropertiesService.getScriptProperties().getProperty('WH_SYNC_OFF_TABLAS')||'').trim();
+    if(!raw) return {};
+    var set={}; raw.split(',').forEach(function(s){ var t=s.trim().toLowerCase(); if(t) set[t]=true; });
+    return set;
+  }catch(e){ return {}; }
+}
+
 function _syncWHImpl(full){
   var t0=Date.now();
   var resumen={};
   var props=PropertiesService.getScriptProperties();
   var N=_WH_ORDEN.length;
+  var offSet=_whSyncOffSet();   // [PASO 5] tablas que ya NO se sincronizan desde la Hoja
 
   // offset rotativo: solo para el incremental. El full (nocturno/resync manual)
   // arranca en 0 para que reconciliarWH evalúe un barrido completo y coherente.
@@ -343,6 +396,8 @@ function _syncWHImpl(full){
     var tabla=_WH_ORDEN[(startOff+k)%N];
     var cfg=_WH_SPECS[tabla];
     try{
+      // [PASO 5] tabla excluida (escritura directa = fuente de verdad) → NO sincronizar desde la Hoja.
+      if(offSet[tabla]){ resumen[tabla]={omitida:'WH_SYNC_OFF_TABLAS'}; alcanzadas++; continue; }
       if(!getSheet(cfg.sheet)){ alcanzadas++; continue; }
       var rows=_whBuildRows(tabla);
       var tail=_WH_SYNC_TAILS[tabla]||300;
@@ -1041,6 +1096,67 @@ function _dualWriteProductoNuevoWH(idProductoNuevo){
   } catch(e){ Logger.log('[dualWriteProductoNuevoWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
 }
 
+// [MIGRACIÓN GAP] Re-lee una devolución por id y la espeja a wh.devoluciones_zona (best-effort, NUNCA lanza).
+function _dualWriteDevolucionZonaWH(idDevolucion){
+  try {
+    var id = String(idDevolucion||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('DEVOLUCIONES_ZONA'); if(!sh) return { ok:false, error:'DEVOLUCIONES_ZONA no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][0]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('devoluciones_zona', o);
+    }
+    return { ok:false, error:'devolucion no encontrada: '+id };
+  } catch(e){ Logger.log('[dualWriteDevolucionZonaWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+
+// [MIGRACIÓN GAP] Re-lee un pickup por id y lo espeja a wh.pickups (best-effort, NUNCA lanza).
+// PICKUPS ya tenía sombra por sync batch; esto agrega el espejo SÍNCRONO en cada escritura.
+function _dualWritePickupWH(idPickup){
+  try {
+    var id = String(idPickup||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('PICKUPS'); if(!sh) return { ok:false, error:'PICKUPS no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    var iId = hdrs.indexOf('idPickup'); if(iId<0) iId=0;
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][iId]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('pickups', o);
+    }
+    return { ok:false, error:'pickup no encontrado: '+id };
+  } catch(e){ Logger.log('[dualWritePickupWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+
+// [MIGRACIÓN GAP] Re-lee una sesión por id y la espeja a wh.sesiones (best-effort, NUNCA lanza).
+function _dualWriteSesionWH(idSesion){
+  try {
+    var id = String(idSesion||''); if(!id) return { ok:false, error:'sin id' };
+    var sh = getSheet('SESIONES'); if(!sh) return { ok:false, error:'SESIONES no existe' };
+    var data = sh.getDataRange().getValues();
+    var hdrs = data[0].map(function(h){ return String(h||'').trim(); });
+    var iId = hdrs.indexOf('idSesion'); if(iId<0) iId=0;
+    for(var i=1;i<data.length;i++){
+      if(String(data[i][iId]) !== id) continue;
+      var o = {}; for(var c=0;c<hdrs.length;c++){ o[hdrs[c]] = data[i][c]; }
+      return _dualWriteWH('sesiones', o);
+    }
+    return { ok:false, error:'sesion no encontrada: '+id };
+  } catch(e){ Logger.log('[dualWriteSesionWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+
+// [MIGRACIÓN GAP] Espeja UN evento de historial de lote a wh.lotes_historial (best-effort, NUNCA lanza).
+// Recibe el objeto crudo {ts,idLote,codigoProducto,idGuia,accion,cantidad,motivo,usuario} con el MISMO
+// shape que la fila recién agregada por _logMovimientoLote → el id_hist (cfg.post) sale idéntico al sync.
+function _dualWriteLoteHistorialWH(o){
+  try {
+    if(!o) return { ok:false, error:'sin obj' };
+    return _dualWriteWH('lotes_historial', o);
+  } catch(e){ Logger.log('[dualWriteLoteHistorialWH] '+(e&&e.message)); return { ok:false, error:String(e&&e.message||e) }; }
+}
+
 // ════════════════════════════════════════════════════════════════════
 // [Migración WH · PASO 3] LECTURA DIRECTA genérica desde la sombra Supabase.
 // Invierte _sheetToObjects: reconstruye objetos con el MISMO shape (claves camelCase, fechas
@@ -1091,6 +1207,22 @@ function _filasLecturaWH(tabla, sheetName){
     catch(e){ Logger.log('[filasLecturaWH '+tabla+'] cae a Sheets: '+(e&&e.message)); }
   }
   return _sheetToObjects(getSheet(sheetName));
+}
+
+// [Cutover lectura · helper compartido] Devuelve las filas de STOCK con el MISMO shape
+// que la hoja STOCK ({codigoProducto, cantidadDisponible, ...}) leyendo de la FUENTE
+// vigente: si el flip FUENTE_DATOS está ON, getStockFlip lee wh.stock_enriquecido (RPC)
+// con fallback automático a la hoja; si está OFF, lee la hoja. Esto es CRÍTICO tras la
+// escritura directa: el cierre/ajuste/auditoría aplican el stock SOLO en Supabase
+// (saltan _actualizarStock), así que la hoja STOCK puede quedar ATRÁS. Cualquier lectura
+// de stock (dashboard, proyectado, pendientes-envasado) DEBE pasar por acá, no por
+// getSheet('STOCK') directo, sino mostraría stock viejo / SIN STOCK.
+function _filasStockWH(){
+  try{
+    var r = (typeof getStockFlip === 'function') ? getStockFlip({ soloAlertas: 'false' }) : null;
+    if(r && r.ok && Array.isArray(r.data)) return r.data;
+  }catch(e){ Logger.log('[filasStockWH] cae a Sheets: '+(e&&e.message)); }
+  return _sheetToObjects(getSheet('STOCK'));
 }
 
 // Comparación numérica tolerante (vacío==vacío, ±0.001).

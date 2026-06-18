@@ -1562,7 +1562,8 @@ function getReporte(params) {
 }
 
 function _reportePreingreso(id) {
-  var rows = _sheetToObjects(getSheet('PREINGRESOS'));
+  // [Cutover lectura WH] Fuente vigente (sombra Supabase si flip ON, fallback hoja).
+  var rows = _filasLecturaWH('preingresos', 'PREINGRESOS');
   var pi   = rows.find(function(r) { return r.idPreingreso === id; });
   if (!pi) return { ok: false, error: 'Preingreso no encontrado: ' + id };
 
@@ -1579,10 +1580,10 @@ function _reportePreingreso(id) {
   var guiaResumen = null;
   if (pi.idGuia) {
     try {
-      var guias = _sheetToObjects(getSheet('GUIAS'));
+      var guias = _filasLecturaWH('guias', 'GUIAS');
       var g     = guias.find(function(x) { return x.idGuia === pi.idGuia; });
       if (g) {
-        var dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
+        var dets = _filasLecturaWH('guia_detalle', 'GUIA_DETALLE')
           .filter(function(d) { return d.idGuia === g.idGuia && d.observacion !== 'ANULADO'; });
         guiaResumen = {
           idGuia:  g.idGuia,
@@ -1617,7 +1618,8 @@ function _reportePreingreso(id) {
 }
 
 function _reporteGuia(id) {
-  var guias = _sheetToObjects(getSheet('GUIAS'));
+  // [Cutover lectura WH] Fuente vigente (sombra Supabase si flip ON, fallback hoja).
+  var guias = _filasLecturaWH('guias', 'GUIAS');
   var g     = guias.find(function(x) { return x.idGuia === id; });
   if (!g) return { ok: false, error: 'Guia no encontrada: ' + id };
 
@@ -1669,14 +1671,14 @@ function _reporteGuia(id) {
       }
     } catch(e) {}
 
-    var pns = _sheetToObjects(getSheet('PRODUCTO_NUEVO'));
+    var pns = _filasLecturaWH('producto_nuevo', 'PRODUCTO_NUEVO');
     var pnMap = {};
     pns.forEach(function(pn) {
       var cod = String(pn.codigoBarra || '');
       if (cod) pnMap[cod] = { desc: String(pn.descripcion || pn.marca || cod), estado: String(pn.estado || '') };
     });
 
-    dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
+    dets = _filasLecturaWH('guia_detalle', 'GUIA_DETALLE')
       .filter(function(d) { return d.idGuia === id && d.observacion !== 'ANULADO'; })
       .map(function(d) {
         var cod        = String(d.codigoProducto || '');
@@ -1747,7 +1749,9 @@ function getCargadoresDelDia(params) {
     var hoy = new Date();
     fechaStr = Utilities.formatDate(hoy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
   }
-  var rows = _sheetToObjects(getSheet('PREINGRESOS'));
+  // [Cutover lectura WH] Fuente vigente (sombra Supabase si flip ON, fallback hoja): los
+  // cargadores viven en el JSON del preingreso, ahora escrito direct vía RPC.
+  var rows = _filasLecturaWH('preingresos', 'PREINGRESOS');
 
   var provMap = {};
   try {

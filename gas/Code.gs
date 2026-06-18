@@ -122,6 +122,15 @@ function _route(method, e) {
       case 'desactivarUnoWH':      return desactivarUnoWH(params.ep);  // un endpoint → Sheets (off-list)
       case 'reactivarUnoWH':       return reactivarUnoWH(params.ep);   // quitar de off-list
       case 'mintTokenWH':          return mintSupabaseTokenWH(params.deviceId);  // [PASO 5 B1] JWT app=warehouseMos
+      // [CUTOVER ESCRITURA DIRECTA] controles del gate GAS WH_ESCRITURA_DIRECTA + reconciliación landmine + sync-off.
+      case 'whEscrituraDirectaEstado': return whEscrituraDirectaEstado();
+      case 'whEscrituraDirectaON':     return whEscrituraDirectaON();
+      case 'whEscrituraDirectaOFF':    return whEscrituraDirectaOFF();      // rollback instantáneo a Hoja
+      case 'reconciliarGuiaSheet':     return reconciliarGuiaSheet(params); // PASO 1: alinea cantidadAplicada+estado de la guía ②
+      case 'whSyncOffEstado':          return whSyncOffEstado();
+      case 'whSyncOffTablas':          return whSyncOffTablas(params);      // PASO 5: apaga sync de las tablas directas
+      case 'whSyncOnTablas':           return whSyncOnTablas();             // rollback: reactiva sync de todo
+      case 'syncWHRecienteManual':     return syncWHReciente();             // [CUTOVER PASO 5 verif] corre 1 pasada del sync incremental y devuelve resumen (muestra 'omitida' por tabla)
 
       // ── Dashboard ──────────────────────────────────────────
       case 'getDashboard':       return getDashboard();

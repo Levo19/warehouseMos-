@@ -105,6 +105,8 @@ function loginPersonal(params) {
   getSheet('SESIONES').appendRow([
     idSesion, operador.idPersonal, fechaStr, horaStr, '', '', 0, 'ACTIVA'
   ]);
+  // [MIGRACIÓN GAP] espejo síncrono de la sesión nueva a wh.sesiones (best-effort)
+  try { if (typeof _dualWriteSesionWH === 'function') _dualWriteSesionWH(idSesion); } catch(_eS) {}
 
   getSheet('DESEMPENO').appendRow([
     idDesempeno, operador.idPersonal, idSesion, fechaStr,
@@ -234,6 +236,8 @@ function cerrarTurno(params) {
   sesSheet.getRange(filaS, sesHdrs.indexOf('horaFin')        + 1).setValue(horaFin);
   sesSheet.getRange(filaS, sesHdrs.indexOf('minutosActivos') + 1).setValue(minutos);
   sesSheet.getRange(filaS, sesHdrs.indexOf('estado')         + 1).setValue(forzado ? 'FORZADA' : 'CERRADA');
+  // [MIGRACIÓN GAP] espejo síncrono del cierre de sesión a wh.sesiones (best-effort)
+  try { if (typeof _dualWriteSesionWH === 'function') _dualWriteSesionWH(idSesion); } catch(_eS) {}
 
   // Actualizar DESEMPENO con métricas finales
   var reporte = _calcularYCerrarDesempeno(idSesion, minutos, horas);
@@ -426,10 +430,13 @@ function _cerrarSesionesHuerfanas(idPersonal) {
   var count   = 0;
   var ultimaFecha = null;
 
+  var idxIdSes = hdrs.indexOf('idSesion');
   for (var i = 1; i < data.length; i++) {
     if (data[i][idxIdP] === idPersonal && data[i][idxEst] === 'ACTIVA') {
       sheet.getRange(i + 1, idxEst + 1).setValue('HUERFANA');
       count++;
+      // [MIGRACIÓN GAP] espejo del cambio de estado a wh.sesiones (best-effort)
+      try { if (typeof _dualWriteSesionWH === 'function' && idxIdSes >= 0) _dualWriteSesionWH(String(data[i][idxIdSes] || '')); } catch(_eS) {}
       var fec = String(data[i][idxFec] || '').substring(0, 10);
       // Solo reportar si la sesión huérfana era de otro día (no de hoy)
       if (fec && fec !== hoy) ultimaFecha = fec;
@@ -615,6 +622,8 @@ function forzarCierreSesionesNocturno() {
     sheet.getRange(i + 1, idxFFin + 1).setValue(fechaStr);
     sheet.getRange(i + 1, idxHFin + 1).setValue(horaStr);
     sheet.getRange(i + 1, idxEst  + 1).setValue('CERRADA_AUTO');
+    // [MIGRACIÓN GAP] espejo del cierre nocturno a wh.sesiones (best-effort)
+    try { if (typeof _dualWriteSesionWH === 'function' && idxId >= 0) _dualWriteSesionWH(String(data[i][idxId] || '')); } catch(_eS) {}
     cerradas++;
   }
   Logger.log('forzarCierreSesionesNocturno: ' + cerradas + ' sesiones cerradas');

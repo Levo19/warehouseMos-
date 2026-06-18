@@ -91,8 +91,10 @@ function getEnvasados(params) {
 }
 
 function getPendientesEnvasado() {
+  // [Cutover lectura WH] stock de la fuente vigente (Supabase si flip ON, fallback hoja):
+  // tras la escritura directa la hoja STOCK queda atrás → leerla daría "pendientes" falsos.
   var productos = _sheetToObjects(getProductosSheet());
-  var stock     = _sheetToObjects(getSheet('STOCK'));
+  var stock     = _filasStockWH();
 
   var stockMap = {};
   stock.forEach(function(s){ stockMap[s.codigoProducto] = parseFloat(s.cantidadDisponible) || 0; });
@@ -188,6 +190,41 @@ function _registrarEnvasadoImpl(params) {
   // y no ejecuta nada. TTL 120s.
   try { cache.put(keyEfectiva, idEnvasado, 120); } catch(_){}
 
+  // [ESCRITURA DIRECTA WH · Fase 1] Si el gate WH_ESCRITURA_DIRECTA + el flag
+  // server-side WH_REGISTRAR_ENVASADO_DIRECTO están ON, wh.registrar_envasado es la
+  // FUENTE DE VERDAD del STOCK: consume base y produce derivado de forma ATÓMICA
+  // (UPDATE cantidad±delta), idempotente por id_envasado. Cuando la RPC tiene éxito
+  // SALTAMOS los dos _actualizarStock de abajo (sino el stock se aplicaría dos veces).
+  // El resto del flujo GAS (guías del día + detalles + lote + fila ENVASADOS en la
+  // Hoja, con sus dual-writes) se mantiene para que la Hoja siga coherente.
+  // ⚠️ CAVEAT DE ACTIVACIÓN (documentado en EscrituraDirectaWH.gs): la RPC crea SUS
+  //    PROPIAS guías SALIDA/INGRESO_ENVASADO en Supabase (ids GSE/GIE+idEnvasado),
+  //    distintas de las guías-del-día que GAS dual-escribe. Mientras el sync siga
+  //    vivo esto NO afecta el stock (que es lo migrado), pero deja guías de envasado
+  //    "espejo" en la sombra. Por eso ENVASADO es el último punto a activar y a
+  //    validar aparte. Gate OFF / RPC fallida → fallback (idéntico a hoy).
+  var stockEnvDirecto = false;
+  if (typeof _whRegistrarEnvasadoDirecto === 'function') {
+    try {
+      var rEnv = _whRegistrarEnvasadoDirecto({
+        idEnvasado: idEnvasado,
+        codProductoBase: prodBase.codigoBarra,
+        codProductoEnvasado: prodDerivado.codigoBarra,
+        cantidadBase: cantBase,
+        unidadesProducidas: unidadesReales,
+        unidadBase: prodBase.unidad || '',
+        fechaVencimiento: fechaVencimiento || '',
+        usuario: String(usuario || 'sistema')
+      });
+      if (rEnv && rEnv.handled) {
+        stockEnvDirecto = true;
+        Logger.log('[envasado] escritura DIRECTA Supabase OK id=' + idEnvasado + ' → ' + JSON.stringify(rEnv.data));
+      } else if (rEnv && rEnv.fallback) {
+        Logger.log('[envasado] escritura directa falló (' + rEnv.error + ') → FALLBACK. id=' + idEnvasado);
+      }
+    } catch(_eEnvD) { Logger.log('[envasado] _whRegistrarEnvasadoDirecto excepción: ' + (_eEnvD && _eEnvD.message)); }
+  }
+
   // 5. Guía SALIDA_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
   var gsRes = _getOCrearGuiaDia('SALIDA_ENVASADO', usuario);
   if (!gsRes.ok) return { ok: false, error: 'Error guía salida: ' + gsRes.error };
@@ -200,12 +237,14 @@ function _registrarEnvasadoImpl(params) {
     precioUnitario:   0
   });
   if (!detSalida.ok) return { ok: false, error: 'Detalle salida: ' + detSalida.error };
-  _actualizarStock(prodBase.codigoBarra, -cantBase, {
-    tipoOperacion: 'ENVASADO_BASE',
-    origen:        idEnvasado,
-    usuario:       String(usuario || ''),
-    observacion:   'consumo base ' + unidadesReales + ' uds'
-  });
+  if (!stockEnvDirecto) {
+    _actualizarStock(prodBase.codigoBarra, -cantBase, {
+      tipoOperacion: 'ENVASADO_BASE',
+      origen:        idEnvasado,
+      usuario:       String(usuario || ''),
+      observacion:   'consumo base ' + unidadesReales + ' uds'
+    });
+  }
 
   // 6. Guía INGRESO_ENVASADO del día — reutilizar si ya existe ABIERTA hoy
   var giRes = _getOCrearGuiaDia('INGRESO_ENVASADO', usuario);
@@ -221,12 +260,14 @@ function _registrarEnvasadoImpl(params) {
     fechaVencimiento: fechaVencimiento
   });
   if (!detIngreso.ok) return { ok: false, error: 'Detalle ingreso: ' + detIngreso.error };
-  _actualizarStock(prodDerivado.codigoBarra, unidadesReales, {
-    tipoOperacion: 'ENVASADO_DERIVADO',
-    origen:        idEnvasado,
-    usuario:       String(usuario || ''),
-    observacion:   'producción ' + unidadesReales + ' uds'
-  });
+  if (!stockEnvDirecto) {
+    _actualizarStock(prodDerivado.codigoBarra, unidadesReales, {
+      tipoOperacion: 'ENVASADO_DERIVADO',
+      origen:        idEnvasado,
+      usuario:       String(usuario || ''),
+      observacion:   'producción ' + unidadesReales + ' uds'
+    });
+  }
 
   // 7. Registro en hoja ENVASADOS
   getSheet('ENVASADOS').appendRow([

@@ -18,8 +18,11 @@ function getGuias(params) {
 }
 
 function getGuia(idGuia) {
-  var guias    = _sheetToObjects(getSheet('GUIAS'));
-  var detalles = _sheetToObjects(getSheet('GUIA_DETALLE'));
+  // [Cutover lectura WH] Misma fuente que getGuias (plural): sombra Supabase si el flip
+  // está ON (fallback a hoja). Tras la escritura directa, el detalle/estado de una guía
+  // vive en Supabase; leer la hoja mostraría estado/cantidades atrasados.
+  var guias    = _filasLecturaWH('guias', 'GUIAS');
+  var detalles = _filasLecturaWH('guia_detalle', 'GUIA_DETALLE');
 
   var guia = guias.find(function(g){ return g.idGuia === idGuia; });
   if (!guia) return { ok: false, error: 'Guía no encontrada: ' + idGuia };
@@ -110,6 +113,10 @@ function _crearGuiaImpl(params) {
     }
   } catch(_eDW) {}
 
+  // [ULTIMA_ACTIVIDAD] marcar actividad inicial = now() (la columna va al final,
+  // así que appendRow no la llena; _tocarActividadGuia la garantiza y setea).
+  _tocarActividadGuia(idGuia);
+
   return { ok: true, data: { idGuia: idGuia, estado: 'ABIERTA' } };
 }
 
@@ -143,6 +150,137 @@ function _conLock(nombre, fn) {
   _lockHeld = true;
   try { return fn(); }
   finally { _lockHeld = false; try { lock.releaseLock(); } catch(e) {} }
+}
+
+// ============================================================
+// [CIERRE IDEMPOTENTE · delta-reconciliación] Helpers de cantidadAplicada.
+// ------------------------------------------------------------
+// `cantidadAplicada` = lo último que YA impactó el stock por esta línea.
+// El cierre aplica SOLO (cantidadRecibida − cantidadAplicada). Reabrir NO
+// revierte stock (lo aplicado se queda aplicado); recerrar sin cambios → delta 0.
+// Editar/anular en guía cerrada también sincroniza este valor para que un
+// reopen+reclose posterior no duplique.
+//
+// La columna se agrega AL FINAL de GUIA_DETALLE (aditivo, default 0). Es
+// crítico que vaya al final: los writers posicionales existentes escriben
+// las primeras 8 columnas con setValues(row,1,1,8); leer/escribir esta
+// columna SIEMPRE por header name (hdrs.indexOf), nunca por posición fija.
+// ------------------------------------------------------------
+
+// Garantiza la columna 'cantidadAplicada' en GUIA_DETALLE. Idempotente.
+// Devuelve el índice 0-based de la columna. DEBE llamarse bajo _conLock.
+//
+// BACKFILL CORRECTO (no naive-0): al crear la columna por primera vez, las líneas
+// de guías ya CERRADA/AUTOCERRADA (no ANULADO) ya impactaron el stock → su
+// cantidadAplicada arranca = cantidadRecibida. Las de guías ABIERTA (o ANULADO)
+// arrancan en 0. Esto evita el bug de que reabrir+recerrar una guía HISTÓRICA
+// sin editar re-aplique su cantidad completa (delta = recibida − 0).
+function _ensureColCantidadAplicada(sheet) {
+  sheet = sheet || getSheet('GUIA_DETALLE');
+  var lastCol = sheet.getLastColumn();
+  var hdrs    = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var idx     = hdrs.indexOf('cantidadAplicada');
+  if (idx >= 0) return idx;
+  // Crear al final
+  var nuevaCol = lastCol + 1;
+  sheet.getRange(1, nuevaCol).setValue('cantidadAplicada');
+  var nFilas = sheet.getLastRow() - 1;
+  if (nFilas > 0) {
+    // Mapa idGuia → estado (para decidir el backfill por línea)
+    var estadoPorGuia = {};
+    try {
+      var gSheet = getSheet('GUIAS');
+      var gData  = gSheet.getDataRange().getValues();
+      var gHdrs  = gData[0];
+      var gIdxId = gHdrs.indexOf('idGuia');
+      var gIdxEs = gHdrs.indexOf('estado');
+      for (var g = 1; g < gData.length; g++) {
+        estadoPorGuia[String(gData[g][gIdxId] || '')] = String(gData[g][gIdxEs] || '').toUpperCase();
+      }
+    } catch(_eG) {}
+
+    var detAll  = sheet.getRange(2, 1, nFilas, lastCol).getValues();
+    var idxIdG  = hdrs.indexOf('idGuia');
+    var idxRec  = hdrs.indexOf('cantidadRecibida');
+    var idxObs  = hdrs.indexOf('observacion');
+    var backfill = [];
+    for (var r = 0; r < nFilas; r++) {
+      var est = estadoPorGuia[String(detAll[r][idxIdG] || '')] || '';
+      var anulado = idxObs >= 0 && String(detAll[r][idxObs] || '').toUpperCase() === 'ANULADO';
+      var yaAplicada = (est === 'CERRADA' || est === 'AUTOCERRADA') && !anulado;
+      backfill.push([ yaAplicada ? (parseFloat(detAll[r][idxRec]) || 0) : 0 ]);
+    }
+    sheet.getRange(2, nuevaCol, nFilas, 1).setValues(backfill);
+  }
+  return nuevaCol - 1;   // 0-based
+}
+
+// Setea cantidadAplicada en una fila concreta (rowSheet 1-based) de GUIA_DETALLE.
+// Best-effort: si la columna no existe la crea. DEBE ir bajo _conLock.
+function _setCantidadAplicada(sheet, rowSheet, valor) {
+  if (!rowSheet || rowSheet < 2) return;
+  var idx = _ensureColCantidadAplicada(sheet);
+  sheet.getRange(rowSheet, idx + 1).setValue(parseFloat(valor) || 0);
+}
+
+// ============================================================
+// [ULTIMA_ACTIVIDAD + AUTO-CIERRE] Helpers de la columna ultimaActividad en GUIAS.
+// ------------------------------------------------------------
+// Como GUIA_DETALLE no tiene fecha por línea, ultimaActividad en la cabecera
+// la suple: se pone = now() al crear la guía y CADA vez que se registra/edita
+// una línea. El auto-cierre por inactividad (30 min) la usa como reloj.
+// Columna aditiva AL FINAL de GUIAS (no rompe writers posicionales de crearGuia).
+// ------------------------------------------------------------
+
+// Garantiza la columna 'ultimaActividad' en GUIAS. Idempotente. Devuelve índice 0-based.
+// DEBE llamarse bajo _conLock.
+function _ensureColUltimaActividad(sheet) {
+  sheet = sheet || getSheet('GUIAS');
+  var lastCol = sheet.getLastColumn();
+  var hdrs    = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var idx     = hdrs.indexOf('ultimaActividad');
+  if (idx >= 0) return idx;
+  var nuevaCol = lastCol + 1;
+  sheet.getRange(1, nuevaCol).setValue('ultimaActividad');
+  sheet.getRange(1, nuevaCol).setNumberFormat('dd/MM/yyyy HH:mm:ss');
+  // Backfill: a las guías existentes les ponemos su 'fecha' de creación como base
+  // (más conservador que now(): así una vieja olvidada abierta queda elegible para
+  // auto-cierre de inmediato en vez de ganar 30 min nuevos sin haberse tocado).
+  var nFilas = sheet.getLastRow() - 1;
+  if (nFilas > 0) {
+    var allVals = sheet.getRange(2, 1, nFilas, lastCol).getValues();
+    var hdrsFull = hdrs;
+    var idxFecha = hdrsFull.indexOf('fecha');
+    var col = [];
+    for (var i = 0; i < nFilas; i++) {
+      var f = idxFecha >= 0 ? allVals[i][idxFecha] : '';
+      col.push([f instanceof Date ? f : (f ? new Date(f) : '')]);
+    }
+    sheet.getRange(2, nuevaCol, nFilas, 1).setValues(col);
+  }
+  return nuevaCol - 1;
+}
+
+// Refresca ultimaActividad = now() para una guía (por idGuia). Best-effort.
+// La llaman crearGuia / agregarDetalle / actualizarCantidadDetalle / reabrir.
+// DEBE ir bajo _conLock (todas esas funciones ya lo están).
+function _tocarActividadGuia(idGuia) {
+  try {
+    if (!idGuia) return;
+    var sheet = getSheet('GUIAS');
+    var idxUA = _ensureColUltimaActividad(sheet);
+    var data  = sheet.getDataRange().getValues();
+    var hdrs  = data[0];
+    var idxId = hdrs.indexOf('idGuia');
+    var now   = new Date();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idxId]) === String(idGuia)) {
+        sheet.getRange(i + 1, idxUA + 1).setValue(now);
+        try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { ultima_actividad: now }); } catch(_e) {}
+        return;
+      }
+    }
+  } catch(e) { Logger.log('[_tocarActividadGuia] ' + (e && e.message)); }
 }
 
 function _agregarDetalleGuiaImpl(params) {
@@ -302,8 +440,15 @@ function _agregarDetalleGuiaImpl(params) {
           observacion:   'idGuia=' + params.idGuia
         });
       }
+      // [CIERRE IDEMPOTENTE] el AJUSTE ya impactó stock por +cantRecibida → la cantidad
+      // aplicada de esta línea pasa a ser qtyNueva (un reopen+reclose calculará delta 0).
+      try { _setCantidadAplicada(sheet, dr + 1, qtyNueva); }
+      catch(_eApl) { Logger.log('[autoSuma] set cantidadAplicada: ' + (_eApl && _eApl.message)); }
     }
+    // Nota: si la guía está ABIERTA, NO se toca cantidadAplicada (la línea aún no
+    // impactó stock; el cierre aplicará qtyNueva − cantidadAplicada).
 
+    _tocarActividadGuia(params.idGuia);   // [ULTIMA_ACTIVIDAD] reinicia ventana de auto-cierre
     return {
       ok: true,
       autoSumado: true,
@@ -365,6 +510,10 @@ function _agregarDetalleGuiaImpl(params) {
     String(idLote || ''),
     params.observacion || ''
   ]]);
+  // [CIERRE IDEMPOTENTE] línea nueva todavía NO impactó stock → cantidadAplicada=0.
+  _setCantidadAplicada(sheet, nextRow, 0);
+
+  _tocarActividadGuia(params.idGuia);   // [ULTIMA_ACTIVIDAD] reinicia ventana de auto-cierre
 
   return {
     ok: true,
@@ -509,6 +658,15 @@ function _agregarDetallesBatchImpl(idGuia, items, usuario) {
   var startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 3, filas.length, 1).setNumberFormat('@');
   sheet.getRange(startRow, 1, filas.length, 8).setValues(filas);
+  // [CIERRE IDEMPOTENTE] líneas nuevas → cantidadAplicada=0 (no han impactado stock aún).
+  try {
+    var idxAplB = _ensureColCantidadAplicada(sheet);
+    var cerosB = [];
+    for (var zb = 0; zb < filas.length; zb++) cerosB.push([0]);
+    sheet.getRange(startRow, idxAplB + 1, filas.length, 1).setValues(cerosB);
+  } catch(_eAplB) { Logger.log('[batch] set cantidadAplicada=0 fallo: ' + (_eAplB && _eAplB.message)); }
+  // [ULTIMA_ACTIVIDAD] reinicia ventana de auto-cierre para esta guía.
+  _tocarActividadGuia(idGuia);
 
   // 6. FLUSH crítico: garantiza que las filas sean visibles a las siguientes
   // lecturas (cerrarGuia + imprimirTicketGuia) ANTES de continuar.
@@ -636,6 +794,21 @@ function _actualizarCantidadDetalleImpl(params) {
       }
 
       sheet.getRange(i + 1, idxRec + 1).setValue(cantidad);
+
+      // [CIERRE IDEMPOTENTE] Mantener cantidadAplicada coherente:
+      //  - Guía CERRADA: la edición YA impactó stock (AJUSTE por el diff) →
+      //    cantidadAplicada pasa a ser la cantidad nueva (un reopen+reclose calculará delta 0).
+      //  - Guía ABIERTA: la edición NO impacta stock todavía → cantidadAplicada NO cambia
+      //    (sigue reflejando lo último que sí impactó; el cierre aplicará la diferencia).
+      try {
+        if (guiaInfo && String(guiaInfo.estado).toUpperCase() === 'CERRADA'
+            && codigo && !_esGuiaEnvasado(guiaInfo.tipo)) {
+          _setCantidadAplicada(sheet, i + 1, cantidad);
+        }
+      } catch(_eApl) { Logger.log('[actualizarCantidad] set cantidadAplicada: ' + (_eApl && _eApl.message)); }
+
+      // [ULTIMA_ACTIVIDAD] editar una línea cuenta como actividad → reinicia ventana de auto-cierre.
+      _tocarActividadGuia(idGuia);
 
       // [v2.13.58 BUG D FIX] Sincronizar cantidad del lote asociado.
       // Antes: detalle 15u + lote 10u → FIFO rompía + reconciliación marcaba ajuste fantasma.
@@ -939,8 +1112,9 @@ function _logMovimientoLote(opts) {
       sh.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#0f172a').setFontColor('#22d3ee');
       sh.setFrozenRows(1);
     }
+    var _ts = new Date();
     sh.appendRow([
-      new Date(),
+      _ts,
       String(opts.idLote || ''),
       String(opts.codigoProducto || ''),
       String(opts.idGuia || ''),
@@ -949,6 +1123,14 @@ function _logMovimientoLote(opts) {
       String(opts.motivo || ''),
       String(opts.usuario || '')
     ]);
+    // [MIGRACIÓN GAP] espejo a wh.lotes_historial (best-effort, mismo shape → id_hist idéntico al sync)
+    try {
+      if (typeof _dualWriteLoteHistorialWH === 'function') _dualWriteLoteHistorialWH({
+        ts: _ts, idLote: String(opts.idLote || ''), codigoProducto: String(opts.codigoProducto || ''),
+        idGuia: String(opts.idGuia || ''), accion: String(opts.accion || ''),
+        cantidad: parseFloat(opts.cantidad) || 0, motivo: String(opts.motivo || ''), usuario: String(opts.usuario || '')
+      });
+    } catch(_eLH) {}
   } catch(e) { Logger.log('[_logMovimientoLote] ' + e.message); }
 }
 
@@ -1034,39 +1216,36 @@ function _consumirLotesFIFO(codigoProducto, cantidadPedida, idGuia, usuario, mot
 function getLotesFIFO(params) {
   var codigoProducto = String(params.codigoProducto || '').trim();
   if (!codigoProducto) return { ok: false, error: 'codigoProducto requerido' };
-  var sheet = getSheet('LOTES_VENCIMIENTO');
-  if (!sheet) return { ok: true, data: [] };
-  var data = sheet.getDataRange().getValues();
-  if (data.length < 2) return { ok: true, data: [] };
-  var hdrs = data[0];
-  var idxId   = hdrs.indexOf('idLote');
-  var idxCod  = hdrs.indexOf('codigoProducto');
-  var idxVenc = hdrs.indexOf('fechaVencimiento');
-  var idxQA   = hdrs.indexOf('cantidadActual');
-  var idxEst  = hdrs.indexOf('estado');
-  var idxGuia = hdrs.indexOf('idGuia');
-  var idxCre  = hdrs.indexOf('fechaCreacion');
+  // [Cutover lectura WH] Fuente vigente (sombra Supabase si flip ON, fallback hoja). Tras la
+  // escritura directa el FIFO/lotes se mantienen aún en la hoja (cerrar_guia_idempotente no
+  // toca lotes — los crea el GAS), pero leer por _filasLecturaWH unifica la fuente y evita
+  // depender de la hoja congelada. Las fechas vienen como 'yyyy-MM-dd' (string) desde el spec.
+  var rows = _filasLecturaWH('lotes_vencimiento', 'LOTES_VENCIMIENTO');
   var hoy = new Date();
   var lotes = [];
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][idxCod]).toUpperCase() !== codigoProducto.toUpperCase()) continue;
-    var est = String(data[i][idxEst] || '').toUpperCase();
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    if (String(r.codigoProducto || '').toUpperCase() !== codigoProducto.toUpperCase()) continue;
+    var est = String(r.estado || '').toUpperCase();
     if (est !== 'ACTIVO') continue;
-    var cant = parseFloat(data[i][idxQA]) || 0;
+    var cant = parseFloat(r.cantidadActual) || 0;
     if (cant <= 0) continue;
-    var fv = data[i][idxVenc];
+    var fvRaw = r.fechaVencimiento;
+    var fv = (fvRaw instanceof Date) ? fvRaw : (fvRaw ? new Date(String(fvRaw).substring(0, 10) + 'T12:00:00') : null);
     var diasRestantes = null;
-    if (fv instanceof Date && !isNaN(fv.getTime())) {
+    if (fv && !isNaN(fv.getTime())) {
       diasRestantes = Math.ceil((fv.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
     }
+    var fcRaw = r.fechaCreacion;
+    var fc = (fcRaw instanceof Date) ? fcRaw : (fcRaw ? new Date(String(fcRaw)) : null);
     lotes.push({
-      idLote:           String(data[i][idxId]),
-      codigoProducto:   String(data[i][idxCod]),
-      fechaVencimiento: fv instanceof Date ? fv.toISOString() : String(fv || ''),
+      idLote:           String(r.idLote || ''),
+      codigoProducto:   String(r.codigoProducto || ''),
+      fechaVencimiento: (fv && !isNaN(fv.getTime())) ? fv.toISOString() : String(fvRaw || ''),
       cantidadActual:   cant,
-      idGuia:           String(data[i][idxGuia] || ''),
+      idGuia:           String(r.idGuia || ''),
       diasRestantes:    diasRestantes,
-      fechaCreacion:    data[i][idxCre] instanceof Date ? data[i][idxCre].toISOString() : String(data[i][idxCre] || '')
+      fechaCreacion:    (fc && !isNaN(fc.getTime())) ? fc.toISOString() : String(fcRaw || '')
     });
   }
   // Orden FIFO: el que vence primero → primero (lotes sin fecha al final)
@@ -1145,12 +1324,35 @@ function _anularDetalleImpl(params) {
         var esIngreso = String(guiaInfo.tipo || '').toUpperCase().indexOf('INGRESO') === 0;
         // Reverso: si era INGRESO, suma se revierte (resta); si SALIDA, devuelve (suma)
         var delta = esIngreso ? -cantidadActual : cantidadActual;
-        _actualizarStock(codigo, delta, {
-          tipoOperacion: 'ANULACION_DETALLE',
-          origen:        idDetalle,
-          usuario:       String(params.usuario || ''),
-          observacion:   'idGuia=' + idGuia
-        });
+        // [ESCRITURA DIRECTA WH] SOLO cuando el gate está ON, el reverso de stock se
+        // canaliza por crearAjuste (que escribe Supabase como fuente de verdad y deja
+        // traza de AJUSTE). Bajo escritura directa, un _actualizarStock directo (solo
+        // Hoja) desincronizaría Supabase. Con el gate OFF → exactamente IGUAL a hoy
+        // (_actualizarStock directo, sin AJUSTE extra). Fallback a _actualizarStock si
+        // crearAjuste no está disponible o lanza.
+        var anulManejadoDirecto = false;
+        if (typeof _whEscrituraDirectaON === 'function' && _whEscrituraDirectaON() && typeof crearAjuste === 'function') {
+          try {
+            crearAjuste({
+              codigoProducto: codigo,
+              tipoAjuste:     delta > 0 ? 'INC' : 'DEC',
+              cantidadAjuste: Math.abs(delta),
+              motivo:         'Anulación detalle guía cerrada · idGuia=' + idGuia + ' · detalle=' + idDetalle,
+              usuario:        String(params.usuario || 'sistema')
+            });
+            anulManejadoDirecto = true;
+          } catch(eAnul) {
+            Logger.log('[anularDetalle] AJUSTE directo falló, fallback a _actualizarStock: ' + eAnul.message);
+          }
+        }
+        if (!anulManejadoDirecto) {
+          _actualizarStock(codigo, delta, {
+            tipoOperacion: 'ANULACION_DETALLE',
+            origen:        idDetalle,
+            usuario:       String(params.usuario || ''),
+            observacion:   'idGuia=' + idGuia
+          });
+        }
       }
 
       // Si era una línea de PN pendiente, marcar el PN correspondiente como ANULADO
@@ -1165,6 +1367,11 @@ function _anularDetalleImpl(params) {
       // Marcar como anulado y poner cantidad en 0
       sheet.getRange(i + 1, idxObs + 1).setValue('ANULADO');
       if (idxRec >= 0) sheet.getRange(i + 1, idxRec + 1).setValue(0);
+      // [CIERRE IDEMPOTENTE] la línea ya no tiene impacto en stock (se devolvió arriba
+      // si estaba cerrada; si estaba abierta nunca impactó) → cantidadAplicada=0.
+      // Así un reopen+reclose no intenta "des-aplicar" otra vez.
+      try { _setCantidadAplicada(sheet, i + 1, 0); }
+      catch(_eApl) { Logger.log('[anularDetalle] set cantidadAplicada=0: ' + (_eApl && _eApl.message)); }
       return { ok: true };
     }
   }
@@ -1195,8 +1402,15 @@ function _anularPNPorGuiaYCodigo(idGuia, codigoBarra) {
 }
 
 // ── Reabrir una guía cerrada (requiere adminPin en el cliente) ──
-// REVIERTE el stock que se aplicó al cerrar para que al volver a cerrar
-// no se descuente dos veces. Es la operación inversa de cerrarGuia.
+// [CIERRE IDEMPOTENTE] NUEVO MODELO: reabrir NO revierte stock.
+// Con delta-reconciliación, lo que ya se aplicó al stock (cantidadAplicada
+// por línea) SE QUEDA aplicado. Recerrar sin cambios → delta 0 (no duplica).
+// Si el operador edita una línea estando abierta, al recerrar solo aplica
+// la DIFERENCIA contra cantidadAplicada. Esto elimina el bug de doble-delta
+// (caso LOPESA −72 dos veces) que tenía el reverso simétrico viejo.
+//
+// [TEMPORIZADOR DE REAPERTURA] Setea ultimaActividad=now() → el auto-cierre
+// por inactividad le da otros 30 min antes de volver a cerrarla.
 function reabrirGuia(params) {
   return _conLock('reabrirGuia', function() { return _reabrirGuiaImpl(params); });
 }
@@ -1205,46 +1419,29 @@ function _reabrirGuiaImpl(params) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
 
   var sheet = getSheet('GUIAS');
+  var idxUA = _ensureColUltimaActividad(sheet);   // garantiza la columna ANTES de leer
   var data  = sheet.getDataRange().getValues();
   var hdrs  = data[0];
   var idxId   = hdrs.indexOf('idGuia');
   var idxEst  = hdrs.indexOf('estado');
-  var idxTipo = hdrs.indexOf('tipo');
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][idxId]) === String(idGuia)) {
       var estadoActual = String(data[i][idxEst] || '').toUpperCase();
-      // Idempotencia: si ya está ABIERTA, no revertir stock
+      // Idempotencia: si ya está ABIERTA, refrescar actividad y salir (no toca stock)
       if (estadoActual === 'ABIERTA') {
+        if (idxUA >= 0) sheet.getRange(i + 1, idxUA + 1).setValue(new Date());
         return { ok: true, yaAbierta: true };
       }
-      var tipoGuia = String(data[i][idxTipo] || '');
-      var esIngreso = tipoGuia.toUpperCase().indexOf('INGRESO') === 0;
 
-      // Solo revertir si estaba CERRADA Y no es de envasado.
-      // Envasados manejan stock directo (no via cerrarGuia), por lo tanto
-      // reabrir NO debe revertir stock — eso descuadraría el inventario.
-      if (estadoActual === 'CERRADA' && !_esGuiaEnvasado(tipoGuia)) {
-        var detalles = _sheetToObjects(getSheet('GUIA_DETALLE')).filter(function(d) {
-          return d.idGuia === idGuia && d.observacion !== 'ANULADO';
-        });
-        detalles.forEach(function(d) {
-          var cant = parseFloat(d.cantidadRecibida) || 0;
-          if (cant === 0 || !d.codigoProducto) return;
-          // Reverso del cierre: si era INGRESO, restar; si SALIDA, sumar
-          var deltaReverso = esIngreso ? -cant : cant;
-          _actualizarStock(String(d.codigoProducto), deltaReverso, {
-            tipoOperacion: 'REABRIR_REVERSO',
-            origen:        idGuia,
-            usuario:       String(params.usuario || ''),
-            observacion:   'tipo=' + tipoGuia
-          });
-        });
-      }
-
+      // [CIERRE IDEMPOTENTE] NO se revierte stock. El stock aplicado se preserva;
+      // cantidadAplicada por línea queda intacto. Al recerrar, _cerrarGuiaImpl
+      // aplica solo (cantidadRecibida − cantidadAplicada).
       sheet.getRange(i + 1, idxEst + 1).setValue('ABIERTA');
+      // [TEMPORIZADOR DE REAPERTURA] reinicia la ventana de 30 min de auto-cierre
+      if (idxUA >= 0) sheet.getRange(i + 1, idxUA + 1).setValue(new Date());
       // [WH Fase 2 · PASO 2] PATCH del estado a la sombra (best-effort)
-      try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { estado: 'ABIERTA' }); } catch(_eDW) {}
+      try { if (typeof _dualWritePatchWH === 'function') _dualWritePatchWH('guias', { id_guia: 'eq.' + idGuia }, { estado: 'ABIERTA', ultima_actividad: new Date() }); } catch(_eDW) {}
       return { ok: true };
     }
   }
@@ -1293,6 +1490,110 @@ function _autoCloseDayGuiasImpl() {
   return { ok: true, data: { cerradas: cerradas } };
 }
 
+// ============================================================
+// [AUTO-CIERRE POR INACTIVIDAD · 30 min]
+// ------------------------------------------------------------
+// Cierra (con el cierre idempotente de delta-reconciliación) las guías ABIERTA
+// cuya ultimaActividad quedó > 30 min atrás. Ejemplo del dueño: guía creada 1pm,
+// último producto 3:20pm → a las 3:50pm cierra. Como reusa cerrarGuia():
+//   - aplica solo (cantRecibida − cantidadAplicada) por línea → NUNCA duplica;
+//   - es idempotente (si el trigger corre dos veces, la 2da ve la guía CERRADA).
+//
+// Pensada para correr como trigger time-based cada ~10-15 min. NO se instala aquí:
+// usar instalarTriggerAutocierre() UNA vez desde el editor GAS (ver abajo).
+// Las guías de envasado NO se cierran por inactividad (su flujo es manual y el
+// stock lo maneja Envasados.gs).
+//
+// VENTANA configurable vía Script Property AUTOCIERRE_INACTIVIDAD_MIN (default 30).
+// ============================================================
+function autocerrarGuiasInactivas() {
+  return _conLock('autocerrarGuiasInactivas', function() { return _autocerrarGuiasInactivasImpl(); });
+}
+function _autocerrarGuiasInactivasImpl() {
+  var sheet = getSheet('GUIAS');
+  var idxUA = _ensureColUltimaActividad(sheet);   // garantiza la columna antes de leer
+  var data  = sheet.getDataRange().getValues();
+  var hdrs  = data[0];
+  var idxId   = hdrs.indexOf('idGuia');
+  var idxEst  = hdrs.indexOf('estado');
+  var idxTipo = hdrs.indexOf('tipo');
+  var idxFec  = hdrs.indexOf('fecha');
+
+  var minInact = 30;
+  try {
+    var p = PropertiesService.getScriptProperties().getProperty('AUTOCIERRE_INACTIVIDAD_MIN');
+    if (p && !isNaN(parseFloat(p))) minInact = parseFloat(p);
+  } catch(_e) {}
+  var umbralMs = minInact * 60 * 1000;
+  var ahora    = new Date().getTime();
+
+  // Recolectar candidatos PRIMERO (no cerrar dentro del loop de lectura: cerrarGuia
+  // reescribe la hoja; iterar sobre 'data' viejo seguiría siendo válido, pero
+  // recolectar es más claro y evita sorpresas).
+  var aCerrar = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxEst] || '').toUpperCase() !== 'ABIERTA') continue;
+    var tipoGuia = String(data[i][idxTipo] || '');
+    if (_esGuiaEnvasado(tipoGuia)) continue;   // envasados: cierre manual, stock directo
+
+    // Reloj de inactividad: ultimaActividad; si está vacía (guías pre-feature),
+    // fallback a 'fecha' de creación → quedan elegibles según su antigüedad real.
+    var ua = idxUA >= 0 ? data[i][idxUA] : '';
+    var uaMs;
+    if (ua instanceof Date) uaMs = ua.getTime();
+    else if (ua) uaMs = new Date(ua).getTime();
+    else {
+      var fv = idxFec >= 0 ? data[i][idxFec] : '';
+      uaMs = fv instanceof Date ? fv.getTime() : (fv ? new Date(fv).getTime() : ahora);
+    }
+    if (isNaN(uaMs)) continue;
+
+    if ((ahora - uaMs) > umbralMs) {
+      aCerrar.push(String(data[i][idxId] || ''));
+    }
+  }
+
+  var cerradas = 0, errores = 0, detalle = [];
+  aCerrar.forEach(function(idG) {
+    if (!idG) return;
+    try {
+      // Reusa el cierre idempotente. skipMosSync: evita timeouts en corridas batch
+      // (no sincroniza productos a MOS por cada detalle; el sync regular lo cubre).
+      var r = cerrarGuia(idG, 'sistema-autocierre-inactividad', null, { skipMosSync: true });
+      if (r && r.ok) { cerradas++; detalle.push({ idGuia: idG, ok: true }); }
+      else { errores++; detalle.push({ idGuia: idG, error: r && r.error }); }
+    } catch(e) {
+      errores++; detalle.push({ idGuia: idG, error: e && e.message });
+    }
+  });
+
+  Logger.log('[autocerrarGuiasInactivas] umbral=' + minInact + 'min · candidatas=' + aCerrar.length +
+             ' · cerradas=' + cerradas + ' · errores=' + errores);
+  return { ok: true, data: { umbralMin: minInact, candidatas: aCerrar.length, cerradas: cerradas, errores: errores, detalle: detalle } };
+}
+
+// ── Instalador del trigger de auto-cierre — ejecutar UNA vez desde el editor GAS ──
+// NO se llama automáticamente. El dueño lo activa cuando confirme el deploy.
+// Corre cada 15 min (resolución suficiente para una ventana de 30 min).
+function instalarTriggerAutocierre() {
+  var TRG = 'autocerrarGuiasInactivas';
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === TRG) ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger(TRG).timeBased().everyMinutes(15).create();
+  Logger.log('[Trigger] ' + TRG + ' instalado · cada 15 min');
+  return { ok: true, mensaje: 'Trigger auto-cierre por inactividad instalado (cada 15 min)' };
+}
+function desinstalarTriggerAutocierre() {
+  var TRG = 'autocerrarGuiasInactivas';
+  var n = 0;
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === TRG) { ScriptApp.deleteTrigger(t); n++; }
+  });
+  Logger.log('[Trigger] ' + TRG + ' desinstalado · ' + n + ' eliminados');
+  return { ok: true, eliminados: n };
+}
+
 function cerrarGuia(idGuia, usuario, idSesion, opts) {
   if (!idGuia) return { ok: false, error: 'idGuia requerido' };
   return _conLock('cerrarGuia', function() {
@@ -1311,15 +1612,18 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   var idxEstado     = headers.indexOf('estado');
   var idxTipo       = headers.indexOf('tipo');
   var idxMontoTotal = headers.indexOf('montoTotal');
+  var idxIdZona     = headers.indexOf('idZona');   // [RIZ] zona destino del despacho (SALIDA_ZONA)
 
   var filaGuia = -1;
   var tipoGuia = '';
   var estadoActual = '';
+  var idZonaGuia = '';
   for (var i = 1; i < guias.length; i++) {
     if (guias[i][idxIdGuia] === idGuia) {
       filaGuia = i + 1;
       tipoGuia = guias[i][idxTipo];
       estadoActual = String(guias[i][idxEstado] || '').toUpperCase();
+      if (idxIdZona >= 0) idZonaGuia = String(guias[i][idxIdZona] || '').trim();
       break;
     }
   }
@@ -1346,6 +1650,29 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   var esIngreso = String(tipoGuia || '').toUpperCase().indexOf('INGRESO') === 0;
   var esEnvasado = _esGuiaEnvasado(tipoGuia);
 
+  // [ESCRITURA DIRECTA WH · Fase 1] Si el gate WH_ESCRITURA_DIRECTA está ON, la
+  // RPC idempotente wh.cerrar_guia_idempotente es la FUENTE DE VERDAD del stock:
+  // aplica delta = cant_recibida − cantidad_aplicada por línea (no duplica al
+  // recerrar/reabrir — bug LOPESA), de forma ATÓMICA en Supabase. Cuando la RPC
+  // tiene éxito, SALTAMOS el _actualizarStock de cada detalle (sino el stock se
+  // aplicaría dos veces: una en la RPC, otra en la Hoja+dual-write). El resto del
+  // flujo GAS (marcar CERRADA en la Hoja, cantidadAplicada por línea, lotes, FIFO
+  // de lotes, sync MOS) se mantiene IGUAL para que la Hoja siga coherente hasta el
+  // apagado del sync. Gate OFF (default) → handled:false → comportamiento idéntico
+  // a hoy. RPC falla → fallback:true → corre la lógica vieja (red de seguridad).
+  var stockYaAplicadoDirecto = false;
+  if (typeof _whCerrarGuiaDirecto === 'function') {
+    try {
+      var rDir = _whCerrarGuiaDirecto(idGuia);
+      if (rDir && rDir.handled) {
+        stockYaAplicadoDirecto = true;   // la RPC ya aplicó TODO el stock atómicamente
+        Logger.log('[cierre] escritura DIRECTA Supabase OK idGuia=' + idGuia + ' → ' + JSON.stringify(rDir.data));
+      } else if (rDir && rDir.fallback) {
+        Logger.log('[cierre] escritura directa falló (' + rDir.error + ') → FALLBACK a _actualizarStock. idGuia=' + idGuia);
+      }
+    } catch(_eDir) { Logger.log('[cierre] _whCerrarGuiaDirecto excepción: ' + (_eDir && _eDir.message)); }
+  }
+
   // Actualizar stock por cada detalle.
   // SALIDA_ENVASADO / INGRESO_ENVASADO: stock ya fue aplicado por Envasados.gs
   // directamente con _actualizarStock — saltarse para no duplicar.
@@ -1354,27 +1681,55 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   // crea el lote desde fecha, necesitamos el rowIndex original en GUIA_DETALLE.
   // Releemos la hoja una sola vez y armamos un map idDetalle → rowSheet.
   var detSheetRef = getSheet('GUIA_DETALLE');
+  // [CIERRE IDEMPOTENTE] Garantizar la columna cantidadAplicada ANTES de leer la hoja,
+  // para que el índice exista en detSheetHdrs y podamos leer/escribir el valor por línea.
+  _ensureColCantidadAplicada(detSheetRef);
   var detSheetVals = detSheetRef.getDataRange().getValues();
   var detSheetHdrs = detSheetVals[0];
   var detIdxId    = detSheetHdrs.indexOf('idDetalle');
   var detIdxLote  = detSheetHdrs.indexOf('idLote');
+  var detIdxApl   = detSheetHdrs.indexOf('cantidadAplicada');
   var detRowByDet = {};
+  var detAplByDet = {};   // idDetalle → cantidadAplicada actual (lo ya impactado al stock)
+  var _lotesZonaPend = [];   // [RIZ] lotes consumidos por FIFO a heredar a la zona (SALIDA_ZONA)
   for (var dsi = 1; dsi < detSheetVals.length; dsi++) {
     var detId = String(detSheetVals[dsi][detIdxId] || '');
-    if (detId) detRowByDet[detId] = dsi + 1;
+    if (detId) {
+      detRowByDet[detId] = dsi + 1;
+      detAplByDet[detId] = detIdxApl >= 0 ? (parseFloat(detSheetVals[dsi][detIdxApl]) || 0) : 0;
+    }
   }
 
   if (!esEnvasado) {
     detalles.forEach(function(d) {
       var cantidad = parseFloat(d.cantidadRecibida) || 0;
-      if (cantidad === 0) return;
-      var delta = esIngreso ? cantidad : -cantidad;
-      _actualizarStock(d.codigoProducto, delta, {
-        tipoOperacion: 'CIERRE_GUIA',
-        origen:        idGuia,
-        usuario:       String(usuario || ''),
-        observacion:   'tipo=' + tipoGuia
-      });
+      // [CIERRE IDEMPOTENTE · delta-reconciliación]
+      // Solo se aplica al stock la DIFERENCIA contra lo ya aplicado por esta línea.
+      // Recerrar sin cambios → diffAplicar=0 → NO toca stock (no duplica).
+      // Editar 1 producto → solo ese aplica su diferencia.
+      var yaAplicado  = parseFloat(detAplByDet[String(d.idDetalle)]) || 0;
+      var diffAplicar = cantidad - yaAplicado;          // en "unidades de la guía"
+      var rowDetApl   = detRowByDet[String(d.idDetalle)];
+      // Sincronizar SIEMPRE el marcador (incluso si la cantidad llegó a 0), para que
+      // el estado quede consistente y un reopen+reclose calcule delta 0.
+      if (rowDetApl && detIdxApl >= 0 && yaAplicado !== cantidad) {
+        detSheetRef.getRange(rowDetApl, detIdxApl + 1).setValue(cantidad);
+      }
+      if (diffAplicar === 0) return;   // nada nuevo que aplicar para esta línea
+      var delta = esIngreso ? diffAplicar : -diffAplicar;
+      // [ESCRITURA DIRECTA WH] Si la RPC idempotente ya aplicó el stock (gate ON y
+      // RPC OK), NO lo aplicamos de nuevo acá (evita doble-aplicación Supabase+Hoja).
+      // El marcador cantidadAplicada de la Hoja ya se sincronizó arriba; los lotes/FIFO
+      // de abajo SÍ se mantienen (cerrar_guia_idempotente no toca lotes). Gate OFF o
+      // RPC fallida → stockYaAplicadoDirecto=false → se aplica como hoy.
+      if (!stockYaAplicadoDirecto) {
+        _actualizarStock(d.codigoProducto, delta, {
+          tipoOperacion: 'CIERRE_GUIA',
+          origen:        idGuia + '#' + String(d.idDetalle || '') + '@' + cantidad,  // clave única (guía,línea,versión) → log no se duplica
+          usuario:       String(usuario || ''),
+          observacion:   'tipo=' + tipoGuia + ' · aplicado ' + yaAplicado + '→' + cantidad
+        });
+      }
       // [v2.13.57] Si es INGRESO y el detalle tiene fechaVencimiento → garantizar lote.
       // ANTES: solo actualizaba si d.idLote ya existía. Esto dejaba detalles con fecha
       // sin lote (ej: el operador editó fecha inline y actualizarFechaVencimiento falló
@@ -1428,9 +1783,41 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
             Logger.log('[FIFO] consumo huerfano ' + resFifo.huerfano + ' de ' +
                        d.codigoProducto + ' (sin lote disponible) en ' + idGuia);
           }
+          // [RIZ] Acumular los lotes que FIFO consumió de WH para heredarlos a la ZONA destino
+          // (solo SALIDA_ZONA). El lote físico que salió de almacén (id_lote + vencimiento real)
+          // es el que llega a la zona. Se propaga DESPUÉS del forEach, en una sola RPC idempotente.
+          if (resFifo.lotesConsumidos && resFifo.lotesConsumidos.length) {
+            resFifo.lotesConsumidos.forEach(function(lc){
+              _lotesZonaPend.push({
+                idLote:           String(lc.idLote || ''),
+                codBarra:         String(d.codigoProducto || ''),
+                fechaVencimiento: lc.fechaVencimiento ? String(lc.fechaVencimiento).substring(0,10) : '',
+                cantidad:         lc.cantidad
+              });
+            });
+          }
         } catch(eF) { Logger.log('[FIFO] consumo fallo en ' + d.codigoProducto + ': ' + eF.message); }
       }
     });
+  }
+
+  // [RIZ · CABLEO ACTIVO] Despacho WH→ZONA: heredar lote+vencimiento al "libro de lotes" de la zona.
+  // Solo para SALIDA_ZONA con idZona poblado y lotes efectivamente consumidos por FIFO. La RPC
+  // wh.propagar_lotes_zona_cierre (supabase/155) es IDEMPOTENTE por (zona,idLote,idGuiaOrigen) →
+  // recerrar/reintentar NO duplica. NUNCA lanza (best-effort): el libro de lotes de zona jamás debe
+  // tumbar el cierre (que es dinero). NO escribe me.stock_zonas (solo el desglose de lotes [E]).
+  if (String(tipoGuia || '').toUpperCase() === 'SALIDA_ZONA' && idZonaGuia && _lotesZonaPend.length) {
+    try {
+      var rZL = _sbRpc('wh', 'propagar_lotes_zona_cierre', {
+        p: { id_guia: String(idGuia), zona: String(idZonaGuia), lotes: _lotesZonaPend }
+      });
+      if (rZL && rZL.ok && rZL.data && rZL.data.ok) {
+        Logger.log('[RIZ] lotes→zona ' + idZonaGuia + ' guia=' + idGuia +
+                   ' recibidos=' + rZL.data.recibidos + ' dedup=' + rZL.data.dedup + ' omitidos=' + rZL.data.omitidos);
+      } else {
+        Logger.log('[RIZ] lotes→zona NO-OK guia=' + idGuia + ' → ' + JSON.stringify(rZL && (rZL.data || rZL.error)));
+      }
+    } catch(eZL) { Logger.log('[RIZ] lotes→zona excepción guia=' + idGuia + ': ' + (eZL && eZL.message)); }
   }
 
   if (idSesion) registrarActividad(idSesion, 'GUIA_CERRADA', 1);
@@ -1608,6 +1995,8 @@ function _recibirPickupDeMEImpl(params) {
   if (iAt  >= 0) fila[iAt]  = '';     // pickup nuevo: nadie lo atiende
   if (iUa  >= 0) fila[iUa]  = nowIso; // primera actividad = creación
   sheet.appendRow(fila);
+  // [MIGRACIÓN GAP] espejo síncrono del pickup nuevo a wh.pickups (best-effort)
+  try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(idPickup); } catch(_eP) {}
 
   // Avisar a MOS que hay un pickup nuevo (push a operadores almacén)
   try {
@@ -1691,6 +2080,8 @@ function _actualizarPickupImpl(params) {
           Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
         );
       }
+      // [MIGRACIÓN GAP] espejo del cambio de pickup a wh.pickups (best-effort)
+      try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(params.idPickup)); } catch(_eP) {}
       return { ok: true };
     }
   }
@@ -1723,6 +2114,8 @@ function _liberarPickupImpl(params) {
     if (idxUa  >= 0) sheet.getRange(i + 1, idxUa  + 1).setValue(
       Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
     );
+    // [MIGRACIÓN GAP] espejo del liberar-lock a wh.pickups (best-effort)
+    try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(params.idPickup)); } catch(_eP) {}
     return { ok: true, data: { hayProgreso: hayProgreso } };
   }
   return { ok: false, error: 'Pickup no encontrado' };
@@ -1795,9 +2188,13 @@ function _pickupDescontarVentaImpl(params) {
     if (!itemsFinal.length) {
       sheet.getRange(i + 1, idxEst + 1).setValue('CANCELADO');
       sheet.getRange(i + 1, idxIt  + 1).setValue('[]');
+      // [MIGRACIÓN GAP] espejo del descuento/cancelación a wh.pickups (best-effort)
+      try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(data[i][idxId])); } catch(_eP) {}
       return { ok: true, data: { ajustado: true, ajustes: ajustes, cancelado: true } };
     }
     sheet.getRange(i + 1, idxIt + 1).setValue(JSON.stringify(itemsFinal));
+    // [MIGRACIÓN GAP] espejo del descuento a wh.pickups (best-effort)
+    try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(data[i][idxId])); } catch(_eP) {}
     return { ok: true, data: { ajustado: true, ajustes: ajustes, cancelado: false } };
   }
   return { ok: false, error: 'Pickup origen no encontrado' };
@@ -1834,6 +2231,8 @@ function _jobReabrirPickupsAtascados() {
       idPickup: data[i][idxId],
       idZona:   idxZn >= 0 ? data[i][idxZn] : ''
     });
+    // [MIGRACIÓN GAP] espejo de la reapertura por inactividad a wh.pickups (best-effort)
+    try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(data[i][idxId])); } catch(_eP) {}
   }
   // Avisar a operadores WH si hubo reaperturas
   if (reabiertos.length) {
@@ -1910,6 +2309,8 @@ function _guardarProgresoPickupImpl(params) {
           Utilities.formatDate(new Date(), 'UTC', "yyyy-MM-dd'T'HH:mm:ss'Z'")
         );
       }
+      // [MIGRACIÓN GAP] espejo del progreso a wh.pickups (best-effort)
+      try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(String(params.idPickup)); } catch(_eP) {}
       return { ok: true };
     }
   }
@@ -2053,6 +2454,8 @@ function _cerrarPickupConDespachoImpl(params) {
     var idxUaFx  = headers.indexOf('ultimaActividad');
     if (idxAtpFx >= 0) sheet.getRange(rowIdx, idxAtpFx + 1).setValue('');
     if (idxUaFx  >= 0) sheet.getRange(rowIdx, idxUaFx  + 1).setValue(nowFix);
+    // [MIGRACIÓN GAP] espejo del cierre idempotente del pickup a wh.pickups (best-effort)
+    try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(idPickup); } catch(_eP) {}
     Logger.log('cerrarPickupConDespacho IDEMPOTENT: reusing existing guía ' + guiaExistente.idGuia + ' for pickup ' + idPickup);
     return {
       ok: true,
@@ -2147,6 +2550,8 @@ function _cerrarPickupConDespachoImpl(params) {
   if (idxAte >= 0) sheet.getRange(rowIdx, idxAte + 1).setValue(nowIsoCierre);
   if (idxAtp >= 0) sheet.getRange(rowIdx, idxAtp + 1).setValue(''); // libera lock al cerrar
   if (idxUa  >= 0) sheet.getRange(rowIdx, idxUa  + 1).setValue(nowIsoCierre);
+  // [MIGRACIÓN GAP] espejo del cierre del pickup (estado COMPLETADO/PARCIAL/CANCELADO) a wh.pickups (best-effort)
+  try { if (typeof _dualWritePickupWH === 'function') _dualWritePickupWH(idPickup); } catch(_eP) {}
 
   return { ok: true, data: {
     idGuia:        idGuia,
