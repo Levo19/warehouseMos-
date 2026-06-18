@@ -3733,6 +3733,11 @@ const App = (() => {
     // Precarga universal en background ANTES del login (30s cycle)
     OfflineManager.iniciarRefreshOperacional();
 
+    // [poller catálogo] Auto-refresco del maestro cuando MOS cambia productos/equivalencias.
+    // Sondea mos.catalogo_version (~50s + foreground/foco) y solo re-descarga si la versión subió.
+    // No interrumpe operaciones: refresca datos de catálogo (silentRefresh), no recarga la app.
+    OfflineManager.iniciarPollerCatalogo?.();
+
     // Escuchar refresh silencioso → actualizar vista activa sin flicker
     window.addEventListener('wh:data-refresh', e => {
       const changed = e.detail?.changed || [];

@@ -626,6 +626,20 @@ const API = (() => {
     } };
   }
 
+  // ── Versión del catálogo (mos.catalogo_version) — poller barato de cambios del maestro ──
+  // El trigger en mos.productos/mos.equivalencias incrementa esa versión (bigint) cada vez que
+  // cambia el catálogo. WH la sondea (1 query liviana) para decidir CUÁNDO re-descargar el maestro
+  // completo, en vez de re-bajarlo a ciegas. Se llama con profile 'mos' (igual que catalogo_wh_rls).
+  // Devuelve un Number monotónico (>=0). LANZA ante fallo → el llamador (poller) lo trata como
+  // "no pude leer la versión" y NO toca el baseline (no re-descarga por las dudas).
+  async function _catalogoVersion() {
+    const out = await _sbRpcWH('catalogo_version', {}, 'mos');
+    if (!out || out.ok === false) throw new Error((out && out.error) || 'catalogo_version error');
+    const v = Number(out.version);
+    if (!Number.isFinite(v)) throw new Error('catalogo_version: version inválida');
+    return v;
+  }
+
   // Mapea una acción de lectura → su RPC directa. Devuelve la respuesta {ok,data}
   // o null si la acción NO tiene backend RLS listo (→ el llamador cae a GAS).
   async function _callDirecto(params) {
@@ -1834,6 +1848,9 @@ const API = (() => {
   return {
     // Descarga maestros MOS → localStorage
     descargarMaestros:    ()     => call({ action: 'descargarMaestros' }),
+    // [poller catálogo] versión monotónica del maestro (mos.catalogo_version, profile 'mos').
+    // Devuelve Number; LANZA ante fallo (el poller lo captura y no toca el baseline).
+    catalogoVersion:      ()     => _catalogoVersion(),
     // [BUG A · cutover] Si el dispositivo escribe Y/O lee directo a Supabase, el operacional
     // (que alimenta el listado de Guías) DEBE leerse directo — si no, nunca vería sus propias
     // guías directas 'G_L...' a través del GAS (cache stale). Ante cualquier fallo → GAS.

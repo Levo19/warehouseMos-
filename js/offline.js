@@ -24,7 +24,8 @@ const OfflineManager = (() => {
     ADMIN_CACHE:  'wh_admin_cache',        // nuevo — { globalPin, adminPins[], sincronizadoEn }
     LAST_MASTER:  'wh_last_master',
     PN:           'wh_pn',
-    ENVASADOS:    'wh_envasados'
+    ENVASADOS:    'wh_envasados',
+    CAT_VERSION:  'wh_cat_version'        // [poller] baseline de mos.catalogo_version visto por este equipo
   };
 
   // ── Estado ────────────────────────────────────────────────
@@ -47,6 +48,18 @@ const OfflineManager = (() => {
   const _masterSig = {};
   let _onStatusChange = null;
   let _opRefreshTimer = null;
+
+  // ── Poller de versión del catálogo ───────────────────────────
+  // El maestro (productos/equivalencias) cambia en MOS; cuando eso pasa, un trigger
+  // incrementa mos.catalogo_version. Este equipo guarda la versión vista (baseline) y la
+  // sondea barato cada ~50s (+ al volver a foreground/foco). Si subió → re-descarga el
+  // catálogo (precargar 'manual') y avanza el baseline. La RE-DESCARGA es de DATOS de
+  // referencia: pasa por _guardarSiCambia (no flashea si no cambió) y dispara
+  // wh:data-refresh → silentRefresh, que NO resetea guías/envasados/ventas en armado.
+  let _catVersionBaseline = null;   // null = aún sin baseline (no comparar todavía)
+  let _catPollTimer       = null;
+  let _catPollBusy        = false;  // guard anti-reentrada del propio chequeo
+  const CAT_POLL_MS       = 50000;  // ~50s; solo corre con la pestaña visible
 
   function onStatusChange(fn) { _onStatusChange = fn; }
 
@@ -418,6 +431,13 @@ const OfflineManager = (() => {
       if (maestrosChanged.length) {
         window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: maestrosChanged } }));
       }
+      // [poller catálogo] Sembrar el baseline de versión la PRIMERA vez que bajamos el maestro.
+      // Así el poller compara contra la versión que efectivamente quedó en cache (no re-descarga
+      // de inmediato). Si ya hay baseline (de localStorage o de un chequeo previo), no lo tocamos:
+      // el avance del baseline es responsabilidad exclusiva de _chequearVersionCatalogo.
+      if (_catVersionBaseline == null && typeof API !== 'undefined' && typeof API.catalogoVersion === 'function') {
+        API.catalogoVersion().then(v => { if (_catVersionBaseline == null) _setBaselineCatalogo(v); }).catch(() => {});
+      }
       _notificar();
     } catch(e) {
       console.warn('[Offline] Error en precarga:', e);
@@ -716,6 +736,70 @@ const OfflineManager = (() => {
     if (_opRefreshTimer) { clearInterval(_opRefreshTimer); _opRefreshTimer = null; }
   }
 
+  // ── Poller de versión del catálogo ───────────────────────────
+  // Sondea mos.catalogo_version (1 query liviana, profile 'mos'). Si la versión subió respecto
+  // al baseline → re-descarga el catálogo completo y avanza el baseline. EFICIENTE: solo corre con
+  // la app visible; NO re-descarga si la versión es igual; ante cualquier fallo deja el baseline
+  // intacto (no re-descarga "por las dudas"). MONEY-SAFE: la re-descarga es del catálogo (datos de
+  // referencia) vía precargar('manual') → _guardarSiCambia + wh:data-refresh + silentRefresh, que
+  // NO toca formularios/carritos en armado (guía/envasado/venta). No es un reload de la app.
+  function _setBaselineCatalogo(v) {
+    _catVersionBaseline = v;
+    try { localStorage.setItem(KEYS.CAT_VERSION, String(v)); } catch (_) {}
+  }
+
+  async function _chequearVersionCatalogo(motivo) {
+    // Guardas de eficiencia: solo con red, app visible y la API disponible.
+    if (!navigator.onLine) return;
+    if (typeof document !== 'undefined' && document.visibilityState && document.visibilityState !== 'visible') return;
+    if (typeof API === 'undefined' || typeof API.catalogoVersion !== 'function') return;
+    if (_catPollBusy) return;                     // un chequeo a la vez (timer + foco + visibility coinciden)
+    _catPollBusy = true;
+    try {
+      const v = await API.catalogoVersion();      // LANZA ante fallo → catch → baseline intacto
+      // Baseline aún no fijado (1er chequeo si no se sembró tras la 1ra descarga): adoptar y salir.
+      if (_catVersionBaseline == null) { _setBaselineCatalogo(v); return; }
+      if (v <= _catVersionBaseline) return;       // sin cambios → NO re-descargar
+      // Versión nueva: re-descargar el catálogo. 'manual' ignora los pisos de throttle (cambio real).
+      // precargar dedupea in-flight y solo notifica si los datos REALMENTE cambiaron (sin flash inútil).
+      console.log('[Offline] catálogo versión ' + _catVersionBaseline + ' → ' + v + ' (' + (motivo || 'poll') + ') · re-descargando maestro');
+      await precargar('manual').catch(() => {});
+      _setBaselineCatalogo(v);                     // avanzar baseline SOLO tras intentar la re-descarga
+      if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+    } catch (_) {
+      /* fallo de red/RPC: dejar baseline intacto → reintenta en el próximo ciclo */
+    } finally {
+      _catPollBusy = false;
+    }
+  }
+
+  // Inicia el poller de versión del catálogo. Idempotente. Llamar tras arrancar el refresh
+  // operacional (App.init). Siembra el baseline desde localStorage si existe (continuidad entre
+  // recargas) y hace un primer chequeo que lo adopta/actualiza.
+  function iniciarPollerCatalogo() {
+    if (_catPollTimer) return;
+    if (_catVersionBaseline == null) {
+      const guardado = (() => { try { return localStorage.getItem(KEYS.CAT_VERSION); } catch (_) { return null; } })();
+      if (guardado != null && guardado !== '' && Number.isFinite(Number(guardado))) _catVersionBaseline = Number(guardado);
+    }
+    // Chequeo inmediato: fija baseline si no había, o detecta cambios ocurridos mientras la app estaba cerrada.
+    _chequearVersionCatalogo('init');
+    _catPollTimer = setInterval(() => { _chequearVersionCatalogo('timer'); }, CAT_POLL_MS);
+    // Volver a foreground / recuperar el foco → chequear ya (no esperar al timer).
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') _chequearVersionCatalogo('visible');
+      });
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => { _chequearVersionCatalogo('focus'); });
+    }
+  }
+
+  function detenerPollerCatalogo() {
+    if (_catPollTimer) { clearInterval(_catPollTimer); _catPollTimer = null; }
+  }
+
   // ── Getters cache ─────────────────────────────────────────
   // _guardarPersonalConPin mantenido por compatibilidad con llamada puntual al iniciar sesión
   function _guardarPersonalConPin(data) { guardar(KEYS.PERSONAL, data); }
@@ -854,6 +938,7 @@ const OfflineManager = (() => {
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
+    iniciarPollerCatalogo, detenerPollerCatalogo,
     setSubiendoFotos, isSubiendoFotos,
     marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
