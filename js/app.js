@@ -9291,7 +9291,11 @@ function _renderEnvasadosPorDia(list, container, opts) {
     const headerCls = lbl.destacado
       ? 'text-sm font-bold text-amber-400 mt-4 mb-2 px-1 tracking-wide border-b border-amber-500/20 pb-1'
       : 'text-xs font-semibold text-slate-400 mt-3 mb-1 px-1 uppercase tracking-wide';
-    return `<p class="${headerCls}">${escHtml(lbl.texto || lbl)}</p>${items}`;
+    // [v2.13.260] Total del día (Σ unidades producidas, excluye anulados).
+    // Modelo de pago = por unidad (no hay tarifa $ configurada) → total en uds.
+    const totDia = (typeof _totalUnidadesDia === 'function') ? _totalUnidadesDia(grupos[dia]) : 0;
+    const badgeTot = `<span class="float-right font-bold ${lbl.destacado ? 'text-amber-300' : 'text-slate-300'} normal-case tracking-normal">${fmt(totDia)} un</span>`;
+    return `<p class="${headerCls}">${escHtml(lbl.texto || lbl)}${badgeTot}</p>${items}`;
   }).join('');
 }
 
@@ -9306,6 +9310,133 @@ function _fechaDesde14Dias() {
   const d = new Date();
   d.setDate(d.getDate() - 13);
   return d.toISOString().split('T')[0];
+}
+
+// [v2.13.260] "Hoy" en TZ America/Lima como 'YYYY-MM-DD'. No depende de la
+// zona horaria del dispositivo (un equipo en AR/España daría otro día).
+function _hoyLima() {
+  try {
+    // en-CA da formato YYYY-MM-DD directo
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  } catch (_) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+// [v2.13.260] Lunes de la semana EN CURSO (TZ Lima) como 'YYYY-MM-DD'.
+// La semana arranca el LUNES. Como el cálculo se ancla en _hoyLima(), cada
+// lunes el rango se reinicia solo (lunes = lunes..lunes).
+function _lunesDeEstaSemanaLima() {
+  const hoyStr = _hoyLima();
+  const p = hoyStr.split('-');
+  // Construir un Date en UTC-mediodía para que getUTCDay() no cruce de día.
+  const d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2], 12, 0, 0));
+  const dow = d.getUTCDay();            // 0=domingo … 6=sábado
+  const restar = (dow === 0) ? 6 : (dow - 1);  // domingo retrocede 6, lunes 0
+  d.setUTCDate(d.getUTCDate() - restar);
+  return d.toISOString().split('T')[0];
+}
+
+// [v2.13.260] Total de unidades del día (excluye anulados). Reusado por el
+// header de cada día del historial.
+function _totalUnidadesDia(items) {
+  let total = 0;
+  (items || []).forEach(e => {
+    const est = String(e.estado || '').toUpperCase();
+    if (est.indexOf('ANULADO') === 0) return;
+    total += parseFloat(e.unidadesProducidas) || 0;
+  });
+  return total;
+}
+
+// [v2.13.260] LIQUIDACIÓN DE LA SEMANA EN CURSO (lun→hoy, TZ Lima).
+// Modelo de pago hallado: el envasado se paga POR UNIDAD PRODUCIDA (no hay
+// tarifa $ por unidad en wh.config/mos.config — solo TARIFA_CARRETA=10 para
+// carretas/guías y META_ENVASADOR/evalMetaEnvasador=500 que es una META de
+// unidades para evaluación, no un precio). Por eso la liquidación es Σ unidades.
+// Si en el futuro se define una tarifa (ej. wh.config TARIFA_ENVASADO_UNIDAD),
+// bastará multiplicar acá y mostrar S/.
+//
+// Excluye anulados. Agrupa por usuario (lo más útil para "cuánto voy a cobrar").
+// Operador normal ve solo su propia liquidación; admin/master ven a todos.
+function _renderLiquidacionSemanaEnvasado(list) {
+  const cont = document.getElementById('envLiquidacionSemana');
+  if (!cont) return;
+
+  const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
+  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
+  const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
+  const lunes = _lunesDeEstaSemanaLima();
+  const hoy   = _hoyLima();
+
+  // Filtrar: semana en curso (lun→hoy), no anulados, y por usuario si operador.
+  const enSemana = (list || []).filter(e => {
+    const f = String(e.fecha || '').substring(0, 10);
+    if (f < lunes || f > hoy) return false;
+    const est = String(e.estado || '').toUpperCase();
+    if (est.indexOf('ANULADO') === 0) return false;
+    if (!esAdminMaster && usuarioActual) {
+      if (String(e.usuario || '').trim().toLowerCase() !== usuarioActual) return false;
+    }
+    return true;
+  });
+
+  // Agrupar por usuario
+  const porUsuario = {};
+  let totalGeneral = 0;
+  enSemana.forEach(e => {
+    const u = String(e.usuario || '—').trim() || '—';
+    const uds = parseFloat(e.unidadesProducidas) || 0;
+    porUsuario[u] = (porUsuario[u] || 0) + uds;
+    totalGeneral += uds;
+  });
+
+  // Etiqueta del rango (ej "lun 15 → mié 18 jun")
+  const lblRango = (() => {
+    const fmtCorto = (s) => {
+      const pp = String(s).split('-');
+      const d = new Date(+pp[0], +pp[1] - 1, +pp[2]);
+      const dias  = ['dom','lun','mar','mié','jue','vie','sáb'];
+      const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+      return dias[d.getDay()] + ' ' + d.getDate() + (s === hoy ? ' ' + meses[d.getMonth()] : '');
+    };
+    return fmtCorto(lunes) + ' → ' + fmtCorto(hoy);
+  })();
+
+  const usuarios = Object.keys(porUsuario).sort((a, b) => porUsuario[b] - porUsuario[a]);
+
+  // Desglose por usuario (solo admin/master y si hay >1 envasador)
+  let desglose = '';
+  if (esAdminMaster && usuarios.length > 1) {
+    desglose = '<div class="mt-2 pt-2 space-y-1" style="border-top:1px solid rgba(245,158,11,.15)">' +
+      usuarios.map(u =>
+        `<div class="flex items-center justify-between text-[11px]">
+           <span class="text-slate-400 truncate mr-2">👤 ${escHtml(u)}</span>
+           <span class="font-bold text-amber-200 whitespace-nowrap">${fmt(porUsuario[u])} un</span>
+         </div>`
+      ).join('') + '</div>';
+  }
+
+  const titulo = esAdminMaster ? 'Envasado de la semana' : 'Mi envasado de la semana';
+
+  cont.innerHTML = `
+    <div class="rounded-xl px-3 py-2.5"
+         style="background:linear-gradient(135deg,rgba(245,158,11,.10),rgba(245,158,11,.04));border:1px solid rgba(245,158,11,.25)">
+      <div class="flex items-center justify-between gap-2">
+        <div class="min-w-0">
+          <p class="text-[10px] uppercase tracking-wide text-amber-400/80 font-semibold">${titulo}</p>
+          <p class="text-[10px] text-slate-500 mt-0.5">${escHtml(lblRango)} · se reinicia el lunes</p>
+        </div>
+        <div class="text-right shrink-0">
+          <span class="text-xl font-extrabold text-amber-300 leading-none">${fmt(totalGeneral)}</span>
+          <span class="text-xs text-amber-400/70 font-bold ml-0.5">un</span>
+        </div>
+      </div>
+      ${desglose}
+    </div>`;
+  cont.classList.remove('hidden');
 }
 
 // [v2.13.116] Convierte una fecha 'YYYY-MM-DD' a label legible para humanos.
@@ -9693,7 +9824,11 @@ const EnvasadosView = (() => {
       unidadesProducidas:     producidas,
       mermaReal:              0,
       eficienciaPct:          100,
-      fecha:                  new Date().toISOString().split('T')[0],
+      // [v2.13.260] fecha del registro optimista en TZ Lima (no UTC). Antes
+      // toISOString() daba el día UTC: un envasado de las 19-23h Lima caía al
+      // día siguiente hasta que el backend lo reconciliaba, desfasando el
+      // total/día y la liquidación semanal en ese intervalo.
+      fecha:                  (typeof _hoyLima === 'function') ? _hoyLima() : new Date().toISOString().split('T')[0],
       usuario:                window.WH_CONFIG.usuario,
       estado:                 'COMPLETADO',
       descripcionProductoEnvasado: prod.descripcion || '',
@@ -10469,6 +10604,7 @@ const EnvasadorView = (() => {
     _histCacheLista = cached;
     if (cached.length) {
       _renderEnvasadosPorDia(cached, container, { modo: 'historial14d', query: _histQuery });
+      _renderLiquidacionSemanaEnvasado(cached);
     } else {
       container.innerHTML = '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
     }
@@ -10485,15 +10621,19 @@ const EnvasadorView = (() => {
       OfflineManager.guardarEnvasadosCache(fusionado);
       _histCacheLista = fusionado;
       _renderEnvasadosPorDia(fusionado, container, { modo: 'historial14d', query: _histQuery });
+      _renderLiquidacionSemanaEnvasado(fusionado);
     }
   }
 
   // [v2.13.116] Llamado desde el oninput del buscador (HTML envHistSearch)
+  // [v2.13.260] La liquidación semanal NO se filtra por la búsqueda (siempre
+  // refleja el total real de la semana), por eso se recalcula con la lista full.
   function buscarHistorial(q) {
     _histQuery = String(q || '').trim();
     const container = document.getElementById('listEnvasadorHistorial');
     if (!container) return;
     _renderEnvasadosPorDia(_histCacheLista, container, { modo: 'historial14d', query: _histQuery });
+    _renderLiquidacionSemanaEnvasado(_histCacheLista);
   }
 
   function verCatalogo() {
