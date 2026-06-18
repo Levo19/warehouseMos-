@@ -5036,6 +5036,15 @@ const GuiasView = (() => {
   // se agrupan los detalles/PN por idGuia una sola vez y la card hace un lookup directo.
   let _detPorGuia = null;  // Map<idGuia, [lineas no-ANULADO]>
   let _pnPendPorGuia = null; // Map<idGuia, nº PN pendientes>
+  let _provNombrePorId = null; // [perf] Map<idProveedor, nombre> precomputado por render()
+  // [perf v2.13.267] Ventana de render: el histórico crece sin techo (≈600 guías y
+  // subiendo ~15/día). Pintar TODAS de golpe en un solo innerHTML congela el hilo al
+  // entrar a la vista. Renderizamos solo las primeras N (las más recientes, ya van
+  // ordenadas desc por fecha) y mostramos "cargar más". El filtro/búsqueda re-setea
+  // la ventana. NO toca datos: 'todas' sigue completo; solo limita lo PINTADO.
+  const _PAGE = 80;
+  let _visibles = _PAGE;
+  let _renderToken = 0;   // invalida un render en chunks si llega otro antes de terminar
   function _construirIndicesRender() {
     const det = OfflineManager.getGuiaDetalleCache() || [];
     const m = new Map();
@@ -5055,6 +5064,15 @@ const GuiasView = (() => {
       mp.set(p.idGuia, (mp.get(p.idGuia) || 0) + 1);
     }
     _pnPendPorGuia = mp;
+    // [perf] Nombre de proveedor: antes cada card hacía un .find lineal sobre el cache
+    // de proveedores (O(cards × proveedores)). Precomputamos UN Map por render.
+    const provs = OfflineManager.getProveedoresCache() || [];
+    const pm = new Map();
+    for (let i = 0; i < provs.length; i++) {
+      const p = provs[i];
+      pm.set(String(p.idProveedor), p.nombre || p.idProveedor);
+    }
+    _provNombrePorId = pm;
   }
 
   const TIPO_LABELS = {
@@ -5067,6 +5085,7 @@ const GuiasView = (() => {
   // Carga inicial: primero desde caché (instantáneo), luego refresca en bg
   async function cargar() {
     _animarEntrada = true;   // [v2.13.223] entrada con stagger al entrar a la vista
+    _visibles = _PAGE;       // [perf v2.13.267] entrar a la vista arranca con 1 página
     const cached = OfflineManager.getGuiasCache();
     if (cached.length) {
       todas = cached;
@@ -5099,6 +5118,12 @@ const GuiasView = (() => {
       _guiaActual.estado = 'ABIERTA';
       _mostrarDetalleSheet(_guiaActual, false);
     }
+  }
+
+  // [perf v2.13.267] Amplía la ventana de render con datos YA en memoria (sin re-fetch).
+  function cargarMas() {
+    _visibles += _PAGE;
+    render(_filtrarYBuscar());
   }
 
   function silentRefresh() {
@@ -5138,6 +5163,7 @@ const GuiasView = (() => {
   }
 
   function buscar(q) {
+    _visibles = _PAGE;   // [perf] nueva búsqueda → reinicia la ventana de render
     _busquedaQ = (q || '').trim();
     const cl = document.getElementById('clearBuscarGuia');
     if (cl) cl.style.display = _busquedaQ ? 'flex' : 'none';
@@ -5180,6 +5206,7 @@ const GuiasView = (() => {
   }
 
   function buscarClear() {
+    _visibles = _PAGE;   // [perf] reinicia la ventana de render
     _busquedaQ = '';
     const inp = document.getElementById('inputBuscarGuia');
     if (inp) inp.value = '';
@@ -5205,6 +5232,7 @@ const GuiasView = (() => {
   const FILTRO_LABELS = { TODAS: 'TODAS', INGRESO: '↓ INGRESOS', SALIDA: '↑ SALIDAS', ABIERTA: '◌ ABIERTAS' };
 
   function filtrar(f) {
+    _visibles = _PAGE;   // [perf] cambio de filtro → reinicia la ventana de render
     filtroActual = f || 'TODAS';
     const active = filtroActual !== 'TODAS';
     // Mobile dot + dropdown
@@ -5245,6 +5273,9 @@ const GuiasView = (() => {
 
   function _getProvNombre(idProveedor) {
     if (!idProveedor) return '';
+    // [perf] usa el Map precomputado por render() si está disponible (O(1)); si no
+    // (card aislada / búsqueda antes de un render), cae al .find lineal de respaldo.
+    if (_provNombrePorId) return _provNombrePorId.get(String(idProveedor)) || idProveedor;
     const p = OfflineManager.getProveedoresCache().find(x => x.idProveedor === idProveedor);
     return p ? (p.nombre || idProveedor) : idProveedor;
   }
@@ -5378,7 +5409,7 @@ const GuiasView = (() => {
       return;
     }
 
-    const sorted = [...list].sort((a, b) => {
+    const sortedFull = [...list].sort((a, b) => {
       const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
       const td = db - da;
       if (td !== 0) return td;
@@ -5386,6 +5417,15 @@ const GuiasView = (() => {
       const nb = parseInt((b.idGuia || '').replace(/\D/g, '')) || 0;
       return nb - na;
     });
+    // [perf v2.13.267] Ventana: solo pintamos las primeras _visibles (más recientes).
+    // El resto vive en 'todas'/'sortedFull' y se pinta con "cargar más" (sin re-fetch:
+    // ya están en memoria). Esto acota el innerHTML a un tamaño FIJO (≤_visibles cards)
+    // en vez de crecer con el histórico (≈600 y subiendo) → no más freeze al entrar.
+    // Si hay BÚSQUEDA activa, NO se ventana: el usuario ya acotó y espera ver/saltar a
+    // CUALQUIER coincidencia (el scrollIntoView de buscar() necesita la card en el DOM).
+    const buscando = !!_busquedaQ;
+    const hayMas  = !buscando && sortedFull.length > _visibles;
+    const sorted  = hayMas ? sortedFull.slice(0, _visibles) : sortedFull;
 
     // [v2.13.181] Día en TZ de Perú (consistente con el pill de cargadores y el backend)
     const hoyKey  = _hoyPeru();
@@ -5412,25 +5452,66 @@ const GuiasView = (() => {
       groupMap[k].push(g);
     });
 
-    container.innerHTML = Object.entries(groupMap)
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, items]) => {
-        // [v2.13.3] Pill de cargadores: carretas + advertencia si alguna no llena
-        const r = _resumenCargadoresDiaPorFecha(key);
-        const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
-        const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
-        const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
-        const pill = r.carretas > 0
-          ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
-                     class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-                <span>🛺</span><span>${r.carretas} cart</span>${alerta}
-              </button>`
-          : '';
-        const addBtn = `<button class="day-header-add" onclick="App.abrirActionDia()" title="Crear (guía/preingreso/cargador)">+</button>`;
-        const countChip = `<span class="day-chip" title="${items.length} guías del día">📋 ${items.length}</span>`;
-        return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${countChip}${pill}${addBtn}</div>
-                <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`;
-      }).join('');
+    const grupos = Object.entries(groupMap).sort((a, b) => b[0].localeCompare(a[0]));
+
+    function _grupoHtml([key, items]) {
+      // [v2.13.3] Pill de cargadores: carretas + advertencia si alguna no llena
+      const r = _resumenCargadoresDiaPorFecha(key);
+      const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
+      const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
+      const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
+      const pill = r.carretas > 0
+        ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
+                   class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
+              <span>🛺</span><span>${r.carretas} cart</span>${alerta}
+            </button>`
+        : '';
+      const addBtn = `<button class="day-header-add" onclick="App.abrirActionDia()" title="Crear (guía/preingreso/cargador)">+</button>`;
+      const countChip = `<span class="day-chip" title="${items.length} guías del día">📋 ${items.length}</span>`;
+      return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${countChip}${pill}${addBtn}</div>
+              <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`;
+    }
+
+    // [perf v2.13.267] "Cargar más": pinta el siguiente bloque SIN re-fetch (ya está en
+    // memoria) y sin reconstruir lo ya pintado.
+    const moreHtml = hayMas
+      ? `<button id="guiasLoadMore" onclick="GuiasView.cargarMas()"
+                 class="btn btn-outline" style="margin:14px auto 4px;display:block;width:auto;padding:8px 18px;font-size:13px">
+           Cargar más (${sortedFull.length - sorted.length} restantes)
+         </button>`
+      : '';
+
+    // [perf v2.13.267] Render en CHUNKS por rAF cuando la ventana es grande, para no
+    // congelar el hilo armando+parseando un innerHTML enorme de una. Con pocos grupos
+    // se pinta de una (sin overhead). 'todas' no se toca: esto es solo presentación.
+    _renderToken++;
+    const myToken = _renderToken;
+    const CHUNK = 6;   // grupos-día por frame
+    // Búsqueda → render síncrono (la card debe existir YA para el scrollIntoView de buscar()).
+    if (buscando || grupos.length <= CHUNK) {
+      container.innerHTML = grupos.map(_grupoHtml).join('') + moreHtml;
+      _aplicarEfectosYopt(container, optCards, sorted);
+    } else {
+      // Primer chunk inmediato (lo que se ve al instante), resto por rAF.
+      container.innerHTML = grupos.slice(0, CHUNK).map(_grupoHtml).join('');
+      let i = CHUNK;
+      const step = () => {
+        if (myToken !== _renderToken) return;   // llegó otro render → abortar este
+        const frag = grupos.slice(i, i + CHUNK).map(_grupoHtml).join('');
+        container.insertAdjacentHTML('beforeend', frag);
+        i += CHUNK;
+        if (i < grupos.length) { requestAnimationFrame(step); return; }
+        if (moreHtml) container.insertAdjacentHTML('beforeend', moreHtml);
+        _aplicarEfectosYopt(container, optCards, sorted);
+      };
+      requestAnimationFrame(step);
+    }
+    return;  // los efectos/opt se aplican dentro de _aplicarEfectosYopt
+  }
+
+  // [perf v2.13.267] Efectos de entrada + reinserción de cards optimistas + panel tablet.
+  // Extraído de render() para poder aplicarlo al FINAL del render en chunks.
+  function _aplicarEfectosYopt(container, optCards, sorted) {
 
     // Preservar solo cards optimistas cuyo ID aún no está en la lista real
     optCards.forEach(c => {
@@ -8950,7 +9031,7 @@ const GuiasView = (() => {
   }
 
   return {
-    cargar, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
+    cargar, cargarMas, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
     marcarGuiaAbierta,   // [v2.13.186] reabrir desde App → refleja ABIERTA en módulo
     crearConTipo,
     filtrarTablet, _searchFocusGuiaTablet,
