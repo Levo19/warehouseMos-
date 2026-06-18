@@ -4068,6 +4068,7 @@ const App = (() => {
         el.dataset.hidden = n === 0 ? 'true' : 'false';
       };
       _setBadgeEnv('sideBadgeEnv', pendEnv.length);
+      _setBadgeEnv('bottomBadgeEnv', pendEnv.length);
       _setBadgeEnv('dashQuickEnvBadge', pendEnv.length);
     }
 

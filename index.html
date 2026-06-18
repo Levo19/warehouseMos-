@@ -3692,6 +3692,8 @@
     pointer-events:none; line-height:1;
   }
   .nav-badge[data-hidden="true"] { display:none; }
+  /* Badge Envasador = "por envasar" → ámbar (no rojo de alerta) */
+  .nav-badge-env { background:#f59e0b; color:#0b1120; }
 
   /* ── Badges en sidebar (tablet) ── */
   .side-badge {
@@ -8010,6 +8012,18 @@
         </svg>
       </span>
       <span class="nav-lbl">Guías</span>
+    </button>
+
+    <!-- ⚡ Envasador (acceso nivel 1 + badge "por envasar") -->
+    <button data-view="envasador" data-nav="envasador" onclick="App.irAEnvasador()"
+            class="nav-btn nav-btn-v3" title="Modo Envasador">
+      <span id="bottomBadgeEnv" class="nav-badge nav-badge-env" data-hidden="true">0</span>
+      <span class="nav-ico">
+        <svg width="24" height="24" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/>
+        </svg>
+      </span>
+      <span class="nav-lbl">Envasador</span>
     </button>
 
     <!-- 📦 Productos -->
