@@ -925,6 +925,29 @@ const API = (() => {
         const lo = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
         if (lo && lo.ok !== false && Array.isArray(lo.data)) lotes = lo.data;
       } catch (_) {}
+      // [HISTORIAL ENRIQUECIDO] Zona DESTINO de cada salida + tipo de guía (autoritativo desde wh.guias.id_zona).
+      // El cache local de guías (OfflineManager) sólo tiene las recientes → para que TODA salida histórica
+      // muestre su zona, leemos wh.guias directo (read-only, whitelisted en leer_tabla_rls). Sólo necesitamos
+      // id_guia → {id_zona, tipo}; si falla (offline) caemos al cache local sin romper nada.
+      const zonaGuiaMap = {};   // idGuia → { zona: 'ZONA-02'|..., tipo: 'SALIDA_ZONA'|... }
+      try {
+        const gz = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'guias' });
+        if (gz && gz.ok !== false && Array.isArray(gz.data)) {
+          gz.data.forEach(g => {
+            const gid = String(g.id_guia || '');
+            if (gid) zonaGuiaMap[gid] = { zona: String(g.id_zona || ''), tipo: String(g.tipo || ''), usuario: String(g.usuario || '') };
+          });
+        }
+      } catch (_) {}
+      // Normaliza el código de zona crudo a una etiqueta legible y estable (ZONA-01/ZONA-02/JEFATURA/VENTAS).
+      // Tolera variantes históricas (z001/Z001/z002/ALMACEN/vacío). Devuelve '' si no hay zona conocida.
+      const _normZona = (raw) => {
+        const z = String(raw || '').trim().toUpperCase();
+        if (!z || z === 'ALMACEN') return '';
+        if (z === 'Z001') return 'ZONA-01';
+        if (z === 'Z002') return 'ZONA-02';
+        return z;   // ya viene 'ZONA-01' / 'ZONA-02' / 'JEFATURA' / 'VENTAS'
+      };
       const guiaMap = {};
       const guias = (typeof OfflineManager !== 'undefined' && OfflineManager.getGuiasCache) ? (OfflineManager.getGuiasCache() || []) : [];
       guias.forEach(g => { guiaMap[String(g.idGuia)] = g; });
@@ -945,12 +968,15 @@ const API = (() => {
           const cls   = _clasificar(m.tipoOperacion, delta);
           const idGuia = String(m.origen || '');
           const g = guiaMap[idGuia] || {};
+          const gz = zonaGuiaMap[idGuia] || {};
+          // Zona DESTINO sólo aplica a SALIDAS hacia una zona (no a ingresos ni envasados/ajustes).
+          const zona = (!cls.esIngreso) ? _normZona(gz.zona || g.idZona || '') : '';
           const mov = {
             idGuia, fecha: m.fecha || '', tipo: cls.tipo, tipoOperacion: String(m.tipoOperacion || ''),
             esIngreso: cls.esIngreso, cantidad: Math.abs(delta),
             saldo: parseFloat(m.stockDespues), stockAntes: parseFloat(m.stockAntes),
-            usuario: m.usuario || g.usuario || '—', origen: g.idProveedor || g.destino || '',
-            estado: g.estado || 'CERRADA', fuente: cls.fuente, aplicado: true
+            usuario: m.usuario || g.usuario || gz.usuario || '—', origen: g.idProveedor || g.destino || '',
+            zona, estado: g.estado || 'CERRADA', fuente: cls.fuente, aplicado: true
           };
           if (cls.esIngreso) {
             const codUp = String(m.codigoProducto).toUpperCase();

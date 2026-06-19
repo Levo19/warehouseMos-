@@ -630,6 +630,22 @@ function fmtFecha(s) {
   return d.toLocaleDateString('es-PE', { day:'2-digit', month:'short', year:'numeric' });
 }
 
+// Fecha + HORA en TZ Perú para el kardex/historial ("18 jun 2026 · 13:44").
+// El dueño pidió ver la hora junto a la fecha. Usamos timeZone explícita para
+// que un dispositivo mal configurado no muestre la hora en otra zona.
+function fmtFechaHora(s) {
+  if (!s) return '—';
+  const d = _parseLocalDate(s);
+  if (isNaN(d)) return s;
+  try {
+    const fecha = d.toLocaleDateString('es-PE', { day:'2-digit', month:'short', year:'numeric', timeZone: WH_TZ });
+    const hora  = d.toLocaleTimeString('es-PE', { hour:'2-digit', minute:'2-digit', hour12:false, timeZone: WH_TZ });
+    return fecha + ' · ' + hora;
+  } catch (_) {
+    return fmtFecha(s);
+  }
+}
+
 // Fecha corta "19 abr" para cards
 function _fmtCorta(s) {
   if (!s) return '—';
@@ -19748,11 +19764,12 @@ const ProductosView = (() => {
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline justify-between gap-2">
               <span class="hist-mov-amount is-${colorCat}">${sign}${fmt(m.cantidad)}</span>
-              <span class="hist-mov-fecha">${fmtFecha(m.fecha)}</span>
+              <span class="hist-mov-fecha">${fmtFechaHora(m.fecha)}</span>
             </div>
             <p class="hist-mov-meta">
               ${tipoChip}<span style="color:#94a3b8">${escHtml(m.tipo || '')}</span>${m.idGuia ? ` · <span class="font-mono text-[10px]">${escHtml(m.idGuia)}</span>` : ''}
             </p>
+            ${(!m.esIngreso && m.zona) ? `<p class="hist-mov-destino">→ <strong>${escHtml(m.zona)}</strong>${m.usuario && m.usuario !== '—' ? ` · por ${escHtml(m.usuario)}` : ''}</p>` : ''}
             ${m.origen ? `<p class="text-[10px] text-slate-600 truncate mt-0.5">${escHtml(m.origen)}</p>` : ''}
             ${lotesHtml}
             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
