@@ -1973,7 +1973,8 @@ const API = (() => {
     starting:  false,  // guard anti-reentrada del arranque
     started:   false,  // hay (o hubo) un intento exitoso de canal
     libPromise:null,   // promesa de import del cliente (1 sola vez)
-    listeners: false   // listeners visible/focus/online ya cableados
+    listeners: false,  // listeners visible/focus/online ya cableados
+    gen:       0       // [anti-orphan] generación: _detener la incrementa → un arranque en vuelo se aborta tras sus awaits
   };
 
   function _rtImportarLib() {
@@ -2010,14 +2011,16 @@ const API = (() => {
     if (_RT.starting || _RT.channel) return;            // singleton + anti-reentrada
     if (!navigator.onLine) return;                      // sin red no hay WS; el poller cubrirá
     _RT.starting = true;
+    const _gen = _RT.gen;   // [anti-orphan] si un logout (detener) ocurre durante los awaits, _RT.gen cambia → abortamos
     try {
       const RealtimeClient = await _rtImportarLib();
       if (!RealtimeClient) return;                       // lib no cargó → poller fallback
-      // Re-chequeo: otra llamada pudo crear el canal mientras importábamos.
-      if (_RT.channel) return;
+      // Re-chequeo: otra llamada pudo crear el canal mientras importábamos, o un logout cerró el canal.
+      if (_RT.channel || _gen !== _RT.gen) return;
 
       const token = await _mintTokenWH().catch(() => null);  // JWT authenticated (mismo que las RPC)
       if (!token) return;                                     // sin token no hay canal; el poller cubre
+      if (_RT.channel || _gen !== _RT.gen) return;             // logout/otra apertura durante el mint → abortar
 
       // URL WebSocket explícita (wss://<ref>.supabase.co/realtime/v1) — coincide con el
       // endpoint verificado. apikey (anon, público) va en params; el access_token (JWT
@@ -2080,6 +2083,7 @@ const API = (() => {
   }
 
   function _detenerRealtimeCatalogo() {
+    _RT.gen++;   // [anti-orphan] invalida cualquier arranque en vuelo (post-await abortará en vez de abrir un canal huérfano)
     try { if (_RT.channel && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.channel); } catch (_) {}
     try { if (_RT.client && _RT.client.disconnect) _RT.client.disconnect(); } catch (_) {}
     _RT.channel = null;
