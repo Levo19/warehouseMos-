@@ -1468,6 +1468,9 @@ const Session = (() => {
     App.cargarDashboard();
     App.cargarProductosMaestro();
     App.cargarProveedoresMaestro();
+    // [Realtime] (Re)abrir el canal de catálogo. Idempotente (singleton): si ya está
+    // abierto desde App.init no hace nada; tras un logout previo lo vuelve a montar.
+    try { API.iniciarRealtimeCatalogo?.(); } catch (_) {}
     DespachoView.startPoll();
     DespachoView.badgeUpdate();
 
@@ -1868,6 +1871,9 @@ const Session = (() => {
 
     document.getElementById('reporteTurnoOverlay').style.display = 'none';
     _ocultarApp();
+    // [Realtime] Cerrar el canal WebSocket al cerrar turno (usa un JWT autenticado).
+    // Se reabre en el próximo App.init/login. El poller sigue siendo el fallback.
+    try { API.detenerRealtimeCatalogo?.(); } catch (_) {}
     toast('Turno cerrado. ¡Hasta mañana! 👋', 'ok', 3000);
     setTimeout(() => mostrarLogin(), 2000);
   }
@@ -2005,6 +2011,8 @@ const Session = (() => {
     _ls.classList.remove('wh-lock-out');
     _ls.style.display = 'none';
     _ocultarApp();
+    // [Realtime] Cerrar el canal WebSocket al cerrar sesión (se reabre en el próximo login).
+    try { API.detenerRealtimeCatalogo?.(); } catch (_) {}
     mostrarLogin();
   }
 
@@ -3843,6 +3851,11 @@ const App = (() => {
     // No interrumpe operaciones: refresca datos de catálogo (silentRefresh), no recarga la app.
     OfflineManager.iniciarPollerCatalogo?.();
 
+    // [Realtime catálogo] Suscripción WebSocket a mos.catalogo_meta (UPDATE) → propagación ~0s
+    // de cambios del catálogo (productos/proveedores). ADITIVA: el poller de arriba sigue como
+    // red de seguridad si el WS no carga o cae. Carga defensiva: nunca rompe el arranque.
+    try { API.iniciarRealtimeCatalogo?.(); } catch (_) {}
+
     // Escuchar refresh silencioso → actualizar vista activa sin flicker
     window.addEventListener('wh:data-refresh', e => {
       const changed = e.detail?.changed || [];
@@ -4547,6 +4560,11 @@ const App = (() => {
     _tpState = { direccion: '', subtipo: '', entidad: null };
     document.getElementById('overlayTypePicker').style.display = 'block';
     document.getElementById('sheetTypePicker').classList.add('open');
+    // [latencia 0 proveedores] Al iniciar el flujo de crear guía, refrescar el catálogo
+    // (incl. proveedores) en background. Así la lista de proveedores ya está fresca cuando
+    // el usuario llegue al entidadPicker, aunque el WebSocket Realtime hubiera fallado.
+    // Optimista y no bloqueante: 'manual' ignora throttles; precargar dedupea in-flight.
+    try { OfflineManager.precargar?.('manual'); } catch (_) {}
   }
   function cerrarTypePicker() {
     document.getElementById('overlayTypePicker').style.display = 'none';
@@ -4644,6 +4662,38 @@ const App = (() => {
     _renderEntidadPicker(lista);
     document.getElementById('overlayEntidadPicker').style.display = 'block';
     document.getElementById('sheetEntidadPicker').classList.add('open');
+
+    // [latencia 0 proveedores] Refresco puntual + re-render optimista. El picker ya está
+    // abierto con la cache (instantáneo); cuando llegue el catálogo fresco re-leemos la
+    // cache y, si la lista cambió Y el picker sigue abierto con este mismo tipo, repintamos
+    // (respetando el filtro de búsqueda activo). No bloquea la apertura ni el dictado.
+    if (tipo === 'proveedor' || tipo === 'zona' || tipo === 'jefatura') {
+      Promise.resolve(OfflineManager.precargar?.('manual')).then(() => {
+        // El picker pudo cerrarse o cambiar de tipo mientras refrescaba → no tocar nada.
+        if (!_entidadPickerState || _entidadPickerState.tipo !== tipo) return;
+        const sheet = document.getElementById('sheetEntidadPicker');
+        if (!sheet || !sheet.classList.contains('open')) return;
+        let nueva = [];
+        if (tipo === 'proveedor') {
+          nueva = (OfflineManager.getProveedoresCache() || []).filter(p => {
+            const n = String(p.nombre || '').trim().toUpperCase();
+            return String(p.estado || '') === '1' && n.indexOf('CARGADOR') !== 0;
+          });
+        } else if (tipo === 'jefatura') {
+          nueva = (OfflineManager.getPersonalCache() || []).filter(p => {
+            const rol = String(p.rol || '').toUpperCase();
+            return rol === 'ADMIN' || rol === 'MASTER';
+          });
+        } else if (tipo === 'zona') {
+          nueva = OfflineManager.getZonasCache?.() || [];
+        }
+        // Solo repintar si REALMENTE cambió (evita flash inútil si nada nuevo llegó).
+        if (JSON.stringify(nueva) === JSON.stringify(_entidadPickerState.lista)) return;
+        _entidadPickerState.lista = nueva;
+        const q = (document.getElementById('entidadPickerSearch') || {}).value || '';
+        if (q.trim()) filtrarEntidad(q); else _renderEntidadPicker(nueva);
+      }).catch(() => {});
+    }
   }
   function cerrarEntidadPicker() {
     document.getElementById('overlayEntidadPicker').style.display = 'none';

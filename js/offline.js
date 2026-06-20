@@ -760,14 +760,45 @@ const OfflineManager = (() => {
       // Baseline aún no fijado (1er chequeo si no se sembró tras la 1ra descarga): adoptar y salir.
       if (_catVersionBaseline == null) { _setBaselineCatalogo(v); return; }
       if (v <= _catVersionBaseline) return;       // sin cambios → NO re-descargar
-      // Versión nueva: re-descargar el catálogo. 'manual' ignora los pisos de throttle (cambio real).
-      // precargar dedupea in-flight y solo notifica si los datos REALMENTE cambiaron (sin flash inútil).
-      console.log('[Offline] catálogo versión ' + _catVersionBaseline + ' → ' + v + ' (' + (motivo || 'poll') + ') · re-descargando maestro');
-      await precargar('manual').catch(() => {});
-      _setBaselineCatalogo(v);                     // avanzar baseline SOLO tras intentar la re-descarga
-      if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+      await _aplicarVersionCatalogo(v, motivo || 'poll');
     } catch (_) {
       /* fallo de red/RPC: dejar baseline intacto → reintenta en el próximo ciclo */
+    } finally {
+      _catPollBusy = false;
+    }
+  }
+
+  // Núcleo compartido por el POLLER (_chequearVersionCatalogo) y el REALTIME
+  // (notificarVersionCatalogo): dada una versión NUEVA (> baseline), re-descarga
+  // el catálogo y avanza el baseline. MONEY-SAFE: la re-descarga es vía
+  // precargar('manual') → _guardarSiCambia + wh:data-refresh + silentRefresh, que
+  // NO resetea formularios/carritos en armado (guía/envasado/venta) — no es un
+  // reload de la app. NO toca el baseline si la re-descarga lanzó (se reintenta).
+  async function _aplicarVersionCatalogo(v, motivo) {
+    console.log('[Offline] catálogo versión ' + _catVersionBaseline + ' → ' + v + ' (' + (motivo || 'evento') + ') · re-descargando maestro');
+    await precargar('manual').catch(() => {});
+    _setBaselineCatalogo(v);                     // avanzar baseline SOLO tras intentar la re-descarga
+    if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+  }
+
+  // [Realtime] Llamado por la suscripción Realtime de api.js al recibir un UPDATE de
+  // mos.catalogo_meta con record.version. Comparte el guard anti-reentrada + el núcleo
+  // money-safe del poller. Si la versión NO subió respecto al baseline → no hace nada
+  // (el poller ya cubría ese caso). Si el baseline aún no estaba sembrado, lo adopta sin
+  // re-descargar (la 1ra precarga ya trajo ese estado). Es ADITIVO: el poller de ~50s
+  // sigue como red de seguridad si el WebSocket cae.
+  async function notificarVersionCatalogo(v, motivo) {
+    const nv = Number(v);
+    if (!Number.isFinite(nv)) return;
+    if (!navigator.onLine) return;
+    if (_catPollBusy) return;                     // poll/foco/visibility en curso → ese ciclo lo cubre
+    _catPollBusy = true;
+    try {
+      if (_catVersionBaseline == null) { _setBaselineCatalogo(nv); return; }
+      if (nv <= _catVersionBaseline) return;      // ya estamos a esa versión o más → nada que hacer
+      await _aplicarVersionCatalogo(nv, motivo || 'realtime');
+    } catch (_) {
+      /* fallo de red/RPC: baseline intacto → el poller reintenta */
     } finally {
       _catPollBusy = false;
     }
@@ -938,7 +969,7 @@ const OfflineManager = (() => {
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
-    iniciarPollerCatalogo, detenerPollerCatalogo,
+    iniciarPollerCatalogo, detenerPollerCatalogo, notificarVersionCatalogo,
     setSubiendoFotos, isSubiendoFotos,
     marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
