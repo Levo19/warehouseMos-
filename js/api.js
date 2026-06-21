@@ -1072,6 +1072,90 @@ const API = (() => {
   }
   // Dispatcher: mapea una acción de escritura → su RPC wh.* (PASO 4). Devuelve {ok,...} o null (→ fallback GAS:
   // tanto si la acción no está cableada como si la RPC responde *_OFF / error).
+  // [v2.13.300] Gate PROPIO de la impresión de adhesivos por LOTE vía Supabase (Edge print-adhesivo +
+  // RPCs atómicas wh.lote_adhesivo_*). Independiente de escritura/impresión single-job. INERTE por
+  // defecto (espeja el flag server-side WH_LOTE_ADHESIVO_DIRECTO). OFF → null → la cola sigue en GAS.
+  function _whLoteAdhesivoDirecto() {
+    try { return localStorage.getItem('wh_lote_adhesivo_navegador') === '1' || window.WH_CONFIG?.loteAdhesivoNavegador === true; }
+    catch (_) { return window.WH_CONFIG?.loteAdhesivoNavegador === true; }
+  }
+  const _MESES_ADH = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+  function _vtoDesdeFechaAdh(fechaEnv) {
+    try { const d = new Date(fechaEnv); d.setFullYear(d.getFullYear() + 1); return _MESES_ADH[d.getMonth()] + '/' + d.getFullYear(); }
+    catch (_) { return ''; }
+  }
+  // Dispara la Edge en mode:'lote' (fire-and-forget: la Edge completa el lote server-side hasta su
+  // presupuesto; el frontend solo poll-ea el estado). Re-disparable: reserve-first es idempotente.
+  async function _fireEdgePrintAdhesivo(idLote) {
+    try {
+      const token = await _mintTokenWH();
+      _whFetchTimeout(`${_SB_URL}/functions/v1/print-adhesivo`, {
+        method: 'POST',
+        headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'lote', idLote })
+      }, 120000).catch(() => {});   // no await: corre server-side
+    } catch (_) {}
+  }
+  // Rutea las acciones de LOTE de adhesivos a Supabase. Devuelve undefined (no es lote), null (→ GAS), o el resultado.
+  async function _postDirectoLoteAdhesivo(params) {
+    const LOTE_ACTIONS = ['crearLoteAdhesivo', 'imprimirSubLoteAdhesivo', 'getEstadoLoteAdhesivo', 'cancelarLoteAdhesivo'];
+    if (LOTE_ACTIONS.indexOf(params.action) < 0) return undefined;   // no es acción de lote
+    if (!_whLoteAdhesivoDirecto()) return null;                       // flag OFF → GAS
+
+    if (params.action === 'crearLoteAdhesivo') {
+      // Solo adhesivos de envasado (los membretes ME/WH siguen su propio camino GAS por ahora).
+      const tipo = String(params.tipoEtiqueta || 'ADHESIVO_ENVASADO').toUpperCase();
+      if (tipo !== 'ADHESIVO_ENVASADO') return null;
+      const printerId = _resolvePrinterId('ADHESIVO', params.printerIdOverride);
+      if (!printerId) return null;                                    // sin impresora resoluble → GAS
+      let vto = String(params.vto || '');
+      if (!vto && params.fechaEnvasado) vto = _vtoDesdeFechaAdh(params.fechaEnvasado);
+      const out = await _sbRpcWH('lote_adhesivo_crear', { p: {
+        codigoBarra: String(params.codigoBarra || ''), descripcion: params.descripcion || '',
+        total: params.total, vto, tipoEtiqueta: tipo, usuario: params.usuario || '',
+        origen: params.origen || 'WH', printerId: String(printerId),
+        idempotencyKey: String(params.idempotencyKey || '')   // estable → dedup de lote
+      } });
+      if (!out || out.ok === false) return null;                     // *_OFF / error → GAS
+      const idLote = out.data && out.data.idLote;
+      if (!idLote) return null;
+      if (!out.dedup) _fireEdgePrintAdhesivo(idLote);                // imprime server-side (solo lote nuevo)
+      return { ok: true, data: out.data };                           // shape paritario con GAS crearLoteAdhesivo
+    }
+
+    if (params.action === 'imprimirSubLoteAdhesivo') {
+      // Migrado: el front YA NO orquesta sub-jobs (lo hace la Edge). Aquí solo devolvemos el ESTADO
+      // (poll del modal de progreso). Self-heal: si el lote quedó sin arrancar (ENCOLADO/CREADO),
+      // re-disparamos la Edge (idempotente). OJO: NO auto-reanudar PAUSADO_OUT_PAPER (requiere cambiar rollo).
+      const idLote = String(params.idLote || '');
+      if (!idLote) return null;
+      const out = await _sbRpcWH('lote_adhesivo_get', { p: { idLote } });
+      if (!out || out.ok === false) return null;
+      const d = out.data || {};
+      if ((d.status === 'ENCOLADO' || d.status === 'CREADO') && (d.completadas || 0) < (d.total || 0)) {
+        _fireEdgePrintAdhesivo(idLote);
+      }
+      return { ok: true, data: { idLote, completadas: d.completadas, total: d.total, status: d.status, ultimoError: d.ultimoError, qtyImpresa: 0 } };
+    }
+
+    if (params.action === 'getEstadoLoteAdhesivo') {
+      const idLote = String(params.idLote || '');
+      if (!idLote) return null;
+      const out = await _sbRpcWH('lote_adhesivo_get', { p: { idLote } });
+      if (!out || out.ok === false) return null;
+      return { ok: true, data: out.data };
+    }
+
+    if (params.action === 'cancelarLoteAdhesivo') {
+      const idLote = String(params.idLote || '');
+      if (!idLote) return null;
+      const out = await _sbRpcWH('lote_adhesivo_cancelar', { p: { idLote } });
+      if (!out || out.ok === false) return null;
+      return { ok: true, data: out.data };
+    }
+    return null;
+  }
+
   async function _postDirecto(params) {
     const lid = params.localId || _genLocalId();
 
@@ -1080,6 +1164,11 @@ const API = (() => {
     // SIN activar la escritura directa. Cada caso revalida su flag; devuelve {ok:true} o null (→ GAS).
     const _printResult = await _postDirectoImpresion(params, lid);
     if (_printResult !== undefined) return _printResult;
+
+    // [v2.13.300] LOTE de adhesivos vía Supabase (gate PROPIO _whLoteAdhesivoDirecto). También antes de
+    // la escritura directa: la cola de adhesivos tiene su propio flag y no requiere la escritura ON.
+    const _loteResult = await _postDirectoLoteAdhesivo(params);
+    if (_loteResult !== undefined) return _loteResult;
 
     // Las RPCs de escritura SOLO corren si la escritura directa está activa (flag propio). Con la escritura OFF
     // pero la impresión ON, llegar acá significa "no era impresión cableada" → null → GAS (no se toca Supabase).
@@ -1890,7 +1979,7 @@ const API = (() => {
     // encolar por timeout). Un ítem así PUDO commitear en Supabase → SIEMPRE debe reintentarse directo
     // (la RPC dedupea por el id sembrado del localId), aunque el flag global ya esté apagado por rollback.
     // Si fuera a GAS, GAS no tiene su localId en SYNC_LOG → lo ejecutaría → DOBLE STOCK / DOBLE GUÍA.
-    if ((_whEscrituraDirecta() || _whImpresionDirecta() || params._viaDirecta) && navigator.onLine) {
+    if ((_whEscrituraDirecta() || _whImpresionDirecta() || _whLoteAdhesivoDirecto() || params._viaDirecta) && navigator.onLine) {
       _opsEnVuelo++; _emitOpsState();
       let timeoutDirecto = false, rechazoPermanente = false;
       // [FIX stale-tras-escritura] Un éxito directo MUTÓ datos en Supabase → invalidar el

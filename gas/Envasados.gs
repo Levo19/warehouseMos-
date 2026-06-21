@@ -3033,21 +3033,41 @@ function imprimirSubLoteAdhesivo(params) {
 
     var printNodeJobId = JSON.parse(resp.getContentText());
 
-    // [v2.13.131 FIX CRÍTICO] Liberar lock ANTES del polling PrintNode (25s).
-    // Antes el lock se mantenía durante todo el polling → bloqueaba TODOS los
-    // endpoints WH durante 25-33s por cada sub-job. Operarios reportaban "app
-    // congelada" durante impresiones. La protección anti-concurrencia ya hizo
-    // su trabajo (marcamos IMPRIMIENDO + check 35s); el polling no necesita lock.
+    // [v2.13.300 FIX OVER-PRINT] RESERVAR el rango de forma ATÓMICA, bajo el MISMO
+    // lock, apenas PrintNode aceptó (201) y ANTES de soltar el lock / pollear.
+    //   BUG previo: `completadas` se persistía DESPUÉS del poll de 25s y FUERA del
+    //   lock → durante esa ventana `completadas` seguía en el valor viejo, así que
+    //   un 2º disparo (trigger procesarLotesPendientes, retry del cliente, u otra
+    //   pestaña) leía el conteo viejo y RE-IMPRIMÍA el mismo rango. Resultado:
+    //   sub-jobs duplicados (40 envasados → 50 u 80 adhesivos con subJobSize=10).
+    //   La única defensa era el heurístico de 35s, que se vence si el sub-job
+    //   tarda (carga de catálogo + 25s de poll).
+    //   FIX: contamos AL 201 (job aceptado por PrintNode), bajo lock. Cualquier
+    //   driver concurrente queda bloqueado por el lock durante la reserva, y tras
+    //   soltarlo lee el `completadas` YA avanzado → jamás reclama el mismo rango.
+    //   Failure mode seguro: si tras el 201 el rollo se acaba, revertimos el rango
+    //   (abajo) → UNDER-print recuperable, NUNCA over-print.
+    var nuevasCompletadas = lote.completadas + qty;
+    var nuevoStatus = nuevasCompletadas >= lote.totalEtq ? 'COMPLETADO' : 'IMPRIMIENDO';
+    _patchLote(sheet, rowIdx, {
+      completadas:          nuevasCompletadas,
+      status:               nuevoStatus,
+      ultimoPrintNodeJobId: String(printNodeJobId),
+      ultimoError:          ''
+    });
+    // [v2.13.118] Drift: contador de prints desde la última calibración.
+    try { _incrementarPrintsCount(qty); } catch(_) {}
+
+    // [v2.13.131] Liberar lock ANTES del polling (25s) para no congelar la app.
+    // El conteo YA quedó comprometido de forma segura → soltar es seguro.
     try { _lock.releaseLock(); } catch(_){}
     _lock = null;  // flag para que finally no la libere de nuevo
 
-    // [v2.13.109 AUDIT FIX #3] Polling al estado del job para detectar
-    // OUT_OF_PAPER REAL. PrintNode retorna 201 apenas el job entra a la
-    // cola; el OUT_OF_PAPER se descubre cuando la impresora intenta
-    // ejecutar. Sin este polling el backend creía que TODO se imprimió.
-    //
-    // Strategy: polling cada 2s hasta done/error/timeout 25s.
-    // Estados PrintNode: new → downloading → printing → done / error / expired
+    // [v2.13.109] Polling SOLO para detectar OUT_OF_PAPER real (PrintNode retorna
+    // 201 apenas encola; el atasco se ve al ejecutar). Si el rollo se acabó, esos
+    // `qty` NO salieron → revertir el rango reservado para que al reanudar se
+    // reimpriman. Re-adquirimos lock y revertimos SOLO si nadie más avanzó el
+    // conteo en estos ≤25s (con la reserva atómica, el guard de 35s lo garantiza).
     var pollResult = _esperarFinJobPrintNode(printNodeJobId, auth, 25000, 2000);
 
     if (pollResult.estado === 'error') {
@@ -3056,11 +3076,28 @@ function imprimirSubLoteAdhesivo(params) {
                       || msg.indexOf('media') >= 0
                       || msg.indexOf('label') >= 0
                       || msg.indexOf('out of') >= 0;
-      _patchLote(sheet, rowIdx, {
-        status:               esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR',
-        ultimoError:          pollResult.mensaje || 'Error en job ' + printNodeJobId,
-        ultimoPrintNodeJobId: String(printNodeJobId)
-      });
+      try {
+        var _lk2 = LockService.getScriptLock();
+        if (_lk2.tryLock(8000)) {
+          try {
+            var rIdx2 = _findLoteRow(sheet, idLote);
+            if (rIdx2 >= 0) {
+              var lote2 = _readLote(sheet, rIdx2);
+              var patch2 = {
+                status:               esOutOfPaper ? 'PAUSADO_OUT_PAPER' : 'PAUSADO_ERROR',
+                ultimoError:          pollResult.mensaje || ('Error job ' + printNodeJobId),
+                ultimoPrintNodeJobId: String(printNodeJobId)
+              };
+              // Revertir el rango SOLO si nadie más lo avanzó (sigue en nuestro valor).
+              if ((parseInt(lote2.completadas) || 0) === nuevasCompletadas) {
+                patch2.completadas = lote.completadas;
+                try { _incrementarPrintsCount(-qty); } catch(_){}
+              }
+              _patchLote(sheet, rIdx2, patch2);
+            }
+          } finally { try { _lk2.releaseLock(); } catch(_){} }
+        }
+      } catch(_){}
       return {
         ok:     false,
         error:  pollResult.mensaje || 'Error de impresión',
@@ -3069,27 +3106,12 @@ function imprimirSubLoteAdhesivo(params) {
     }
 
     if (pollResult.estado === 'timeout') {
-      // No tuvimos confirmación en 25s. Asumimos que sigue procesando.
-      // Marcamos como impreso optimista pero registramos warning.
-      // Si el siguiente sub-job falla por OUT_OF_PAPER, el operario reanuda.
+      // Sin confirmación en 25s. El conteo ya quedó comprometido (impresión asumida
+      // OK, igual que antes); si el siguiente sub-job falla por OUT_OF_PAPER, reanuda.
       Logger.log('[Lote ' + idLote + '] timeout polling job ' + printNodeJobId + ', estado: ' + pollResult.ultimoEstado);
     }
 
-    // Estado = done (o timeout asumido OK) → contar como impreso
-    var nuevasCompletadas = lote.completadas + qty;
-    var nuevoStatus = nuevasCompletadas >= lote.totalEtq ? 'COMPLETADO' : 'IMPRIMIENDO';
-
-    _patchLote(sheet, rowIdx, {
-      completadas:          nuevasCompletadas,
-      status:               nuevoStatus,
-      ultimoPrintNodeJobId: String(printNodeJobId),
-      ultimoError:          ''
-    });
-
-    // [v2.13.118] Drift compensation: incrementar contador de prints
-    // desde la última calibración. Próximo TSPL aplicará más offset.
-    try { _incrementarPrintsCount(qty); } catch(_) {}
-
+    // done (o timeout asumido OK) → el rango ya quedó contado al 201. Nada más.
     return { ok: true, data: {
       idLote:            idLote,
       completadas:       nuevasCompletadas,
