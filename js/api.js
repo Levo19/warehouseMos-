@@ -1076,8 +1076,17 @@ const API = (() => {
   // RPCs atómicas wh.lote_adhesivo_*). Independiente de escritura/impresión single-job. INERTE por
   // defecto (espeja el flag server-side WH_LOTE_ADHESIVO_DIRECTO). OFF → null → la cola sigue en GAS.
   function _whLoteAdhesivoDirecto() {
-    try { return localStorage.getItem('wh_lote_adhesivo_navegador') === '1' || window.WH_CONFIG?.loteAdhesivoNavegador === true; }
-    catch (_) { return window.WH_CONFIG?.loteAdhesivoNavegador === true; }
+    // [cutover 2026-06-21] DEFAULT ON → 100% Supabase en todos los equipos. El KILL-SWITCH real es el
+    // flag server-side WH_LOTE_ADHESIVO_DIRECTO (mos.config): si está '0', las RPCs devuelven *_OFF →
+    // _postDirectoLoteAdhesivo retorna null → cae a GAS AL INSTANTE, sin re-deploy ni tocar dispositivos.
+    // Opt-out por dispositivo (debug): localStorage 'wh_lote_adhesivo_navegador'='0' o WH_CONFIG.loteAdhesivoNavegador=false.
+    try {
+      const v = localStorage.getItem('wh_lote_adhesivo_navegador');
+      if (v === '0') return false;
+      if (v === '1') return true;
+    } catch (_) {}
+    if (window.WH_CONFIG && window.WH_CONFIG.loteAdhesivoNavegador === false) return false;
+    return true;
   }
   const _MESES_ADH = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
   function _vtoDesdeFechaAdh(fechaEnv) {
