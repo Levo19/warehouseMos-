@@ -13714,8 +13714,10 @@ const DespachoView = (() => {
           const pct = totalUds > 0 ? Math.round((totalDesp / totalUds) * 100) : 0;
           const enProceso = String(p.estado) === 'EN_PROCESO';
           const fuente = String(p.fuente || '').toLowerCase();
-          const fuenteIcon = fuente.indexOf('me_cierre') >= 0 ? '🛒' : '📥';
-          const fuenteLbl  = fuente.indexOf('me_cierre') >= 0 ? 'Cierre caja' : (p.fuente || 'Externo');
+          let fuenteIcon = '📥', fuenteLbl = (p.fuente || 'Externo');
+          if (fuente.indexOf('acumulado') >= 0)      { fuenteIcon = '📋'; fuenteLbl = 'Acumulado semanal'; }
+          else if (fuente.indexOf('me_cierre') >= 0) { fuenteIcon = '🛒'; fuenteLbl = 'Cierre caja'; }
+          else if (fuente.indexOf('riz') >= 0)       { fuenteIcon = '🛒'; fuenteLbl = 'Pedido de zona'; }
           let hace = '';
           try {
             const t = new Date(p.fechaCreado).getTime();
@@ -13729,6 +13731,16 @@ const DespachoView = (() => {
           const atp = String(p.atendidoPor || '').trim();
           const lockedByMe    = atp && usuario && _sameUser(atp, usuario);
           const lockedByOther = atp && usuario && !lockedByMe;
+          // [#5] "activo hace Nm" del que lo tiene — del heartbeat (ultimaActividad,
+          // Supabase). Sirve para ver si sigue trabajando o se fue (>15m = quizá soltarlo).
+          let activoHace = '';
+          if (atp) {
+            try {
+              const ta = new Date(p.ultimaActividad || p.fechaCreado).getTime();
+              const ma = Math.floor((Date.now() - ta) / 60000);
+              activoHace = ma < 1 ? 'ahora' : ma < 60 ? (ma + 'm') : (Math.floor(ma/60) + 'h');
+            } catch(_) {}
+          }
           let btnHtml = '';
           if (lockedByOther) {
             btnHtml = `<button disabled class="btn btn-sm flex-shrink-0"
@@ -13762,7 +13774,7 @@ const DespachoView = (() => {
                   <span class="text-xs text-slate-400">·</span>
                   <span class="text-xs text-slate-400">${fuenteLbl}</span>
                   <span class="text-xs text-slate-500">· ${hace}</span>
-                  ${atp ? `<span class="text-[10px]" style="color:${lockedByMe?'#a5b4fc':'#94a3b8'};background:rgba(15,23,42,.6);padding:1px 6px;border-radius:6px;font-weight:700">🔒 ${escHtml(atp)}${lockedByMe?' (yo)':''}</span>` : ''}
+                  ${atp ? `<span class="text-[10px]" style="color:${lockedByMe?'#a5b4fc':'#94a3b8'};background:rgba(15,23,42,.6);padding:1px 6px;border-radius:6px;font-weight:700">🔒 ${escHtml(atp)}${lockedByMe?' (yo)':''}${activoHace?` · activo ${activoHace}`:''}</span>` : ''}
                 </div>
                 <p class="text-xs text-slate-300 mt-0.5">
                   ${items.length} producto${items.length !== 1 ? 's' : ''} · ${Math.round(totalUds)} uds
