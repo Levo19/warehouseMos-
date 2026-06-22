@@ -2399,7 +2399,22 @@ const API = (() => {
     // Etiquetas / Tickets
     imprimirEtiqueta:   (p)      => post({ action: 'imprimirEtiqueta', ...p }),
     imprimirMembrete:   (p)      => post({ action: 'imprimirMembrete', ...p }),
-    imprimirTicketGuia: (p)      => post({ action: 'imprimirTicketGuia', ...p }),
+    imprimirTicketGuia: async (p) => {
+      p = p || {};
+      // [3x dedup ATÓMICO] Reserva en Supabase ANTES de imprimir (wh.reservar_ticket,
+      // FOR UPDATE) — salvo copia manual explícita (fuerzaCopia). 3 llamadas paralelas
+      // → solo 1 reserva (primera=true) → solo 1 imprime. Fail-open: si la RPC falla,
+      // imprime igual (nunca bloquea la impresión por un fallo de dedup).
+      if (!p.fuerzaCopia && p.idGuia) {
+        try {
+          const rsv = await _sbRpcWH('reservar_ticket', { p: { id_guia: String(p.idGuia), usuario: p.usuario || '' } });
+          if (rsv && rsv.ok === true && rsv.primera === false) {
+            return { ok: true, ya_impresa: true, dedup: true, data: { idGuia: p.idGuia } };
+          }
+        } catch (_) { /* fail-open → imprime */ }
+      }
+      return post({ action: 'imprimirTicketGuia', ...p });
+    },
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
