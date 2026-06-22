@@ -9194,7 +9194,18 @@ const GuiasView = (() => {
     detUndoEliminar
   };
 
+  let _imprimiendoTicket = {};   // idGuia -> ts del último envío (anti triple-tap)
   function imprimirTicket(idGuia) {
+    // [fix 3 copias] El ticket manual usa fuerzaCopia:true (SALTA el dedup del
+    // backend) y el envío a PrintNode tarda ~2s SIN lock → un doble/triple-tap
+    // mandaba 2-3 jobs antes de que el 1ro registrara. Guard: ignora re-taps del
+    // MISMO ticket dentro de 5s. Para otra copia legítima, esperar 5s.
+    const _now = Date.now();
+    if (_imprimiendoTicket[idGuia] && (_now - _imprimiendoTicket[idGuia]) < 5000) {
+      toast('🖨 Ese ticket ya se envió · esperá unos segundos para otra copia', 'info', 3000);
+      return;
+    }
+    _imprimiendoTicket[idGuia] = _now;
     const base       = location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '');
     const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
     vibrate(10);
