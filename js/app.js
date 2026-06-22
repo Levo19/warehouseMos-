@@ -3742,7 +3742,10 @@ const App = (() => {
           usuario:        function() { return (window.WH_CONFIG && WH_CONFIG.usuario) || ''; },
           origen:         'WH',
           unwrapData:     false,
-          endpointPrefix: ''
+          endpointPrefix: '',
+          // [v2.13.310] Membrete 100% Supabase: el modal imprime vía Edge print-adhesivo
+          // (mode:'crear-membrete'). Si falla/flag OFF, el modal cae al flujo GAS.
+          edgeCall:       function(body) { return API.printAdhesivoEdge(body); }
         });
       }
     } catch(_) {}

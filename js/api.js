@@ -1105,6 +1105,20 @@ const API = (() => {
       }, 120000).catch(() => {});   // no await: corre server-side
     } catch (_) {}
   }
+  // [v2.13.310] Llamada GENÉRICA y AWAITED al Edge print-adhesivo (la usa el modal de membretes
+  // vía edgeCall). Pasa el body tal cual (mode:'crear'|'crear-membrete'|...). Devuelve el JSON del
+  // Edge {ok,data}|{ok:false,error}. Timeout amplio (lote grande imprime server-side hasta ~140s).
+  async function _printAdhesivoEdge(body) {
+    const token = await _mintTokenWH();
+    const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/print-adhesivo`, {
+      method: 'POST',
+      headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }, 150000);
+    const d = await res.json().catch(() => null);
+    if (!res.ok || !d) return { ok: false, error: 'print-adhesivo HTTP ' + res.status };
+    return d;
+  }
   // Rutea las acciones de LOTE de adhesivos a Supabase. Devuelve undefined (no es lote), null (→ GAS), o el resultado.
   async function _postDirectoLoteAdhesivo(params) {
     const LOTE_ACTIONS = ['crearLoteAdhesivo', 'imprimirSubLoteAdhesivo', 'getEstadoLoteAdhesivo', 'cancelarLoteAdhesivo'];
@@ -2303,6 +2317,9 @@ const API = (() => {
     // Ajustes
     getAjustes:         (p={})   => call({ action: 'getAjustes', ...p }),
     crearAjuste:        (p)      => post({ action: 'crearAjuste', ...p }),
+
+    // [v2.13.310] Edge print-adhesivo genérico (membretes vía edgeCall del modal compartido)
+    printAdhesivoEdge:  (body)    => _printAdhesivoEdge(body),
 
     // Proveedores
     getProveedores:     (p={})   => call({ action: 'getProveedores', ...p }),
