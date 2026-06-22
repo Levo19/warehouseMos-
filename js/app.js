@@ -22967,7 +22967,7 @@ const WhAdhesivoReprint = (() => {
                 <button onclick="WhAdhesivoReprint.delta(-1)"
                         class="w-12 h-12 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 text-2xl font-bold">−</button>
                 <input id="whAdhReprintCant" type="number"
-                       value="${datos.defaultCant}" min="1" max="999"
+                       value="${datos.defaultCant}" min="1" max="500"
                        oninput="WhAdhesivoReprint.setCant(this.value)"
                        class="flex-1 h-12 px-4 text-center text-2xl font-bold rounded-lg bg-slate-900 border border-slate-700 text-slate-100">
                 <button onclick="WhAdhesivoReprint.delta(1)"
@@ -23032,7 +23032,7 @@ const WhAdhesivoReprint = (() => {
   function delta(d) {
     const inp = document.getElementById('whAdhReprintCant');
     if (!inp) return;
-    const nuevo = Math.max(1, Math.min(999, (parseInt(inp.value) || 1) + d));
+    const nuevo = Math.max(1, Math.min(500, (parseInt(inp.value) || 1) + d));   // tope 500
     inp.value = nuevo;
     _actualizarCantTag(nuevo);
   }
@@ -23042,7 +23042,7 @@ const WhAdhesivoReprint = (() => {
     let n = parseInt(v) || 1;
     const inp = document.getElementById('whAdhReprintCant');
     if (n < 1)   { n = 1;   if (inp) inp.value = 1; }
-    if (n > 999) { n = 999; if (inp) inp.value = 999; }
+    if (n > 500) { n = 500; if (inp) inp.value = 500; }   // tope 500
     _actualizarCantTag(n);
   }
 
@@ -23050,7 +23050,7 @@ const WhAdhesivoReprint = (() => {
     const datos = window._whAdhReprintDatos;
     if (!datos) return;
     const inp = document.getElementById('whAdhReprintCant');
-    const cant = Math.max(1, Math.min(999, parseInt(inp && inp.value) || datos.defaultCant));
+    const cant = Math.max(1, Math.min(500, parseInt(inp && inp.value) || datos.defaultCant));   // tope 500
 
     cerrar();
     // [v2.13.152 FIX] WhLoteAdhesivo se declara con `const` a nivel de archivo.

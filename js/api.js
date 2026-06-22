@@ -1125,7 +1125,11 @@ const API = (() => {
         origen: params.origen || 'WH', printerId: String(printerId),
         idempotencyKey: String(params.idempotencyKey || '')   // estable → dedup de lote
       } });
-      if (!out || out.ok === false) return null;                     // *_OFF / error → GAS
+      if (!out || out.ok === false) {
+        // Tope 500: NO caer a GAS (saltaría el límite). Devolver el error para mostrarlo.
+        if (out && /EXCEDE_MAX/.test(String(out.error || ''))) return { ok: false, error: out.error, mensaje: out.mensaje };
+        return null;                                                 // *_OFF / otro error → GAS
+      }
       const idLote = out.data && out.data.idLote;
       if (!idLote) return null;
       if (!out.dedup) _fireEdgePrintAdhesivo(idLote);                // imprime server-side (solo lote nuevo)
