@@ -14776,18 +14776,35 @@ const DespachoView = (() => {
         _updateGenerarBtn();
         _renderCart();
         badgeUpdate();
+      } else if (res.yaCerrado || res.data?.idempotente) {
+        // El pickup YA estaba despachado: otro equipo/sesión lo cerró, o es un
+        // reintento tras timeout cuyo PRIMER intento sí funcionó. NO es error —
+        // es éxito tardío. Antes esto se mostraba como "Error: ya despachado/parcial"
+        // (rojo) y confundía al operador. Ahora: cerrar limpio + refrescar lista.
+        try { SoundFX.done(); } catch(_){}
+        vibrate([30, 20, 60]);
+        toast('✅ Este pickup ya estaba despachado · listo', 'ok', 5000);
+        _pickupActivo = null;
+        _clearPickup();
+        _renderPickupActivoBanner();
+        _renderPickupChecklistInline();
+        _renderExtrasSection();
+        _updateGenerarBtn();
+        _renderCart();
+        badgeUpdate();
+        try { _pollPickups(); } catch(_){}   // refrescar lista para que desaparezca de pendientes
       } else {
         try { SoundFX.error(); } catch(_){}
         vibrate([80, 40, 80]);
-        toast('Error: ' + (res.error || 'no se pudo cerrar'), 'danger', 8000);
-        // Revert
+        toast('No se pudo cerrar: ' + (res.error || 'sin respuesta del servidor') + ' · tu avance sigue guardado, reintentá', 'danger', 8000);
+        // Revert — el avance NO se pierde, el operador puede reintentar
         _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
       }
     } catch (e) {
       try { SoundFX.error(); } catch(_){}
       vibrate([80, 40, 80]);
-      const msg = e?.timeout ? 'Tiempo agotado' : 'Sin conexión';
-      toast('Error: ' + msg, 'danger', 8000);
+      const msg = e?.timeout ? 'Tardó demasiado — revisá tu conexión e intentá de nuevo' : 'Sin conexión — tu avance está guardado, reintentá al volver online';
+      toast('⚠ ' + msg, 'danger', 8000);
       _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
     } finally {
       _pickupClosing = false;
@@ -14905,7 +14922,7 @@ const DespachoView = (() => {
     if (!_pickupActivo) return;
     const idP = _pickupActivo.idPickup;
     const zona = _pickupActivo.idZona || '';
-    if (!await _whConfirm('¿Soltar este pickup?\n\nEl progreso despachado se conserva en la hoja.\nOtro operador podrá tomarlo.', { warning: true, titulo: 'Soltar pickup', okText: 'Soltar' })) return;
+    if (!await _whConfirm('¿Soltar este pickup?\n\nLo que ya escaneaste queda guardado.\nOtro operador (o vos desde otro equipo) podrá continuarlo.', { warning: true, titulo: 'Soltar pickup', okText: 'Soltar' })) return;
 
     try { SoundFX.warn(); } catch(_){}
     vibrate([30, 20, 60]);

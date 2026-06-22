@@ -1535,6 +1535,41 @@ const API = (() => {
       if (!out || out.error === 'WH_CERRAR_PICKUP_DIRECTO_OFF') return null;
       return out;   // {ok:true,data:{idGuia,estado,despachados,noDespachados}} | {ok:false,error,yaCerrado}
     }
+    if (params.action === 'actualizarPickup') {
+      // Estado + lock (atendido_por) del pickup en Supabase — MISMO store que lee
+      // la lista (getPickups). Antes iba a GAS (Hoja) → el lock no viajaba a la
+      // lista → 2 equipos del mismo operador no veían lo mismo + RIZ fallaba.
+      // Lock POR USUARIO (normalizado): otro device del mismo operador no entra en
+      // conflicto; otro operador sí. *_OFF → GAS; conflicto/ok se devuelven tal cual.
+      const out = await _sbRpcWH('actualizar_pickup', { p: {
+        id_pickup:    String(params.idPickup || ''),
+        estado:       params.estado || '',
+        lock_usuario: params.lockUsuario || '',
+        tomar_lock:   params.tomarLock === true,
+        liberar_lock: params.liberarLock === true
+      } });
+      if (!out || out.error === 'WH_PICKUP_ESTADO_DIRECTO_OFF') return null;
+      return out;   // {ok:true} | {ok:false,error,atendidoPor,conflicto}
+    }
+    if (params.action === 'guardarProgresoPickup') {
+      // Autosave (cada 4s) del avance escaneado → wh.pickups.items (jsonb). Esto es
+      // lo que hace que el OTRO equipo del mismo operador vea el progreso al
+      // "↻ Continuar" (hidrata despachadoPorCodigo del server). Toma el lock si está libre.
+      const out = await _sbRpcWH('guardar_progreso_pickup', { p: {
+        id_pickup:    String(params.idPickup || ''),
+        items:        Array.isArray(params.items) ? params.items : [],
+        lock_usuario: params.lockUsuario || ''
+      } });
+      if (!out || out.error === 'WH_PICKUP_ESTADO_DIRECTO_OFF') return null;
+      return out;   // {ok:true} | {ok:false,error,atendidoPor,conflicto}
+    }
+    if (params.action === 'liberarPickup') {
+      // "Soltar" el pickup: limpia atendido_por. Si hay progreso queda EN_PROCESO
+      // (cualquiera del equipo continúa); si no, vuelve a PENDIENTE.
+      const out = await _sbRpcWH('liberar_pickup', { p: { id_pickup: String(params.idPickup || '') } });
+      if (!out || out.error === 'WH_PICKUP_ESTADO_DIRECTO_OFF') return null;
+      return out;   // {ok:true,data:{hayProgreso}}
+    }
     if (params.action === 'reabrirGuia') {
       // [152 · INVARIANTE] reabrir NUNCA toca stock y NUNCA resetea cantidad_aplicada (solo estado=ABIERTA +
       // ultima_actividad). El stock aplicado se preserva → al recerrar (idempotente) delta = cant_recibida −
