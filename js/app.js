@@ -11596,6 +11596,24 @@ const ConfigPanel = (() => {
     }
   }
 
+  // Calibrar NUEVO ROLLO — operador, sin admin/MOS. Manda un GAPDETECT independiente
+  // a la impresora de adhesivos (vía Edge): re-mide el gap del rollo nuevo (~2-3
+  // etiquetas) y alinea. Distinto de "Ajuste fino (drift)". Hacerlo al cambiar rollo.
+  async function calibrarNuevoRollo() {
+    if (!API || typeof API.printAdhesivoEdge !== 'function') { if (typeof toast === 'function') toast('Calibración no disponible', 'error'); return; }
+    const confirmar = (typeof _whConfirm === 'function')
+      ? await _whConfirm('¿Calibrar la impresora para el rollo nuevo?\n\nGastará ~2-3 etiquetas en blanco mientras mide el gap del rollo. Hacelo cada vez que cambiás el rollo.', { titulo: '🆕 Calibrar nuevo rollo', okText: 'Calibrar' })
+      : true;
+    if (!confirmar) return;
+    cerrar();
+    if (typeof toast === 'function') toast('Calibrando rollo… (gasta ~2-3 etiquetas)', 'info', 4000);
+    try {
+      const d = await API.printAdhesivoEdge({ mode: 'calibrate-roll' });
+      if (d && d.ok) { try { SoundFX.done(); } catch(_){} if (typeof toast === 'function') toast('✅ Rollo calibrado · ya podés imprimir', 'ok', 4000); }
+      else if (typeof toast === 'function') toast('No se pudo calibrar: ' + ((d && d.error) || 'error'), 'error', 6000);
+    } catch (e) { if (typeof toast === 'function') toast('Error al calibrar: ' + (e?.message || e), 'error', 6000); }
+  }
+
   function testPrint() {
     // Test real: imprime una etiqueta de prueba reusando el flujo existente
     // (PrintHub → API.imprimirEtiqueta). Respeta selector de impresora.
@@ -11813,7 +11831,7 @@ const ConfigPanel = (() => {
 
   return {
     abrir, cerrar, aplicarPreferencias, getImpresoraDefault,
-    guardarImpresora, calibrarDrift, testPrint, reimprimirLote,
+    guardarImpresora, calibrarDrift, calibrarNuevoRollo, testPrint, reimprimirLote,
     forzarRecarga, diagnostico,
     toggleSound, toggleVibrate,
     fontStep, fontReset, toggleContrast,
