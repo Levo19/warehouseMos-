@@ -13783,6 +13783,9 @@ const DespachoView = (() => {
                 ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
               </div>
               ${btnHtml}
+              <button onclick="event.stopPropagation();DespachoView.eliminarPickupAdmin('${escAttr(p.idPickup)}')"
+                      title="Eliminar pickup (requiere clave admin)" aria-label="Eliminar pickup"
+                      class="flex-shrink-0" style="background:transparent;border:none;color:#64748b;font-size:15px;padding:4px 5px;cursor:pointer;line-height:1">🗑</button>
             </div>`;
         }).join('');
         // [v2.13.16] Cards de listas sombra del equipo — mismo estilo card,
@@ -14956,6 +14959,42 @@ const DespachoView = (() => {
     setTimeout(() => _pollPickups(), 800);
   }
 
+  // Eliminar un pickup de la lista — SOLO con autorización admin (clave 8 dígitos).
+  // No borra la fila: la marca estado=ELIMINADO (terminal). El guard de cierre
+  // endurecido impide que un ELIMINADO se despache (no duplica stock). Queda en
+  // auditoría quién/cuándo vía verificar_clave_admin('ELIMINAR_PICKUP').
+  async function eliminarPickupAdmin(idPickup) {
+    idPickup = String(idPickup || '');
+    if (!idPickup) return;
+    const ok1 = await _whConfirm('¿Eliminar este pickup de la lista?\n\nRequiere clave de administrador. Queda registrado quién y cuándo. (No mueve stock.)',
+      { warning: true, titulo: '🗑 Eliminar pickup', okText: 'Pedir clave admin' });
+    if (!ok1) return;
+    const clave = await _whPrompt('Clave admin · 8 dígitos (4 globales + 4 PIN personal)', '',
+      { inputType: 'password', inputMode: 'numeric', maxlength: 8, titulo: '🗑 Eliminar pickup', okText: 'Eliminar', placeholder: '••••••••' });
+    if (clave == null) return;
+    if (!/^\d{8}$/.test(String(clave))) { toast('La clave debe ser 8 dígitos numéricos', 'warn', 3000); return; }
+    const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+    try {
+      const res = await API.verificarClaveAdmin({
+        clave: String(clave), accion: 'ELIMINAR_PICKUP', refDocumento: idPickup,
+        appOrigen: 'warehouseMos', tier: 2, cache_hit: 0, deviceId: devId, dispositivo: devId
+      });
+      if (!res || !res.ok) { try { SoundFX.error(); } catch(_){} toast('✗ ' + (res?.error || 'Clave incorrecta'), 'danger', 5000); return; }
+      // Autorizado → marcar ELIMINADO (gateado por WH_PICKUP_ESTADO_DIRECTO; el guard de cierre ya protege)
+      await API.actualizarPickup({ idPickup, estado: 'ELIMINADO', usuario: window.WH_CONFIG?.usuario || '' });
+      if (_pickupActivo && String(_pickupActivo.idPickup) === idPickup) {
+        _pickupActivo = null; try { _clearPickup(); } catch(_){} try { _renderPickupActivoBanner(); } catch(_){}
+      }
+      _pickupsPendientes = _pickupsPendientes.filter(p => String(p.idPickup) !== idPickup);
+      try { SoundFX.done(); } catch(_){} vibrate([30, 20, 60]);
+      toast('🗑 Pickup eliminado por ' + ((res.data && res.data.validadoPor) || 'admin'), 'ok', 4000);
+      try { _pollPickups(); } catch(_){}
+    } catch (e) {
+      try { SoundFX.error(); } catch(_){}
+      toast('Error al eliminar: ' + (e?.message || e), 'danger', 5000);
+    }
+  }
+
   // Sincronización al hidratar: si en backend ya está cerrado, limpiar local.
   async function _sincronizarPickupActivo() {
     if (!_pickupActivo) return;
@@ -16048,7 +16087,7 @@ const DespachoView = (() => {
            badgeUpdate, startPoll,
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
-           soltarPickupActivo, pickupSetSearch, pickupSetSort,
+           soltarPickupActivo, eliminarPickupAdmin, pickupSetSearch, pickupSetSort,
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
            hayDespachoActivo, procesarScanGlobal,
            flotMas, flotMenos, flotSetGranel,
