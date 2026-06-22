@@ -1510,6 +1510,31 @@ const API = (() => {
         impresion: { ok: false, error: 'omitido' }
       }, dedup: !!out.dedup };
     }
+    if (params.action === 'cerrarPickupConDespacho') {
+      // CIERRE DE PICKUP 100% SUPABASE (wh.cerrar_pickup_con_despacho, SQL 210).
+      // La lista de pickups (🛒) ya se LEE de wh.pickups (getPickups → _sbLeerTablaWH).
+      // Antes el cierre seguía en GAS (Hoja PICKUPS) → los pickups RIZ (que solo
+      // viven en Supabase) daban "Pickup no encontrado" y no se podían despachar.
+      // Ahora el cierre orquesta en Supabase: lee el pickup, idempotencia por estado,
+      // crea la GUIA_SALIDA vía wh.crear_despacho_rapido (motor de dinero ya vivo) y
+      // marca el pickup terminal — TODO atómico (all-or-nothing). El front dispara la
+      // impresión del ticket aparte (imprimir:false acá). idGuia estable GPCK_<idPickup>
+      // → un reintento/doble-tap dedupea (no duplica guía/stock/kardex).
+      const out = await _sbRpcWH('cerrar_pickup_con_despacho', { p: {
+        id_pickup:        String(params.idPickup || ''),
+        usuario:          params.usuario || '',
+        items:            Array.isArray(params.items) ? params.items : [],
+        despacho_detalle: Array.isArray(params.despachoDetalle) ? params.despachoDetalle : []
+      } });
+      // SOLO *_OFF (flag server apagado) cae a GAS — kill-switch instantáneo. Cualquier
+      // otra respuesta (ok:true / yaCerrado / error real) viene de Supabase, que es el
+      // master de pickups → devolverla tal cual (NO doble-path a GAS, que para RIZ daría
+      // "no encontrado" y para cierre-caja crearía una guía duplicada por el otro camino).
+      // Un throw (timeout/5xx) lo maneja post(): cerrarPickupConDespacho ∈ _IDEMPOTENT_ACTIONS
+      // → NO cae a GAS (pudo commitear) → reintenta directo. La RPC es atómica: ok:false ⇒ rollback.
+      if (!out || out.error === 'WH_CERRAR_PICKUP_DIRECTO_OFF') return null;
+      return out;   // {ok:true,data:{idGuia,estado,despachados,noDespachados}} | {ok:false,error,yaCerrado}
+    }
     if (params.action === 'reabrirGuia') {
       // [152 · INVARIANTE] reabrir NUNCA toca stock y NUNCA resetea cantidad_aplicada (solo estado=ABIERTA +
       // ultima_actividad). El stock aplicado se preserva → al recerrar (idempotente) delta = cant_recibida −
