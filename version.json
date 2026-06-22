@@ -1,1 +1,1 @@
-{ "version": "2.13.312", "build": "3x MUERTO de raiz: imprimirTicketGuia reserva atomico en Supabase (wh.reservar_ticket, FOR UPDATE, SQL 214) ANTES de imprimir -> 3 llamadas paralelas, solo 1 reserva -> solo 1 imprime. Ventana 12s (mata la rafaga, permite reimpresion luego). fuerzaCopia (copia manual) bypassa. Fail-open: si la RPC falla, imprime igual. + guard anti triple-tap (2.13.310)." }
+{ "version": "2.13.313", "build": "Preview gondola sync (preview.js v1.3.0): cuadritos+ME sin caja, igual al print. + 3x ticket muerto de raiz (dedup atomico, 2.13.312)." }
