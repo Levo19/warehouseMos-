@@ -13783,6 +13783,9 @@ const DespachoView = (() => {
                 ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
               </div>
               ${btnHtml}
+              ${fuente.indexOf('acumulado') >= 0 ? `<button onclick="event.stopPropagation();DespachoView.imprimirAcumuladoManual('${escAttr(p.idPickup)}')"
+                      title="Imprimir ticket de esta zona" aria-label="Imprimir ticket"
+                      class="flex-shrink-0" style="background:transparent;border:none;color:#64748b;font-size:15px;padding:4px 5px;cursor:pointer;line-height:1">🖨</button>` : ''}
               <button onclick="event.stopPropagation();DespachoView.eliminarPickupAdmin('${escAttr(p.idPickup)}')"
                       title="Eliminar pickup (requiere clave admin)" aria-label="Eliminar pickup"
                       class="flex-shrink-0" style="background:transparent;border:none;color:#64748b;font-size:15px;padding:4px 5px;cursor:pointer;line-height:1">🗑</button>
@@ -13875,6 +13878,8 @@ const DespachoView = (() => {
     _ultimosIdsPickups = idsActuales;
     _saveIdsSnapshot([...idsActuales]);
     badgeUpdate();
+    // Auto-impresión del lunes: ticket por zona del acumulado (dedup server-side).
+    try { _autoImprimirAcumuladosLunes(); } catch (_) {}
     if (nuevos.length > 0) {
       // Snooze: si ya estoy despachando un pickup, no abrir overlay fullscreen.
       // Solo toast suave + sonido corto + voz breve + count actualizado en FAB.
@@ -14995,6 +15000,44 @@ const DespachoView = (() => {
     }
   }
 
+  // Imprime el ticket 80mm del pickup ACUMULADO por zona (lo no despachado de la
+  // semana) vía Edge print-adhesivo (mode pickup-ticket → PrintNode impresora
+  // WH_TICKET_PRINTER_ID). force=true (botón 🖨) reimprime; force=false (auto lunes)
+  // respeta el dedup server-side (marca [impreso] en notas → 1 vez por semana).
+  async function _imprimirAcumuladoEdge(idPickup, force) {
+    idPickup = String(idPickup || '');
+    if (!idPickup || !API || typeof API.printAdhesivoEdge !== 'function') return null;
+    try {
+      const d = await API.printAdhesivoEdge({ mode: 'pickup-ticket', id_pickup: idPickup, force: force === true });
+      if (force) {
+        if (d && d.ok && d.data && d.data.dedup) toast('Ese acumulado ya se imprimió esta semana', 'info', 3500);
+        else if (d && d.ok && d.data && d.data.vacio) toast('No hay nada pendiente que imprimir', 'info', 3500);
+        else if (d && d.ok) { try { SoundFX.done(); } catch(_){} vibrate(20); toast('🖨 Ticket de la zona enviado a la impresora', 'ok', 3500); }
+        else { try { SoundFX.error(); } catch(_){} toast('No se pudo imprimir: ' + ((d && d.error) || 'error'), 'danger', 6000); }
+      }
+      return d;
+    } catch (e) {
+      if (force) { try { SoundFX.error(); } catch(_){} toast('Error de impresión: ' + (e?.message || e), 'danger', 6000); }
+      return null;
+    }
+  }
+  function imprimirAcumuladoManual(id) { return _imprimirAcumuladoEdge(id, true); }
+
+  // Auto-impresión del LUNES: 1 ticket por zona del acumulado. Guard local por equipo
+  // (no spamear el Edge cada poll); el dedup REAL es server-side (1 vez por semana global).
+  function _autoImprimirAcumuladosLunes() {
+    try {
+      const diaLima = new Date().toLocaleDateString('en-US', { timeZone: 'America/Lima', weekday: 'short' });
+      if (diaLima !== 'Mon') return;
+      (_pickupsPendientes || []).forEach(p => {
+        if (String(p.fuente || '').toUpperCase() !== 'ACUMULADO_SEMANAL') return;
+        const k = 'wh_acumimpr_' + p.idPickup;
+        try { if (localStorage.getItem(k) === '1') return; localStorage.setItem(k, '1'); } catch (_) {}
+        _imprimirAcumuladoEdge(p.idPickup, false);
+      });
+    } catch (_) {}
+  }
+
   // Sincronización al hidratar: si en backend ya está cerrado, limpiar local.
   async function _sincronizarPickupActivo() {
     if (!_pickupActivo) return;
@@ -16087,7 +16130,7 @@ const DespachoView = (() => {
            badgeUpdate, startPoll,
            abrirPickupPendiente, abrirPickup, elegirMatchParcial, confirmarPickup,
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
-           soltarPickupActivo, eliminarPickupAdmin, pickupSetSearch, pickupSetSort,
+           soltarPickupActivo, eliminarPickupAdmin, imprimirAcumuladoManual, pickupSetSearch, pickupSetSort,
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
            hayDespachoActivo, procesarScanGlobal,
            flotMas, flotMenos, flotSetGranel,
