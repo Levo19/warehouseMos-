@@ -1447,6 +1447,26 @@ const API = (() => {
       if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }); } catch (_) {} }
       return out;
     }
+    // ── [Grupo A] Listas-sombra: escritura DIRECTA a wh.listas_sombra (RPCs 216). getListasSombra ya lee
+    // directo; esto cierra la asimetría. CLAVE: los errores de NEGOCIO (YA_COMPLETADA/EN_USO_POR_OTRO/
+    // NO_ES_TUYA/NO_ENCONTRADA) se PROPAGAN al front (no van a GAS, que re-evaluaría la Hoja stale).
+    // Solo *_OFF (flag) o transporte-null → null → GAS. Shape de retorno idéntico al GAS.
+    if (params.action === 'crearListaSombra' || params.action === 'tomarListaSombra' ||
+        params.action === 'liberarListaSombra' || params.action === 'actualizarProgresoListaSombra' ||
+        params.action === 'cerrarListaSombra' || params.action === 'anularListaSombra') {
+      const _lsRpc = {
+        crearListaSombra: 'crear_lista_sombra', tomarListaSombra: 'tomar_lista_sombra',
+        liberarListaSombra: 'liberar_lista_sombra', actualizarProgresoListaSombra: 'actualizar_progreso_lista_sombra',
+        cerrarListaSombra: 'cerrar_lista_sombra', anularListaSombra: 'anular_lista_sombra'
+      }[params.action];
+      const out = await _sbRpcWH(_lsRpc, { p: {
+        idLista: params.idLista || '', usuario: params.usuario || '', items: params.items,
+        compartir: !!params.compartir, forzar: !!params.forzar, nota: params.nota || ''
+      } });
+      // *_OFF (flag server apagado) o transporte caído → GAS. Negocio (ok:false con otro error) → PROPAGAR.
+      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
+      return out;
+    }
     if (params.action === 'crearGuia') {
       // si viene fotoBase64, súbela a Storage y pásala como URL (ya no fallback por foto)
       if (String(params.fotoBase64 || '').trim()) {

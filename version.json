@@ -1,1 +1,1 @@
-{ "version": "2.13.318", "build": "Grupo A.1: getAlertasStock lee de Supabase (wh.get_alertas_stock) en vez de GAS/Hoja. Cierra asimetria (marcar/aceptar alerta ya eran directos, la lectura no). Programa de migracion WH->100% Supabase en tandas." }
+{ "version": "2.13.319", "build": "Grupo A.2: escritura de listas-sombra 100% Supabase (RPCs wh.crear/tomar/liberar/progreso/cerrar/anular_lista_sombra, SQL 216). Errores de negocio propagan (no GAS). getListasSombra ya leia directo -> asimetria cerrada. Flag WH_LISTA_SOMBRA_DIRECTO ON." }
