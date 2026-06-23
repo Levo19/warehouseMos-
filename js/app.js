@@ -1137,6 +1137,10 @@ const Session = (() => {
   let pinBuffer = '';
   let lockPinBuffer = '';
   let sesionActual = null;
+  // [FIX desbloqueo cero-GAS] El catálogo ya NO trae el pin (seguridad) → el lock screen no podía
+  // validar contra p.pin del caché. Guardamos el pin validado del login SOLO en memoria (nunca
+  // localStorage ni disco) para poder desbloquear offline a la misma persona. Se pierde al recargar.
+  let _unlockPin = '';
   let lockTimer = null;
   let lockInterval = null;
   let cierreReporte = null;
@@ -1319,6 +1323,7 @@ const Session = (() => {
         return;
       }
       sesionActual = res.data;
+      _unlockPin = pinIntento;   // [FIX desbloqueo] pin validado en memoria → permite desbloquear el lock screen
       _guardarSesion(sesionActual);
       document.getElementById('loginScreen').style.display = 'none';
       // [v2.13.162 UX] Reset del contador de bloqueos — login nuevo merece
@@ -1367,6 +1372,7 @@ const Session = (() => {
       color:      localOp.color,
       horaInicio: new Date().toLocaleTimeString('es-PE')
     };
+    _unlockPin = pinIntento;   // [FIX desbloqueo] pin validado en memoria (mismo que el login local)
     _guardarSesion(sesionActual);
     document.getElementById('loginScreen').style.display = 'none';
     // [v2.13.162 UX] Reset del contador de bloqueos — login optimista offline
@@ -1599,10 +1605,14 @@ const Session = (() => {
     _actualizarPuntos('lpin', 0);
     document.getElementById('lockError').textContent = '';
 
+    // [FIX pantalla blanca] Defensivo: si nombre/apellido/color vienen null (login_pin_wh sobre un
+    // personal sin apellido), no romper con `null[0]`. Iniciales y color con fallback.
+    const _nom = String(sesionActual.nombre || '').trim();
+    const _ape = String(sesionActual.apellido || '').trim();
     const av = document.getElementById('lockAvatar');
-    av.textContent = sesionActual.nombre[0] + sesionActual.apellido[0];
-    av.style.background = sesionActual.color;
-    document.getElementById('lockNombre').textContent = sesionActual.nombre + ' ' + sesionActual.apellido;
+    av.textContent = ((_nom[0] || '') + (_ape[0] || '')) || '👤';
+    av.style.background = sesionActual.color || '#475569';
+    document.getElementById('lockNombre').textContent = (_nom + ' ' + _ape).trim() || 'Operador';
 
     localStorage.setItem('wh_lock_inicio', Date.now());
 
@@ -1769,16 +1779,28 @@ const Session = (() => {
     }
   }
 
-  function _intentarDesbloqueo() {
+  async function _intentarDesbloqueo() {
     const pin = lockPinBuffer;
     lockPinBuffer = '';
     _actualizarPuntos('lpin', 0);
 
-    // Validación 100% local — solo acepta el PIN del usuario activo (instantáneo).
-    const personal = OfflineManager.getPersonalCache();
-    const ok = personal.find(p =>
-      String(p.pin) === String(pin) && p.idPersonal === sesionActual.idPersonal
-    );
+    // [FIX cero-GAS] El catálogo ya NO trae el pin → la validación local contra p.pin daba siempre
+    // falso → lock screen intrabable. Cascada: (1) pin en memoria del login de esta sesión (offline-safe,
+    // mismo usuario), (2) caché legacy si aún trae pin, (3) servidor (login_pin_wh) exigiendo mismo idPersonal.
+    let ok = !!(_unlockPin && String(pin) === String(_unlockPin));
+    if (!ok) {
+      const personal = OfflineManager.getPersonalCache();
+      ok = !!personal.find(p =>
+        p.pin && String(p.pin) === String(pin) && p.idPersonal === sesionActual.idPersonal
+      );
+    }
+    if (!ok && navigator.onLine && typeof API !== 'undefined' && API.loginPersonalSB) {
+      const r = await API.loginPersonalSB(pin).catch(() => null);
+      if (r && r.ok && r.data && String(r.data.idPersonal) === String(sesionActual.idPersonal)) {
+        ok = true;
+        _unlockPin = pin;   // cachear en memoria para próximos desbloqueos offline
+      }
+    }
 
     if (ok) {
       // [v2.13.266] Desbloqueo: chime de éxito + vibración + fade de salida suave.

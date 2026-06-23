@@ -1,1 +1,1 @@
-{ "version": "2.13.335", "build": "Revision 100x: guard en login (si NI Supabase NI GAS responden -> mensaje claro, no TypeError). + (server-side) liquidaciones a SYNC_OFF (fix revert bono/sancion), pickup estado boolean fix, login_pin_wh btrim." }
+{ "version": "2.13.336", "build": "URGENTE: desbloqueo de pantalla arreglado. El catalogo ya no trae el pin (seguridad) -> el lock screen validaba contra p.pin vacio = intrabable. Ahora valida por pin en memoria del login + fallback servidor. + bloquear() endurecido contra nombre/apellido/color null (no mas pantalla blanca)." }
