@@ -2620,6 +2620,14 @@ const API = (() => {
 
     // Personal / Sesiones
     loginPersonal:      (pin)    => post({ action: 'loginPersonal', pin }),
+    // [F1 login · cero-GAS + seguro] Valida el PIN SERVER-SIDE (mos.login_pin_wh; el pin nunca sale del server) +
+    // crea/reusa sesión wh.sesiones. APP_NO_AUTORIZADA/sin-token → null → caller cae a GAS loginPersonal.
+    // FIX del login caído: catalogo_wh_rls dejó de mandar el pin (seguridad) → validarPinLocal no podía matchear.
+    loginPersonalSB: async (pin) => {
+      const out = await _sbRpcWH('login_pin_wh', { p: { pin: String(pin || '') } }, 'mos');
+      if (!out || (out.ok === false && String(out.error || '') === 'APP_NO_AUTORIZADA')) return null;
+      return out;   // {ok:true,data:{...}} | {ok:false,error:'PIN incorrecto'/'PIN requerido'}
+    },
     cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
     getPersonal:        ()       => call({ action: 'getPersonal' }),
     getSesionActiva:    (id)     => call({ action: 'getSesionActiva', idSesion: id }),

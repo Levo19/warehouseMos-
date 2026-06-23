@@ -1,1 +1,1 @@
-{ "version": "2.13.332", "build": "F6 espia device WH cero-GAS: _espiaCliWHPost Supabase-first (mos.espia_sync/push_batch/iniciar_dispositivo/config/subir_respuesta/reneg), fallback GAS. Chunk sigue GAS." }
+{ "version": "2.13.333", "build": "FIX LOGIN CAIDO + F1 cero-GAS: mos.login_pin_wh valida PIN server-side (nunca expone el pin) + crea/reusa sesion wh.sesiones; loginPersonalSB Supabase-first, fallback GAS. Causa: catalogo_wh_rls dejo de mandar pin (seguridad) -> validarPinLocal quedaba null. SQL 232." }

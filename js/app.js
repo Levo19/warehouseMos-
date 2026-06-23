@@ -1294,9 +1294,11 @@ const Session = (() => {
     let localOp = OfflineManager.validarPinLocal(pinIntento);
     console.log('[Login] validarPinLocal result:', localOp ? localOp.nombre : null);
 
-    // Sin caché → esperar GAS (nuevo dispositivo o sin datos locales)
+    // Sin caché → validar online. [F1 cero-GAS] Supabase-first (mos.login_pin_wh, pin server-side) → fallback GAS.
+    // FIX login caído: el catálogo dejó de mandar el pin (seguridad) → validarPinLocal queda null → antes solo GAS.
     if (!localOp && navigator.onLine) {
-      const res = await API.loginPersonal(pinIntento);
+      let res = (typeof API !== 'undefined' && API.loginPersonalSB) ? await API.loginPersonalSB(pinIntento).catch(() => null) : null;
+      if (!res) res = await API.loginPersonal(pinIntento);
       if (!res.ok && res.error === 'FUERA_DE_HORARIO') {
         // Operador/Envasador intentando entrar fuera del horario laboral
         try { SoundFX.buzzer(); } catch(e) {}
