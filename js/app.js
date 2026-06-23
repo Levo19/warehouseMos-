@@ -2289,7 +2289,22 @@ const Session = (() => {
       // Port del de MosExpress adaptado a WH (vanilla JS, sin Vue).
       // ════════════════════════════════════════════════════════════════════
       window._espiaCliWH = null;
+      // [F6 espía · cero-GAS] Acción→RPC Supabase (mos.espia_*). El chunk (Drive) NO está mapeado → sigue GAS.
+      const _ESPIA_RPC = {
+        espiaIniciarDispositivo: 'espia_iniciar_dispositivo', espiaConfig: 'espia_config',
+        espiaSync: 'espia_sync', espiaPushBatch: 'espia_push_batch',
+        espiaSubirRespuesta: 'espia_subir_respuesta', espiaSubirRenegOferta: 'espia_subir_reneg_oferta',
+        espiaCerrarSesion: 'espia_cerrar_sesion'
+      };
       async function _espiaCliWHPost(accion, params) {
+        // Supabase-first: si la acción tiene RPC y el directo está habilitado, va a mos.espia_* (mismo shape {ok,data}).
+        const rpc = _ESPIA_RPC[accion];
+        if (rpc && window.ESPIA_DIRECTO !== false && typeof API !== 'undefined' && API.espiaRpc) {
+          try {
+            const out = await API.espiaRpc(rpc, params || {});
+            if (out) return out;   // {ok,data} o {ok:false,error de negocio} — el loop lo maneja igual que GAS
+          } catch(_) { /* → GAS */ }
+        }
         try {
           const url = window.WH_CONFIG?.mosGasUrl;
           if (!url) return null;

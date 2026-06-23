@@ -1,1 +1,1 @@
-{ "version": "2.13.331", "build": "F6 push wiring: WH registra su token FCM directo en Supabase (mos.registrar_push_token) ademas de GAS. Aditivo, transicion cero-GAS." }
+{ "version": "2.13.332", "build": "F6 espia device WH cero-GAS: _espiaCliWHPost Supabase-first (mos.espia_sync/push_batch/iniciar_dispositivo/config/subir_respuesta/reneg), fallback GAS. Chunk sigue GAS." }

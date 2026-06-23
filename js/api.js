@@ -2592,6 +2592,13 @@ const API = (() => {
     // [F6 push] Registro de token FCM directo a Supabase (mos.registrar_push_token). Aditivo al registro GAS
     // durante la transición; cuando los disparadores migren, la audiencia ya está en mos.push_tokens.
     registrarPushTokenSB: (p={}) => _sbRpcWH('registrar_push_token', { p }, 'mos'),
+    // [F6 espía] Señalización WebRTC directo a Supabase (mos.espia_*). El device WH la usa Supabase-first;
+    // *_OFF/APP_NO_AUTORIZADA o fallo de transporte → null → el caller cae a GAS.
+    espiaRpc: async (rpc, p={}) => {
+      const out = await _sbRpcWH(rpc, { p }, 'mos');
+      if (!out || (out.ok === false && String(out.error || '') === 'APP_NO_AUTORIZADA')) return null;
+      return out;
+    },
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
     imprimirCargadoresDia:(p)    => post({ action: 'imprimirCargadoresDia', ...p }),
     getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),
