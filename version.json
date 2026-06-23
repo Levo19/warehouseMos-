@@ -1,1 +1,1 @@
-{ "version": "2.13.317", "build": "WH nivel-inferior: removidas crear/editar producto y proveedor (codigo muerto que iba a GAS/Hoja) + aprobarPN (la aprobacion es de MOS). WH solo USA el catalogo y EMITE producto nuevo. Step A de la limpieza GAS." }
+{ "version": "2.13.318", "build": "Grupo A.1: getAlertasStock lee de Supabase (wh.get_alertas_stock) en vez de GAS/Hoja. Cierra asimetria (marcar/aceptar alerta ya eran directos, la lectura no). Programa de migracion WH->100% Supabase en tandas." }

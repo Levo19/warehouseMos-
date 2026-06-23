@@ -695,6 +695,11 @@ const API = (() => {
       if (!out || out.ok === false) throw new Error((out && out.error) || 'rpc proyectado error');
       return out;  // {ok:true, data:[{codigoProducto,cantidadDisponible,porRecibir,porSalir,proyectado,...}]}
     }
+    // [Grupo A · asimetría] getAlertasStock: las escrituras (marcar/aceptar) ya son directas, pero la LECTURA
+    // iba a GAS (Hoja). RPC dedicada wh.get_alertas_stock (mismo shape {ok,data}). Cierra la asimetría.
+    if (action === 'getAlertasStock') {
+      return await _sbRpcWH('get_alertas_stock', { p: { soloPendientes: !!params.soloPendientes } }, 'wh');
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
