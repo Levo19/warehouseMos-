@@ -3211,6 +3211,14 @@ const Session = (() => {
         console.warn('[Push WH] deviceId vacío — no registro hasta tenerlo');
         return;
       }
+      // [F6 push · cero-GAS] Registro directo a Supabase (mos.push_tokens). Aditivo al GAS durante transición.
+      try {
+        if (typeof API !== 'undefined' && API.registrarPushTokenSB) {
+          await API.registrarPushTokenSB({ token, usuario, appOrigen: 'warehouseMos', deviceId: _devIdToken,
+            dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80) });
+          console.log('[Push WH] token registrado en Supabase ✅');
+        }
+      } catch(eSB) { console.warn('[Push WH] registro Supabase falló:', eSB?.message); }
       try {
         await fetch(mosUrl, {
           method: 'POST',

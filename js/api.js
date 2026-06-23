@@ -2589,6 +2589,9 @@ const API = (() => {
     },
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
+    // [F6 push] Registro de token FCM directo a Supabase (mos.registrar_push_token). Aditivo al registro GAS
+    // durante la transición; cuando los disparadores migren, la audiencia ya está en mos.push_tokens.
+    registrarPushTokenSB: (p={}) => _sbRpcWH('registrar_push_token', { p }, 'mos'),
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
     imprimirCargadoresDia:(p)    => post({ action: 'imprimirCargadoresDia', ...p }),
     getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),

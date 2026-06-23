@@ -1,1 +1,1 @@
-{ "version": "2.13.330", "build": "F4 cargadores: getCargadoresDelDia 100% directo en frontend (lee wh.preingresos + cache proveedores, consolida carretas/llenas/medias/vacias del dia replicando Reporte.gs). Read-only, fallback GAS." }
+{ "version": "2.13.331", "build": "F6 push wiring: WH registra su token FCM directo en Supabase (mos.registrar_push_token) ademas de GAS. Aditivo, transicion cero-GAS." }
