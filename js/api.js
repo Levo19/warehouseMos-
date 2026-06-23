@@ -2585,18 +2585,32 @@ const API = (() => {
           }
         } catch (_) { /* fail-open → imprime */ }
       }
-      // [cero-GAS dispatch] El ticket de guía era el ÚLTIMO salto a GAS→PrintNode (el resto ya imprime por la Edge).
-      // GAS arma el ESC/POS (soloBase64) y el navegador lo manda por la Edge `imprimir` (Supabase) — la misma ruta
-      // probada de ME. Esto desacopla el envío de la API key de PrintNode del GAS (rotada → tickets no salían).
-      // fuerzaCopia:true al armar = el GAS NO aplica su propio dedup (el real ya lo hizo wh.reservar_ticket arriba).
-      // Si CUALQUIER paso falla (build, sin base64, Edge rechaza) → fallback al envío GAS histórico (no rompe nada).
-      if (navigator.onLine) {
+      // [100% Supabase] El ticket de guía era el ÚLTIMO salto a GAS→PrintNode. Ahora 3 capas, de + a - directa:
+      //   1) Edge `ticket-guia` (CERO GAS): lee la guía de Postgres, ARMA el ESC/POS (idéntico al GAS, validado
+      //      byte-a-byte) y la manda a PrintNode con el secret. printerId por mos.config WH_TICKET_PRINTER_ID
+      //      (ID EXPLÍCITO, nunca por nombre → no confunde la XP-80C duplicada de ME).
+      //   2) GAS arma (soloBase64) + Edge `imprimir` despacha (híbrido — si la Edge ticket-guia falla).
+      //   3) GAS full (envío histórico — último recurso).
+      // El dedup real ya lo hizo wh.reservar_ticket arriba (salvo fuerzaCopia).
+      if (navigator.onLine && p.idGuia) {
+        // Capa 1 — 100% Supabase
+        try {
+          const token = await _mintTokenWH();
+          const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/ticket-guia`, {
+            method: 'POST',
+            headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idGuia: String(p.idGuia), printerIdOverride: p.printerIdOverride || null, fuerzaCopia: !!p.fuerzaCopia, usuario: p.usuario || '' })
+          }, 15000);
+          const d = await res.json().catch(() => ({}));
+          if (d && d.ok) return { ok: true, data: { idGuia: p.idGuia, via: 'edge-ticket', jobId: d.jobId, detallesImpresos: d.detallesImpresos } };
+        } catch (_) { /* cae a la capa 2 */ }
+        // Capa 2 — GAS arma + Edge imprimir
         try {
           const built = await post({ action: 'imprimirTicketGuia', ...p, soloBase64: true, fuerzaCopia: true });
           const d = built && built.data;
           if (built && built.ok && d && d.base64 && d.printerId) {
             const okEdge = await _imprimirDirecto(d.printerId, d.base64, d.title || ('Ticket ' + (p.idGuia || '')));
-            if (okEdge) return { ok: true, data: { idGuia: p.idGuia, via: 'edge', detallesImpresos: d.detallesImpresos } };
+            if (okEdge) return { ok: true, data: { idGuia: p.idGuia, via: 'gas-build+edge', detallesImpresos: d.detallesImpresos } };
           }
         } catch (_) { /* cae al envío GAS */ }
       }
