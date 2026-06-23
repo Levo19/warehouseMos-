@@ -700,6 +700,10 @@ const API = (() => {
     if (action === 'getAlertasStock') {
       return await _sbRpcWH('get_alertas_stock', { p: { soloPendientes: !!params.soloPendientes } }, 'wh');
     }
+    // [Grupo A] getHistorialLote: trazabilidad de lote desde Supabase (RPC wh.get_historial_lote) en vez de GAS.
+    if (action === 'getHistorialLote') {
+      return await _sbRpcWH('get_historial_lote', { p: { idLote: params.idLote || '', codigos: params.codigos } }, 'wh');
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
