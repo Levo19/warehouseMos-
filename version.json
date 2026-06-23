@@ -1,1 +1,1 @@
-{ "version": "2.13.329", "build": "F4 cargadores: getResumenCargadoresDia 100% Supabase (wh.resumen_cargadores_dia, SQL 223 — group-by ACTIVO del dia en TZ Lima). Cierra asimetria (writes ya directos). Read-only, fallback GAS." }
+{ "version": "2.13.330", "build": "F4 cargadores: getCargadoresDelDia 100% directo en frontend (lee wh.preingresos + cache proveedores, consolida carretas/llenas/medias/vacias del dia replicando Reporte.gs). Read-only, fallback GAS." }

@@ -736,6 +736,56 @@ const API = (() => {
       } catch (_) { /* → GAS */ }
       return null;
     }
+    // [Frente 4 · cargadores] getCargadoresDelDia 100% directo: lee wh.preingresos + cache proveedores y
+    // consolida cargadores del día (carretas/llenas/medias/vacías) — réplica fiel de Reporte.gs. El spec ya
+    // convirtió preingresos.fecha a yyyy-MM-dd Lima → comparo directo (NO re-convertir: 'yyyy-MM-dd' parseado
+    // como Date sería UTC y restaría un día). Read-only.
+    if (action === 'getCargadoresDelDia') {
+      const fechaStr = (String(params.fecha || '').trim().substring(0, 10)) || _fmtFechaLima(new Date());
+      const rows = await _sbLeerTablaWH('preingresos');
+      const provMap = {};
+      const provs = (typeof OfflineManager !== 'undefined' && OfflineManager.getProveedoresCache) ? (OfflineManager.getProveedoresCache() || []) : [];
+      provs.forEach(p => { if (p && p.idProveedor != null) provMap[String(p.idProveedor)] = String(p.nombre || ''); });
+      const delDia = (rows || []).filter(pi => pi.fecha && String(pi.fecha).substring(0, 10) === fechaStr);
+      const _normEstados = (c) => {
+        const n = parseInt(c.carretas) || 1;
+        let arr = [];
+        if (Array.isArray(c.estados)) arr = c.estados.slice(0, n).map(e => (e === 'MEDIA' || e === 'VACIA') ? e : 'LLENA');
+        while (arr.length < n) arr.push('LLENA');
+        return arr;
+      };
+      const byId = {};
+      delDia.forEach(pi => {
+        let cargs = [];
+        try { cargs = JSON.parse(pi.cargadores || '[]'); } catch (_) {}
+        if (!Array.isArray(cargs)) return;
+        cargs.forEach(c => {
+          if (!c || typeof c !== 'object') return;
+          const id     = String(c.id || c.idPersonal || c.nombre || '');
+          const nombre = String(c.nombre || c.idPersonal || id || '');
+          if (!id || !nombre) return;
+          const carretas = parseInt(c.carretas) || 0;
+          const estados  = _normEstados(c);
+          let llenas = 0, medias = 0, vacias = 0;
+          estados.forEach(e => { if (e === 'LLENA') llenas++; else if (e === 'MEDIA') medias++; else if (e === 'VACIA') vacias++; });
+          if (!byId[id]) byId[id] = { id, nombre, carretasTotal: 0, llenasTotal: 0, mediasTotal: 0, vaciasTotal: 0, preingresos: [] };
+          byId[id].carretasTotal += carretas; byId[id].llenasTotal += llenas; byId[id].mediasTotal += medias; byId[id].vaciasTotal += vacias;
+          byId[id].preingresos.push({
+            idPreingreso: pi.idPreingreso, proveedor: provMap[String(pi.idProveedor)] || pi.idProveedor || '',
+            carretas, estados, llenas, medias, vacias, estado: String(pi.estado || '')
+          });
+        });
+      });
+      const cargadores = Object.keys(byId).map(k => byId[k]).sort((a, b) => b.carretasTotal - a.carretasTotal);
+      return { ok: true, data: {
+        fecha: fechaStr, cargadores,
+        totalCarretas: cargadores.reduce((s, c) => s + c.carretasTotal, 0),
+        totalLlenas:   cargadores.reduce((s, c) => s + c.llenasTotal, 0),
+        totalMedias:   cargadores.reduce((s, c) => s + c.mediasTotal, 0),
+        totalVacias:   cargadores.reduce((s, c) => s + c.vaciasTotal, 0),
+        preingresos:   delDia.length
+      } };
+    }
     // [Frente 4 · cargadores] getResumenCargadoresDia directo (wh.resumen_cargadores_dia). Cierra asimetría:
     // add/remove_cargador_dia YA escriben directo; el resumen leía la Hoja. Comparación de día en TZ Lima.
     if (action === 'getResumenCargadoresDia') {
