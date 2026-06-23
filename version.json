@@ -1,1 +1,1 @@
-{ "version": "2.13.325", "build": "F4: getImpresorasEcosistema via Edge printers (PrintNode) no GAS. Cierra lecturas residuales WH del grupo." }
+{ "version": "2.13.326", "build": "F1 sesion: getSesionActiva + cerrarTurno 100% Supabase (wh.get_sesion_activa/cerrar_sesion, SQL 221). Login/horario sigue GAS (dato horario-custom solo en Hoja + lockout-risk)." }

@@ -708,6 +708,10 @@ const API = (() => {
     if (action === 'getConfig') {
       return await _sbRpcWH('get_config', {}, 'wh');
     }
+    // [Frente 1 · sesión] getSesionActiva desde Supabase (wh.get_sesion_activa). Login/horario sigue GAS (aparte).
+    if (action === 'getSesionActiva') {
+      return await _sbRpcWH('get_sesion_activa', { p: { idSesion: params.idSesion } }, 'wh');
+    }
     // [Frente 4] getImpresorasEcosistema → Edge `printers` {op:'list'} (PrintNode), no GAS. Read-only.
     if (action === 'getImpresorasEcosistema') {
       try {
@@ -1491,6 +1495,12 @@ const API = (() => {
     // ── [Grupo B] Producto Nuevo: WH solo EMITE el PN a wh.producto_nuevo (RPC 217). Foto → Supabase
     // Storage (NO Drive). La línea de guía se guarda aparte (agregarDetalleGuia directo). Inerte hasta
     // prender WH_REGISTRAR_PN_DIRECTO (que va junto con migrar el LECTOR de PN de MOS a Supabase).
+    if (params.action === 'cerrarTurno') {
+      // [Frente 1 · sesión] cerrar sesión directo a wh.sesiones (gate WH_SESION_DIRECTO). *_OFF → GAS.
+      const out = await _sbRpcWH('cerrar_sesion', { p: { idSesion: params.idSesion, forzado: !!params.forzado } });
+      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
+      return out;
+    }
     if (params.action === 'setConfigValue') {
       // [Frente 4] guardar config directo a wh.config (gate WH_CONFIG_DIRECTO; rechaza secretos). *_OFF → GAS.
       const out = await _sbRpcWH('set_config', { clave: params.clave || '', valor: params.valor, descripcion: params.descripcion || '' });
