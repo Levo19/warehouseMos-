@@ -2585,36 +2585,37 @@ const API = (() => {
           }
         } catch (_) { /* fail-open → imprime */ }
       }
-      // [100% Supabase] El ticket de guía era el ÚLTIMO salto a GAS→PrintNode. Ahora 3 capas, de + a - directa:
-      //   1) Edge `ticket-guia` (CERO GAS): lee la guía de Postgres, ARMA el ESC/POS (idéntico al GAS, validado
-      //      byte-a-byte) y la manda a PrintNode con el secret. printerId por mos.config WH_TICKET_PRINTER_ID
-      //      (ID EXPLÍCITO, nunca por nombre → no confunde la XP-80C duplicada de ME).
-      //   2) GAS arma (soloBase64) + Edge `imprimir` despacha (híbrido — si la Edge ticket-guia falla).
-      //   3) GAS full (envío histórico — último recurso).
-      // El dedup real ya lo hizo wh.reservar_ticket arriba (salvo fuerzaCopia).
+      // [100% SUPABASE · CERO GAS] El ticket de guía imprime EXCLUSIVAMENTE por la Edge `ticket-guia` (lee la guía
+      // de Postgres, arma el ESC/POS validado BYTE-IDÉNTICO al viejo GAS, y manda a PrintNode con el secret).
+      // printerId por mos.config WH_TICKET_PRINTER_ID (ID EXPLÍCITO, nunca por nombre → no confunde la XP-80C
+      // duplicada de ME). Se ELIMINÓ todo fallback a GAS: el GAS→PrintNode era lo que DUPLICABA el ticket (su dedup
+      // por Hoja era frágil + el front reintentaba al timeoutear → 2 jobs). Ahora el único dedup es wh.reservar_ticket
+      // (atómico FOR UPDATE, evaluado arriba salvo fuerzaCopia) → doble imposible.
       if (navigator.onLine && p.idGuia) {
-        // Capa 1 — 100% Supabase
+        let _token = null;
+        try { _token = await _mintTokenWH(); } catch (_) { _token = null; }
+        if (!_token) return { ok: false, error: 'No se pudo obtener token de impresión' };
         try {
-          const token = await _mintTokenWH();
           const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/ticket-guia`, {
             method: 'POST',
-            headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ idGuia: String(p.idGuia), printerIdOverride: p.printerIdOverride || null, fuerzaCopia: !!p.fuerzaCopia, usuario: p.usuario || '' })
+            headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' },
+            // reporteUrl → la Edge imprime el QR del reporte (sin esto el ticket sale sin QR).
+            body: JSON.stringify({ idGuia: String(p.idGuia), reporteUrl: p.reporteUrl || '', printerIdOverride: p.printerIdOverride || null, fuerzaCopia: !!p.fuerzaCopia, usuario: p.usuario || '' })
           }, 15000);
           const d = await res.json().catch(() => ({}));
           if (d && d.ok) return { ok: true, data: { idGuia: p.idGuia, via: 'edge-ticket', jobId: d.jobId, detallesImpresos: d.detallesImpresos } };
-        } catch (_) { /* cae a la capa 2 */ }
-        // Capa 2 — GAS arma + Edge imprimir
-        try {
-          const built = await post({ action: 'imprimirTicketGuia', ...p, soloBase64: true, fuerzaCopia: true });
-          const d = built && built.data;
-          if (built && built.ok && d && d.base64 && d.printerId) {
-            const okEdge = await _imprimirDirecto(d.printerId, d.base64, d.title || ('Ticket ' + (p.idGuia || '')));
-            if (okEdge) return { ok: true, data: { idGuia: p.idGuia, via: 'gas-build+edge', detallesImpresos: d.detallesImpresos } };
-          }
-        } catch (_) { /* cae al envío GAS */ }
+          // Respuesta DEFINITIVA ok:false (auth/printerId/guía/PrintNode rechazó): el ticket NO salió → error claro.
+          return { ok: false, error: (d && (d.error || d.mensaje)) || 'No se pudo imprimir el ticket (Supabase)' };
+        } catch (_) {
+          // [ANTI DOBLE] El fetch lanzó (timeout 15s / red): el job PUDO entrar a PrintNode → NO reimprimir.
+          // Optimista; si no salió, "🖨 imprimir copia" (fuerzaCopia salta el dedup) lo reimprime. _imprimirConReintento
+          // trata este caso como "posiblemente impreso" y NO reintenta → cero duplicados.
+          return { ok: true, data: { idGuia: p.idGuia, via: 'edge-ticket', incierto: true } };
+        }
       }
-      return post({ action: 'imprimirTicketGuia', ...p });
+      // Sin red → el caller (_imprimirConReintento) encola; la cola se drena por la Edge al volver online (la
+      // reserva permanente de wh.reservar_ticket evita reimprimir lo ya impreso).
+      return { ok: false, offline: true, error: 'sin conexión' };
     },
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
