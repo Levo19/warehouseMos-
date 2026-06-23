@@ -2503,8 +2503,26 @@ const API = (() => {
     _escrituraDirectaActiva: () => _whEscrituraDirecta(),
     _postCola: (params) => post({ ...params, _fromQueue: true }),
 
-    // ── F0: Auth ────────────────────────────────────────────────
-    verificarClaveAdmin: (p)   => post({ action: 'verificarClaveAdmin', ...p }),
+    // ── F0: Auth — Supabase-first (RPC central mos.verificar_clave_admin, bcrypt+cascada+auditoría),
+    // GAS solo kill-switch. ⚠ SEGURIDAD: el consumidor WH lee `res.ok` COMO "autorizado" → la RPC
+    // devuelve {ok:true, autorizado:false} para clave mala, así que normalizamos ok = ok && autorizado
+    // (sin esto, clave incorrecta autorizaría). Offline/sin token → cae a GAS (igual que hoy).
+    verificarClaveAdmin: async (p) => {
+      try {
+        const r = await _sbRpcWH('verificar_clave_admin', {
+          p_clave: String(p.clave || ''), p_accion: String(p.accion || 'GENERICA'),
+          p_ref: String(p.refDocumento || ''), p_app: String(p.appOrigen || 'warehouseMos'),
+          p_device: String(p.deviceId || p.dispositivo || ''), p_detalle: String(p.detalle || ''),
+          p_tier: (p.tier != null ? parseInt(p.tier, 10) : null), p_cliente_meta: null
+        }, 'mos');
+        if (r && typeof r.ok !== 'undefined') {
+          return { ok: !!(r.ok && r.autorizado), autorizado: !!r.autorizado, error: r.error || '',
+                   nombre: r.nombre || '', rol: r.rol || '', nivel: r.nivel,
+                   validadoPor: r.validado_por || '', idPersonal: r.id_personal || '', idAccion: r.id_accion || '' };
+        }
+      } catch (_) { /* → GAS kill-switch */ }
+      return post({ action: 'verificarClaveAdmin', ...p });
+    },
 
     // ── F0: Cargadores independientes ───────────────────────────
     listarCargadoresMaster:  ()    => call({ action: 'listarCargadoresMaster' }),

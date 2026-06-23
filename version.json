@@ -1,1 +1,1 @@
-{ "version": "2.13.321", "build": "Grupo B PN: WH emite producto nuevo directo a wh.producto_nuevo (RPC 217) + foto a Storage. Inerte hasta WH_REGISTRAR_PN_DIRECTO (cutover coordinado con lectura MOS)." }
+{ "version": "2.13.322", "build": "AUTH F1: verificarClaveAdmin Supabase-first (RPC mos.verificar_clave_admin), GAS kill-switch. Normalizado ok=ok&&autorizado (evita autorizar clave mala)." }
