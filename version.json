@@ -1,1 +1,1 @@
-{ "version": "2.13.314", "build": "pin membrete-modal 2.43.310 (dedup codigos[])." }
+{ "version": "2.13.315", "build": "FIX asimetria catalogo: precargar (maestros) ahora via API.descargarMaestros -> Supabase (mos.catalogo_wh_rls) en vez de fetch crudo a GAS (la Hoja). Un proveedor/estacion escrito DIRECTO a Supabase (que no toca la Hoja) ya NO es invisible para WH. Mismo arreglo que ya tenia operacional." }

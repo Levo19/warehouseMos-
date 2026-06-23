@@ -388,8 +388,15 @@ const OfflineManager = (() => {
     _lastMasterTs  = ahora;
     _masterInflight = (async () => {
     try {
+      // [FIX asimetría catálogo] Maestros vía API.descargarMaestros → call() usa Supabase directo
+      // (mos.catalogo_wh_rls) cuando _whLecturaDirecta está ON, con fallback a GAS. ANTES era fetch crudo
+      // a GAS = leía la HOJA; un proveedor/estación escrito DIRECTO a Supabase (que NO toca la Hoja) era
+      // INVISIBLE para WH (el dato estaba en mos.* pero WH cacheaba la Hoja). Mismo arreglo que ya se hizo
+      // para operacional (API.descargarOperacional). getStock/getConfig siguen por GAS (fuera de scope).
       const [maestros, stock, config] = await Promise.all([
-        fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null),
+        ((typeof API !== 'undefined' && API.descargarMaestros)
+          ? API.descargarMaestros().catch(() => null)
+          : fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null)),
         fetch(_gasUrl('getStock')).then(r => r.json()).catch(() => null),
         fetch(_gasUrl('getConfig')).then(r => r.json()).catch(() => null)
       ]);
