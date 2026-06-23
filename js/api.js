@@ -708,6 +708,19 @@ const API = (() => {
     if (action === 'getConfig') {
       return await _sbRpcWH('get_config', {}, 'wh');
     }
+    // [Frente 4] getImpresorasEcosistema → Edge `printers` {op:'list'} (PrintNode), no GAS. Read-only.
+    if (action === 'getImpresorasEcosistema') {
+      try {
+        const token = await _mintTokenWH();
+        const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/printers`, {
+          method: 'POST', headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ op: 'list' })
+        }, 20000);
+        const d = await res.json().catch(() => null);
+        if (res.ok && d && d.ok === true && Array.isArray(d.data)) return { ok: true, data: d.data };
+      } catch (_) { /* → GAS */ }
+      return null;
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
