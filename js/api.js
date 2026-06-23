@@ -2585,6 +2585,21 @@ const API = (() => {
           }
         } catch (_) { /* fail-open → imprime */ }
       }
+      // [cero-GAS dispatch] El ticket de guía era el ÚLTIMO salto a GAS→PrintNode (el resto ya imprime por la Edge).
+      // GAS arma el ESC/POS (soloBase64) y el navegador lo manda por la Edge `imprimir` (Supabase) — la misma ruta
+      // probada de ME. Esto desacopla el envío de la API key de PrintNode del GAS (rotada → tickets no salían).
+      // fuerzaCopia:true al armar = el GAS NO aplica su propio dedup (el real ya lo hizo wh.reservar_ticket arriba).
+      // Si CUALQUIER paso falla (build, sin base64, Edge rechaza) → fallback al envío GAS histórico (no rompe nada).
+      if (navigator.onLine) {
+        try {
+          const built = await post({ action: 'imprimirTicketGuia', ...p, soloBase64: true, fuerzaCopia: true });
+          const d = built && built.data;
+          if (built && built.ok && d && d.base64 && d.printerId) {
+            const okEdge = await _imprimirDirecto(d.printerId, d.base64, d.title || ('Ticket ' + (p.idGuia || '')));
+            if (okEdge) return { ok: true, data: { idGuia: p.idGuia, via: 'edge', detallesImpresos: d.detallesImpresos } };
+          }
+        } catch (_) { /* cae al envío GAS */ }
+      }
       return post({ action: 'imprimirTicketGuia', ...p });
     },
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),

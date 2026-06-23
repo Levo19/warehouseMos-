@@ -877,6 +877,20 @@ function imprimirTicketGuia(params) {
   var blob = Utilities.newBlob(B, 'application/octet-stream');
   var b64  = Utilities.base64Encode(blob.getBytes());
 
+  // [cero-GAS impresión] soloBase64: el GAS ARMA el ticket (lee Supabase/Sheet + plantilla ESC/POS) pero NO lo
+  // manda a PrintNode. El navegador lo despacha por la Edge `imprimir` (Supabase) — misma ruta que ME. Así el
+  // envío deja de depender de la API key de PrintNode del GAS (que se rotó/desincronizó → tickets no salían).
+  // El dedup real ya lo hizo el front con wh.reservar_ticket; acá no registramos TICKETS_IMPRESOS (no hay job).
+  if (params.soloBase64) {
+    return { ok: true, data: {
+      base64:          b64,
+      printerId:       parseInt(printerId),
+      title:           'Ticket ' + idGuia,
+      detallesImpresos: dets.length,
+      idGuia:          idGuia
+    }};
+  }
+
   var payload = {
     printerId:   parseInt(printerId),
     title:       'Ticket ' + idGuia,
