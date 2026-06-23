@@ -397,7 +397,12 @@ const OfflineManager = (() => {
         ((typeof API !== 'undefined' && API.descargarMaestros)
           ? API.descargarMaestros().catch(() => null)
           : fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null)),
-        fetch(_gasUrl('getStock')).then(r => r.json()).catch(() => null),
+        // [FIX #4 asimetría stock] getStock vía API → Supabase (stock_enriquecido_rls) cuando lectura
+        // directa ON, fallback GAS. ANTES: fetch crudo a la Hoja STOCK = stale si el stock se escribe
+        // directo a Supabase. Cierra la ventana junto con precargarOperacional (que ya es Supabase-first).
+        ((typeof API !== 'undefined' && API.getStock)
+          ? API.getStock().catch(() => null)
+          : fetch(_gasUrl('getStock')).then(r => r.json()).catch(() => null)),
         fetch(_gasUrl('getConfig')).then(r => r.json()).catch(() => null)
       ]);
 
