@@ -1,1 +1,1 @@
-{ "version": "2.13.316", "build": "FIX #4 asimetria stock: precargar baja getStock via API.getStock -> Supabase (stock_enriquecido_rls), fallback GAS. Antes leia la Hoja STOCK (stale si stock se escribe directo a Supabase). Cierra la ventana junto con precargarOperacional." }
+{ "version": "2.13.317", "build": "WH nivel-inferior: removidas crear/editar producto y proveedor (codigo muerto que iba a GAS/Hoja) + aprobarPN (la aprobacion es de MOS). WH solo USA el catalogo y EMITE producto nuevo. Step A de la limpieza GAS." }

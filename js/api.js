@@ -1986,11 +1986,10 @@ const API = (() => {
     'anularDetalle', 'cerrarGuia', 'reabrirGuia', 'crearGuia', 'crearDespachoRapido',
     'registrarEnvasado', 'corregirUnidadesEnvasado', 'anularEnvasadoConClave', 'anularEnvasadoManual',
     'registrarMerma', 'resolverMerma',
-    'registrarProductoNuevo', 'aprobarProductoNuevo',
+    'registrarProductoNuevo',   // (aprobarProductoNuevo removido: la aprobación es de MOS, no de WH)
     'crearPreingreso', 'aprobarPreingreso', 'actualizarPreingreso',
     'subirFotoGuia', 'subirFotoPreingreso',   // [40x #1] localId estable → nombre de foto determinístico (idempotente)
-    'crearProducto', 'actualizarProducto',
-    'crearProveedor', 'actualizarProveedor',
+    // (crear/actualizar producto y proveedor removidos: WH no escribe catálogo, solo lo usa)
     'crearAjuste', 'auditarProducto',
     'asignarAuditoria', 'ejecutarAuditoria',
     'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
@@ -2308,8 +2307,8 @@ const API = (() => {
     // [Stock teórico/proyectado] real + Σ(ingresos abiertos) − Σ(salidas abiertos), DERIVADO al vuelo (no persiste).
     getStockProyectado: (p={})   => call({ action: 'getStockProyectado', ...p }),
     getLotes:           (p={})   => call({ action: 'getLotesVencimiento', ...p }),
-    crearProducto:      (p)      => post({ action: 'crearProducto', ...p }),
-    actualizarProducto: (p)      => post({ action: 'actualizarProducto', ...p }),
+    // [WH nivel-inferior] crear/editar PRODUCTO NO existe en WH: el catálogo se crea/edita SOLO en MOS
+    // (admin) y se propaga. WH lo USA, no lo escribe. (Funciones muertas removidas — antes iban a GAS/Hoja.)
 
     // Guias
     getGuias:           (p={})   => call({ action: 'getGuias', ...p }),
@@ -2381,16 +2380,14 @@ const API = (() => {
     // [v2.13.310] Edge print-adhesivo genérico (membretes vía edgeCall del modal compartido)
     printAdhesivoEdge:  (body)    => _printAdhesivoEdge(body),
 
-    // Proveedores
+    // Proveedores — [WH nivel-inferior] WH solo LEE proveedores (los crea/edita el admin en MOS y se
+    // propagan). crear/actualizar proveedor removidos (eran código muerto que iba a GAS/Hoja).
     getProveedores:     (p={})   => call({ action: 'getProveedores', ...p }),
-    crearProveedor:     (p)      => post({ action: 'crearProveedor', ...p }),
-    actualizarProveedor:(p)      => post({ action: 'actualizarProveedor', ...p }),
 
-    // Producto Nuevo
+    // Producto Nuevo — WH solo EMITE el PN (registrarPN); la APROBACIÓN es de MOS (aprobarPN removido).
     getProductosNuevos:          (p={}) => call({ action: 'getProductosNuevos', ...p }),
     getProductosNuevosRecientes: (p={}) => call({ action: 'getProductosNuevosRecientes', ...p }),
     registrarPN:                 (p)    => post({ action: 'registrarProductoNuevo', ...p }),
-    aprobarPN:                   (p)    => post({ action: 'aprobarProductoNuevo', ...p }),
 
     // Config
     getConfig:          ()                  => call({ action: 'getConfig' }),
