@@ -1,1 +1,1 @@
-{ "version": "2.13.328", "build": "F4 mermas-cesta: getMermasCesta + contadorMermasPendientes 100% directo en frontend (lee wh.mermas + agrupa, sin round-trip a GAS). Read-only, fallback GAS." }
+{ "version": "2.13.329", "build": "F4 cargadores: getResumenCargadoresDia 100% Supabase (wh.resumen_cargadores_dia, SQL 223 — group-by ACTIVO del dia en TZ Lima). Cierra asimetria (writes ya directos). Read-only, fallback GAS." }

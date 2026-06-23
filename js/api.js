@@ -736,6 +736,11 @@ const API = (() => {
       } catch (_) { /* → GAS */ }
       return null;
     }
+    // [Frente 4 · cargadores] getResumenCargadoresDia directo (wh.resumen_cargadores_dia). Cierra asimetría:
+    // add/remove_cargador_dia YA escriben directo; el resumen leía la Hoja. Comparación de día en TZ Lima.
+    if (action === 'getResumenCargadoresDia') {
+      return await _sbRpcWH('resumen_cargadores_dia', { p: { fecha: params.fecha || '' } }, 'wh');
+    }
     // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
     // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;
     // esto saca el round-trip a GAS del navegador. Read-only.
