@@ -1298,7 +1298,14 @@ const Session = (() => {
     // FIX login caído: el catálogo dejó de mandar el pin (seguridad) → validarPinLocal queda null → antes solo GAS.
     if (!localOp && navigator.onLine) {
       let res = (typeof API !== 'undefined' && API.loginPersonalSB) ? await API.loginPersonalSB(pinIntento).catch(() => null) : null;
-      if (!res) res = await API.loginPersonal(pinIntento);
+      if (!res) res = await API.loginPersonal(pinIntento).catch(() => null);
+      // [100x guard] Si NI Supabase NI GAS respondieron (red caída devolviendo vacío), no leer res.* (TypeError) → mensaje claro.
+      if (!res) {
+        document.getElementById('loginError').textContent = '⚠ Sin conexión · reintenta';
+        try { SoundFX.buzzer(); } catch(e) {}
+        setTimeout(() => { const el = document.getElementById('loginError'); if (el) el.textContent = ''; }, 2500);
+        return;
+      }
       if (!res.ok && res.error === 'FUERA_DE_HORARIO') {
         // Operador/Envasador intentando entrar fuera del horario laboral
         try { SoundFX.buzzer(); } catch(e) {}

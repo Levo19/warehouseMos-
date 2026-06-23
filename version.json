@@ -1,1 +1,1 @@
-{ "version": "2.13.334", "build": "FIX cuota GAS: bloqueo overlay poll 30s->120s (getEstadoBloqueoUsuario MOS GAS). SW: guard method GET + catch en put (HEAD no lanza)." }
+{ "version": "2.13.335", "build": "Revision 100x: guard en login (si NI Supabase NI GAS responden -> mensaje claro, no TypeError). + (server-side) liquidaciones a SYNC_OFF (fix revert bono/sancion), pickup estado boolean fix, login_pin_wh btrim." }
