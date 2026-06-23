@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.333';
+const VERSION = '2.13.334';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -130,8 +130,9 @@ self.addEventListener('fetch', e => {
         if (res.status !== 200) return res;
         // Solo cachear respuestas same-origin o CORS (no opaque)
         if (res.type !== 'basic' && res.type !== 'cors') return res;
+        if (e.request.method !== 'GET') return res;   // [FIX] Cache.put solo soporta GET (HEAD/POST lanzan)
         const clone = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, clone));
+        caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});  // defensivo: nunca uncaught
         return res;
       }).catch(async () => {
         if (e.request.destination === 'document') {

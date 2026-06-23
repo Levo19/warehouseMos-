@@ -3478,7 +3478,7 @@ const BloqueoRemoto = (() => {
     if (_activo) return;
     _activo = true;
     setTimeout(_check, 4000);
-    _pollTimer = setInterval(_check, 30 * 1000);
+    _pollTimer = setInterval(_check, 120 * 1000);  // [FIX cuota GAS] 30s→120s: pollea MOS GAS getEstadoBloqueoUsuario; 30s todo el día agotaba urlfetch (rompia otros fetch GAS). 2min de latencia en bloqueo aceptable.
   }
 
   function detener() {
