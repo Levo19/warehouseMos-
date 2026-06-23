@@ -9212,6 +9212,10 @@ const GuiasView = (() => {
     abrirSheet('sheetGuia');
   }
 
+  // [FIX TDZ] Declarado ANTES del return: estaba después (código muerto, nunca inicializado) →
+  // `Cannot access '_imprimiendoTicket' before initialization` al tocar imprimir. idGuia→ts (anti triple-tap).
+  let _imprimiendoTicket = {};
+
   return {
     cargar, cargarMas, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
     marcarGuiaAbierta,   // [v2.13.186] reabrir desde App → refleja ABIERTA en módulo
@@ -9248,7 +9252,7 @@ const GuiasView = (() => {
     detUndoEliminar
   };
 
-  let _imprimiendoTicket = {};   // idGuia -> ts del último envío (anti triple-tap)
+  // _imprimiendoTicket se declara ARRIBA (antes del return) — acá quedaba en zona muerta (TDZ).
   function imprimirTicket(idGuia) {
     // [fix 3 copias] El ticket manual usa fuerzaCopia:true (SALTA el dedup del
     // backend) y el envío a PrintNode tarda ~2s SIN lock → un doble/triple-tap
