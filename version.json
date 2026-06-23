@@ -1,1 +1,1 @@
-{ "version": "2.13.320", "build": "Grupo A.3: getHistorialLote lee de Supabase (wh.get_historial_lote). Reads 0x (getRolUsuario/getMermasCesta/cargadores/getProducto/getProductosCambiadosDesde) = codigo muerto, no se invocan. getImpresorasEcosistema (estado PrintNode externo) y getHistorialGuia (auditoria) quedan para B/C." }
+{ "version": "2.13.321", "build": "Grupo B PN: WH emite producto nuevo directo a wh.producto_nuevo (RPC 217) + foto a Storage. Inerte hasta WH_REGISTRAR_PN_DIRECTO (cutover coordinado con lectura MOS)." }

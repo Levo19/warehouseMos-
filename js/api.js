@@ -1471,6 +1471,22 @@ const API = (() => {
       if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
       return out;
     }
+    // ── [Grupo B] Producto Nuevo: WH solo EMITE el PN a wh.producto_nuevo (RPC 217). Foto → Supabase
+    // Storage (NO Drive). La línea de guía se guarda aparte (agregarDetalleGuia directo). Inerte hasta
+    // prender WH_REGISTRAR_PN_DIRECTO (que va junto con migrar el LECTOR de PN de MOS a Supabase).
+    if (params.action === 'registrarProductoNuevo') {
+      let fotoUrl = String(params.foto || '');
+      const b64 = String(params.fotoBase64 || '').trim();
+      if (b64) { try { fotoUrl = (await _subirFotoStorage('producto_nuevo', 'PN_' + lid, b64, params.mimeType || 'image/jpeg', lid)).url; } catch (_) { /* sin foto no bloquea el PN */ } }
+      const out = await _sbRpcWH('registrar_producto_nuevo', { p: {
+        codigoBarra: params.codigoBarra || '', idGuia: params.idGuia || '', marca: params.marca || '',
+        descripcion: params.descripcion || '', idCategoria: params.idCategoria || '', unidad: params.unidad || '',
+        cantidad: params.cantidad, fechaVencimiento: params.fechaVencimiento || '', foto: fotoUrl,
+        usuario: params.usuario || ''
+      } });
+      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;  // flag off → GAS
+      return out;  // {ok,data:{idProductoNuevo,codigoBarra,idempotente}}
+    }
     if (params.action === 'crearGuia') {
       // si viene fotoBase64, súbela a Storage y pásala como URL (ya no fallback por foto)
       if (String(params.fotoBase64 || '').trim()) {
