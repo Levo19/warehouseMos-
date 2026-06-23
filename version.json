@@ -1,1 +1,1 @@
-{ "version": "2.13.323", "build": "F5: impresion por Edge imprimir (PrintNode) 100% Supabase (impresionNavegador:true). ME via flag ME_IMPRESION_DIRECTA=1." }
+{ "version": "2.13.324", "build": "F4: getConfig/setConfig 100% Supabase (wh.get_config/set_config, SQL 220, filtra secretos). precargar config via API. Ya no lee la Hoja CONFIG." }

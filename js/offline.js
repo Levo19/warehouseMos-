@@ -403,7 +403,10 @@ const OfflineManager = (() => {
         ((typeof API !== 'undefined' && API.getStock)
           ? API.getStock().catch(() => null)
           : fetch(_gasUrl('getStock')).then(r => r.json()).catch(() => null)),
-        fetch(_gasUrl('getConfig')).then(r => r.json()).catch(() => null)
+        // [Frente 4] config vía API.getConfig → Supabase (wh.get_config), fallback GAS.
+        ((typeof API !== 'undefined' && API.getConfig)
+          ? API.getConfig().catch(() => null)
+          : fetch(_gasUrl('getConfig')).then(r => r.json()).catch(() => null))
       ]);
 
       console.log('[Offline] descargarMaestros respuesta:', maestros);

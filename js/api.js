@@ -704,6 +704,10 @@ const API = (() => {
     if (action === 'getHistorialLote') {
       return await _sbRpcWH('get_historial_lote', { p: { idLote: params.idLote || '', codigos: params.codigos } }, 'wh');
     }
+    // [Frente 4] getConfig desde Supabase (wh.get_config, filtra secretos). Reemplaza la lectura de la Hoja CONFIG.
+    if (action === 'getConfig') {
+      return await _sbRpcWH('get_config', {}, 'wh');
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
@@ -1474,6 +1478,12 @@ const API = (() => {
     // ── [Grupo B] Producto Nuevo: WH solo EMITE el PN a wh.producto_nuevo (RPC 217). Foto → Supabase
     // Storage (NO Drive). La línea de guía se guarda aparte (agregarDetalleGuia directo). Inerte hasta
     // prender WH_REGISTRAR_PN_DIRECTO (que va junto con migrar el LECTOR de PN de MOS a Supabase).
+    if (params.action === 'setConfigValue') {
+      // [Frente 4] guardar config directo a wh.config (gate WH_CONFIG_DIRECTO; rechaza secretos). *_OFF → GAS.
+      const out = await _sbRpcWH('set_config', { clave: params.clave || '', valor: params.valor, descripcion: params.descripcion || '' });
+      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
+      return out;
+    }
     if (params.action === 'registrarProductoNuevo') {
       let fotoUrl = String(params.foto || '');
       const b64 = String(params.fotoBase64 || '').trim();
