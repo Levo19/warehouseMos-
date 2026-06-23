@@ -1,1 +1,1 @@
-{ "version": "2.13.327", "build": "F4 historial: getHistorialGuia 100% Supabase (wh.historial_guia, SQL 222 — compone guias/ops_log/stock_mov/producto_nuevo/mermas; gating admin/master server-side). Read-only, fallback GAS." }
+{ "version": "2.13.328", "build": "F4 mermas-cesta: getMermasCesta + contadorMermasPendientes 100% directo en frontend (lee wh.mermas + agrupa, sin round-trip a GAS). Read-only, fallback GAS." }

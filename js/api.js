@@ -736,6 +736,37 @@ const API = (() => {
       } catch (_) { /* → GAS */ }
       return null;
     }
+    // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
+    // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;
+    // esto saca el round-trip a GAS del navegador. Read-only.
+    if (action === 'getMermasCesta' || action === 'contadorMermasPendientes') {
+      const rows = await _sbLeerTablaWH('mermas');
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 7);
+      const pendientes = [], descartado = [], solucionado = [];
+      (rows || []).forEach(r => {
+        const est = String(r.estado || '').toUpperCase();
+        const pend = parseFloat(r.cantidadPendiente) || 0;
+        const des  = parseFloat(r.cantidadDesechada) || 0;
+        const rep  = parseFloat(r.cantidadReparada)  || 0;
+        const idg  = String(r.idGuiaSalida || '');
+        if (est === 'EN_PROCESO' && pend > 0) pendientes.push(r);
+        else if (des > 0 && !idg && est !== 'ELIMINADO') descartado.push(r);
+        else {
+          const f = r.fechaResolucion ? new Date(r.fechaResolucion)
+                  : r.fechaIngreso    ? new Date(r.fechaIngreso) : null;
+          if (rep > 0 && f && f >= cutoff) solucionado.push(r);
+        }
+      });
+      if (action === 'contadorMermasPendientes') {
+        return { ok: true, data: { count: pendientes.length + descartado.length } };
+      }
+      const ordSc = (a, b) => new Date(b.fechaResolucion || b.fechaIngreso || 0) - new Date(a.fechaResolucion || a.fechaIngreso || 0);
+      pendientes.sort(ordSc); descartado.sort(ordSc); solucionado.sort(ordSc);
+      return { ok: true, data: {
+        pendientes, descartado, solucionado,
+        totalPendientes: pendientes.length, totalDescartado: descartado.length
+      } };
+    }
     // Lecturas SIMPLES (filas + filtros, sin lógica derivada) — filtros REPLICAN exacto el getXxx de GAS.
     if (action === 'getMermas') {
       let rows = await _sbLeerTablaWH('mermas');
