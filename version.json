@@ -1,1 +1,1 @@
-{ "version": "2.13.322", "build": "AUTH F1: verificarClaveAdmin Supabase-first (RPC mos.verificar_clave_admin), GAS kill-switch. Normalizado ok=ok&&autorizado (evita autorizar clave mala)." }
+{ "version": "2.13.323", "build": "F5: impresion por Edge imprimir (PrintNode) 100% Supabase (impresionNavegador:true). ME via flag ME_IMPRESION_DIRECTA=1." }
