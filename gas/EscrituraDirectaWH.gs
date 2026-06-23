@@ -165,6 +165,44 @@ function _whRegistrarEnvasadoDirecto(o) {
   return { handled: false, fallback: true, error: r.error };
 }
 
+/**
+ * MARCAR ALERTA REVISADA → wh.marcar_alerta_revisada(p jsonb).
+ * CRÍTICO para delete-safety: getAlertasStock LEE de wh.get_alertas_stock cuando
+ * FUENTE_DATOS está en supabase; si el "marcar revisada" sólo tocara la Hoja, la
+ * alerta seguiría PENDIENTE para siempre en la lectura (la Hoja ya no es fuente).
+ * Idempotente (update por id_alerta). Gateada por WH_MARCAR_ALERTA_REVISADA_DIRECTO.
+ */
+function _whMarcarAlertaRevisadaDirecto(idAlerta) {
+  if (!_whEscrituraDirectaON()) return { handled: false };
+  var r = _whRpcStock('marcar_alerta_revisada', { p: { id_alerta: String(idAlerta || '') } });
+  if (r.ok) return { handled: true, data: r.data };
+  return { handled: false, fallback: true, error: r.error };
+}
+
+/**
+ * ACEPTAR TEÓRICO (one-click) → wh.aceptar_teorico_alerta(p jsonb).
+ * Orquestador atómico: crea AJUSTE INC/DEC para llevar real→teórico + mueve stock
+ * (UPDATE atómico) + marca la alerta revisada, todo en UNA transacción.
+ * Mueve stock por DELTA (no idempotente natural) → exige local_id (dedup) + guard
+ * `revisado` bajo FOR UPDATE. Ids deterministas los genera GAS. Gateada por
+ * WH_ACEPTAR_TEORICO_ALERTA_DIRECTO.
+ */
+function _whAceptarTeoricoAlertaDirecto(o) {
+  if (!_whEscrituraDirectaON()) return { handled: false };
+  var r = _whRpcStock('aceptar_teorico_alerta', {
+    p: {
+      id_alerta:      String(o.idAlerta || ''),
+      usuario:        String(o.usuario || 'sistema'),
+      id_ajuste:      String(o.idAjuste || ''),
+      id_stock_nuevo: String(o.idStockNuevo || ''),
+      id_mov:         String(o.idMov || ''),
+      local_id:       String(o.localId || '')
+    }
+  });
+  if (r.ok) return { handled: true, data: r.data };
+  return { handled: false, fallback: true, error: r.error };
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // [CUTOVER · PASO FINAL] Desactivar los triggers GAS que SINCRONIZAN/PISAN Supabase.
 // ----------------------------------------------------------------------------
@@ -308,7 +346,11 @@ function whEscrituraDirectaOFF() { PropertiesService.getScriptProperties().setPr
 // así el sync deja de pisar la verdad que escribe la escritura directa. REVERSIBLE:
 // whSyncOnTablas() la vacía y reactiva el sync de TODO al instante.
 // El set por defecto cubre exactamente las tablas que mutan las RPCs directas.
-var _WH_SYNC_OFF_DEFAULT = 'stock,stock_movimientos,guias,guia_detalle,ajustes,envasados,auditorias,lotes_vencimiento';
+//  · mermas          → registrarMerma/resolverMerma escriben Supabase directo (wh.registrar_merma/resolver_merma).
+//  · alertas_stock   → getAlertasStock LEE de wh.get_alertas_stock; marcar/aceptar la marcan en Supabase, y la
+//                       regenera wh.guardar_alertas_stock (purga + reinsert). El sync desde la Hoja re-introduciría
+//                       los huérfanos viejos y revertiría las marcas → DEBE estar OFF para que el Sheet sea solo espejo.
+var _WH_SYNC_OFF_DEFAULT = 'stock,stock_movimientos,guias,guia_detalle,ajustes,envasados,auditorias,lotes_vencimiento,mermas,alertas_stock';
 function whSyncOffTablas(params) {
   params = params || {};
   var csv = String(params.tablas || _WH_SYNC_OFF_DEFAULT)

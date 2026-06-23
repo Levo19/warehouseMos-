@@ -286,6 +286,36 @@ function aceptarTeoricoAlerta(params) {
   if (!idAlerta) return { ok: false, error: 'idAlerta requerido' };
   var usuario = String(params.usuario || 'sistema');
 
+  // [ESCRITURA DIRECTA WH] CRÍTICO: la lectura de alertas sale de Supabase
+  // (wh.get_alertas_stock) cuando FUENTE_DATOS=supabase. La alerta puede NO existir
+  // en la Hoja (huérfana) → el camino viejo devolvería "Alerta no encontrada".
+  // La RPC wh.aceptar_teorico_alerta es el orquestador atómico: lee stockReal/teorico
+  // de Supabase, crea el AJUSTE, mueve el stock (UPDATE atómico) y marca la alerta
+  // revisada, todo en una transacción idempotente (dedup por local_id + guard revisado).
+  // Cuando la maneja, NO debemos volver a mover stock por la Hoja (crearAjuste/_actualizarStock
+  // duplicarían): sólo espejamos en la Hoja la marca revisada + la fila AJUSTES (mismo id).
+  if (typeof _whAceptarTeoricoAlertaDirecto === 'function') {
+    try {
+      var ts = new Date().getTime();
+      var rD = _whAceptarTeoricoAlertaDirecto({
+        idAlerta:     idAlerta,
+        usuario:      usuario,
+        idAjuste:     'AJALERTA' + ts,
+        idStockNuevo: 'STKALERTA' + ts,
+        idMov:        'MOVALERTA' + ts,
+        localId:      idAlerta   // 1 alerta = 1 aceptación → local_id estable + guard revisado en la RPC
+      });
+      if (rD && rD.handled) {
+        // Espejo best-effort en la Hoja (respaldo): marcar revisada + fila AJUSTES con el MISMO id.
+        try { _espejarAceptarTeoricoEnHoja(idAlerta, rD.data); } catch(_eM) { Logger.log('[aceptarTeoricoAlerta] espejo Hoja falló: ' + (_eM && _eM.message)); }
+        var d = rD.data || {};
+        return { ok: true, data: { idAlerta: idAlerta, ajusteAplicado: (d.ajusteAplicado != null ? d.ajusteAplicado : 0), idAjuste: d.idAjuste || '' } };
+      } else if (rD && rD.fallback) {
+        Logger.log('[aceptarTeoricoAlerta] directo falló (' + rD.error + ') → FALLBACK Hoja. id=' + idAlerta);
+      }
+    } catch(_eD) { Logger.log('[aceptarTeoricoAlerta] _whAceptarTeoricoAlertaDirecto excepción: ' + (_eD && _eD.message)); }
+  }
+
   var ss = SpreadsheetApp.openById(SS_ID);
   var sheet = ss.getSheetByName('ALERTAS_STOCK');
   if (!sheet) return { ok: false, error: 'Hoja ALERTAS_STOCK no existe' };
@@ -327,6 +357,48 @@ function aceptarTeoricoAlerta(params) {
   return { ok: false, error: 'Alerta no encontrada' };
 }
 
+// [ESCRITURA DIRECTA WH] Espeja en la Hoja lo que ya hizo wh.aceptar_teorico_alerta en
+// Supabase (fuente de verdad): marca la alerta revisada y deja la fila AJUSTES con el
+// MISMO id_ajuste que usó la RPC. NO mueve stock (lo movió la RPC) y NO hace dual-write
+// (la fila ya existe en wh.ajustes). Best-effort: si la alerta es huérfana de la Hoja,
+// no falla. Sólo respaldo/coherencia hasta el corte final de Sheets.
+function _espejarAceptarTeoricoEnHoja(idAlerta, d) {
+  d = d || {};
+  var ss = SpreadsheetApp.openById(SS_ID);
+  var sheet = ss.getSheetByName('ALERTAS_STOCK');
+  if (sheet) {
+    var data = sheet.getDataRange().getValues();
+    var hdrs = data[0];
+    var idxId   = hdrs.indexOf('idAlerta');
+    var idxCb   = hdrs.indexOf('codigoProducto');
+    var idxRev  = hdrs.indexOf('revisado');
+    var idxFecR = hdrs.indexOf('fechaRevision');
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][idxId]) !== String(idAlerta)) continue;
+      if (idxRev  >= 0) sheet.getRange(i + 1, idxRev + 1).setValue('SI');
+      if (idxFecR >= 0) sheet.getRange(i + 1, idxFecR + 1).setValue(new Date());
+      // Si hubo ajuste real, dejar también la fila AJUSTES con el id de la RPC (sin dual-write, sin mover stock).
+      var ajId = String(d.idAjuste || '');
+      var ajAplicado = parseFloat(d.ajusteAplicado || 0) || 0;
+      if (ajId && Math.abs(ajAplicado) > 0) {
+        try {
+          var cb = String(data[i][idxCb] || '');
+          var ajSheet = getSheet('AJUSTES');
+          var ajHdrs  = ajSheet.getRange(1, 1, 1, ajSheet.getLastColumn()).getValues()[0];
+          var ajColCod = ajHdrs.indexOf('codigoProducto') + 1;
+          var ajVals = [ajId, cb, ajAplicado > 0 ? 'INC' : 'DEC', Math.abs(ajAplicado),
+                        'Aceptar teórico (alerta cuadre stock)', '', '', new Date()];
+          var ajNext = ajSheet.getLastRow() + 1;
+          if (ajColCod > 0) ajSheet.getRange(ajNext, ajColCod).setNumberFormat('@');
+          ajSheet.getRange(ajNext, 8).setNumberFormat('dd/MM/yyyy HH:mm');
+          ajSheet.getRange(ajNext, 1, 1, ajVals.length).setValues([ajVals]);
+        } catch(_eAj) { Logger.log('[espejarAceptarTeorico] fila AJUSTES Hoja falló: ' + (_eAj && _eAj.message)); }
+      }
+      break;
+    }
+  }
+}
+
 // Endpoint para consultar STOCK_MOVIMIENTOS de un producto específico.
 // Útil para diagnosticar "¿quién/cuándo movió este stock?".
 function getStockMovimientos(params) {
@@ -362,9 +434,23 @@ function getStockMovimientos(params) {
 function marcarAlertaRevisada(params) {
   var idAlerta = String(params.idAlerta || '');
   if (!idAlerta) return { ok: false, error: 'idAlerta requerido' };
+
+  // [ESCRITURA DIRECTA WH] La lectura de alertas (getAlertasStock) sale de Supabase
+  // cuando FUENTE_DATOS=supabase. Marcar revisada DEBE escribir en Supabase o la
+  // alerta seguiría pendiente para siempre en la lectura. La Hoja se sigue actualizando
+  // como respaldo/coherencia. Gate OFF / RPC fallida → fallback a sólo-Hoja (idéntico a hoy).
+  var directo = false;
+  if (typeof _whMarcarAlertaRevisadaDirecto === 'function') {
+    try {
+      var rD = _whMarcarAlertaRevisadaDirecto(idAlerta);
+      if (rD && rD.handled) { directo = true; }
+      else if (rD && rD.fallback) { Logger.log('[marcarAlertaRevisada] directo falló (' + rD.error + ') → FALLBACK Hoja. id=' + idAlerta); }
+    } catch(_eD) { Logger.log('[marcarAlertaRevisada] _whMarcarAlertaRevisadaDirecto excepción: ' + (_eD && _eD.message)); }
+  }
+
   var ss = SpreadsheetApp.openById(SS_ID);
   var sheet = ss.getSheetByName('ALERTAS_STOCK');
-  if (!sheet) return { ok: false, error: 'Hoja ALERTAS_STOCK no existe' };
+  if (!sheet) return directo ? { ok: true } : { ok: false, error: 'Hoja ALERTAS_STOCK no existe' };
   var data = sheet.getDataRange().getValues();
   var hdrs = data[0];
   var idxId   = hdrs.indexOf('idAlerta');
@@ -377,7 +463,8 @@ function marcarAlertaRevisada(params) {
       return { ok: true };
     }
   }
-  return { ok: false, error: 'Alerta no encontrada' };
+  // Si Supabase la marcó pero no está en la Hoja (huérfana de la Hoja), igual fue OK.
+  return directo ? { ok: true } : { ok: false, error: 'Alerta no encontrada' };
 }
 
 // ============================================================

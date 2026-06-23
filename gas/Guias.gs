@@ -1650,6 +1650,26 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
   var esIngreso = String(tipoGuia || '').toUpperCase().indexOf('INGRESO') === 0;
   var esEnvasado = _esGuiaEnvasado(tipoGuia);
 
+  // [FIX KARDEX SALIDA_ZONA · 2026-06-18] ⚠️ MONEY-CRITICAL — orden de espejado.
+  // La RPC wh.cerrar_guia_idempotente lee wh.guia_detalle (la SOMBRA) para aplicar
+  // el stock por línea. En el flujo GAS de despacho (crearGuia → _agregarDetallesBatchImpl
+  // → cerrarGuia), el batch escribe el detalle SOLO en la Hoja; el dual-write del
+  // detalle a la sombra ocurría DESPUÉS (más abajo, línea ~1832). Resultado: con el
+  // gate WH_ESCRITURA_DIRECTA ON, la RPC corría contra una sombra VACÍA → 0 líneas →
+  // 0 kardex → NO descontaba el almacén (guías G<numérico> SALIDA_ZONA de hoy con 0
+  // movimientos). Las G_L… (front-directo) no sufren esto porque el front usa
+  // wh.crear_despacho_rapido (header+detalle+stock en UNA tx).
+  // FIX: espejar el detalle a la sombra ANTES de llamar a la RPC, para que vea las
+  // líneas reales. cantidad_aplicada se copia de la Hoja (0 en líneas nuevas → delta
+  // = cant_recibida → aplica; =recibida en recerrar → delta 0 → no duplica). Best-effort:
+  // si falla, _whCerrarGuiaDirecto hará fallback a _actualizarStock (red de seguridad).
+  // Idempotente: el dual-write de abajo (línea ~1832) se mantiene y re-espeja el estado final.
+  if (typeof _dualWriteDetallesGuiaWH === 'function' &&
+      typeof _whEscrituraDirectaON === 'function' && _whEscrituraDirectaON()) {
+    try { _dualWriteDetallesGuiaWH(idGuia); }
+    catch(_ePre) { Logger.log('[cierre] dual-write detalle PRE-RPC fallo idGuia=' + idGuia + ': ' + (_ePre && _ePre.message)); }
+  }
+
   // [ESCRITURA DIRECTA WH · Fase 1] Si el gate WH_ESCRITURA_DIRECTA está ON, la
   // RPC idempotente wh.cerrar_guia_idempotente es la FUENTE DE VERDAD del stock:
   // aplica delta = cant_recibida − cantidad_aplicada por línea (no duplica al
@@ -1665,8 +1685,24 @@ function _cerrarGuiaImpl(idGuia, usuario, idSesion, opts) {
     try {
       var rDir = _whCerrarGuiaDirecto(idGuia);
       if (rDir && rDir.handled) {
-        stockYaAplicadoDirecto = true;   // la RPC ya aplicó TODO el stock atómicamente
-        Logger.log('[cierre] escritura DIRECTA Supabase OK idGuia=' + idGuia + ' → ' + JSON.stringify(rDir.data));
+        // [FIX KARDEX SALIDA_ZONA · GUARD ANTI-SOMBRA-VACÍA] La RPC devuelve cuántas
+        // líneas aplicó (lineasAplicadas) y saltó por delta 0 (lineasSaltadas). Si la
+        // guía NO es envasado y la Hoja tiene líneas con producto pero la RPC procesó
+        // CERO (aplicadas+saltadas == 0), la sombra estaba desincronizada (el detalle
+        // no llegó) → NO confiamos en la RPC: caemos al _actualizarStock de la Hoja
+        // (red de seguridad money-safe). Re-trabajar es idempotente (kardex por origen
+        // único guía#línea@cant + delta-reconciliación por cantidadAplicada).
+        var _dd = rDir.data || {};
+        var _procesadas = (parseInt(_dd.lineasAplicadas, 10) || 0) + (parseInt(_dd.lineasSaltadas, 10) || 0);
+        var _lineasConProd = esEnvasado ? 0 : detalles.filter(function(d){ return String(d.codigoProducto || '').trim() !== ''; }).length;
+        if (!esEnvasado && _lineasConProd > 0 && _procesadas === 0) {
+          Logger.log('[cierre] ⚠ RPC handled pero procesó 0 líneas y la Hoja tiene ' + _lineasConProd +
+                     ' con producto → sombra vacía/desync. FALLBACK a _actualizarStock. idGuia=' + idGuia);
+          // stockYaAplicadoDirecto queda false → abajo corre _actualizarStock (kardex Hoja + sync).
+        } else {
+          stockYaAplicadoDirecto = true;   // la RPC ya aplicó TODO el stock atómicamente
+          Logger.log('[cierre] escritura DIRECTA Supabase OK idGuia=' + idGuia + ' → ' + JSON.stringify(rDir.data));
+        }
       } else if (rDir && rDir.fallback) {
         Logger.log('[cierre] escritura directa falló (' + rDir.error + ') → FALLBACK a _actualizarStock. idGuia=' + idGuia);
       }

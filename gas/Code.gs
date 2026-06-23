@@ -483,6 +483,28 @@ function _getStockProducto(codigo) {
   return { fila: -1, cantidad: 0 };
 }
 
+// [ESCRITURA DIRECTA WH] Cantidad de stock VIGENTE de un producto para LECTURAS de
+// presentación (getProducto / getStockProducto). Cuando FUENTE_DATOS=supabase, el stock
+// real lo escribe la RPC directo en Supabase y la Hoja STOCK puede quedar atrás → leer la
+// Hoja mostraría stock viejo. Reusa _filasStockWH() (= getStockFlip: Supabase con fallback
+// Hoja, cacheado 15s) y cae a _getStockProducto (Hoja) si no encuentra el código.
+// OJO: NO usar como baseline de _actualizarStock (esa es la ruta de respaldo/Hoja y necesita
+// la cantidad de la Hoja + el nº de fila); esto es SÓLO para mostrar la cantidad al operador.
+function _stockCantidadVigente(codigo) {
+  var sCod = String(codigo);
+  try {
+    if (typeof _filasStockWH === 'function') {
+      var rows = _filasStockWH();
+      if (Array.isArray(rows)) {
+        for (var i = 0; i < rows.length; i++) {
+          if (String(rows[i].codigoProducto) === sCod) return parseFloat(rows[i].cantidadDisponible) || 0;
+        }
+      }
+    }
+  } catch (e) { /* cae a Hoja */ }
+  return _getStockProducto(codigo).cantidad;
+}
+
 // ============================================================
 // Bridge hacia ProyectoMOS — siempre lee de MOS_SS_ID
 // Sin fallback local: si MOS_SS_ID no está configurado, error claro.

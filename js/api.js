@@ -712,6 +712,17 @@ const API = (() => {
     if (action === 'getSesionActiva') {
       return await _sbRpcWH('get_sesion_activa', { p: { idSesion: params.idSesion } }, 'wh');
     }
+    // [Frente 4] getHistorialGuia desde Supabase (wh.historial_guia, read-only). Compone 6 fuentes (guias/ops_log/
+    // stock_mov/producto_nuevo/mermas) + gating admin/master server-side. APP_NO_AUTORIZADA (misconfig) → GAS;
+    // la denegación legítima (no admin) y "no encontrada" SÍ se devuelven (GAS daría lo mismo).
+    if (action === 'getHistorialGuia') {
+      const out = await _sbRpcWH('historial_guia', { p: {
+        idGuia: params.idGuia || '', idPersonal: params.idPersonal || '',
+        usuario: params.usuario || '', claveAdmin: params.claveAdmin || ''
+      } }, 'wh');
+      if (!out || (out.ok === false && String(out.error || '') === 'APP_NO_AUTORIZADA')) return null;
+      return out;
+    }
     // [Frente 4] getImpresorasEcosistema → Edge `printers` {op:'list'} (PrintNode), no GAS. Read-only.
     if (action === 'getImpresorasEcosistema') {
       try {

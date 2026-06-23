@@ -257,6 +257,10 @@ function imprimirTicketGuia(params) {
   //      Si vemos menos: esperar + flush + reintentar (hasta 3 veces).
   try { SpreadsheetApp.flush(); } catch(_){}
   var esperado = parseInt(params.esperadoDetalles) || 0;
+  // [v2.13.243] Las guías directas (id 'G_L…') viven en Supabase, no en el Sheet
+  // GUIA_DETALLE → contar ahí siempre daría 0 y el loop dormiría 4.5s en vano.
+  // Su consistencia ya la garantiza la RPC en Supabase; saltamos la espera.
+  if (idGuia.indexOf('G_L') === 0) esperado = 0;
   if (esperado > 0) {
     function _contarDetalles() {
       return _sheetToObjects(getSheet('GUIA_DETALLE'))
@@ -278,6 +282,23 @@ function imprimirTicketGuia(params) {
   // ── Datos ────────────────────────────────────────────────────
   var guias = _sheetToObjects(getSheet('GUIAS'));
   var g     = guias.find(function(x) { return x.idGuia === idGuia; });
+
+  // [v2.13.243] FALLBACK SUPABASE — guías directas (id 'G_L…') NACEN en
+  // wh.guias y NUNCA llegan al Sheet GUIAS (las crea el PWA vía RPC crear_guia,
+  // no GAS). Esto incluye TODAS las JEFATURA (INGRESO_JEFATURA / SALIDA_JEFATURA)
+  // y cualquier salida directa. Para esas guías el lookup en el Sheet fallaba con
+  // "Guía no encontrada" → toast "ese id no existe" y NO imprimía. Si el Sheet no
+  // la tiene, la leemos de Supabase (wh.guias + wh.guia_detalle) y mapeamos al
+  // mismo shape camelCase que _sheetToObjects, de modo que el resto del armado del
+  // ticket (template ESC/POS idéntico) funcione sin tocarse.
+  var detsSupabase = null;  // null = leer detalle del Sheet (camino clásico); array = ya cargado de Supabase
+  if (!g) {
+    var _gSb = _cargarGuiaDesdeSupabase_(idGuia);
+    if (_gSb && _gSb.guia) {
+      g = _gSb.guia;
+      detsSupabase = _gSb.detalle || [];
+    }
+  }
   if (!g) return { ok: false, error: 'Guía no encontrada: ' + idGuia };
 
   var TIPO_LABELS = {
@@ -341,7 +362,11 @@ function imprimirTicketGuia(params) {
       if (cod) pnMap[cod] = { desc: String(pn.descripcion || pn.marca || cod), estado: String(pn.estado || '') };
     });
 
-    dets = _sheetToObjects(getSheet('GUIA_DETALLE'))
+    // Fuente del detalle: Supabase (guía directa 'G_L…') o el Sheet (clásico).
+    var detRows = detsSupabase !== null
+      ? detsSupabase
+      : _sheetToObjects(getSheet('GUIA_DETALLE'));
+    dets = detRows
       .filter(function(d) { return d.idGuia === idGuia && d.observacion !== 'ANULADO'; })
       .map(function(d) {
         var cod        = String(d.codigoProducto || '');
@@ -892,6 +917,66 @@ function imprimirTicketGuia(params) {
     return { ok: false, error: 'PrintNode ' + code + ': ' + resp.getContentText() };
   } catch(e) {
     return { ok: false, error: e.message };
+  }
+}
+
+// ============================================================
+// [v2.13.243] Fallback de lectura de guía DIRECTA desde Supabase
+// ------------------------------------------------------------
+// Una guía nacida en el PWA (id 'G_L…', p.ej. todas las JEFATURA) vive solo en
+// wh.guias / wh.guia_detalle y NUNCA se escribe al Sheet GUIAS → imprimirTicketGuia
+// no la encontraba en el Sheet. Esta función la trae de Supabase y la mapea al
+// MISMO shape camelCase que _sheetToObjects, para que el armado del ticket
+// (template ESC/POS) la consuma sin cambios.
+// Devuelve { guia, detalle } o null si no existe / falla la lectura.
+// ============================================================
+function _cargarGuiaDesdeSupabase_(idGuia) {
+  try {
+    var gr = _sbSelect('wh.guias', {
+      filters: { id_guia: 'eq.' + idGuia },
+      limit: 1
+    });
+    if (!gr || !gr.ok || !gr.data || !gr.data.length) return null;
+    var r = gr.data[0];
+
+    // snake_case (Supabase) → camelCase (shape que espera el resto del código)
+    var guia = {
+      idGuia:         String(r.id_guia || ''),
+      tipo:           String(r.tipo || ''),
+      estado:         String(r.estado || ''),
+      fecha:          r.fecha || '',
+      usuario:        String(r.usuario || ''),
+      comentario:     String(r.comentario || ''),
+      idProveedor:    String(r.id_proveedor || ''),
+      idZona:         String(r.id_zona || ''),
+      numeroDocumento:String(r.numero_documento || ''),
+      idPreingreso:   String(r.id_preingreso || ''),
+      montoTotal:     r.monto_total,
+      foto:           String(r.foto || '')
+    };
+
+    var detalle = [];
+    var dr = _sbSelect('wh.guia_detalle', {
+      filters: { id_guia: 'eq.' + idGuia },
+      order:   'linea'
+    });
+    if (dr && dr.ok && dr.data && dr.data.length) {
+      detalle = dr.data.map(function(d) {
+        return {
+          idGuia:           String(d.id_guia || ''),
+          codigoProducto:   String(d.cod_producto || ''),
+          cantidadEsperada: d.cant_esperada,
+          cantidadRecibida: d.cant_recibida,
+          fechaVencimiento: d.fecha_vencimiento || '',
+          observacion:      String(d.observacion || ''),
+          idLote:           String(d.id_lote || '')
+        };
+      });
+    }
+    return { guia: guia, detalle: detalle };
+  } catch(e) {
+    Logger.log('[_cargarGuiaDesdeSupabase_] ' + idGuia + ' ERR ' + (e && e.message || e));
+    return null;
   }
 }
 

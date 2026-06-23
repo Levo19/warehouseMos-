@@ -33,8 +33,9 @@ function getProducto(codigo) {
   });
   if (!prod) return { ok: false, error: 'Producto no encontrado: ' + codigo };
 
-  // Enriquecer con stock actual (STOCK usa codigoBarra como clave)
-  prod.stockActual = _getStockProducto(prod.codigoBarra || prod.idProducto).cantidad;
+  // Enriquecer con stock actual (STOCK usa codigoBarra como clave). [ESCRITURA DIRECTA WH]
+  // Stock VIGENTE desde la fuente flip (Supabase si está ON, fallback Hoja) → no muestra stock viejo.
+  prod.stockActual = _stockCantidadVigente(prod.codigoBarra || prod.idProducto);
 
   // Lotes vigentes (LOTES usa codigoBarra)
   var lotes = _sheetToObjects(getSheet('LOTES_VENCIMIENTO'));
@@ -71,7 +72,8 @@ function getStock(params) {
 }
 
 function getStockProducto(codigo) {
-  var info = _getStockProducto(codigo);
+  // [ESCRITURA DIRECTA WH] cantidad VIGENTE desde la fuente flip (Supabase si ON, fallback Hoja).
+  var cantidad = _stockCantidadVigente(codigo);
   var prods = _sheetToObjects(getProductosSheet());
   var prod  = prods.find(function(p){ return p.idProducto === codigo; }) || {};
   return {
@@ -79,10 +81,10 @@ function getStockProducto(codigo) {
     data: {
       codigo:     codigo,
       descripcion: prod.descripcion || codigo,
-      cantidad:   info.cantidad,
+      cantidad:   cantidad,
       unidad:     prod.unidad || '',
       stockMinimo: prod.stockMinimo || 0,
-      alerta:     info.cantidad < (parseFloat(prod.stockMinimo) || 0)
+      alerta:     cantidad < (parseFloat(prod.stockMinimo) || 0)
     }
   };
 }
@@ -1313,6 +1315,26 @@ function registrarMerma(params) {
 
   if (params.idSesion) registrarActividad(params.idSesion, 'MERMA_REGISTRADA', 1);
 
+  // [ESCRITURA DIRECTA WH] La merma es operativa y getMermas LEE de Supabase cuando
+  // FUENTE_DATOS=supabase. wh.registrar_merma (idempotente por id_merma) es la fuente
+  // de verdad de la fila. La foto se sube a Drive ANTES (GAS) y se pasa la URL.
+  // La Hoja se escribe igual como respaldo. Gate OFF / RPC fallida → fallback a sólo-Hoja.
+  if (typeof _whEscrituraDirectaON === 'function' && _whEscrituraDirectaON() && typeof _whRpcStock === 'function') {
+    try {
+      _whRpcStock('registrar_merma', { p: {
+        id_merma:        id,
+        codigo_producto: String(params.codigoProducto || ''),
+        cantidad:        cant,
+        motivo:          String(params.motivo || ''),
+        usuario:         String(params.usuario || ''),
+        responsable:     String(params.responsable || ''),
+        origen:          String(params.responsable || params.origen || 'ALMACEN'),
+        id_lote:         String(params.idLote || ''),
+        foto:            fotoUrl
+      }});  // best-effort: la Hoja sigue escribiéndose abajo como respaldo (mismo id → no duplica en sync)
+    } catch(_eM) { Logger.log('[registrarMerma] directo excepción: ' + (_eM && _eM.message)); }
+  }
+
   // Escribir por nombre de columna (la hoja puede tener schema viejo o nuevo)
   // Al primer registro con campos nuevos, agregamos las columnas faltantes.
   _ensureColumnasMerma(sheet);
@@ -1405,6 +1427,37 @@ function resolverMerma(params) {
   var usuario         = String(params.usuario || '');
   if (!idMerma) return { ok: false, error: 'idMerma requerido' };
 
+  // [ESCRITURA DIRECTA WH] wh.resolver_merma es el orquestador atómico: marca la merma
+  // RESUELTA + (si hay desecho) crea/usa la guía SALIDA_MERMA semanal y su detalle, todo
+  // en una transacción idempotente (dedup local_id + guard estado FOR UPDATE). Cuando la
+  // maneja, NO debemos volver a crear el detalle de guía por la Hoja (agregarDetalleGuia
+  // tiene su propio path directo → duplicaría la línea en Supabase): sólo espejamos la
+  // fila MERMAS en la Hoja con el id_guia_salida que devolvió la RPC.
+  if (typeof _whEscrituraDirectaON === 'function' && _whEscrituraDirectaON() && typeof _whRpcStock === 'function') {
+    var rMD = null;
+    try {
+      rMD = _whRpcStock('resolver_merma', { p: {
+        id_merma:               idMerma,
+        cantidad_reparada:      cantReparada,
+        cantidad_desechada:     cantDesechada,
+        observacion_resolucion: observacion,
+        usuario:                usuario,
+        id_detalle:             'MRMDET_' + idMerma,
+        local_id:               'RESMERMA_' + idMerma
+      }});
+    } catch(_eRM) { Logger.log('[resolverMerma] directo excepción: ' + (_eRM && _eRM.message)); rMD = null; }
+    if (rMD && rMD.ok) {
+      var dM = rMD.data || {};
+      var idGuiaSalidaD = String(dM.id_guia_salida || '');
+      try { _espejarResolverMermaEnHoja(idMerma, cantReparada, cantDesechada, observacion, idGuiaSalidaD); }
+      catch(_eMir) { Logger.log('[resolverMerma] espejo Hoja falló: ' + (_eMir && _eMir.message)); }
+      return { ok: true, data: { idMerma: idMerma, idGuiaSalida: idGuiaSalidaD,
+                                  cantidadReparada: cantReparada, cantidadDesechada: cantDesechada } };
+    } else if (rMD && rMD.fallback) {
+      Logger.log('[resolverMerma] directo falló (' + rMD.error + ') → FALLBACK Hoja. id=' + idMerma);
+    }
+  }
+
   var sheet = getSheet('MERMAS');
   _ensureColumnasMerma(sheet);
   var data  = sheet.getDataRange().getValues();
@@ -1464,6 +1517,37 @@ function resolverMerma(params) {
                                 cantidadReparada: cantReparada, cantidadDesechada: cantDesechada } };
   }
   return { ok: false, error: 'Merma no encontrada' };
+}
+
+// [ESCRITURA DIRECTA WH] Espeja en la Hoja MERMAS lo que ya hizo wh.resolver_merma en
+// Supabase (fuente de verdad): marca la fila RESUELTA con sus cantidades + id_guia_salida.
+// NO crea detalle de guía (lo creó la RPC en Supabase; agregarDetalleGuia duplicaría).
+// Best-effort: si la merma es huérfana de la Hoja no falla. Sólo respaldo/coherencia.
+function _espejarResolverMermaEnHoja(idMerma, cantReparada, cantDesechada, observacion, idGuiaSalida) {
+  var sheet = getSheet('MERMAS');
+  if (!sheet) return;
+  _ensureColumnasMerma(sheet);
+  var data = sheet.getDataRange().getValues();
+  var hdrs = data[0];
+  var idxId     = hdrs.indexOf('idMerma');
+  var idxEstado = hdrs.indexOf('estado');
+  var idxPend   = hdrs.indexOf('cantidadPendiente');
+  var idxRep    = hdrs.indexOf('cantidadReparada');
+  var idxDes    = hdrs.indexOf('cantidadDesechada');
+  var idxFechaR = hdrs.indexOf('fechaResolucion');
+  var idxObsR   = hdrs.indexOf('observacionResolucion');
+  var idxIdGuia = hdrs.indexOf('idGuiaSalida');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][idxId]) !== String(idMerma)) continue;
+    if (idxRep    >= 0) sheet.getRange(i + 1, idxRep    + 1).setValue(cantReparada);
+    if (idxDes    >= 0) sheet.getRange(i + 1, idxDes    + 1).setValue(cantDesechada);
+    if (idxPend   >= 0) sheet.getRange(i + 1, idxPend   + 1).setValue(0);
+    if (idxEstado >= 0) sheet.getRange(i + 1, idxEstado + 1).setValue('RESUELTA');
+    if (idxFechaR >= 0) sheet.getRange(i + 1, idxFechaR + 1).setValue(new Date());
+    if (idxObsR   >= 0) sheet.getRange(i + 1, idxObsR   + 1).setValue(observacion);
+    if (idxIdGuia >= 0 && idGuiaSalida) sheet.getRange(i + 1, idxIdGuia + 1).setValue(idGuiaSalida);
+    break;
+  }
 }
 
 // Busca o crea la guía SALIDA_MERMA ABIERTA de la semana actual (lun-dom).
@@ -1575,7 +1659,9 @@ function getAuditorias(params) {
 function asignarAuditoria(params) {
   var sheet = getSheet('AUDITORIAS');
   var id    = _generateId('AUD');
-  var stockActual = _getStockProducto(params.codigoProducto).cantidad;
+  // [ESCRITURA DIRECTA WH] stock teórico VIGENTE (Supabase si flip ON, fallback Hoja) → el auditor
+  // compara el físico contra el real, no contra un valor viejo de la Hoja.
+  var stockActual = _stockCantidadVigente(params.codigoProducto);
 
   sheet.appendRow([
     id, new Date(), params.codigoProducto, params.usuario,
@@ -1629,8 +1715,11 @@ function _auditarProductoImpl(params) {
     return { ok: false, error: 'stockFisico inválido' };
 
   // ── 1. Stock sistema actual ────────────────────────────────
+  // stockInfo (con .fila de la Hoja) lo usa el FALLBACK que escribe la Hoja; el stock
+  // SISTEMA para el diff/registro sale de la fuente VIGENTE (Supabase si flip ON, fallback
+  // Hoja) para que el auditor compare el físico contra el real, no contra la Hoja vieja.
   var stockInfo    = _getStockProducto(codigoBarra);
-  var stockSistema = stockInfo.cantidad;
+  var stockSistema = _stockCantidadVigente(codigoBarra);
   var diff         = stockFisico - stockSistema;
   var resultado    = Math.abs(diff) <= 0.5 ? 'OK' : 'DIFERENCIA';
 

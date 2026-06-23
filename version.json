@@ -1,1 +1,1 @@
-{ "version": "2.13.326", "build": "F1 sesion: getSesionActiva + cerrarTurno 100% Supabase (wh.get_sesion_activa/cerrar_sesion, SQL 221). Login/horario sigue GAS (dato horario-custom solo en Hoja + lockout-risk)." }
+{ "version": "2.13.327", "build": "F4 historial: getHistorialGuia 100% Supabase (wh.historial_guia, SQL 222 — compone guias/ops_log/stock_mov/producto_nuevo/mermas; gating admin/master server-side). Read-only, fallback GAS." }
