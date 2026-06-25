@@ -14323,10 +14323,14 @@ const DespachoView = (() => {
   function _pkckSetGranel(skuBase, valorRaw) {
     const item = _pkckItemPorSku(skuBase);
     if (!item) return;
-    const qty = parseFloat(String(valorRaw).replace(',', '.'));
-    if (isNaN(qty) || qty < 0) return;
+    const qtyIn = parseFloat(String(valorRaw).replace(',', '.'));
+    if (isNaN(qtyIn) || qtyIn < 0) return;
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
+    // [fix] No setear por debajo del baseline (peso ya despachado del rezagado en una guía previa). Para
+    // base=0 (caso normal) es transparente (qty sin cambios).
+    const base = parseFloat(item.despachadoBaseline) || 0;
+    const qty = Math.max(base, qtyIn);
     const cb = _pkckCodigoDe(item);
     // Granel: el input SETEA el total pesado (no acumula). 1 código domina.
     item._ultimoCb = cb;
@@ -14951,6 +14955,10 @@ const DespachoView = (() => {
                       || it.skuBase;
             return { codigo: String(cod), nombre: it.nombre, peso: hoy };
           }).filter(Boolean);
+          // + extras granel escaneados FUERA del pickup (también se despachan en esta guía → también su adhesivo)
+          (cartSnap || []).filter(c => c._extraPickup && _esProductoPeso(c)).forEach(c => {
+            _granelAdh.push({ codigo: c.codigoBarra, nombre: c.descripcion, peso: c.cantidad });
+          });
           _dispararAdhesivosGranel(_granelAdh, d.idGuia);
         } catch (_) {}
 
