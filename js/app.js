@@ -13573,6 +13573,26 @@ const DespachoView = (() => {
     }
   }
 
+  // [Adhesivo granel] Dispara los adhesivos (items ya en shape {codigo,nombre,peso}) en paralelo, con
+  // IDEMPOTENCIA por idGuia: un reintento del despacho reusa el mismo idGuia → no reimprime. Si no salió
+  // ninguno, libera el guard para permitir reintento. Fire-and-forget (jamás rompe el flujo de la guía).
+  const _granelAdhYa = {};
+  function _dispararAdhesivosGranel(granelItems, idGuia) {
+    try {
+      const key = String(idGuia || '');
+      if (!key || _granelAdhYa[key]) return;
+      if (!Array.isArray(granelItems) || !granelItems.length) return;
+      _granelAdhYa[key] = 1;
+      API.imprimirAdhesivoGranel(granelItems)
+        .then(r => {
+          const ok = (r && r.ok && r.data && Array.isArray(r.data.impresos)) ? r.data.impresos.filter(x => x.ok).length : 0;
+          if (ok > 0) toast(`🏷 ${ok} adhesivo(s) granel impresos`, 'ok', 3000);
+          else { delete _granelAdhYa[key]; }   // ninguno salió → permitir reintento (no marcar impreso)
+        })
+        .catch(() => { delete _granelAdhYa[key]; });
+    } catch (_) {}
+  }
+
   async function confirmarDespacho() {
     // ─── LOCK ANTI-DOBLE-CLICK ───────────────────────────────
     // Bug histórico (12 may + 13 may): triple click generaba 3 guías en
@@ -13654,18 +13674,14 @@ const DespachoView = (() => {
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
         _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
-        // [Adhesivo granel] EN PARALELO al ticket: 1 adhesivo por ítem KGM (granel) del despacho,
-        // para pegar en el saco pesado. Fire-and-forget (no bloquea el flujo). La Edge auto-ajusta
-        // las coordenadas por etiqueta (driftOffset) si son varias.
+        // [Adhesivo granel] EN PARALELO al ticket: 1 adhesivo por ítem KGM (granel) para pegar en el saco.
+        // Idempotente por idGuia (un reintento del despacho NO reimprime). Fire-and-forget.
         try {
-          const _granelAdh = cartSnapshot
-            .filter(c => _esProductoPeso(c))
-            .map(c => ({ codigo: c.codigoBarra, nombre: c.descripcion, peso: c.cantidad }));
-          if (_granelAdh.length) {
-            API.imprimirAdhesivoGranel(_granelAdh)
-              .then(r => { if (r && r.ok) toast(`🏷 ${_granelAdh.length} adhesivo(s) granel`, 'ok', 3000); })
-              .catch(() => {});
-          }
+          _dispararAdhesivosGranel(
+            cartSnapshot.filter(c => _esProductoPeso(c))
+              .map(c => ({ codigo: c.codigoBarra, nombre: c.descripcion, peso: c.cantidad })),
+            d.idGuia
+          );
         } catch (_) {}
         // [Fix #2+#5 v2.11.2] Re-impresión validada con QR + verificación
         // de items. Pasamos `esperadoDetalles` para que el backend espere
@@ -14290,9 +14306,12 @@ const DespachoView = (() => {
     const item = _pkckItemPorSku(skuBase);
     if (!item) return;
     const prevDesp = parseFloat(item.despachado) || 0;
-    if (prevDesp <= 0) return;
+    // [fix] No bajar del baseline: lo ya despachado del acumulado (rezagado) salió en una guía previa y NO se
+    // "des-despacha" desde acá. El piso es el baseline, no 0.
+    const base = parseFloat(item.despachadoBaseline) || 0;
+    if (prevDesp <= base) return;
     const cb = _pkckCodigoDe(item);
-    item.despachado = Math.max(0, prevDesp - 1);
+    item.despachado = Math.max(base, prevDesp - 1);
     if (item.despachadoPorCodigo && item.despachadoPorCodigo[cb] != null) {
       const nv = (parseFloat(item.despachadoPorCodigo[cb]) || 0) - 1;
       if (nv > 0) item.despachadoPorCodigo[cb] = nv;
@@ -14759,27 +14778,31 @@ const DespachoView = (() => {
     abrirSheet('sheetDespPickup');
   }
 
+  // Normaliza los items de un pickup sembrando `despachadoBaseline` = lo YA despachado (rezagado del
+  // acumulado) al ABRIR el pickup, preservándolo si ya existe (refresh/restore). El baseline alimenta la
+  // vista "faltan N" del operador (barra desde 0). DEBE usarse en TODOS los puntos donde se construye
+  // _pickupActivo.items (empezarPickup Y abrirPickup) o el flujo rezagado queda sin baseline → vuelve a 1/6.
+  function _normalizarItemsPickup(items) {
+    return (items || []).map(it => {
+      const desp0 = parseFloat(it.despachado) || 0;
+      return {
+        skuBase:             it.skuBase,
+        nombre:              it.nombre || it.skuBase,
+        solicitado:          parseFloat(it.solicitado) || 0,
+        despachado:          desp0,
+        despachadoBaseline:  (it.despachadoBaseline != null ? parseFloat(it.despachadoBaseline) : desp0),
+        codigosOriginales:   Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
+        despachadoPorCodigo: it.despachadoPorCodigo || {}
+      };
+    });
+  }
+
   // Empezar el despacho de un pickup: marca EN_PROCESO, persiste, cierra sheet,
   // muestra banner y deja al operador escaneando.
   async function empezarPickup() {
     if (!_pickupActivo) return;
     // Inicializar estructura si viene fresca
-    _pickupActivo.items = (_pickupActivo.items || []).map(it => {
-      const desp0 = parseFloat(it.despachado) || 0;
-      return {
-        skuBase:           it.skuBase,
-        nombre:            it.nombre || it.skuBase,
-        solicitado:        parseFloat(it.solicitado) || 0,
-        despachado:        desp0,
-        // [fix UX operador] baseline = lo YA despachado (rezagado del acumulado) al ARRANCAR el pickup. La
-        // barra/conteo que ve el operador se mide contra lo que falta HOY (solicitado − baseline) y arranca en
-        // 0 → así escanea de uno en uno y la barra se llena, sin confundirse con el "1" que venía del acumulado.
-        // Se preserva si ya existía (refresh/restore).
-        despachadoBaseline: (it.despachadoBaseline != null ? parseFloat(it.despachadoBaseline) : desp0),
-        codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
-        despachadoPorCodigo: it.despachadoPorCodigo || {}
-      };
-    });
+    _pickupActivo.items = _normalizarItemsPickup(_pickupActivo.items);
     _pickupActivo.estado = 'EN_PROCESO';
     const usuario = window.WH_CONFIG?.usuario || '';
     _pickupActivo.atendidoPor = usuario;
@@ -14912,6 +14935,25 @@ const DespachoView = (() => {
             toast('🖨 No se pudo imprimir: ' + (eImp.message || eImp) + ' · encolado para reintento', 'warn', 9000);
           }
         }
+        // [Adhesivo granel] EN PARALELO: 1 adhesivo por ítem KGM despachado HOY en este pickup (peso =
+        // despachado − baseline). Idempotente por idGuia. Fire-and-forget. Cubre el flujo dominante (pickup),
+        // que NO pasaba por confirmarDespacho.
+        try {
+          const _maestro = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+          const _granelAdh = (pickupSnap.items || []).map(it => {
+            const prod = _maestro.find(p => String(p.idProducto) === String(it.skuBase) || String(p.skuBase) === String(it.skuBase));
+            if (!_esProductoPeso(prod)) return null;
+            const base = parseFloat(it.despachadoBaseline) || 0;
+            const hoy  = Math.max(0, (parseFloat(it.despachado) || 0) - base);
+            if (hoy <= 0) return null;
+            const cod = Object.keys(it.despachadoPorCodigo || {})[0]
+                      || (Array.isArray(it.codigosOriginales) ? it.codigosOriginales[0] : null)
+                      || it.skuBase;
+            return { codigo: String(cod), nombre: it.nombre, peso: hoy };
+          }).filter(Boolean);
+          _dispararAdhesivosGranel(_granelAdh, d.idGuia);
+        } catch (_) {}
+
         // Historial local
         const items = (pickupSnap.items || []).filter(it => (parseFloat(it.despachado)||0) > 0).map(it => ({
           codigoBarra: it.skuBase, descripcion: it.nombre, cantidad: it.despachado
@@ -15022,14 +15064,7 @@ const DespachoView = (() => {
           ...p,
           atendidoPor: usuario,
           estado: 'EN_PROCESO',
-          items: (p.items || []).map(it => ({
-            skuBase:           it.skuBase,
-            nombre:            it.nombre || it.skuBase,
-            solicitado:        parseFloat(it.solicitado) || 0,
-            despachado:        parseFloat(it.despachado) || 0,
-            codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
-            despachadoPorCodigo: it.despachadoPorCodigo || {}
-          }))
+          items: _normalizarItemsPickup(p.items)
         };
       } else {
         // Conservar progreso local, solo refrescar metadata
