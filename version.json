@@ -1,1 +1,1 @@
-{ "version": "2.13.341", "build": "Pickup card: fix 'hace' (m/h/ayer/Nd/fecha, ya no 'hace 24h'); iconos imprimir/eliminar rediseñados (pk-iconbtn, hover/press/glow por accion). Acumulador: una sola lista por zona (barrido)." }
+{ "version": "2.13.342", "build": "Pickup card: 'hace' usa ultimaActividad (refleja el ultimo cierre, no la creacion) -> ya no 'ayer'. Iconos imprimir/eliminar ahora SVG nitidos (no emoji)." }

@@ -13806,10 +13806,11 @@ const DespachoView = (() => {
           else if (fuente.indexOf('me_cierre') >= 0) { fuenteIcon = '🛒'; fuenteLbl = 'Cierre caja'; }
           else if (fuente.indexOf('riz') >= 0)       { fuenteIcon = '🛒'; fuenteLbl = 'Pedido de zona'; }
           // [fix display] hace robusto: m / h / ayer / Nd / fecha. Parse defensivo (NaN → vacío).
-          // Antes solo llegaba a horas → un pickup de ayer mostraba "hace 24h" en vez de "ayer".
+          // El ACUMULADO usa ULTIMA ACTIVIDAD (último cierre que lo alimentó) en vez de fechaCreado
+          // (que es cuando nació la lista) → así refleja "hace 2h" cuando recién cerró una caja.
           let hace = '';
           try {
-            const t = new Date(p.fechaCreado).getTime();
+            const t = new Date(p.ultimaActividad || p.fechaCreado).getTime();
             if (!isNaN(t)) {
               const min = Math.floor((Date.now() - t) / 60000);
               if      (min < 1)    hace = 'recién';
@@ -13882,10 +13883,10 @@ const DespachoView = (() => {
               <div class="flex items-center gap-1.5 flex-shrink-0">
                 ${fuente.indexOf('acumulado') >= 0 ? `<button onclick="event.stopPropagation();DespachoView.imprimirAcumuladoManual('${escAttr(p.idPickup)}')"
                         title="Imprimir ticket de esta zona" aria-label="Imprimir ticket"
-                        class="pk-iconbtn is-print">🖨</button>` : ''}
+                        class="pk-iconbtn is-print"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg></button>` : ''}
                 <button onclick="event.stopPropagation();DespachoView.eliminarPickupAdmin('${escAttr(p.idPickup)}')"
                         title="Eliminar pickup (requiere clave admin)" aria-label="Eliminar pickup"
-                        class="pk-iconbtn is-danger">🗑</button>
+                        class="pk-iconbtn is-danger"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></button>
               </div>
             </div>`;
         }).join('');
