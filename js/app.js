@@ -14012,11 +14012,19 @@ const DespachoView = (() => {
     });
   }
 
+  let _pickupRtWired = false;
   function startPoll() {
     if (_pollTimer) return;
     _pollPickups();
     // Polling 30s — antes era 120s. Ruido de almacén = se necesita aviso rápido.
     _pollTimer = setInterval(_pollPickups, 30_000);
+    // [v2.13.344] Realtime: re-pollear al INSTANTE cuando wh.pickups cambia (cierre/consolidación/
+    // despacho dispara wh.ops_meta dominio 'pickups' → api.js emite 'wh:pickups-realtime').
+    // El poller de 30s queda de respaldo. Listener una sola vez (guard).
+    if (!_pickupRtWired) {
+      _pickupRtWired = true;
+      window.addEventListener('wh:pickups-realtime', () => { try { _pollPickups(); } catch (_) {} });
+    }
   }
 
   // ── Matching engine (Fase 2) ────────────────────────────────

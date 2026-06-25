@@ -2387,6 +2387,20 @@ const API = (() => {
         { event: 'UPDATE', schema: 'mos', table: 'catalogo_meta' },
         (payload) => { _rtNotificar(_rtVersionDePayload(payload), 'realtime'); }
       );
+      // [v2.13.344] Realtime de la LISTA DE PICKUP: wh.ops_meta dominio 'pickups' sube cada vez
+      // que cambia wh.pickups (cierre de caja, consolidación, despacho). La vista de despacho
+      // escucha 'wh:pickups-realtime' y re-pollea al instante (antes esperaba el poller de 30s).
+      channel.on('postgres_changes',
+        { event: 'UPDATE', schema: 'wh', table: 'ops_meta' },
+        (payload) => {
+          try {
+            const rec = (payload && (payload.new || (payload.data && payload.data.record))) || {};
+            if (String(rec.dominio || '') === 'pickups') {
+              window.dispatchEvent(new CustomEvent('wh:pickups-realtime'));
+            }
+          } catch (_) {}
+        }
+      );
       channel.subscribe((status) => {
         try { console.log('[Realtime] canal catalogo_meta:', status); } catch (_) {}
         // Al (re)suscribir, leer la versión actual del catálogo y notificarla por si
