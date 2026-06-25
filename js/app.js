@@ -13805,11 +13805,20 @@ const DespachoView = (() => {
           if (fuente.indexOf('acumulado') >= 0)      { fuenteIcon = '📋'; fuenteLbl = 'Acumulado semanal'; }
           else if (fuente.indexOf('me_cierre') >= 0) { fuenteIcon = '🛒'; fuenteLbl = 'Cierre caja'; }
           else if (fuente.indexOf('riz') >= 0)       { fuenteIcon = '🛒'; fuenteLbl = 'Pedido de zona'; }
+          // [fix display] hace robusto: m / h / ayer / Nd / fecha. Parse defensivo (NaN → vacío).
+          // Antes solo llegaba a horas → un pickup de ayer mostraba "hace 24h" en vez de "ayer".
           let hace = '';
           try {
             const t = new Date(p.fechaCreado).getTime();
-            const min = Math.floor((Date.now() - t) / 60000);
-            hace = min < 1 ? 'recién' : min < 60 ? ('hace ' + min + 'm') : ('hace ' + Math.floor(min/60) + 'h');
+            if (!isNaN(t)) {
+              const min = Math.floor((Date.now() - t) / 60000);
+              if      (min < 1)    hace = 'recién';
+              else if (min < 60)   hace = 'hace ' + min + 'm';
+              else if (min < 1440) hace = 'hace ' + Math.floor(min / 60) + 'h';
+              else if (min < 2880) hace = 'ayer';
+              else if (min < 10080)hace = 'hace ' + Math.floor(min / 1440) + 'd';
+              else hace = new Date(t).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', timeZone: 'America/Lima' });
+            }
           } catch(_) {}
           // Lock visual — atendidoPor distinto al usuario actual = bloqueado.
           // Comparación normalizada para tolerar dobles espacios / mayúsculas
@@ -13870,12 +13879,14 @@ const DespachoView = (() => {
                 ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
               </div>
               ${btnHtml}
-              ${fuente.indexOf('acumulado') >= 0 ? `<button onclick="event.stopPropagation();DespachoView.imprimirAcumuladoManual('${escAttr(p.idPickup)}')"
-                      title="Imprimir ticket de esta zona" aria-label="Imprimir ticket"
-                      class="flex-shrink-0" style="background:transparent;border:none;color:#64748b;font-size:15px;padding:4px 5px;cursor:pointer;line-height:1">🖨</button>` : ''}
-              <button onclick="event.stopPropagation();DespachoView.eliminarPickupAdmin('${escAttr(p.idPickup)}')"
-                      title="Eliminar pickup (requiere clave admin)" aria-label="Eliminar pickup"
-                      class="flex-shrink-0" style="background:transparent;border:none;color:#64748b;font-size:15px;padding:4px 5px;cursor:pointer;line-height:1">🗑</button>
+              <div class="flex items-center gap-1.5 flex-shrink-0">
+                ${fuente.indexOf('acumulado') >= 0 ? `<button onclick="event.stopPropagation();DespachoView.imprimirAcumuladoManual('${escAttr(p.idPickup)}')"
+                        title="Imprimir ticket de esta zona" aria-label="Imprimir ticket"
+                        class="pk-iconbtn is-print">🖨</button>` : ''}
+                <button onclick="event.stopPropagation();DespachoView.eliminarPickupAdmin('${escAttr(p.idPickup)}')"
+                        title="Eliminar pickup (requiere clave admin)" aria-label="Eliminar pickup"
+                        class="pk-iconbtn is-danger">🗑</button>
+              </div>
             </div>`;
         }).join('');
         // [v2.13.16] Cards de listas sombra del equipo — mismo estilo card,

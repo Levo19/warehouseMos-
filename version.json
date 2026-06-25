@@ -1,1 +1,1 @@
-{ "version": "2.13.340", "build": "Ticket de guia 100% Supabase y CERO GAS: imprimirTicketGuia usa SOLO la Edge ticket-guia (eliminados los fallbacks a GAS que duplicaban). Anti-doble: dedup atomico wh.reservar_ticket + en timeout NO reimprime. Pasa reporteUrl (QR del reporte). printerId por ID explicito, no por nombre." }
+{ "version": "2.13.341", "build": "Pickup card: fix 'hace' (m/h/ayer/Nd/fecha, ya no 'hace 24h'); iconos imprimir/eliminar rediseñados (pk-iconbtn, hover/press/glow por accion). Acumulador: una sola lista por zona (barrido)." }
