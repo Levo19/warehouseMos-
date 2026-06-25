@@ -12178,9 +12178,16 @@ const DespachoView = (() => {
     cont.innerHTML = sorted.map(it => {
       const sol  = parseFloat(it.solicitado) || 0;
       const desp = parseFloat(it.despachado) || 0;
-      const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
-      const completo  = desp >= sol && sol > 0;
-      const enProg    = desp > 0 && desp < sol;
+      // [fix UX operador] medir contra lo que falta HOY: objetivo = solicitado − baseline (lo que ya venía
+      // despachado del acumulado/rezagado). La barra arranca en 0 y se llena con lo escaneado HOY → el operador
+      // ve "faltan N" en vez del confuso "1/6". (faltanHoy === sol − desp, así el badge de stock no cambia.)
+      const base = parseFloat(it.despachadoBaseline) || 0;
+      const objetivo  = Math.max(0, sol - base);
+      const hechoHoy  = Math.max(0, desp - base);
+      const faltanHoy = Math.max(0, objetivo - hechoHoy);
+      const pct  = objetivo > 0 ? Math.min(100, Math.round((hechoHoy / objetivo) * 100)) : (sol > 0 && desp >= sol ? 100 : 0);
+      const completo  = (objetivo > 0) ? (faltanHoy <= 0) : (sol > 0 && desp >= sol);
+      const enProg    = hechoHoy > 0 && faltanHoy > 0;
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
       const stockRow  = _buscarStock(it);
       const stockD    = stockRow ? parseFloat(stockRow.cantidadDisponible || 0) : 0;
@@ -12214,8 +12221,8 @@ const DespachoView = (() => {
               <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
-              <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
-              <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
+              <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
+              <p class="text-[10px] mt-0.5 font-bold ${faltanHoy > 0 ? 'text-amber-300' : 'text-emerald-400'}">${faltanHoy > 0 ? 'faltan ' + (esKg ? fmt(faltanHoy,3) : faltanHoy) : '✓ listo'}</p>
             </div>
           </div>
           <div class="pkck-bar-wrap">
@@ -14560,9 +14567,14 @@ const DespachoView = (() => {
     cont.innerHTML = filtered.map(it => {
       const sol  = parseFloat(it.solicitado) || 0;
       const desp = parseFloat(it.despachado) || 0;
-      const pct  = sol > 0 ? Math.min(100, Math.round((desp / sol) * 100)) : 0;
-      const completo  = desp >= sol && sol > 0;
-      const enProg    = desp > 0 && desp < sol;
+      // [fix UX operador] objetivo = solicitado − baseline (rezagado); barra/conteo desde 0 con lo de HOY.
+      const base = parseFloat(it.despachadoBaseline) || 0;
+      const objetivo  = Math.max(0, sol - base);
+      const hechoHoy  = Math.max(0, desp - base);
+      const faltanHoy = Math.max(0, objetivo - hechoHoy);
+      const pct  = objetivo > 0 ? Math.min(100, Math.round((hechoHoy / objetivo) * 100)) : (sol > 0 && desp >= sol ? 100 : 0);
+      const completo  = (objetivo > 0) ? (faltanHoy <= 0) : (sol > 0 && desp >= sol);
+      const enProg    = hechoHoy > 0 && faltanHoy > 0;
       const cls       = completo ? 'is-completo' : (enProg ? 'is-progreso' : '');
       const flash     = (flashSkuBase && String(flashSkuBase) === String(it.skuBase)) ? 'is-just-completed is-flash' : '';
       const stockRow  = _buscarStockSheet(it);
@@ -14610,9 +14622,9 @@ const DespachoView = (() => {
         } else {
           ctrlsHtml = `
           <div class="pkck-ctrls">
-            <button class="pkck-ctrl-btn pkck-ctrl-menos" ${desp <= 0 ? 'disabled' : ''}
+            <button class="pkck-ctrl-btn pkck-ctrl-menos" ${hechoHoy <= 0 ? 'disabled' : ''}
                     onclick="DespachoView.pkckMenos('${skuAttr}')">−</button>
-            <span class="pkck-ctrl-val">${desp}</span>
+            <span class="pkck-ctrl-val">${hechoHoy}</span>
             <button class="pkck-ctrl-btn pkck-ctrl-mas"
                     onclick="DespachoView.pkckMas('${skuAttr}')">+</button>
           </div>`;
@@ -14627,8 +14639,8 @@ const DespachoView = (() => {
               <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
-              <p><span class="pkck-qty">${esKg ? fmt(desp,3) : desp}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(sol,3) : sol}${esKg ? ' '+unidadLbl : ''}</span></p>
-              <p class="text-[10px] text-slate-500 mt-0.5">${pct}%</p>
+              <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
+              <p class="text-[10px] mt-0.5 font-bold ${faltanHoy > 0 ? 'text-amber-300' : 'text-emerald-400'}">${faltanHoy > 0 ? 'faltan ' + (esKg ? fmt(faltanHoy,3) : faltanHoy) : '✓ listo'}</p>
             </div>
           </div>
           <div class="pkck-bar-wrap">
@@ -14752,14 +14764,22 @@ const DespachoView = (() => {
   async function empezarPickup() {
     if (!_pickupActivo) return;
     // Inicializar estructura si viene fresca
-    _pickupActivo.items = (_pickupActivo.items || []).map(it => ({
-      skuBase:           it.skuBase,
-      nombre:            it.nombre || it.skuBase,
-      solicitado:        parseFloat(it.solicitado) || 0,
-      despachado:        parseFloat(it.despachado) || 0,
-      codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
-      despachadoPorCodigo: it.despachadoPorCodigo || {}
-    }));
+    _pickupActivo.items = (_pickupActivo.items || []).map(it => {
+      const desp0 = parseFloat(it.despachado) || 0;
+      return {
+        skuBase:           it.skuBase,
+        nombre:            it.nombre || it.skuBase,
+        solicitado:        parseFloat(it.solicitado) || 0,
+        despachado:        desp0,
+        // [fix UX operador] baseline = lo YA despachado (rezagado del acumulado) al ARRANCAR el pickup. La
+        // barra/conteo que ve el operador se mide contra lo que falta HOY (solicitado − baseline) y arranca en
+        // 0 → así escanea de uno en uno y la barra se llena, sin confundirse con el "1" que venía del acumulado.
+        // Se preserva si ya existía (refresh/restore).
+        despachadoBaseline: (it.despachadoBaseline != null ? parseFloat(it.despachadoBaseline) : desp0),
+        codigosOriginales: Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
+        despachadoPorCodigo: it.despachadoPorCodigo || {}
+      };
+    });
     _pickupActivo.estado = 'EN_PROCESO';
     const usuario = window.WH_CONFIG?.usuario || '';
     _pickupActivo.atendidoPor = usuario;
