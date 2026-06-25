@@ -13647,6 +13647,19 @@ const DespachoView = (() => {
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
         _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
+        // [Adhesivo granel] EN PARALELO al ticket: 1 adhesivo por ítem KGM (granel) del despacho,
+        // para pegar en el saco pesado. Fire-and-forget (no bloquea el flujo). La Edge auto-ajusta
+        // las coordenadas por etiqueta (driftOffset) si son varias.
+        try {
+          const _granelAdh = cartSnapshot
+            .filter(c => _esProductoPeso(c))
+            .map(c => ({ codigo: c.codigoBarra, nombre: c.descripcion, peso: c.cantidad }));
+          if (_granelAdh.length) {
+            API.imprimirAdhesivoGranel(_granelAdh)
+              .then(r => { if (r && r.ok) toast(`🏷 ${_granelAdh.length} adhesivo(s) granel`, 'ok', 3000); })
+              .catch(() => {});
+          }
+        } catch (_) {}
         // [Fix #2+#5 v2.11.2] Re-impresión validada con QR + verificación
         // de items. Pasamos `esperadoDetalles` para que el backend espere
         // a que la hoja esté completa (retry interno con flush). Si el

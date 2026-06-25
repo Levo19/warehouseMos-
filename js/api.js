@@ -2632,6 +2632,21 @@ const API = (() => {
       // reserva permanente de wh.reservar_ticket evita reimprimir lo ya impreso).
       return { ok: false, offline: true, error: 'sin conexión' };
     },
+    // [Adhesivo granel despacho] imprime 1 adhesivo por ítem KGM vía Edge print-adhesivo (mode granel-despacho).
+    // items = [{codigo, nombre, peso(kg)}]. Fire-and-forget desde el despacho. Cero GAS. {ok,data:{impresos}} | {ok:false}.
+    imprimirAdhesivoGranel: async (items, printerId) => {
+      try {
+        if (!navigator.onLine || !Array.isArray(items) || !items.length) return { ok: false };
+        const token = await _mintTokenWH();
+        if (!token) return { ok: false, error: 'sin token' };
+        const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/print-adhesivo`, {
+          method: 'POST',
+          headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'granel-despacho', items, printerId: printerId || null })
+        }, 15000);
+        return await res.json().catch(() => ({ ok: false }));
+      } catch (e) { return { ok: false, error: e.message }; }
+    },
     imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
     // [F6 push] Registro de token FCM directo a Supabase (mos.registrar_push_token). Aditivo al registro GAS
