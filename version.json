@@ -1,1 +1,1 @@
-{ "version": "2.13.342", "build": "Pickup card: 'hace' usa ultimaActividad (refleja el ultimo cierre, no la creacion) -> ya no 'ayer'. Iconos imprimir/eliminar ahora SVG nitidos (no emoji)." }
+{ "version": "2.13.343", "build": "SW network-first para HTML/JS (antes cache-first -> se quedaba pegado en version vieja) + Supabase EXCLUIDO del SW (datos siempre frescos: arregla la lista de pickup que mostraba 'ayer' por cache). Adios errores rojos del SW viejo." }

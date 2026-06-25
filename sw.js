@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.342';
+const VERSION = '2.13.343';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -104,8 +104,10 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
 
-  // No interceptar GAS (tanto script.google.com como script.googleusercontent.com)
-  if (url.hostname.includes('google.com') || url.hostname.includes('googleusercontent.com')) return;
+  // No interceptar GAS ni Supabase (son datos dinámicos / API). Supabase SIEMPRE va a la red
+  // → evita servir datos VIEJOS cacheados (ej. la lista de pickup que mostraba "ayer").
+  if (url.hostname.includes('google.com') || url.hostname.includes('googleusercontent.com') ||
+      url.hostname.includes('supabase.co') || url.hostname.includes('supabase.in')) return;
 
   // version.json: siempre desde red. Si falla red, devolver caché o respuesta
   // de error explícita (NUNCA undefined — eso rompe respondWith).
@@ -121,16 +123,43 @@ self.addEventListener('fetch', e => {
     return;
   }
 
+  // [v2.13.343] CRÍTICOS (HTML/JS/manifest same-origin) = NETWORK-FIRST con timeout → así un
+  // deploy nuevo llega en el siguiente refresh online y NO se queda pegado en cache (era cache-first).
+  const path = url.pathname;
+  const esCritico = url.origin === self.location.origin && (
+    path === '/' || path.endsWith('/') || path.endsWith('.html') ||
+    path.endsWith('.js') || path.endsWith('manifest.json')
+  );
+  if (esCritico) {
+    e.respondWith((async () => {
+      try {
+        const net = await Promise.race([
+          fetch(e.request),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
+        ]);
+        if (net && net.status === 200 && (net.type === 'basic' || net.type === 'cors')) {
+          const clone = net.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
+        }
+        return net || (await caches.match(e.request)) || Response.error();
+      } catch (_) {
+        const cached = await caches.match(e.request);
+        if (cached) return cached;
+        if (e.request.destination === 'document') return (await caches.match('./index.html')) || Response.error();
+        return Response.error();
+      }
+    })());
+    return;
+  }
+
+  // RESTO (imágenes, fuentes, CDN same-origin/cors) = cache-first (rápido + offline).
   e.respondWith(
     caches.match(e.request).then(cached => {
       if (cached) return cached;
       return fetch(e.request).then(res => {
-        // Si la red devuelve algo inválido, fallback a respuesta de error explícita
         if (!res) return Response.error();
         if (res.status !== 200) return res;
-        // Solo cachear respuestas same-origin o CORS (no opaque)
         if (res.type !== 'basic' && res.type !== 'cors') return res;
-        if (e.request.method !== 'GET') return res;   // [FIX] Cache.put solo soporta GET (HEAD/POST lanzan)
         const clone = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});  // defensivo: nunca uncaught
         return res;
