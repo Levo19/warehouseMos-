@@ -370,8 +370,11 @@ function imprimirTicketGuia(params) {
       .filter(function(d) { return d.idGuia === idGuia && d.observacion !== 'ANULADO'; })
       .map(function(d) {
         var cod        = String(d.codigoProducto || '');
-        var esPN       = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
         var enCatalogo = !!prodMap[cod];
+        // [fix arroz/565656 · paridad Edge ticket-guia] El catálogo MANDA sobre producto_nuevo: si el
+        // código ya está en mos.productos NO es "nuevo", aunque quede una fila vieja PENDIENTE en
+        // PRODUCTO_NUEVO. Antes el PN ganaba → un producto catalogado salía con su nombre/tag PN viejo.
+        var esPN       = !enCatalogo && (!!(pnMap[cod]) || cod.indexOf('NLEV') === 0);
         var desc       = esPN ? (pnMap[cod] ? pnMap[cod].desc : cod)
                        : enCatalogo ? prodMap[cod] : cod;
         return {
@@ -1781,8 +1784,11 @@ function _reporteGuia(id) {
       .filter(function(d) { return d.idGuia === id && d.observacion !== 'ANULADO'; })
       .map(function(d) {
         var cod        = String(d.codigoProducto || '');
-        var esPN       = !!(pnMap[cod]) || cod.indexOf('NLEV') === 0;
         var enCatalogo = !!prodMap[cod];
+        // [fix arroz/565656 · paridad Edge ticket-guia] El catálogo MANDA sobre producto_nuevo: si el
+        // código ya está en mos.productos NO es "nuevo", aunque quede una fila vieja PENDIENTE en
+        // PRODUCTO_NUEVO. Antes el PN ganaba → un producto catalogado salía con su nombre/tag PN viejo.
+        var esPN       = !enCatalogo && (!!(pnMap[cod]) || cod.indexOf('NLEV') === 0);
         var desc       = esPN ? (pnMap[cod] ? pnMap[cod].desc : cod)
                        : enCatalogo ? prodMap[cod] : cod;
         return {
