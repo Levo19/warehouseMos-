@@ -5208,6 +5208,33 @@
     }
     .wh-upd-title { font-size:1.2rem;font-weight:700;color:#f1f5f9;margin:0 0 6px;text-align:center; }
     .wh-upd-sub   { font-size:.82rem;color:#64748b;margin:0 0 26px;text-align:center; }
+    /* ── Banner nueva versión (estilo MOS, paleta WH teal) ───────── */
+    #whUpdateBanner {
+      position:fixed;bottom:24px;left:50%;
+      transform:translateX(-50%) translateY(200px);
+      z-index:9997;width:calc(100% - 32px);max-width:420px;
+      transition:transform .45s cubic-bezier(.34,1.56,.64,1);pointer-events:none;
+    }
+    #whUpdateBanner.visible { transform:translateX(-50%) translateY(0);pointer-events:auto; }
+    @media (max-width:767px){ #whUpdateBanner{ bottom:calc(70px + env(safe-area-inset-bottom,0px));width:calc(100% - 16px);} }
+    .wh-updb-inner { background:linear-gradient(135deg,#03251c,#0f172a);border:1px solid #10b981;border-radius:16px;padding:12px 14px;box-shadow:0 8px 28px rgba(16,185,129,.28); }
+    .wh-updb-icon { font-size:1.5rem;animation:whUpdBounce 1.8s ease-in-out infinite;filter:drop-shadow(0 0 6px rgba(16,185,129,.5)); }
+    @keyframes whUpdBounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+    .wh-updb-text { flex:1;min-width:0; }
+    .wh-updb-title { font-size:.9rem;font-weight:700;color:#d1fae5; }
+    .wh-updb-sub { font-size:.72rem;color:#34d399;margin-top:2px;font-weight:600; }
+    .wh-updb-btn { background:linear-gradient(135deg,#10b981,#34d399);color:#022c22;border:none;border-radius:10px;padding:8px 16px;font-size:.82rem;font-weight:800;cursor:pointer;white-space:nowrap;box-shadow:0 2px 8px rgba(16,185,129,.4);transition:filter .15s,transform .15s; }
+    .wh-updb-btn:hover:not(:disabled){ filter:brightness(1.08);transform:translateY(-1px); }
+    .wh-updb-btn:disabled { background:rgba(71,85,105,.4)!important;color:#94a3b8!important;cursor:not-allowed;box-shadow:none; }
+    .wh-updb-dismiss { background:transparent;border:1px solid rgba(148,163,184,.35);color:#94a3b8;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;line-height:1;flex-shrink:0;transition:background .15s,color .15s; }
+    .wh-updb-dismiss:active { transform:scale(.92); }
+    .wh-updb-dismiss:hover { background:rgba(148,163,184,.12);color:#e2e8f0; }
+    .wh-updb-progress { height:4px;background:rgba(15,23,42,.6);border-radius:999px;overflow:hidden;margin-top:8px;position:relative; }
+    .wh-updb-progress-fill { height:100%;background:linear-gradient(90deg,#10b981,#34d399);width:0%;transition:width .3s ease;border-radius:999px;box-shadow:0 0 12px rgba(16,185,129,.6); }
+    .wh-updb-progress-fill.is-ready { background:linear-gradient(90deg,#10b981,#6ee7b7); }
+    .wh-updb-progress-shimmer { position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);animation:whUpdShimmer 1.2s linear infinite; }
+    @keyframes whUpdShimmer { from{transform:translateX(-100%)} to{transform:translateX(120%)} }
+    .wh-updb-countdown { font-size:.68rem;color:#94a3b8;text-align:center;margin:6px 0 0; }
     .wh-upd-dots  { display:flex;gap:9px; }
     .wh-upd-dots span {
       width:8px;height:8px;border-radius:50%;background:#0ea5e9;
@@ -5376,6 +5403,29 @@
   <h2 class="wh-upd-title">Actualizando warehouseMos</h2>
   <p class="wh-upd-sub">Nueva versión disponible · Instalando...</p>
   <div class="wh-upd-dots"><span></span><span></span><span></span></div>
+</div>
+
+<!-- ── Banner nueva versión · barra de progreso real (ids que espera _updateProgressBar/_showUpdateBanner) ── -->
+<div id="whUpdateBanner">
+  <div class="wh-updb-inner">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div class="wh-updb-icon">🚀</div>
+      <div class="wh-updb-text">
+        <div class="wh-updb-title" id="whUpdateBannerTitle">Nueva versión disponible</div>
+        <div class="wh-updb-sub" id="whUpdateBannerSub">Preparando…</div>
+      </div>
+      <button class="wh-updb-btn" id="whUpdateBannerBtn" onclick="window._applyUpdate()" disabled>Actualizar</button>
+      <button class="wh-updb-dismiss" onclick="window._dismissUpdate()" title="Posponer 5 min" aria-label="Cerrar">×</button>
+    </div>
+    <div class="wh-updb-progress">
+      <div class="wh-updb-progress-fill" id="whUpdateProgressFill" style="width:0%">
+        <div class="wh-updb-progress-shimmer" id="whUpdateProgressShimmer"></div>
+      </div>
+    </div>
+    <p class="wh-updb-countdown" id="whUpdateCountdown" style="display:none">
+      Auto-actualización en <span id="whUpdateCountdownNum">60</span>s
+    </p>
+  </div>
 </div>
 
 <!-- ── Modal QTY · producto a granel (KGM) ──────────────────────── -->
@@ -5736,12 +5786,9 @@
   </div>
 </div>
 
-<!-- Update overlay (fuera del app) -->
-<div id="whUpdateOverlay">
-  <div class="wh-upd-ring"></div>
-  <p style="color:#94a3b8;font-size:.85rem;font-weight:600;">Actualizando warehouseMos…</p>
-  <div class="wh-upd-dots"><span></span><span></span><span></span></div>
-</div>
+<!-- [Reparación banner] Overlay duplicado eliminado — el id whUpdateOverlay ya está definido arriba
+     (con .wh-upd-sub que el JS usa). Tener 2 con el mismo id rompía getElementById. -->
+
 
 <!-- ════════════════════════════════════════════════
      NAVBAR SUPERIOR
