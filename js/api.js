@@ -2475,6 +2475,11 @@ const API = (() => {
     _RT.channel = null;
     _RT.client  = null;
     _RT.started = false;
+    // [Review R1 fix] limpiar el debounce trailing de _rtNotificar (no dejar un fire-and-forget colgando tras
+    // el logout/cierre de turno) + resetear el throttle del resync para que el próximo login no quede gateado.
+    if (_rtNotifTimer) { clearTimeout(_rtNotifTimer); _rtNotifTimer = null; }
+    _rtNotifPend = null; _rtNotifMotivo = '';
+    _RT.lastResync = 0;
   }
 
   return {

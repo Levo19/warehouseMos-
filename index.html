@@ -5682,28 +5682,8 @@
 </style>
 
 <!-- Banner nueva versión disponible — con barra de progreso y auto-update -->
-<div id="whUpdateBanner" role="alert" aria-live="polite">
-  <div class="wh-upd-banner-inner" style="flex-direction:column;align-items:stretch;gap:8px">
-    <div style="display:flex;align-items:center;gap:12px">
-      <span class="wh-upd-banner-icon">🚀</span>
-      <div class="wh-upd-banner-texts">
-        <p class="wh-upd-banner-title" id="whUpdateBannerTitle">Descargando nueva versión...</p>
-        <p class="wh-upd-banner-sub" id="whUpdateBannerSub">Preparando…</p>
-      </div>
-      <button class="wh-upd-banner-btn" id="whUpdateBannerBtn"
-              onclick="window._applyUpdate()" disabled>Actualizar</button>
-      <button class="wh-upd-banner-dismiss" onclick="window._dismissUpdate()" aria-label="Cerrar">✕</button>
-    </div>
-    <div class="wh-upd-progress">
-      <div class="wh-upd-progress-fill" id="whUpdateProgressFill" style="width:0%">
-        <div class="wh-upd-progress-shimmer" id="whUpdateProgressShimmer"></div>
-      </div>
-    </div>
-    <p class="wh-upd-countdown" id="whUpdateCountdown" style="display:none">
-      Auto-actualización en <span id="whUpdateCountdownNum">60</span>s
-    </p>
-  </div>
-</div>
+<!-- [Review R1 fix] Banner #whUpdateBanner DUPLICADO eliminado (ya existe arriba con clases .wh-updb-*).
+     Tener 2 con el mismo id rompia getElementById. El JS (_updateProgressBar/_showUpdateBanner) usa el de arriba. -->
 
 <!-- ════ Wizard de permisos · post-update ════
      Aparece después de actualizar a una versión nueva. Solo pide los
