@@ -12228,7 +12228,7 @@ const DespachoView = (() => {
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
-              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}${kgBadge}</p>
+              <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
               <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
@@ -14129,6 +14129,28 @@ const DespachoView = (() => {
   let _autosavePickupTimer = null;
   let _autosaveLastTs = 0;
 
+  // [Reparación #8] Nombre del CANÓNICO por skuBase desde el catálogo (factor=1, activo) — robusto ante un
+  // `nombre` viejo guardado en el pickup cacheado (mostraba "100GR"/"25UN"). Prefiere el canónico real (sin
+  // codigoProductoBase) y, ante varios factor=1 mal marcados en el catálogo, el nombre más largo (evita "1").
+  // Memoizado por tamaño del cache de productos (se reconstruye al cambiar el catálogo).
+  let _pckCanonMap = null, _pckCanonMapLen = -1;
+  function _pckCanonName(sku, fb) {
+    const ps = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
+    if (_pckCanonMap === null || _pckCanonMapLen !== ps.length) {
+      _pckCanonMap = {}; const score = {};
+      ps.forEach(p => {
+        const esBase = (parseFloat(p.factorConversion || 1) === 1) && String(p.estado || '') !== '0';
+        if (!esBase || !p.skuBase) return;
+        const nm = p.descripcion || p.nombre || ''; if (!nm) return;
+        const k = String(p.skuBase).trim().toUpperCase();
+        const sc = (p.codigoProductoBase ? 0 : 100000) + nm.length;
+        if (score[k] === undefined || sc > score[k]) { score[k] = sc; _pckCanonMap[k] = nm; }
+      });
+      _pckCanonMapLen = ps.length;
+    }
+    return _pckCanonMap[String(sku || '').trim().toUpperCase()] || fb || sku;
+  }
+
   // Buscar item del pickup que matchee con el producto/código escaneado.
   function _matchPickupItem(prod, cb) {
     if (!_pickupActivo || !Array.isArray(_pickupActivo.items)) return null;
@@ -14669,7 +14691,7 @@ const DespachoView = (() => {
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
-              <p class="pkck-name truncate">${escHtml(it.nombre || it.skuBase)}${kgBadge}</p>
+              <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
               <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
             </div>
             <div class="pkck-qty-wrap">
