@@ -2325,6 +2325,7 @@ const API = (() => {
     started:   false,  // hay (o hubo) un intento exitoso de canal
     libPromise:null,   // promesa de import del cliente (1 sola vez)
     listeners: false,  // listeners visible/focus/online ya cableados
+    lastResync:0,      // [FIX #5/#6] timestamp del último resync por SUBSCRIBED (throttle anti-flapping)
     gen:       0       // [anti-orphan] generación: _detener la incrementa → un arranque en vuelo se aborta tras sus awaits
   };
 
@@ -2347,13 +2348,27 @@ const API = (() => {
     } catch (_) { return null; }
   }
 
+  // [FIX #5/#6 2026-06-26] DEBOUNCE anti-loop. Un burst de UPDATEs de mos.catalogo_meta
+  // (MOS bumpeando la versión repetidamente) o un WS flapeando (CLOSED↔SUBSCRIBED) disparaba
+  // una RE-DESCARGA del maestro POR CADA evento → loop de `descargarMaestros` que satura el
+  // main thread (la pantalla de bloqueo laguea, los efectos se congelan, el giro crashea).
+  // Coalescemos: nos quedamos con la versión MÁS ALTA del burst y disparamos UNA sola descarga
+  // (trailing edge, 1.5s). El poller de ~50s sigue como red de seguridad.
+  let _rtNotifTimer = null, _rtNotifPend = null, _rtNotifMotivo = '';
   function _rtNotificar(v, motivo) {
     if (v == null) return;
-    try {
-      if (typeof OfflineManager !== 'undefined' && OfflineManager.notificarVersionCatalogo) {
-        OfflineManager.notificarVersionCatalogo(v, motivo || 'realtime');
-      }
-    } catch (_) {}
+    _rtNotifPend = (_rtNotifPend == null) ? v : Math.max(_rtNotifPend, v);
+    _rtNotifMotivo = motivo || 'realtime';
+    if (_rtNotifTimer) return;                 // ya hay un disparo trailing programado → coalescer
+    _rtNotifTimer = setTimeout(() => {
+      const vv = _rtNotifPend, mm = _rtNotifMotivo;
+      _rtNotifTimer = null; _rtNotifPend = null;
+      try {
+        if (typeof OfflineManager !== 'undefined' && OfflineManager.notificarVersionCatalogo) {
+          OfflineManager.notificarVersionCatalogo(vv, mm);
+        }
+      } catch (_) {}
+    }, 1500);
   }
 
   async function _iniciarRealtimeCatalogo() {
@@ -2409,6 +2424,12 @@ const API = (() => {
         // pasa por el mismo núcleo que el poller (no re-descarga si la versión no subió).
         // El poller de ~50s igual lo cubriría; esto solo acelera la convergencia.
         if (status === 'SUBSCRIBED') {
+          // [FIX #5/#6 2026-06-26] Si el WS flapea, throttle: máx 1 resync cada 15s → evita
+          // disparar N RPCs de versión + N descargas (el debounce de _rtNotificar ya coalesce,
+          // pero esto ahorra las RPCs redundantes). El poller de ~50s cubre el resto.
+          const now = Date.now();
+          if (now - (_RT.lastResync || 0) < 15000) return;
+          _RT.lastResync = now;
           _catalogoVersion().then(v => _rtNotificar(v, 'realtime-resync')).catch(() => {});
         }
       });

@@ -1787,18 +1787,29 @@ const Session = (() => {
     // [FIX cero-GAS] El catálogo ya NO trae el pin → la validación local contra p.pin daba siempre
     // falso → lock screen intrabable. Cascada: (1) pin en memoria del login de esta sesión (offline-safe,
     // mismo usuario), (2) caché legacy si aún trae pin, (3) servidor (login_pin_wh) exigiendo mismo idPersonal.
+    // [FIX #5/#6 2026-06-26] sesionActual podía ser null si la pantalla de bloqueo quedó
+    // arriba tras un reload (que vacía _unlockPin) o un logout cross-tab → derefenciar
+    // sesionActual.idPersonal CRASHEABA (TypeError) en CADA intento → lock intrabable, no se
+    // podía entrar ni con el PIN correcto. Guardamos null: sin sesión, un PIN válido en el
+    // servidor desbloquea Y RECUPERA la sesión (en vez de morir en null).
+    const ses = sesionActual;
     let ok = !!(_unlockPin && String(pin) === String(_unlockPin));
     if (!ok) {
       const personal = OfflineManager.getPersonalCache();
       ok = !!personal.find(p =>
-        p.pin && String(p.pin) === String(pin) && p.idPersonal === sesionActual.idPersonal
+        p.pin && String(p.pin) === String(pin) && (!ses || p.idPersonal === ses.idPersonal)
       );
     }
     if (!ok && navigator.onLine && typeof API !== 'undefined' && API.loginPersonalSB) {
       const r = await API.loginPersonalSB(pin).catch(() => null);
-      if (r && r.ok && r.data && String(r.data.idPersonal) === String(sesionActual.idPersonal)) {
+      if (r && r.ok && r.data && (!ses || String(r.data.idPersonal) === String(ses.idPersonal))) {
         ok = true;
         _unlockPin = pin;   // cachear en memoria para próximos desbloqueos offline
+        // Recuperar la sesión si se había perdido (lock arriba sin sesión) → no aterrizar en null.
+        if (!sesionActual && r.data) {
+          sesionActual = r.data;
+          try { _guardarSesion(r.data); } catch (_) {}
+        }
       }
     }
 
