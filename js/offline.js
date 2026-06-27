@@ -464,8 +464,10 @@ const OfflineManager = (() => {
         API.catalogoVersion().then(v => { if (_catVersionBaseline == null) _setBaselineCatalogo(v); }).catch(() => {});
       }
       _notificar();
+      return { ok: true };               // [500x HIGH] éxito explícito → el caller puede avanzar el baseline
     } catch(e) {
       console.warn('[Offline] Error en precarga:', e);
+      return { ok: false };              // [500x HIGH] fallo → NO avanzar el baseline (reintentar próximo ciclo)
     } finally {
       _masterInflight = null;
     }
@@ -490,26 +492,30 @@ const OfflineManager = (() => {
     if (!delta || !delta.ok) return precargar('manual');
     const d = delta.data || {};
     const changed = [];
-    // productos: MERGE por idProducto (reemplaza los cambiados, agrega altas) — NO reemplaza todo el array.
-    if (Array.isArray(d.productos) && d.productos.length) {
-      const cache = cargar(KEYS.PRODUCTOS) || [];
+    // [500x HIGH delete] ids borrados desde el corte → sacar del cache (un delete no viaja por updated_at).
+    const elim = Array.isArray(delta.eliminados) ? delta.eliminados : [];
+    const elimSet = elim.length ? new Set(elim) : null;
+    // productos: MERGE por idProducto sobre una COPIA (no mutar la referencia del parse-cache), + quitar borrados.
+    if ((Array.isArray(d.productos) && d.productos.length) || elimSet) {
+      let cache = (cargar(KEYS.PRODUCTOS) || []).slice();   // [500x MED] copia: no mutar el array que retiene la UI
       const idx = {};
       for (let i = 0; i < cache.length; i++) { const id = cache[i] && cache[i].idProducto; if (id != null) idx[id] = i; }
-      d.productos.forEach(p => {
+      (d.productos || []).forEach(p => {
         const id = p && p.idProducto;
         if (id != null && idx[id] != null) cache[idx[id]] = p; else cache.push(p);
       });
+      if (elimSet) cache = cache.filter(p => !(p && elimSet.has(p.idProducto)));
       _guardarSiCambia(KEYS.PRODUCTOS, 'productos', cache, 'productos', changed);
     }
-    // tablas chicas: completas (mismas guardas que precargar)
+    // [500x LOW] tablas chicas por _guardarSiCambia (no reescribir/repintar si no cambiaron).
     if (d.equivalencias != null) _guardarSiCambia(KEYS.EQUIVALENCIAS, 'equivalencias', d.equivalencias, 'equivalencias', changed);
-    if (d.proveedores   != null) guardar(KEYS.PROVEEDORES, d.proveedores);
-    if (d.personal      != null) guardar(KEYS.PERSONAL,    d.personal);
-    if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,  d.impresoras);
-    if (d.zonas         != null) guardar(KEYS.ZONAS,       d.zonas);
+    if (d.proveedores   != null) _guardarSiCambia(KEYS.PROVEEDORES,   'proveedores',   d.proveedores,   'proveedores',   changed);
+    if (d.personal      != null) _guardarSiCambia(KEYS.PERSONAL,      'personal',      d.personal,      'personal',      changed);
+    if (d.impresoras    != null) _guardarSiCambia(KEYS.IMPRESORAS,    'impresoras',    d.impresoras,    'impresoras',    changed);
+    if (d.zonas         != null) _guardarSiCambia(KEYS.ZONAS,         'zonas',         d.zonas,         'zonas',         changed);
     if (delta.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(delta.server_ts)); } catch (_) {} }
     localStorage.setItem(KEYS.LAST_SYNC, new Date().toLocaleTimeString('es-PE'));
-    console.log('[Offline] catálogo DELTA: ' + (delta.productos_cambiados || 0) + ' productos cambiados' + (changed.length ? ' (' + changed.join(',') + ')' : ''));
+    console.log('[Offline] catálogo DELTA: ' + (delta.productos_cambiados || 0) + ' cambiados · ' + elim.length + ' borrados' + (changed.length ? ' (' + changed.join(',') + ')' : ''));
     if (changed.length) { try { window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } })); } catch (_) {} }
     _notificar();
     return { ok: true, delta: true };
@@ -856,10 +862,16 @@ const OfflineManager = (() => {
     _catRedownloadTimer = setTimeout(async () => {
       _catRedownloadTimer = null;
       const target = _catPendingVersion;
-      // [CD1] refresco INCREMENTAL (delta) en vez de re-bajar el catálogo completo; cae a full si no hay corte.
-      await _refrescarCatalogoDelta().catch(() => {});
-      _setBaselineCatalogo(target);              // avanzar baseline SOLO tras intentar la re-descarga
-      if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+      // [CD1] refresco INCREMENTAL (delta); cae a full si no hay corte. [500x HIGH] el baseline avanza SOLO
+      // si la descarga tuvo éxito → si falla (red/RPC), NO se marca la versión como consumida y se reintenta.
+      let r = null;
+      try { r = await _refrescarCatalogoDelta(); } catch (_) { r = { ok: false }; }
+      if (r && r.ok !== false) {
+        _setBaselineCatalogo(target);
+        if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+      } else {
+        console.warn('[Offline] re-descarga de catálogo falló → baseline intacto, se reintenta en el próximo ciclo');
+      }
     }, CAT_REDOWNLOAD_DEBOUNCE_MS);
   }
 
