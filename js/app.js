@@ -3274,14 +3274,18 @@ const Session = (() => {
         return;
       }
       // [F6 push · cero-GAS] Registro directo a Supabase (mos.push_tokens). Aditivo al GAS durante transición.
+      let _sbPushOk = false;
       try {
         if (typeof API !== 'undefined' && API.registrarPushTokenSB) {
           await API.registrarPushTokenSB({ token, usuario, appOrigen: 'warehouseMos', deviceId: _devIdToken,
             dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80) });
+          _sbPushOk = true;
           console.log('[Push WH] token registrado en Supabase ✅');
         }
       } catch(eSB) { console.warn('[Push WH] registro Supabase falló:', eSB?.message); }
-      try {
+      // [perf 500x · G6 cero-GAS] El GAS es SOLO fallback: si Supabase ya registró, NO escribir doble (ni
+      // el verify GAS de abajo). Antes se escribía a ambos en cada login = round-trips GAS redundantes.
+      if (!_sbPushOk) try {
         await fetch(mosUrl, {
           method: 'POST',
           body: JSON.stringify({
@@ -3292,10 +3296,11 @@ const Session = (() => {
             dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
           })
         });
-        console.log('[Push WH] token registrado en GAS ✅');
+        console.log('[Push WH] token registrado en GAS (fallback) ✅');
       } catch(eReg) {
         console.warn('[Push WH] registro POST falló:', eReg?.message);
       }
+      if (_sbPushOk) return;   // Supabase autoritativo → no correr el verify GAS
       // [v2.13.64] Auto-verify: 8s después, confirmar que el token está activo
       // en PUSH_TOKENS. Si no, retry una vez. Resuelve casos donde el registro
       // se perdió (red intermitente) sin que el user lo note.

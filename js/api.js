@@ -619,8 +619,22 @@ const API = (() => {
   async function _sbDescargarMaestros() {
     const out = await _sbRpcWH('catalogo_wh_rls', {}, 'mos', 25000);   // [perf 500x] 25s: el catálogo es ~1.9MB
     if (!out || out.ok === false) throw new Error((out && out.error) || 'catalogo error');
-    return { ok: true, data: {
+    return { ok: true, server_ts: out.server_ts || null, data: {
       productos:     _mapCat('productos',     out.productos),
+      equivalencias: _mapCat('equivalencias', out.equivalencias),
+      proveedores:   _mapCat('proveedores',   out.proveedores),
+      personal:      _mapCat('personal',      out.personal),
+      impresoras:    _mapCat('impresoras',    out.impresoras),
+      zonas:         _mapCat('zonas',         out.zonas)
+    } };
+  }
+  // [perf 500x · CD1 DELTA] Descarga INCREMENTAL: solo productos cambiados desde `desdeTs` (+ tablas chicas
+  // completas). ~KB en vez de ~1.9MB por bump de versión. El caller (offline.js) mergea los productos por id.
+  async function _sbDescargarMaestrosDelta(desdeTs) {
+    const out = await _sbRpcWH('catalogo_wh_delta', { p: { desde: desdeTs } }, 'mos', 25000);
+    if (!out || out.ok === false) throw new Error((out && out.error) || 'catalogo_delta error');
+    return { ok: true, delta: true, server_ts: out.server_ts || null, productos_cambiados: out.productos_cambiados || 0, data: {
+      productos:     _mapCat('productos',     out.productos),   // SOLO los cambiados
       equivalencias: _mapCat('equivalencias', out.equivalencias),
       proveedores:   _mapCat('proveedores',   out.proveedores),
       personal:      _mapCat('personal',      out.personal),
@@ -2487,6 +2501,9 @@ const API = (() => {
   return {
     // Descarga maestros MOS → localStorage
     descargarMaestros:    ()     => call({ action: 'descargarMaestros' }),
+    // [perf 500x · CD1] Descarga DELTA (solo productos cambiados desde desdeTs). Sin fallback GAS: si falla,
+    // el caller (offline.js) cae a descargarMaestros() completo (que sí tiene fallback GAS).
+    descargarMaestrosDelta: (desdeTs) => _sbDescargarMaestrosDelta(desdeTs),
     // [poller catálogo] versión monotónica del maestro (mos.catalogo_version, profile 'mos').
     // Devuelve Number; LANZA ante fallo (el poller lo captura y no toca el baseline).
     catalogoVersion:      ()     => _catalogoVersion(),

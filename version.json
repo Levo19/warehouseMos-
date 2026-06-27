@@ -1,4 +1,4 @@
 {
- "version": "2.13.354",
- "build": "2.13.354 (perf 500x): COALESCING de la re-descarga de catalogo (ráfaga de bumps de version → 1 sola descarga diferida 20s, en vez de re-bajar ~1.9MB por cada bump) + throttle del chequeo de version por foco/visibility (30s) + timeout de RPC pesada 12→25s (no abortar a GAS bajo cola) + teclado PIN no espera la descarga del catalogo (tecleable al instante) + registrarUbicacion GPS fire-and-forget con timeout."
+ "version": "2.13.355",
+ "build": "2.13.355 (perf 500x · lo de fondo): CATALOGO DELTA — un bump de version ahora baja ~42KB (solo productos cambiados, merge por id) en vez de re-bajar ~1.9MB; trigger updated_at confiable + RPC mos.catalogo_wh_delta + server_ts; payload del full sin created_at/updated_at; fallback a full si el delta falla. + G6 push: GAS solo fallback si Supabase falla (no doble-escritura)."
 }

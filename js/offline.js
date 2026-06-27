@@ -25,7 +25,8 @@ const OfflineManager = (() => {
     LAST_MASTER:  'wh_last_master',
     PN:           'wh_pn',
     ENVASADOS:    'wh_envasados',
-    CAT_VERSION:  'wh_cat_version'        // [poller] baseline de mos.catalogo_version visto por este equipo
+    CAT_VERSION:  'wh_cat_version',       // [poller] baseline de mos.catalogo_version visto por este equipo
+    CAT_SYNC_TS:  'wh_cat_sync_ts'        // [delta] server_ts del último catálogo bajado (punto de corte del delta)
   };
 
   // ── Estado ────────────────────────────────────────────────
@@ -431,6 +432,8 @@ const OfflineManager = (() => {
         if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,    d.impresoras);
         if (d.zonas         != null) guardar(KEYS.ZONAS,         d.zonas);
         if (d.adminPin)            localStorage.setItem(KEYS.ADMIN_PIN, d.adminPin);
+        // [delta] guardar el punto de corte del servidor → el próximo refresh por versión baja solo el delta.
+        if (maestros.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(maestros.server_ts)); } catch (_) {} }
         if (maestros.errores?.length) console.warn('[Offline] descargarMaestros errores:', maestros.errores);
       } else {
         // GAS antiguo o MOS no configurado — degradar a endpoints individuales
@@ -468,6 +471,48 @@ const OfflineManager = (() => {
     }
     })();
     return _masterInflight;
+  }
+
+  // [perf 500x · CD1 DELTA] Refresco INCREMENTAL del catálogo: baja SOLO los productos cambiados desde el
+  // último corte (server_ts) y los mergea por idProducto en el cache, en vez de re-bajar ~1.9MB. Las tablas
+  // chicas viajan completas. Sin punto de corte o ante CUALQUIER error → cae a la descarga completa (que
+  // además tiene fallback GAS). Lo usa _aplicarVersionCatalogo en cada bump de versión.
+  async function _refrescarCatalogoDelta() {
+    if (!navigator.onLine) return;
+    const desdeTs = (() => { try { return localStorage.getItem(KEYS.CAT_SYNC_TS); } catch (_) { return null; } })();
+    if (!desdeTs || typeof API === 'undefined' || typeof API.descargarMaestrosDelta !== 'function') {
+      return precargar('manual');                 // sin corte → descarga completa (siembra el corte + server_ts)
+    }
+    if (_masterInflight) return _masterInflight;   // una descarga completa ya en vuelo → reusarla
+    let delta;
+    try { delta = await API.descargarMaestrosDelta(desdeTs); }
+    catch (e) { console.warn('[Offline] delta catálogo falló → full:', e && e.message); return precargar('manual'); }
+    if (!delta || !delta.ok) return precargar('manual');
+    const d = delta.data || {};
+    const changed = [];
+    // productos: MERGE por idProducto (reemplaza los cambiados, agrega altas) — NO reemplaza todo el array.
+    if (Array.isArray(d.productos) && d.productos.length) {
+      const cache = cargar(KEYS.PRODUCTOS) || [];
+      const idx = {};
+      for (let i = 0; i < cache.length; i++) { const id = cache[i] && cache[i].idProducto; if (id != null) idx[id] = i; }
+      d.productos.forEach(p => {
+        const id = p && p.idProducto;
+        if (id != null && idx[id] != null) cache[idx[id]] = p; else cache.push(p);
+      });
+      _guardarSiCambia(KEYS.PRODUCTOS, 'productos', cache, 'productos', changed);
+    }
+    // tablas chicas: completas (mismas guardas que precargar)
+    if (d.equivalencias != null) _guardarSiCambia(KEYS.EQUIVALENCIAS, 'equivalencias', d.equivalencias, 'equivalencias', changed);
+    if (d.proveedores   != null) guardar(KEYS.PROVEEDORES, d.proveedores);
+    if (d.personal      != null) guardar(KEYS.PERSONAL,    d.personal);
+    if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,  d.impresoras);
+    if (d.zonas         != null) guardar(KEYS.ZONAS,       d.zonas);
+    if (delta.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(delta.server_ts)); } catch (_) {} }
+    localStorage.setItem(KEYS.LAST_SYNC, new Date().toLocaleTimeString('es-PE'));
+    console.log('[Offline] catálogo DELTA: ' + (delta.productos_cambiados || 0) + ' productos cambiados' + (changed.length ? ' (' + changed.join(',') + ')' : ''));
+    if (changed.length) { try { window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed } })); } catch (_) {} }
+    _notificar();
+    return { ok: true, delta: true };
   }
 
   function _gasUrl(action) {
@@ -811,7 +856,8 @@ const OfflineManager = (() => {
     _catRedownloadTimer = setTimeout(async () => {
       _catRedownloadTimer = null;
       const target = _catPendingVersion;
-      await precargar('manual').catch(() => {});
+      // [CD1] refresco INCREMENTAL (delta) en vez de re-bajar el catálogo completo; cae a full si no hay corte.
+      await _refrescarCatalogoDelta().catch(() => {});
       _setBaselineCatalogo(target);              // avanzar baseline SOLO tras intentar la re-descarga
       if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
     }, CAT_REDOWNLOAD_DEBOUNCE_MS);
