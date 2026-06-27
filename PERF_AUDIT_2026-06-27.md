@@ -30,3 +30,17 @@ Todo converge en **dos** causas:
 - **G3** `notificarInicioSesionVendedor`, **G4** `getAdminPinsCache`, **G6** push doble-write (Supabase YA + GAS redundante), **G7** `detenerEscuchaAudio`.
 
 Detalle completo: workflow `w2y0h5j1c` output.
+
+## ✅ Lo de fondo COMPLETADO (WH 2.13.355/356 + SQL 277)
+- **CD1 Catálogo DELTA** (la causa raíz): `mos.catalogo_wh_delta(desde)` → solo productos cambiados + tablas chicas + `eliminados` (tombstones) + `server_ts`. Un bump típico baja **~42KB vs 1.9MB (97% menos)**. Front: `_refrescarCatalogoDelta` mergea por idProducto sobre copia, quita borrados, fallback a full. Trigger `updated_at` (INSERT+UPDATE) + `mos.catalogo_tombstones` (AFTER DELETE).
+- **CD2** full sin created_at/updated_at. **G6** push GAS solo-fallback.
+
+## 🔍 500x del delta (workflow `wm12v8yph`) — 8 hallazgos, 3 HIGH, TODOS corregidos
+- **HIGH deletes**: producto borrado quedaba en el cache WH → tombstones + `delta.eliminados` + filtro en el merge. ✅
+- **HIGH ventana de borde**: `>` + server_ts=now() podía perder un cambio de precio para siempre → `>=` + margen -2s (solape idempotente). ✅
+- **HIGH baseline**: avanzaba aunque la descarga fallara (catálogo stale indefinido) → `precargar`/`_refrescarCatalogoDelta` devuelven `{ok}`; baseline avanza SOLO si ok. ✅
+- **MED** aliasing del parse-cache → `.slice()`. **LOW** tablas chicas → `_guardarSiCambia`. ✅
+
+## ⏳ Migraciones GAS pendientes (pasada dedicada — tocan auth/login)
+G1 heartbeat 120s, G2 registrarUbicacion, G4 getAdminPinsCache, G5 admin-PIN reabrir-guía → migrar a RPC Supabase con fallback GAS. G3, G7 menores. (G6 ya hecho.)
+También pendiente: QW2 escalonar arranque (limitar concurrencia), CD4 lazy guia_detalle_operacional.
