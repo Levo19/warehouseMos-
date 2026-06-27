@@ -60,6 +60,13 @@ const OfflineManager = (() => {
   let _catPollTimer       = null;
   let _catPollBusy        = false;  // guard anti-reentrada del propio chequeo
   const CAT_POLL_MS       = 50000;  // ~50s; solo corre con la pestaña visible
+  // [perf 500x] coalescing de re-descargas: muchos bumps de versión en ráfaga (ej. ediciones en lote en MOS)
+  // NO deben disparar una re-descarga de ~1.9MB cada uno. Se difiere y coalesce a 1 sola descarga por ventana.
+  let _catRedownloadTimer = null;
+  let _catPendingVersion  = null;
+  let _catLastCheck       = 0;      // throttle del chequeo de versión (foco/visibility no deben spamear)
+  const CAT_REDOWNLOAD_DEBOUNCE_MS = 20000;  // ventana de quietud antes de re-descargar (coalesce)
+  const CAT_CHECK_THROTTLE_MS      = 30000;  // no chequear versión más de 1 vez cada 30s (foco/visibility/timer)
 
   function onStatusChange(fn) { _onStatusChange = fn; }
 
@@ -768,6 +775,11 @@ const OfflineManager = (() => {
     if (!navigator.onLine) return;
     if (typeof document !== 'undefined' && document.visibilityState && document.visibilityState !== 'visible') return;
     if (typeof API === 'undefined' || typeof API.catalogoVersion !== 'function') return;
+    // [perf 500x] throttle: foco/visibility/timer pueden coincidir → no spamear el round-trip de versión.
+    // 'init' (1er chequeo del arranque) se exime para sembrar el baseline de inmediato.
+    const _now = Date.now();
+    if (motivo !== 'init' && (_now - _catLastCheck) < CAT_CHECK_THROTTLE_MS) return;
+    _catLastCheck = _now;
     if (_catPollBusy) return;                     // un chequeo a la vez (timer + foco + visibility coinciden)
     _catPollBusy = true;
     try {
@@ -790,10 +802,19 @@ const OfflineManager = (() => {
   // NO resetea formularios/carritos en armado (guía/envasado/venta) — no es un
   // reload de la app. NO toca el baseline si la re-descarga lanzó (se reintenta).
   async function _aplicarVersionCatalogo(v, motivo) {
-    console.log('[Offline] catálogo versión ' + _catVersionBaseline + ' → ' + v + ' (' + (motivo || 'evento') + ') · re-descargando maestro');
-    await precargar('manual').catch(() => {});
-    _setBaselineCatalogo(v);                     // avanzar baseline SOLO tras intentar la re-descarga
-    if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+    // [perf 500x] COALESCING: en vez de re-descargar ~1.9MB por CADA bump (las versiones suben en ráfaga),
+    // diferimos y agrupamos: tomamos la versión más alta y descargamos UNA sola vez tras una ventana de
+    // quietud. Si ya hay una descarga programada, solo actualizamos el objetivo (no apilamos descargas).
+    _catPendingVersion = Math.max(Number(_catPendingVersion) || 0, Number(v) || 0);
+    if (_catRedownloadTimer) return;
+    console.log('[Offline] catálogo ' + _catVersionBaseline + ' → ' + _catPendingVersion + ' (' + (motivo || 'evento') + ') · re-descarga diferida ' + (CAT_REDOWNLOAD_DEBOUNCE_MS / 1000) + 's (coalesce)');
+    _catRedownloadTimer = setTimeout(async () => {
+      _catRedownloadTimer = null;
+      const target = _catPendingVersion;
+      await precargar('manual').catch(() => {});
+      _setBaselineCatalogo(target);              // avanzar baseline SOLO tras intentar la re-descarga
+      if (typeof toast === 'function') toast('Catálogo actualizado', 'info', 2200);
+    }, CAT_REDOWNLOAD_DEBOUNCE_MS);
   }
 
   // [Realtime] Llamado por la suscripción Realtime de api.js al recibir un UPDATE de

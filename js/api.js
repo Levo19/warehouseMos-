@@ -310,7 +310,9 @@ const API = (() => {
   }
 
   // Llama una RPC de LECTURA directo a PostgREST (apikey + Bearer + Profile). profile='wh' (default) o 'mos' (catálogo).
-  async function _sbRpcWH(fn, args, profile) {
+  // [perf 500x] `ms` configurable: las RPC PESADAS (catálogo ~1.9MB, dashboard) legítimamente tardan >12s en
+  // redes lentas o bajo cola; con 12s abortaban y caían a GAS (doble-pago directo-abortado + cold-start GAS).
+  async function _sbRpcWH(fn, args, profile, ms) {
     const prof = profile || 'wh';
     const token = await _mintTokenWH();
     const res = await _whFetchTimeout(`${_SB_URL}/rest/v1/rpc/${fn}`, {
@@ -320,7 +322,7 @@ const API = (() => {
         'Accept-Profile': prof, 'Content-Profile': prof, 'Content-Type': 'application/json'
       },
       body: JSON.stringify(args || {})
-    }, 12000);
+    }, ms || 12000);
     if (!res.ok) {
       // [400-loop fix] Distinguir un RECHAZO definitivo del servidor (HTTP 4xx:
       // request mal formado / función con firma que no existe / args inválidos)
@@ -615,7 +617,7 @@ const API = (() => {
   }
   // Descarga maestros directo de Supabase (catálogo). Mismo shape que descargarMaestros de GAS (sin adminPin → F2).
   async function _sbDescargarMaestros() {
-    const out = await _sbRpcWH('catalogo_wh_rls', {}, 'mos');
+    const out = await _sbRpcWH('catalogo_wh_rls', {}, 'mos', 25000);   // [perf 500x] 25s: el catálogo es ~1.9MB
     if (!out || out.ok === false) throw new Error((out && out.error) || 'catalogo error');
     return { ok: true, data: {
       productos:     _mapCat('productos',     out.productos),

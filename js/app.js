@@ -1249,8 +1249,10 @@ const Session = (() => {
 
     const yaHayCache = OfflineManager.getPersonalCache().length > 0;
     if (!yaHayCache && navigator.onLine && window.WH_CONFIG.gasUrl) {
-      // Sin caché: forzar descarga antes de mostrar teclado
-      await OfflineManager.precargar(true).catch(() => {});
+      // [perf 500x] NO bloquear el teclado PIN esperando la descarga de ~1.9MB del catálogo. La validación
+      // del PIN es server-side (loginPersonalSB, online) y NO necesita el catálogo. Disparamos la precarga
+      // en BACKGROUND (fire-and-forget) y revelamos el teclado de inmediato → PIN tecleable en <100ms.
+      OfflineManager.precargar(true).catch(() => {});
     }
     // Con caché: el timer de 60s se encarga del refresh — no disparar call extra aquí
 
@@ -2254,8 +2256,11 @@ const Session = (() => {
         } catch(_) {}
         try {
           const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
-          await fetch(mosUrl, {
+          // [perf 500x] fire-and-forget REAL (sin await: el retorno no se usa) + timeout 8s para no
+          // dejar una conexión a GAS colgada ~18s compitiendo con el resto. (TODO cero-GAS: migrar a RPC Supabase.)
+          fetch(mosUrl, {
             method: 'POST',
+            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
             body: JSON.stringify({
               action: 'registrarUbicacion',
               deviceId: _getDeviceIdWH(),
@@ -2265,7 +2270,7 @@ const Session = (() => {
               bateria: bateria,
               usuarioLogueado: usuario
             })
-          });
+          }).catch(() => {});
         } catch(_) {}
       },
       (err) => console.warn('[GPS WH] error:', err?.message),

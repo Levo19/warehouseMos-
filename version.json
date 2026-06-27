@@ -1,1 +1,4 @@
-{ "version": "2.13.353", "build": "Review R1: limpia el debounce-timer huerfano + reset lastResync en _detenerRealtimeCatalogo (no dispara post-logout); elimina el div whUpdateBanner DUPLICADO (id repetido rompia getElementById)." }
+{
+ "version": "2.13.354",
+ "build": "2.13.354 (perf 500x): COALESCING de la re-descarga de catalogo (ráfaga de bumps de version → 1 sola descarga diferida 20s, en vez de re-bajar ~1.9MB por cada bump) + throttle del chequeo de version por foco/visibility (30s) + timeout de RPC pesada 12→25s (no abortar a GAS bajo cola) + teclado PIN no espera la descarga del catalogo (tecleable al instante) + registrarUbicacion GPS fire-and-forget con timeout."
+}
