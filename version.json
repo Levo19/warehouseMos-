@@ -1,4 +1,4 @@
 {
- "version": "2.13.358",
- "build": "2.13.358: la guia de despacho a ZONA aparece AL INSTANTE en la lista (tarjeta optimista — antes solo salia tras el refresco de 60s; el flujo de despacho no la inyectaba, solo el de ingreso-proveedor). Finalize con idGuia real en exito, remove si falla; reconciliacion por data-real-id (sin duplicado)."
+ "version": "2.13.359",
+ "build": "2.13.359: LIMITE 30 DIAS en la lista de guias (eran 695 -> saturaban el render y dejaban el formulario tipo/zona en blanco). Ahora solo ultimos 30 dias + ABIERTAS (pendientes nunca se esconden); la busqueda sigue viendo todo el historial. Confirmado: el despacho NO cae a GAS (create=wh.crear_despacho_rapido, impresion=Edge ticket-guia, formulario=cache)."
 }

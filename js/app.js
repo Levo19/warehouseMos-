@@ -5336,6 +5336,13 @@ const GuiasView = (() => {
 
   function _filtrarYBuscar() {
     let r = _filtrar(todas, filtroActual);
+    // [perf] Ventana de 30 días: con cientos de guías (695+), procesar/pintar TODO el histórico satura el
+    // hilo (formulario lento, listas en blanco al abrir el tipo/zona). Mostramos solo los últimos 30 días +
+    // las ABIERTAS (pendientes — nunca esconderlas). Con BÚSQUEDA activa NO se limita (para hallar guías viejas).
+    if (!_busquedaQ) {
+      const _corte30d = Date.now() - 30 * 86400000;
+      r = r.filter(g => g.estado === 'ABIERTA' || _guiaSortTs(g) >= _corte30d);
+    }
     if (_busquedaQ) {
       const qL = _busquedaQ.toLowerCase();
       r = r.filter(g => {
