@@ -1,4 +1,4 @@
 {
- "version": "2.13.359",
- "build": "2.13.359: LIMITE 30 DIAS en la lista de guias (eran 695 -> saturaban el render y dejaban el formulario tipo/zona en blanco). Ahora solo ultimos 30 dias + ABIERTAS (pendientes nunca se esconden); la busqueda sigue viendo todo el historial. Confirmado: el despacho NO cae a GAS (create=wh.crear_despacho_rapido, impresion=Edge ticket-guia, formulario=cache)."
+ "version": "2.13.360",
+ "build": "2.13.360 (FIX ORDEN guias): el transformer trunca fecha a yyyy-MM-dd (sin hora) -> todas las del dia empataban y el sort caia al idGuia con regex codiciosa (d{12,} capturaba 13 O 14 digitos segun el sufijo aleatorio = orden ALEATORIO). Fix: _guiaSortTs usa d{13} (solo el ms epoch, igual que _horaDesdeId que muestra la hora correcta) -> orden estable. + agrupacion por dia usa el ms real (no la fecha UTC truncada que mandaba la guia al grupo del dia equivocado)."
 }

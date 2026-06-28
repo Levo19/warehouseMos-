@@ -1028,12 +1028,17 @@ function _horaDesdeGuia(g) {
 // idGuia (G-<ms>, G_L<ms>, GPCK_<ms>, etc.) que ES el momento de creación; (3) fallback a la fecha.
 function _guiaSortTs(g) {
   const f = String((g && g.fecha) || '');
+  // OJO: el transformer de api.js trunca las columnas `date` a 'yyyy-MM-dd' (sin hora), así que para las
+  // guías `fecha` casi siempre viene sin hora → todas las del día empatan. Por eso el orden REAL sale del
+  // ms epoch embebido en el idGuia (G_L<ms><random>), EXACTAMENTE 13 dígitos (igual que _horaDesdeId, que
+  // por eso muestra la hora correcta). Antes usábamos \d{12,} (codicioso) → capturaba 13 o 14 dígitos según
+  // el sufijo aleatorio → orden inconsistente. \d{13} = solo el ms → orden estable y alineado con la hora.
+  const m = String((g && g.idGuia) || '').match(/(\d{13})/);
+  if (m) { const n = parseInt(m[1], 10); if (n > 1e12) return n; }
   if (f.includes('T') || (f.length > 10 && f.includes(':'))) {
     const d = _parseLocalDate(f);
     if (!isNaN(d)) return d.getTime();
   }
-  const m = String((g && g.idGuia) || '').match(/(\d{12,})/);
-  if (m) { const n = parseInt(m[1], 10); if (n > 1e12) return n; }
   const d2 = _parseLocalDate(f);
   return isNaN(d2) ? 0 : d2.getTime();
 }
@@ -5677,6 +5682,11 @@ const GuiasView = (() => {
     const months  = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
 
     function _gKey(g) {
+      // [fix agrupación] usar el ms REAL del idGuia (igual que el sort) para el día de Perú — `fecha` viene
+      // truncada a 'yyyy-MM-dd' por el transformer y, peor, en fecha UTC (una guía de las 19:21 Lima = 00:21
+      // UTC del día siguiente caería en el grupo del día equivocado). El ms del idGuia da el día Lima correcto.
+      const ts = _guiaSortTs(g);
+      if (ts > 1e12) { try { return _diaPeru(new Date(ts).toISOString()); } catch (_) {} }
       return (g.fecha && _diaPeru(g.fecha)) || '0000-00-00';
     }
     function _gLabel(key) {
