@@ -1023,6 +1023,21 @@ function _horaDesdeGuia(g) {
   return _horaDesdeId(g.idGuia);
 }
 
+// [fix orden] Timestamp en ms para ordenar guías por momento REAL de registro (más reciente primero),
+// sea cual sea el formato de `fecha`: (1) si fecha trae hora la usamos; (2) si no, el ms embebido en el
+// idGuia (G-<ms>, G_L<ms>, GPCK_<ms>, etc.) que ES el momento de creación; (3) fallback a la fecha.
+function _guiaSortTs(g) {
+  const f = String((g && g.fecha) || '');
+  if (f.includes('T') || (f.length > 10 && f.includes(':'))) {
+    const d = _parseLocalDate(f);
+    if (!isNaN(d)) return d.getTime();
+  }
+  const m = String((g && g.idGuia) || '').match(/(\d{12,})/);
+  if (m) { const n = parseInt(m[1], 10); if (n > 1e12) return n; }
+  const d2 = _parseLocalDate(f);
+  return isNaN(d2) ? 0 : d2.getTime();
+}
+
 // Parsea comentario → { comp: 'si'|'no'|null, compl: 'si'|'no'|null }
 function _tagsFromComentario(comentario) {
   const s = String(comentario || '');
@@ -5482,6 +5497,23 @@ const GuiasView = (() => {
     const p = OfflineManager.getProveedoresCache().find(x => x.idProveedor === idProveedor);
     return p ? (p.nombre || idProveedor) : idProveedor;
   }
+  // Nombre de la ZONA destino/origen (para guías de zona: la card debe mostrar la ZONA, no el operador).
+  function _getZonaNombre(idZona) {
+    if (!idZona) return '';
+    try {
+      const z = (OfflineManager.getZonasCache() || []).find(x => x.idZona === idZona);
+      return z ? (z.nombre || idZona) : idZona;
+    } catch (_) { return idZona; }
+  }
+  // El nombre PRINCIPAL de la card: proveedor (ingreso proveedor) · ZONA (salida/devolución a zona) · operador (resto).
+  function _nombrePrincipalGuia(g) {
+    if (g.idProveedor) return _getProvNombre(g.idProveedor) || g.usuario || '—';
+    if (g.tipo === 'SALIDA_ZONA' || g.tipo === 'INGRESO_DEVOLUCION_ZONA') {
+      const zn = g.nombreZona || _getZonaNombre(g.idZona) || g.idZona;
+      return zn ? ('🏬 ' + zn) : (g.usuario || '—');
+    }
+    return g.usuario || '—';
+  }
 
   // [v2.13.223] Icono por tipo de guía (solo presentación, no afecta datos)
   function _tipoIcono(tipo) {
@@ -5501,7 +5533,7 @@ const GuiasView = (() => {
     const borderColor = isMerma ? '#dc2626' : isEnvasado ? '#475569' : isAbierta ? '#f59e0b' : isIngreso ? '#22c55e' : '#3b82f6';
     const tipoIco     = _tipoIcono(g.tipo);
     const tipoLabel   = (isMerma ? '🗑 ' : '') + (TIPO_LABELS[g.tipo] || g.tipo || '—');
-    const provNombre  = _getProvNombre(g.idProveedor) || g.usuario || '—';
+    const provNombre  = _nombrePrincipalGuia(g);   // [fix] guías de zona muestran la ZONA, no el operador
     const hora        = _horaDesdeGuia(g);
     const fechaCorta  = _fmtCorta(g.fecha);
 
@@ -5612,9 +5644,11 @@ const GuiasView = (() => {
       return;
     }
 
+    // [fix orden] ordenar por el timestamp REAL de registro (fecha-con-hora o el ms del idGuia) → el
+    // último en registrarse aparece PRIMERO, aunque `fecha` venga sin hora (antes empataban y se veían
+    // desordenadas). Desempate final por nº de idGuia.
     const sortedFull = [...list].sort((a, b) => {
-      const da = _parseLocalDate(a.fecha), db = _parseLocalDate(b.fecha);
-      const td = db - da;
+      const td = _guiaSortTs(b) - _guiaSortTs(a);
       if (td !== 0) return td;
       const na = parseInt((a.idGuia || '').replace(/\D/g, '')) || 0;
       const nb = parseInt((b.idGuia || '').replace(/\D/g, '')) || 0;

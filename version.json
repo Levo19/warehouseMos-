@@ -1,4 +1,4 @@
 {
- "version": "2.13.356",
- "build": "2.13.356 (500x del delta): 3 HIGH corregidos — (1) DELETES de productos ahora se quitan del cache via tombstones (mos.catalogo_tombstones + delta.eliminados); (2) ventana de perdida en el borde cerrada (filtro >= + server_ts con margen -2s = solape idempotente); (3) el baseline avanza SOLO si la descarga tuvo exito (no queda stale ante fallo). + MED: merge sobre copia (.slice, no muta el parse-cache). + LOW: tablas chicas por _guardarSiCambia."
+ "version": "2.13.357",
+ "build": "2.13.357: guias de zona muestran la ZONA destino (no el operador); orden por timestamp REAL de registro (ultimo primero, robusto a fecha sin hora); y el timer de refresco YA NO re-baja el catalogo completo cada 60s (era 1.9MB/min redundante — el poller de version + delta ya cubren los cambios)."
 }

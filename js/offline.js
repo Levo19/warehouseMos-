@@ -799,8 +799,10 @@ const OfflineManager = (() => {
       precargar().catch(() => {});     // respetará throttle de 60s
     }
     precargarOperacional();
+    // [perf 500x] El timer de 60s YA NO re-baja el catálogo completo (1.9MB/min = el descargarMaestros
+    // repetido). Es redundante: el poller de versión (50s) + realtime detectan cambios del catálogo y bajan
+    // SOLO el delta (~42KB) cuando la versión sube. Aquí solo refrescamos lo operacional (guías/stock).
     _opRefreshTimer = setInterval(() => {
-      precargar().catch(() => {});     // throttled internamente
       precargarOperacional();          // throttled internamente
     }, 60000);
   }
