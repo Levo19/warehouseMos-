@@ -1,4 +1,4 @@
 {
- "version": "2.13.360",
- "build": "2.13.360 (FIX ORDEN guias): el transformer trunca fecha a yyyy-MM-dd (sin hora) -> todas las del dia empataban y el sort caia al idGuia con regex codiciosa (d{12,} capturaba 13 O 14 digitos segun el sufijo aleatorio = orden ALEATORIO). Fix: _guiaSortTs usa d{13} (solo el ms epoch, igual que _horaDesdeId que muestra la hora correcta) -> orden estable. + agrupacion por dia usa el ms real (no la fecha UTC truncada que mandaba la guia al grupo del dia equivocado)."
+ "version": "2.13.361",
+ "build": "2.13.361 (perf): guia_detalle_operacional 60->30 dias (alineado con el limite de 30d de la lista; las ABIERTAS de cualquier edad siguen incluidas) -> ~mitad del payload del detalle en cada refresco operacional. Detalle de guias mas viejas se carga on-demand al abrirlas."
 }

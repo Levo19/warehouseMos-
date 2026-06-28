@@ -554,7 +554,8 @@ const API = (() => {
   // (getHistorialStock, autoritativo); el chat usa getGuia per-guía. Acota el payload global (que crecía
   // sin techo con el histórico) a una ventana rodante. Mismo shape que leer_tabla_rls('guia_detalle')
   // → _sbRowsToObjsFront('guia_detalle', ...) sin cambios. Dedup 4s como el resto.
-  const _GD_DIAS = 60;
+  const _GD_DIAS = 30;   // [perf] 60→30: alineado con el límite de 30d de la lista (todo lo mostrado tiene su
+                         // detalle; las ABIERTAS de cualquier edad siguen incluidas) → ~mitad del payload del refresco.
   function _sbGuiaDetalleOperacional() {
     return _dedupRead('guia_detalle_op:' + _GD_DIAS, 4000, async () => {
       const out = await _sbRpcWH('guia_detalle_operacional', { p_dias: _GD_DIAS });
