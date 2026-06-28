@@ -1,4 +1,4 @@
 {
- "version": "2.13.364",
- "build": "2.13.364 (cero-GAS G4): el cache de PINs admin para verificacion OFFLINE (sincronizarAdminCache, al login) es Supabase-first via mos.admin_pins_cache (authenticated, flag ADMIN_PINS_DIRECTO). null/OFF -> fallback GAS getAdminPinsCache. INERTE por default. Material sensible: gate authenticated (NO anon), mas seguro que el GAS abierto; no resuelve la debilidad de fondo (PINs sin hashear)."
+ "version": "2.13.365",
+ "build": "2.13.365 (G4 online-only · seguridad): se ELIMINO el cache de PINs admin offline (exponia PINs plaintext al navegador). La verificacion de clave admin (reabrir guia, etc) es SIEMPRE online via API.verificarClaveAdmin (mos.verificar_clave_admin: bcrypt+lockout+auditoria). Sin conexion, las acciones de admin se bloquean con aviso 'conectate para autorizar'. Removidos: _validarLocalmenteAdmin, getAdminCache, sincronizarAdminCache, adminPinsCacheDirecto."
 }

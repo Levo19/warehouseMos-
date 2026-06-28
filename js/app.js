@@ -1517,10 +1517,8 @@ const Session = (() => {
     // Polling de bloqueo remoto desde MOS
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.iniciar();
 
-    // Caché admin (clave global + PINs admins) para validar offline
-    if (typeof OfflineManager !== 'undefined' && OfflineManager.sincronizarAdminCache) {
-      OfflineManager.sincronizarAdminCache();
-    }
+    // [G4 online-only] Se eliminó el caché de PINs admin: la verificación de clave admin es siempre online
+    // (mos.verificar_clave_admin, bcrypt+lockout+auditoría). Sin conexión, las acciones de admin se bloquean.
 
     // Push notifications — registrar token con nombre del operador
     setTimeout(_pushInitWH, 3000);
@@ -6913,10 +6911,7 @@ const GuiasView = (() => {
     _updAdminDots(0);
     document.getElementById('adminPinError').textContent = '';
     document.getElementById('adminPinModal').style.display = 'flex';
-    // Refrescar caché en background para próxima vez
-    if (typeof OfflineManager !== 'undefined' && OfflineManager.sincronizarAdminCache) {
-      OfflineManager.sincronizarAdminCache();
-    }
+    // [G4 online-only] Ya no se cachean PINs admin: la verificación es siempre online.
   }
 
   function adminPinTecla(d) {
@@ -6931,48 +6926,31 @@ const GuiasView = (() => {
     _updAdminDots(_adminPinBuf.length);
   }
 
-  function _validarLocalmenteAdmin(clave) {
-    const cache = OfflineManager.getAdminCache();
-    if (!cache || !cache.globalPin) return null;
-    if (clave.length !== 8 || !/^\d{8}$/.test(clave)) return { ok: false, error: 'Clave debe ser de 8 dígitos' };
-    const globalPart = clave.substring(0, 4);
-    const userPart = clave.substring(4, 8);
-    if (globalPart !== cache.globalPin) return { ok: false, error: 'Clave incorrecta' };
-    const admin = (cache.adminPins || []).find(a => String(a.pin) === userPart);
-    if (!admin) return { ok: false, error: 'Clave incorrecta' };
-    return { ok: true, validadoPor: 'admin:' + admin.nombre + ' (offline)', idPersonal: admin.idPersonal };
-  }
-
   async function _verificarAdminPin() {
     const clave = _adminPinBuf;
-    let resultado = null;
-
-    // Online primero — valida contra MOS y registra en auditoría
-    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
-    if (navigator.onLine && mosUrl) {
-      try {
-        const r = await fetch(mosUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'verificarClaveAdmin',
-            clave: clave,
-            accion: 'REABRIR_GUIA',
-            refDocumento: _pinGuiaTarget || '',
-            appOrigen: 'warehouseMos',
-            dispositivo: window.WH_CONFIG?.usuario || ''
-          })
-        });
-        const j = await r.json();
-        if (j?.ok && j.data) resultado = j.data;
-      } catch(e) { /* fallback offline */ }
+    // [G4 online-only] La verificación de clave admin es SIEMPRE online (Supabase-first vía API.verificarClaveAdmin,
+    // con bcrypt + lockout + auditoría server-side). Ya NO se cachean PINs en el dispositivo: sin conexión se
+    // bloquea con aviso en vez de validar localmente (un PIN de 4 díg no se puede proteger offline → texto plano
+    // o hash igual de débil). Online ya es seguro de verdad.
+    if (!navigator.onLine) {
+      document.getElementById('adminPinError').textContent = 'Sin conexión — conéctate para autorizar';
+      _adminPinBuf = ''; _updAdminDots(0);
+      setTimeout(() => { document.getElementById('adminPinError').textContent = ''; }, 2200);
+      return;
     }
-    // Fallback offline
-    if (!resultado) {
-      const local = _validarLocalmenteAdmin(clave);
-      if (local) resultado = local.ok
-        ? { autorizado: true, validadoPor: local.validadoPor }
-        : { autorizado: false, error: local.error };
-      else resultado = { autorizado: false, error: 'Sin caché. Conecta a internet primero.' };
+    let resultado = null;
+    try {
+      // API.verificarClaveAdmin: Supabase-first (mos.verificar_clave_admin) con fallback GAS; ya normaliza
+      // ok = ok && autorizado, así que r.ok === autorizado.
+      const r = await API.verificarClaveAdmin({
+        clave: clave, accion: 'REABRIR_GUIA', refDocumento: _pinGuiaTarget || '',
+        appOrigen: 'warehouseMos', dispositivo: window.WH_CONFIG?.usuario || ''
+      });
+      resultado = (r && r.ok)
+        ? { autorizado: true, validadoPor: r.validadoPor || r.nombre || 'admin' }
+        : { autorizado: false, error: (r && r.error) || 'Clave incorrecta' };
+    } catch(e) {
+      resultado = { autorizado: false, error: 'No se pudo verificar — reintenta' };
     }
 
     if (!resultado.autorizado) {
