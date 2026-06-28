@@ -948,19 +948,28 @@ const OfflineManager = (() => {
   const getAdminCache         = () => cargar(KEYS.ADMIN_CACHE) || null;
 
   async function sincronizarAdminCache() {
-    const url = window.WH_CONFIG?.mosGasUrl;
-    if (!url || !navigator.onLine) return false;
+    if (!navigator.onLine) return false;
+    // [cero-GAS G4] Supabase-first: mos.admin_pins_cache (flag ADMIN_PINS_DIRECTO). null → GAS getAdminPinsCache.
+    let data = null;
     try {
-      const r = await fetch(url + '?action=getAdminPinsCache');
-      const j = await r.json();
-      if (!j?.ok || !j.data?.globalPin) return false;
-      guardar(KEYS.ADMIN_CACHE, {
-        globalPin: String(j.data.globalPin),
-        adminPins: Array.isArray(j.data.adminPins) ? j.data.adminPins : [],
-        sincronizadoEn: Date.now()
-      });
-      return true;
-    } catch(e) { return false; }
+      if (typeof API !== 'undefined' && API.adminPinsCacheDirecto) data = await API.adminPinsCacheDirecto();
+    } catch(_) { data = null; }
+    if (!data) {
+      const url = window.WH_CONFIG?.mosGasUrl;
+      if (!url) return false;
+      try {
+        const r = await fetch(url + '?action=getAdminPinsCache');
+        const j = await r.json();
+        if (!j?.ok || !j.data?.globalPin) return false;
+        data = j.data;
+      } catch(e) { return false; }
+    }
+    guardar(KEYS.ADMIN_CACHE, {
+      globalPin: String(data.globalPin),
+      adminPins: Array.isArray(data.adminPins) ? data.adminPins : [],
+      sincronizadoEn: Date.now()
+    });
+    return true;
   }
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);

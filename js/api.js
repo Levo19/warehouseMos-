@@ -2829,6 +2829,18 @@ const API = (() => {
       } catch (_) { return false; }
     },
 
+    // ── [cero-GAS G4] Cache de PINs admin para verificación OFFLINE, directo a Supabase ──
+    // mos.admin_pins_cache (authenticated, flag ADMIN_PINS_DIRECTO). Devuelve {globalPin, adminPins[], generadoEn}
+    // o null (flag OFF / offline / error) → el caller cae al GAS getAdminPinsCache. Material sensible: NO anon.
+    adminPinsCacheDirecto: async () => {
+      if (!navigator.onLine) return null;
+      try {
+        const r = await _sbRpcWH('admin_pins_cache', {}, 'mos', 8000);
+        if (r && r.ok === true && r.data && r.data.globalPin) return r.data;
+        return null;   // ADMIN_PINS_DIRECTO_OFF u otro → GAS
+      } catch (_) { return null; }
+    },
+
     // ── F0: Cargadores independientes ───────────────────────────
     listarCargadoresMaster:  ()    => call({ action: 'listarCargadoresMaster' }),
     addCargadorDia:          (p)   => post({ action: 'addCargadorDia', ...p }),

@@ -1,4 +1,4 @@
 {
- "version": "2.13.363",
- "build": "2.13.363 (cero-GAS G2): el registro GPS de ubicacion (_gpsRegistrarWH, cada 5min) es Supabase-first via mos.registrar_ubicacion (flag GPS_DIRECTO). false/OFF -> fallback al write GAS. INERTE por default (GPS_DIRECTO en mos.config). Parte de la migracion GPS (tabla + 2 reads admin + purga 7d en pg_cron, SQL 279)."
+ "version": "2.13.364",
+ "build": "2.13.364 (cero-GAS G4): el cache de PINs admin para verificacion OFFLINE (sincronizarAdminCache, al login) es Supabase-first via mos.admin_pins_cache (authenticated, flag ADMIN_PINS_DIRECTO). null/OFF -> fallback GAS getAdminPinsCache. INERTE por default. Material sensible: gate authenticated (NO anon), mas seguro que el GAS abierto; no resuelve la debilidad de fondo (PINs sin hashear)."
 }
