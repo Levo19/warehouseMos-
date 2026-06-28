@@ -946,6 +946,7 @@ const OfflineManager = (() => {
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   // [G4 online-only] Se eliminó el caché de PINs admin (getAdminCache + sincronizarAdminCache): la verificación
   // de clave admin es siempre online (mos.verificar_clave_admin). Ya no se baja ni almacena material de PIN.
+  const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;  // (legacy; sigue exportado)
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);
   const getEnvasadosCache     = () => cargar(KEYS.ENVASADOS)     || [];

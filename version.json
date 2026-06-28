@@ -1,4 +1,4 @@
 {
  "version": "2.13.365",
- "build": "2.13.365 (G4 online-only · seguridad): se ELIMINO el cache de PINs admin offline (exponia PINs plaintext al navegador). La verificacion de clave admin (reabrir guia, etc) es SIEMPRE online via API.verificarClaveAdmin (mos.verificar_clave_admin: bcrypt+lockout+auditoria). Sin conexion, las acciones de admin se bloquean con aviso 'conectate para autorizar'. Removidos: _validarLocalmenteAdmin, getAdminCache, sincronizarAdminCache, adminPinsCacheDirecto."
+ "build": "2.13.365 (HOTFIX pantalla blanca): el commit G4 anterior borro la definicion de getAdminPin pero la dejo en el export de OfflineManager -> ReferenceError -> OfflineManager is not defined -> pantalla blanca. Re-agregada la definicion (legacy, KEYS.ADMIN_PIN). La logica online-only de la clave admin queda intacta."
 }
