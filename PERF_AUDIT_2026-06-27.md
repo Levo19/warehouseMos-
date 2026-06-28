@@ -42,5 +42,7 @@ Detalle completo: workflow `w2y0h5j1c` output.
 - **MED** aliasing del parse-cache → `.slice()`. **LOW** tablas chicas → `_guardarSiCambia`. ✅
 
 ## ⏳ Migraciones GAS pendientes (pasada dedicada — tocan auth/login)
-G1 heartbeat 120s, G2 registrarUbicacion, G4 getAdminPinsCache, G5 admin-PIN reabrir-guía → migrar a RPC Supabase con fallback GAS. G3, G7 menores. (G6 ya hecho.)
-También pendiente: QW2 escalonar arranque (limitar concurrencia), CD4 lazy guia_detalle_operacional.
+- **G1 heartbeat/estado-bloqueo 120s → ✅ HECHO+DESPLEGADO (INERTE), 2026-06-27.** RPC anon `mos.estado_bloqueo_usuario` (SQL 278) = shape exacto de getEstadoBloqueoUsuario + heartbeat dispositivo+personal en 1 llamada. WH 2.13.362 Supabase-first + fallback GAS. Kill-switch `WH_BLOQUEO_DIRECTO` (mos.config, default OFF). Lockstep satisfecho (`_mosLecturaDirecta` ON). Revisado 40x. Doc: `ProyectoMOS/CUTOVER_G1_estado_bloqueo_cero_gas.md`. **Falta solo: poner el flag a '1'.**
+- **G5 admin-PIN reabrir-guía → ✅ ya era Supabase-first** (`mos.verificar_clave_admin`, GAS solo kill-switch).
+- **G2** registrarUbicacion (GPS): falta tabla lat/lng/bateria + migrar lector espía/tracking del admin (no tiene path Supabase). **G4** getAdminPinsCache (auth offline). G3, G7 menores. (G6 ya hecho.)
+- También pendiente: QW2 escalonar arranque (limitar concurrencia), CD4 lazy guia_detalle_operacional.
