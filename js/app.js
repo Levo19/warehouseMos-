@@ -5792,22 +5792,24 @@ const GuiasView = (() => {
   }
 
   // ── Optimistic guía card ──────────────────────────────────
-  function injectOptimisticGuia({ tempId, idProveedor, provNombre }) {
+  function injectOptimisticGuia({ tempId, idProveedor, provNombre, titulo, nombre }) {
     const container = document.getElementById('listGuias');
     if (!container) return;
+    const _titulo = titulo || 'Proveedor';                       // [fix] generalizado: "Proveedor" o "Zona"
+    const _nombre = nombre || provNombre || 'Sin destino';
     const div = document.createElement('div');
     div.id = 'optguia_' + tempId;
     div.className = 'guia-card card-optimistic';
     div.style.borderLeftColor = '#22c55e';
     div.innerHTML = `
       <div class="flex items-center gap-2">
-        <span class="text-xs font-bold text-emerald-400">Proveedor</span>
+        <span class="text-xs font-bold text-emerald-400">${escHtml(_titulo)}</span>
       </div>
       <div class="flex items-center gap-2">
         <div class="spinner" style="width:12px;height:12px;border-width:2px"></div>
         <span class="text-xs text-slate-400 italic">Creando guía…</span>
       </div>
-      <p class="text-xs text-slate-400 truncate">${escHtml(provNombre || 'Sin proveedor')}</p>`;
+      <p class="text-xs text-slate-400 truncate">${escHtml(_nombre)}</p>`;
     container.insertBefore(div, container.firstChild);
   }
 
@@ -13717,6 +13719,16 @@ const DespachoView = (() => {
     cerrarSheet('sheetDespFinalizar');
     _renderCart(); _updateFooter(); badgeUpdate();
     toast('⏳ Generando guía...', 'info', 55000);
+    // [fix lag] Tarjeta optimista: la guía de despacho a ZONA aparece AL INSTANTE en la lista (antes solo
+    // salía tras el refresco de 60s). Se finaliza con el idGuia real al responder, o se quita si falla.
+    const _optTempId = 'dsp_' + Date.now();
+    try {
+      GuiasView.injectOptimisticGuia({
+        tempId: _optTempId,
+        titulo: tipoSnapshot === 'SALIDA_ZONA' ? 'A Zona' : (tipoSnapshot.startsWith('INGRESO') ? 'Ingreso' : 'Salida'),
+        nombre: nombreZona || idZona || 'Zona'
+      });
+    } catch (_) {}
 
     // GAS en segundo plano — timeout generoso 55s
     Promise.race([
@@ -13728,6 +13740,7 @@ const DespachoView = (() => {
         toast(`✅ Guía ${d.idGuia} generada · Imprimiendo...`, 'ok', 6000);
         if (d.errores?.length) toast(`⚠ ${d.errores.length} ítem(s) con error`, 'warn', 5000);
         SoundFX.done(); vibrate([30, 15, 30, 15, 60]);
+        try { GuiasView.finalizeOptimisticGuia(_optTempId, d.idGuia, tipoSnapshot, nombreZona); } catch (_) {}
         _saveHist({ ...histBase, idGuia: d.idGuia, ok: true });
         // [Adhesivo granel] EN PARALELO al ticket: 1 adhesivo por ítem KGM (granel) para pegar en el saco.
         // Idempotente por idGuia (un reintento del despacho NO reimprime). Fire-and-forget.
@@ -13794,6 +13807,7 @@ const DespachoView = (() => {
         }
       } else {
         SoundFX.error(); vibrate([80, 40, 80]);
+        try { GuiasView.removeOptimisticGuia(_optTempId); } catch (_) {}   // [fix lag] quitar tarjeta optimista si falló
         _saveHist({ ...histBase, idGuia: '—', ok: false });
         toast('Error al generar guía: ' + (res.error || 'Sin respuesta'), 'danger', 8000);
         // Restaurar carrito para que el usuario pueda reintentar
@@ -13803,6 +13817,7 @@ const DespachoView = (() => {
     }).catch(e => {
       const msg = e?.timeout ? 'Tiempo agotado — verifica tu conexión' : 'Sin conexión';
       SoundFX.error(); vibrate([80, 40, 80]);
+      try { GuiasView.removeOptimisticGuia(_optTempId); } catch (_) {}     // [fix lag] quitar tarjeta optimista si falló
       _saveHist({ ...histBase, idGuia: '—', ok: false });
       toast('Error: ' + msg, 'danger', 8000);
       if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }

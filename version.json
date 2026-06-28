@@ -1,4 +1,4 @@
 {
- "version": "2.13.357",
- "build": "2.13.357: guias de zona muestran la ZONA destino (no el operador); orden por timestamp REAL de registro (ultimo primero, robusto a fecha sin hora); y el timer de refresco YA NO re-baja el catalogo completo cada 60s (era 1.9MB/min redundante — el poller de version + delta ya cubren los cambios)."
+ "version": "2.13.358",
+ "build": "2.13.358: la guia de despacho a ZONA aparece AL INSTANTE en la lista (tarjeta optimista — antes solo salia tras el refresco de 60s; el flujo de despacho no la inyectaba, solo el de ingreso-proveedor). Finalize con idGuia real en exito, remove si falla; reconciliacion por data-real-id (sin duplicado)."
 }
