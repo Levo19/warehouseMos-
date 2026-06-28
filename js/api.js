@@ -1233,6 +1233,19 @@ const API = (() => {
     if (window.WH_CONFIG && window.WH_CONFIG.loteAdhesivoNavegador === false) return false;
     return true;
   }
+  // [cero-GAS G1] Gate de lectura del estado de bloqueo + heartbeat (mos.estado_bloqueo_usuario). Default ON
+  // en cliente; el KILL-SWITCH real es server-side WH_BLOQUEO_DIRECTO (mos.config): si != '1' el RPC devuelve
+  // WH_BLOQUEO_DIRECTO_OFF → estadoBloqueoUsuarioDirecto retorna null → cae a GAS al instante, sin redeploy.
+  // Opt-out por dispositivo (debug): localStorage 'wh_bloqueo_navegador'='0'.
+  function _whBloqueoDirecto() {
+    try {
+      const v = localStorage.getItem('wh_bloqueo_navegador');
+      if (v === '0') return false;
+      if (v === '1') return true;
+    } catch (_) {}
+    if (window.WH_CONFIG && window.WH_CONFIG.bloqueoNavegador === false) return false;
+    return true;
+  }
   const _MESES_ADH = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
   function _vtoDesdeFechaAdh(fechaEnv) {
     try { const d = new Date(fechaEnv); d.setFullYear(d.getFullYear() + 1); return _MESES_ADH[d.getMonth()] + '/' + d.getFullYear(); }
@@ -2776,6 +2789,27 @@ const API = (() => {
         }
       } catch (_) { /* → GAS kill-switch */ }
       return post({ action: 'verificarClaveAdmin', ...p });
+    },
+
+    // ── [cero-GAS G1] Estado de bloqueo + heartbeat (dispositivo+personal) en 1 RPC ──
+    // Reemplaza el poll GAS getEstadoBloqueoUsuario. Devuelve {ok:true,data:{...}} (shape idéntico al GAS)
+    // o null si: flag server-side WH_BLOQUEO_DIRECTO != '1', opt-out de dispositivo, offline o error →
+    // el caller (BloqueoRemoto._check) cae a GAS al instante. El RPC hace el heartbeat (ultima_conexion en
+    // mos.dispositivos + mos.personal) cuando responde ok, igual que el side-effect del endpoint GAS.
+    estadoBloqueoUsuarioDirecto: async (params) => {
+      if (!_whBloqueoDirecto() || !navigator.onLine) return null;
+      try {
+        const r = await _sbRpcWH('estado_bloqueo_usuario', { p: {
+          nombre:     (params && params.nombre)     || '',
+          idPersonal: (params && params.idPersonal) || '',
+          appOrigen:  (params && params.appOrigen)  || 'warehouseMos',
+          deviceId:   (params && params.deviceId)   || '',
+          idZona:     (params && params.idZona)     || '',
+          idEstacion: (params && params.idEstacion) || ''
+        } }, 'mos', 8000);
+        if (r && r.ok === true && r.data) return r;   // éxito
+        return null;                                   // WH_BLOQUEO_DIRECTO_OFF u otro → GAS
+      } catch (_) { return null; }
     },
 
     // ── F0: Cargadores independientes ───────────────────────────

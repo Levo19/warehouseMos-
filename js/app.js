@@ -3383,22 +3383,33 @@ const BloqueoRemoto = (() => {
   async function _check() {
     const ses = Session.getSesion();
     if (!ses || !ses.idPersonal) return;
-    if (!_mosUrl() || !navigator.onLine) return;
+    if (!navigator.onLine) return;
     try {
-      // Heartbeat para MOS: deviceId + nombre permiten que registrarSesionDispositivo
-      // actualice Ultima_Conexion y Ultima_Sesion en DISPOSITIVOS. Sin esto los
-      // dispositivos WH siempre muestran "hace Nh" porque jamás se les hacía heartbeat.
+      // Heartbeat para MOS: deviceId + nombre permiten que el backend actualice Ultima_Conexion y
+      // Ultima_Sesion en DISPOSITIVOS. Sin esto los dispositivos WH siempre muestran "hace Nh".
       const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
       const nombreFull = ((ses.nombre || '') + ' ' + (ses.apellido || '')).trim();
-      const _ua = (navigator.userAgent || '').substring(0, 200);
-      const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
-                + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
-                + '&nombre=' + encodeURIComponent(nombreFull)
-                + '&deviceId=' + encodeURIComponent(devId)
-                + '&userAgent=' + encodeURIComponent(_ua)
-                + '&appOrigen=warehouseMos';
-      const r = await fetch(url);
-      const j = await r.json();
+      // [cero-GAS G1] Supabase-first: mos.estado_bloqueo_usuario hace heartbeat (dispositivo+personal) +
+      // lee el bloqueo en 1 RPC. null → flag WH_BLOQUEO_DIRECTO OFF / opt-out / offline / error → fallback
+      // GAS (idéntico al legacy: mismo querystring, mismo side-effect registrarSesionDispositivo).
+      let j = null;
+      try {
+        j = await API.estadoBloqueoUsuarioDirecto({
+          idPersonal: ses.idPersonal, nombre: nombreFull, appOrigen: 'warehouseMos', deviceId: devId
+        });
+      } catch (_) { j = null; }
+      if (!j) {
+        if (!_mosUrl()) return;
+        const _ua = (navigator.userAgent || '').substring(0, 200);
+        const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
+                  + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
+                  + '&nombre=' + encodeURIComponent(nombreFull)
+                  + '&deviceId=' + encodeURIComponent(devId)
+                  + '&userAgent=' + encodeURIComponent(_ua)
+                  + '&appOrigen=warehouseMos';
+        const r = await fetch(url);
+        j = await r.json();
+      }
       if (!j || !j.ok || !j.data) return;
       const prev = _state;
       _state = {
