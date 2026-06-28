@@ -2276,21 +2276,25 @@ const Session = (() => {
         } catch(_) {}
         try {
           const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
-          // [perf 500x] fire-and-forget REAL (sin await: el retorno no se usa) + timeout 8s para no
-          // dejar una conexión a GAS colgada ~18s compitiendo con el resto. (TODO cero-GAS: migrar a RPC Supabase.)
-          fetch(mosUrl, {
-            method: 'POST',
-            signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
-            body: JSON.stringify({
-              action: 'registrarUbicacion',
-              deviceId: _getDeviceIdWH(),
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-              bateria: bateria,
-              usuarioLogueado: usuario
-            })
-          }).catch(() => {});
+          const _gp = {
+            deviceId: _getDeviceIdWH(),
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            bateria: bateria,
+            usuarioLogueado: usuario
+          };
+          // [cero-GAS G2] Supabase-first: mos.registrar_ubicacion (flag GPS_DIRECTO). false → cae al write GAS.
+          let _viaSb = false;
+          try { _viaSb = await API.registrarUbicacionDirecto(_gp); } catch(_) { _viaSb = false; }
+          if (!_viaSb) {
+            // Fallback GAS — fire-and-forget REAL + timeout 8s (no dejar conexión colgada ~18s).
+            fetch(mosUrl, {
+              method: 'POST',
+              signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
+              body: JSON.stringify(Object.assign({ action: 'registrarUbicacion' }, _gp))
+            }).catch(() => {});
+          }
         } catch(_) {}
       },
       (err) => console.warn('[GPS WH] error:', err?.message),

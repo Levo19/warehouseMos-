@@ -2812,6 +2812,23 @@ const API = (() => {
       } catch (_) { return null; }
     },
 
+    // ── [cero-GAS G2] Registro de ubicación GPS directo a Supabase (mos.registrar_ubicacion, flag GPS_DIRECTO) ──
+    // Devuelve true si escribió en Supabase; false si flag OFF / offline / error → el caller cae al write GAS.
+    registrarUbicacionDirecto: async (params) => {
+      if (!navigator.onLine) return false;
+      try {
+        const r = await _sbRpcWH('registrar_ubicacion', { p: {
+          deviceId:        (params && params.deviceId)        || '',
+          lat:             (params && params.lat),
+          lng:             (params && params.lng),
+          accuracy:        (params && params.accuracy),
+          bateria:         (params && params.bateria),
+          usuarioLogueado: (params && params.usuarioLogueado) || ''
+        } }, 'mos', 8000);
+        return !!(r && r.ok === true);   // ok:false (GPS_DIRECTO_OFF) → false → GAS
+      } catch (_) { return false; }
+    },
+
     // ── F0: Cargadores independientes ───────────────────────────
     listarCargadoresMaster:  ()    => call({ action: 'listarCargadoresMaster' }),
     addCargadorDia:          (p)   => post({ action: 'addCargadorDia', ...p }),
