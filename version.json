@@ -1,4 +1,4 @@
 {
- "version": "2.13.370",
- "build": "2.13.370 (lista sombra: botones de zona): el form de IA ahora deja elegir la ZONA destino (Zona 1 / Zona 2, por defecto Zona 1) antes de subir la lista. Se guarda en wh.listas_sombra.zona (RPC crear_lista_sombra, SQL 292). Incluye el fix del flicker de la lista pickup (2.13.369)."
+ "version": "2.13.371",
+ "build": "2.13.371 (FIX lunes imprime rezagados): el auto-print del lunes imprimia el bucket PENDIENTE de esta semana (la lista limpia nueva, ej. 42) en vez de los REZAGADO de la semana pasada (lo NO despachado, ej. 156). Ahora consulta los buckets REZAGADO (lista de compra) y los imprime. Dedup por bucket."
 }

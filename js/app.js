@@ -15331,11 +15331,17 @@ const DespachoView = (() => {
 
   // Auto-impresión del LUNES: 1 ticket por zona del acumulado. Guard local por equipo
   // (no spamear el Edge cada poll); el dedup REAL es server-side (1 vez por semana global).
-  function _autoImprimirAcumuladosLunes() {
+  async function _autoImprimirAcumuladosLunes() {
     try {
       const diaLima = new Date().toLocaleDateString('en-US', { timeZone: 'America/Lima', weekday: 'short' });
       if (diaLima !== 'Mon') return;
-      (_pickupsPendientes || []).forEach(p => {
+      // [v2.13.371 · FIX] El lunes se imprime lo NO DESPACHADO de la semana pasada = los
+      // buckets REZAGADO (lista de compra), NO el bucket PENDIENTE de esta semana (que recién
+      // empieza a acumular). Antes iteraba _pickupsPendientes (PENDIENTE) → imprimía la lista
+      // limpia nueva (ej. 42) en vez del rezagado real (ej. 156). Dedup por bucket (1× por device).
+      const res = await API.getPickups({ estado: 'REZAGADO' }).catch(() => null);
+      const rez = (res && res.ok) ? (res.data || []) : [];
+      rez.forEach(p => {
         if (String(p.fuente || '').toUpperCase() !== 'ACUMULADO_SEMANAL') return;
         const k = 'wh_acumimpr_' + p.idPickup;
         try { if (localStorage.getItem(k) === '1') return; localStorage.setItem(k, '1'); } catch (_) {}
