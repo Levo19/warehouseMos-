@@ -16090,10 +16090,22 @@ const DespachoView = (() => {
 
   // ── Modal IA — pegado y análisis ──────────────────────────
   let _lsPreviewBuffer = [];
+  let _lsZonaSel = 'ZONA-01';   // [v2.13.370] zona destino de la lista (default Zona 1)
+
+  // Botones de zona del modal de lista sombra: marca la elegida y resalta el botón.
+  function lsSetZona(z) {
+    _lsZonaSel = z || 'ZONA-01';
+    ['ZONA-01', 'ZONA-02'].forEach(id => {
+      const b = document.getElementById('lsZonaBtn-' + id);
+      if (b) b.classList.toggle('is-active', id === _lsZonaSel);
+    });
+    try { SoundFX.click(); } catch(_){}
+  }
 
   function abrirModalLista() {
     document.getElementById('modalSubirLista').style.display = 'flex';
     _lsMostrarPaso(1);
+    lsSetZona('ZONA-01');   // reset a Zona 1 por defecto en cada apertura
     setTimeout(() => document.getElementById('lsTextoCrudo')?.focus(), 250);
     try { SoundFX.click(); } catch(_){}
   }
@@ -16382,7 +16394,8 @@ const DespachoView = (() => {
         usuarioTomada: '',
         items: items,
         total: items.length,
-        completos: 0
+        completos: 0,
+        zona: _lsZonaSel   // [v2.13.370] zona destino elegida en el modal
       };
       _lsPanelData = [optEntry].concat(_lsPanelData || []);
       try { badgeUpdate(); } catch(_){}
@@ -16392,6 +16405,7 @@ const DespachoView = (() => {
         usuario: usuario,
         items: JSON.stringify(items),
         compartir: true,
+        idZona: _lsZonaSel,   // [v2.13.370] zona destino
         localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
       }).then(r => {
         if (r?.ok) {
@@ -16442,7 +16456,7 @@ const DespachoView = (() => {
            flotMas, flotMenos, flotSetGranel,
            renderFlotante: _renderDespFlotante,
            // [v2.13.8] Lista sombra
-           abrirModalLista, cerrarModalLista, analizarListaConIA,
+           abrirModalLista, cerrarModalLista, analizarListaConIA, lsSetZona,
            volverPaso1, activarListaSombra, toggleListaSombra, cerrarListaSombra,
            _lsPrevSetCant, _lsPrevDel,
            // [v2.13.9] Tap-to-search en item de sombra

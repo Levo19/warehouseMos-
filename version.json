@@ -1,4 +1,4 @@
 {
- "version": "2.13.369",
- "build": "2.13.369 (FIX flicker lista pickup): cuando el poll de getPickups fallaba (timeout/red), la lista se ponia en [] -> '0 productos' parpadeante (al rato volvian los 72). Ahora un poll fallido CONSERVA la ultima lista buena; solo un fetch OK la actualiza (vacio legitimo = ok:true con data:[])."
+ "version": "2.13.370",
+ "build": "2.13.370 (lista sombra: botones de zona): el form de IA ahora deja elegir la ZONA destino (Zona 1 / Zona 2, por defecto Zona 1) antes de subir la lista. Se guarda en wh.listas_sombra.zona (RPC crear_lista_sombra, SQL 292). Incluye el fix del flicker de la lista pickup (2.13.369)."
 }

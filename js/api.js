@@ -1622,7 +1622,8 @@ const API = (() => {
       }
       const out = await _sbRpcWH(_lsRpc, { p: {
         idLista: params.idLista || '', usuario: params.usuario || '', items: _lsItems,
-        compartir: !!params.compartir, forzar: !!params.forzar, nota: params.nota || ''
+        compartir: !!params.compartir, forzar: !!params.forzar, nota: params.nota || '',
+        idZona: params.idZona || params.zona || ''   // [v2.13.370] zona destino de la lista
       } });
       // *_OFF (flag server apagado) o transporte caído → GAS. Negocio (ok:false con otro error) → PROPAGAR.
       if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
