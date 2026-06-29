@@ -14096,7 +14096,12 @@ const DespachoView = (() => {
 
   async function _pollPickups() {
     const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
-    const lista = (res && res.ok) ? (res.data || []) : [];
+    // [FIX flicker] Si el poll FALLA (timeout/5xx/red), NO vaciar la lista — conservar la
+    // última buena. Antes un poll fallido ponía la lista en [] → "0 productos" parpadeante
+    // (al rato volvían los 72 con el siguiente poll). Solo un fetch OK actualiza la lista.
+    // (estado vacío legítimo = ok:true con data:[] → sí actualiza.)
+    if (!res || res.ok !== true) { return; }
+    const lista = res.data || [];
     const idsActuales = new Set(lista.map(p => p.idPickup));
     const huboSnapshot = localStorage.getItem(PICKUPS_SNAPSHOT_KEY) !== null;
     const nuevos = !huboSnapshot ? [] : lista.filter(p => !_ultimosIdsPickups.has(p.idPickup) && p.estado === 'PENDIENTE');

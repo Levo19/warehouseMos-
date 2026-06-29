@@ -1,4 +1,4 @@
 {
- "version": "2.13.368",
- "build": "2.13.368 (FIX lista sombra 'sin items'): la IA reconocia los items pero al subir la lista la RPC crear_lista_sombra devolvia 'sin items'. Causa: el front mandaba items como JSON.stringify (string) y la RPC espera un ARRAY jsonb nativo (jsonb_typeof='array'). Fix en api.js: se parsea el string a array antes de mandarlo a PostgREST (el path GAS sigue usando el string). Aplica a las 6 acciones *_lista_sombra."
+ "version": "2.13.369",
+ "build": "2.13.369 (FIX flicker lista pickup): cuando el poll de getPickups fallaba (timeout/red), la lista se ponia en [] -> '0 productos' parpadeante (al rato volvian los 72). Ahora un poll fallido CONSERVA la ultima lista buena; solo un fetch OK la actualiza (vacio legitimo = ok:true con data:[])."
 }
