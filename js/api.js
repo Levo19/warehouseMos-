@@ -1612,8 +1612,16 @@ const API = (() => {
         liberarListaSombra: 'liberar_lista_sombra', actualizarProgresoListaSombra: 'actualizar_progreso_lista_sombra',
         cerrarListaSombra: 'cerrar_lista_sombra', anularListaSombra: 'anular_lista_sombra'
       }[params.action];
+      // [FIX lista sombra "sin items"] el front manda items como JSON.stringify (lo
+      // necesita el path GAS); las RPC `*_lista_sombra` esperan un ARRAY jsonb nativo
+      // (jsonb_typeof = 'array'). Si llega como string, lo parseamos acá para PostgREST.
+      // El path GAS sigue usando params.items original (no se toca).
+      let _lsItems = params.items;
+      if (typeof _lsItems === 'string') {
+        try { _lsItems = JSON.parse(_lsItems); } catch (_) { /* deja el string; la RPC dará 'sin items' */ }
+      }
       const out = await _sbRpcWH(_lsRpc, { p: {
-        idLista: params.idLista || '', usuario: params.usuario || '', items: params.items,
+        idLista: params.idLista || '', usuario: params.usuario || '', items: _lsItems,
         compartir: !!params.compartir, forzar: !!params.forzar, nota: params.nota || ''
       } });
       // *_OFF (flag server apagado) o transporte caído → GAS. Negocio (ok:false con otro error) → PROPAGAR.
