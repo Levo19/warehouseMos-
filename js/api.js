@@ -2743,9 +2743,19 @@ const API = (() => {
     // crea/reusa sesión wh.sesiones. APP_NO_AUTORIZADA/sin-token → null → caller cae a GAS loginPersonal.
     // FIX del login caído: catalogo_wh_rls dejó de mandar el pin (seguridad) → validarPinLocal no podía matchear.
     loginPersonalSB: async (pin) => {
-      const out = await _sbRpcWH('login_pin_wh', { p: { pin: String(pin || '') } }, 'mos');
+      // [accesos unificados] mandamos deviceId → el hook server-side registra el ingreso
+      // en liquidaciones_dia y el cierre 11pm puede forzar logout de este dispositivo.
+      let _dev = ''; try { _dev = _whDeviceId() || ''; } catch (_) {}
+      const out = await _sbRpcWH('login_pin_wh', { p: { pin: String(pin || ''), deviceId: String(_dev) } }, 'mos');
       if (!out || (out.ok === false && String(out.error || '') === 'APP_NO_AUTORIZADA')) return null;
       return out;   // {ok:true,data:{...}} | {ok:false,error:'PIN incorrecto'/'PIN requerido'}
+    },
+    // [accesos unificados] heartbeat de asistencia (última conexión). Inerte si el flag
+    // server MOS_ACCESOS_DIRECTO está OFF (la RPC devuelve _OFF). Fire-and-forget.
+    heartbeatPersonalSB: async (idPersonal) => {
+      if (!idPersonal) return null;
+      try { return await _sbRpcWH('heartbeat_personal', { p: { idPersonal: String(idPersonal) } }, 'mos'); }
+      catch (_) { return null; }
     },
     cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
     getPersonal:        ()       => call({ action: 'getPersonal' }),

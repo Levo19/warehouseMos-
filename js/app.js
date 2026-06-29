@@ -1530,6 +1530,21 @@ const Session = (() => {
       if (document.visibilityState === 'visible') _gpsRegistrarWH(false);
     }, 5 * 60 * 1000);
 
+    // [accesos unificados] heartbeat de asistencia (última conexión) cada 5 min,
+    // junto al GPS. Reusa el operador logueado (sesionActual). Inerte si el flag
+    // server MOS_ACCESOS_DIRECTO está OFF. fire-and-forget.
+    const _whHeartbeatAccesos = () => {
+      try {
+        const idp = sesionActual && (sesionActual.idPersonal || sesionActual.id_personal);
+        if (idp && API && API.heartbeatPersonalSB) API.heartbeatPersonalSB(idp);
+      } catch (_) {}
+    };
+    setTimeout(_whHeartbeatAccesos, 9000);
+    if (_intervalHeartbeatAccesos) clearInterval(_intervalHeartbeatAccesos);
+    _intervalHeartbeatAccesos = setInterval(() => {
+      if (document.visibilityState === 'visible') _whHeartbeatAccesos();
+    }, 5 * 60 * 1000);
+
     // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
     // Cuando el admin abra el modal de elegir impresora, ya estará cacheado
     // → modal abre INSTANT en vez de "⏳ Cargando impresoras..." por 2-3s.
@@ -2172,6 +2187,7 @@ const Session = (() => {
   let _audioChunkIdx = 0;
   let _audioAutoStopTimer = null;
   let _intervalGpsWH = null;
+  let _intervalHeartbeatAccesos = null;
 
   const _audioBlobToBase64WH = (blob) => new Promise((resolve, reject) => {
     const r = new FileReader();

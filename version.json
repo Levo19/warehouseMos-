@@ -1,4 +1,4 @@
 {
- "version": "2.13.366",
- "build": "2.13.366 (HOTFIX pantalla blanca - bump de version): el 2.13.365 quedo con getAdminPin en el export pero sin definicion -> OfflineManager is not defined -> pantalla blanca. Fix: definicion re-agregada. Este bump (366) fuerza al Service Worker a actualizar (el 365 roto tenia el mismo numero que el primer intento de fix)."
+ "version": "2.13.367",
+ "build": "2.13.367 (accesos unificados · INERTE): el login WH ahora manda deviceId y hay heartbeat de asistencia cada 5min (API.heartbeatPersonalSB). Alimenta el registro unificado de personal en mos.liquidaciones_dia (hook server-side, gateado por MOS_ACCESOS_DIRECTO=OFF). Sin efecto visible hasta que el dueno prenda el flag."
 }
