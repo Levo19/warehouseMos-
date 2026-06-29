@@ -737,7 +737,7 @@ const OfflineManager = (() => {
           // acababa de cambiar pero que el backend aún no había grabado
           // (síntoma: "el cambio se pierde / vuelve al inicial" — afectaba a
           // cargadores Y a comentario/monto).
-          ['cargadores', 'comentario', 'monto', 'idProveedor'].forEach(campo => {
+          ['cargadores', 'comentario', 'monto', 'idProveedor', 'fotos'].forEach(campo => {
             if (_preingCampoPendiente(n.idPreingreso, campo) && old[campo] != null) {
               merged[campo] = old[campo];
             }

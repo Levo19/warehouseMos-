@@ -17906,6 +17906,17 @@ const PreingresosView = (() => {
           const up = await API.subirFotoPreingreso({ idPreingreso, fotoBase64: b64, mimeType: mime, indice: fotosExistentes.length + i + 1 });
           if (up.ok && !up.offline && up.data?.url) {
             todasFotos.push({ url: up.data.url });
+            // [v2.13.373] Persistir el enlace foto→fila INCREMENTALMENTE (igual que el
+            // flujo de creación, app.js:18444). Antes la edición subía TODAS las fotos a
+            // Storage y hacía UN solo actualizarPreingreso al final: si esa llamada fallaba
+            // (6 fotos = >30s → timeout), el enlace de TODAS se perdía → fotos en Storage
+            // pero columna `fotos` vacía → "no carga" para otros dispositivos. Ahora cada
+            // URL queda vinculada en la BD apenas sube, sobreviviendo a cualquier falla posterior.
+            try {
+              const _fstr = todasFotos.map(f => f.url).join(',');
+              await API.actualizarFotosPreingreso({ idPreingreso, fotos: _fstr });
+              try { OfflineManager.patchPreingresosCache(idPreingreso, { fotos: _fstr }); } catch(_){}
+            } catch (eUpd) { console.warn('[FotosEdit] persist incremental', eUpd?.message || eUpd); }
             // [v2.11.3] Registrar preview local como fallback ante Drive lento
             try {
               if (window.Photos && up.data.fileId && fotosNuevasCaptura[i].objectUrl) {
@@ -17923,7 +17934,7 @@ const PreingresosView = (() => {
       // [v2.13.173] Re-marcar pendiente: la subida de fotos pudo tardar >15s y
       // el flag del flush ya habría expirado; sin esto el poll revierte la meta.
       OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor, fotos });
-      OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor']);
+      OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor', 'fotos']);
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => {
           console.warn('[EditPreingreso]', e);
