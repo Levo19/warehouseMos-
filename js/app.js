@@ -14094,13 +14094,21 @@ const DespachoView = (() => {
     }
   }
 
-  async function _pollPickups() {
-    const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO' }).catch(() => ({ ok: false }));
+  async function _pollPickups(_retry) {
+    // [v2.13.372] force=true → lectura FRESCA (bypass caché 4s) para que la consolidación
+    // server-side (realtime) y la carga inicial muestren los productos al instante, sin refrescar.
+    const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO', force: true }).catch(() => ({ ok: false }));
     // [FIX flicker] Si el poll FALLA (timeout/5xx/red), NO vaciar la lista — conservar la
-    // última buena. Antes un poll fallido ponía la lista en [] → "0 productos" parpadeante
-    // (al rato volvían los 72 con el siguiente poll). Solo un fetch OK actualiza la lista.
-    // (estado vacío legítimo = ok:true con data:[] → sí actualiza.)
-    if (!res || res.ok !== true) { return; }
+    // última buena. Solo un fetch OK actualiza la lista. (vacío legítimo = ok:true, data:[].)
+    if (!res || res.ok !== true) {
+      // [v2.13.372 · FIX carga inicial] Si falló Y la lista AÚN está vacía (primer poll, conexión
+      // lenta que timeoutea), reintentar pronto en vez de quedarse en "0 productos" hasta los 30s
+      // (por eso había que refrescar la web). Hasta 4 reintentos, ~2.5s c/u.
+      if (!_pickupsPendientes.length && (_retry || 0) < 4) {
+        setTimeout(() => { try { _pollPickups((_retry || 0) + 1); } catch (_) {} }, 2500);
+      }
+      return;
+    }
     const lista = res.data || [];
     const idsActuales = new Set(lista.map(p => p.idPickup));
     const huboSnapshot = localStorage.getItem(PICKUPS_SNAPSHOT_KEY) !== null;

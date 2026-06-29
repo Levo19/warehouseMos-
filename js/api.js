@@ -538,7 +538,10 @@ const API = (() => {
   // [perf v2.13.242] Dedup + micro-cache 4s: si getDashboard y descargarOperacional
   // piden 'guias' en la misma ráfaga, se hace UNA sola leer_tabla_rls compartida.
   // 4s << ciclo de refresh (60s) → no afecta frescura percibida.
-  function _sbLeerTablaWH(tabla) {
+  function _sbLeerTablaWH(tabla, force) {
+    // [v2.13.372] force=true → invalida el micro-caché (4s) antes de leer, para lecturas que
+    // necesitan frescura inmediata (poll de pickups + realtime), sin afectar la ráfaga del dashboard.
+    if (force) { try { _readCache.delete('tabla:' + tabla); } catch (_) {} }
     return _dedupRead('tabla:' + tabla, 4000, async () => {
       const out = await _sbRpcWH('leer_tabla_rls', { p_tabla: tabla });
       if (!out || out.ok === false) throw new Error((out && out.error) || 'leer_tabla error');
@@ -991,7 +994,7 @@ const API = (() => {
       return { ok: true, data: resultado };
     }
     if (action === 'getPickups') {
-      let rows = await _sbLeerTablaWH('pickups');
+      let rows = await _sbLeerTablaWH('pickups', params.force);   // [v2.13.372] force → lectura fresca
       const filtroEstado = params.estado || 'PENDIENTE';
       rows = rows.filter(r => {
         if (filtroEstado === 'TODOS') return true;
