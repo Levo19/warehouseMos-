@@ -8592,6 +8592,12 @@ const GuiasView = (() => {
             it.idDetalle = rDet.data.idDetalle || it.idDetalle;
             if (rDet.data.idLote) it.idLote = rDet.data.idLote;
             it._local = false; it._saving = false; it._saveFailed = false;
+            // [v2.13.374 · FIX VENCIMIENTO] El alta ya mandó el venc (8577); pero si el
+            // operador lo editó inline mientras la línea era _local, el inline-edit lo
+            // difirió → re-persistir SOLO si cambió respecto al enviado (sin llamadas de más).
+            if (it.fechaVencimiento && String(it.fechaVencimiento) !== String(fechaVenc || '')) {
+              _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle: it.idDetalle, fechaVencimiento: it.fechaVencimiento }), 'el vencimiento');
+            }
             try { OfflineManager.addDetalleCache?.(it); } catch(_) {}
             try { if (SoundFX.savedTick) SoundFX.savedTick(); } catch(_) {}
             _mostrarDetalleSheet(_guiaActual, false);
