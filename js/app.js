@@ -6474,7 +6474,13 @@ const GuiasView = (() => {
       // es temporal (DL…) y el backend no lo encontraría → NO llamamos ahora. El valor ya
       // quedó en d.fechaVencimiento (arriba) y se persiste al sellar (ver API.agregarDetalle().then).
       // Solo persistimos directo si la línea ya tiene idDetalle REAL.
-      if (d.idDetalle && !d._local) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
+      if (d.idDetalle && !d._local) {
+        _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
+      } else if (d._local) {
+        // [v2.13.376] Línea sin sellar: si su alta está ENCOLADA (offline), parchear la op
+        // para que el alta lleve el venc al sincronizar (online lo cubre el sellado).
+        try { OfflineManager.patchPendingDetalleVenc?.(d.idDetalle, _selVenc); } catch(_){}
+      }
     }
     toast('Guardado', 'ok', 1000);
   }
@@ -6772,6 +6778,9 @@ const GuiasView = (() => {
         API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc })
           .then(r => _toastResultado(r, 'vencimiento'))
           .catch(e => _toastResultado(null, 'vencimiento', e));
+      } else if (d._local) {
+        // [v2.13.376] alta encolada (offline) → parchear su venc para que viaje con el alta.
+        try { OfflineManager.patchPendingDetalleVenc?.(d.idDetalle, _editItemVenc); } catch(_){}
       }
     }
     toast('Ítem guardado', 'ok', 1500);
@@ -17961,7 +17970,9 @@ const PreingresosView = (() => {
       // [v2.13.173] Re-marcar pendiente: la subida de fotos pudo tardar >15s y
       // el flag del flush ya habría expirado; sin esto el poll revierte la meta.
       OfflineManager.patchPreingresosCache(idPreingreso, { comentario, monto, idProveedor, fotos });
-      OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor', 'fotos']);
+      // [v2.13.376] 'fotos' ya NO va en el guard de pendientes (causaba revert cross-device);
+      // la subida queda cubierta por _subiendoFotos + el incremental persist.
+      OfflineManager.marcarPreingresoPendiente(idPreingreso, ['comentario', 'monto', 'idProveedor']);
       await API.actualizarPreingreso({ idPreingreso, idProveedor, monto, comentario, fotos, usuario: window.WH_CONFIG.usuario })
         .catch(e => {
           console.warn('[EditPreingreso]', e);

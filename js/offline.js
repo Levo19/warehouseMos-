@@ -556,6 +556,27 @@ const OfflineManager = (() => {
     guardar(KEYS.QUEUE, queue);
   }
 
+  // [v2.13.376] Parchea el fechaVencimiento de un agregarDetalleGuia aún PENDIENTE en la
+  // cola offline. Caso: el operador agrega una línea estando OFFLINE y luego le pone el
+  // vencimiento inline — el alta se encoló con fechaVencimiento:'' y la cola reaplica el
+  // payload tal cual → el venc se perdía al sincronizar. Esto actualiza la op encolada para
+  // que el alta lleve el venc actual (un solo INSERT con el dato correcto). Devuelve true si
+  // parcheó. El localId de la op = 'DET_'+idLocal (catálogo) o 'PNDET_'+idLocal (producto nuevo).
+  function patchPendingDetalleVenc(lineLocalId, fechaVencimiento) {
+    if (!lineLocalId) return false;
+    let patched = false;
+    const upd = getQueue().map(it => {
+      if (it.status !== 'pending' || it.action !== 'agregarDetalleGuia') return it;
+      if (it.localId === 'DET_' + lineLocalId || it.localId === 'PNDET_' + lineLocalId) {
+        patched = true;
+        return { ...it, params: { ...it.params, fechaVencimiento: fechaVencimiento || '' } };
+      }
+      return it;
+    });
+    if (patched) guardar(KEYS.QUEUE, upd);
+    return patched;
+  }
+
   function limpiarSincronizados() {
     const queue = getQueue().filter(i => i.status === 'pending' || i.status === 'error');
     guardar(KEYS.QUEUE, queue);
@@ -737,7 +758,12 @@ const OfflineManager = (() => {
           // acababa de cambiar pero que el backend aún no había grabado
           // (síntoma: "el cambio se pierde / vuelve al inicial" — afectaba a
           // cargadores Y a comentario/monto).
-          ['cargadores', 'comentario', 'monto', 'idProveedor', 'fotos'].forEach(campo => {
+          // [v2.13.376] 'fotos' QUITADO del field-protect: causaba que un borrado de foto
+          // hecho en OTRO dispositivo se revirtiera por ≤15s. Ya no hace falta protegerlo acá
+          // porque (a) durante la subida el refresh se SALTA por _subiendoFotos, y (b) el
+          // incremental persist deja las fotos en el backend al terminar → el poll las trae.
+          // El preserve por-vacío (arriba, líneas 731-734) sigue cubriendo el caso legítimo.
+          ['cargadores', 'comentario', 'monto', 'idProveedor'].forEach(campo => {
             if (_preingCampoPendiente(n.idPreingreso, campo) && old[campo] != null) {
               merged[campo] = old[campo];
             }
@@ -1052,6 +1078,7 @@ const OfflineManager = (() => {
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
     iniciarPollerCatalogo, detenerPollerCatalogo, notificarVersionCatalogo,
     setSubiendoFotos, isSubiendoFotos,
+    patchPendingDetalleVenc,
     marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
   };
