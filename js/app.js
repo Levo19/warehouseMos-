@@ -6469,7 +6469,13 @@ const GuiasView = (() => {
       if (d.idDetalle && !d._local) _persistirCantidad(d);
       else _avisarFalloDetalle(API.actualizarCantidadDetalle({ idDetalle, cantidadRecibida: _selQty }), 'la cantidad');
     }
-    if (vencChanged) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
+    if (vencChanged) {
+      // [v2.13.374 · FIX VENCIMIENTO] Si la línea aún es LOCAL (no sellada), su idDetalle
+      // es temporal (DL…) y el backend no lo encontraría → NO llamamos ahora. El valor ya
+      // quedó en d.fechaVencimiento (arriba) y se persiste al sellar (ver API.agregarDetalle().then).
+      // Solo persistimos directo si la línea ya tiene idDetalle REAL.
+      if (d.idDetalle && !d._local) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle, fechaVencimiento: _selVenc }), 'el vencimiento');
+    }
     toast('Guardado', 'ok', 1000);
   }
 
@@ -6759,9 +6765,14 @@ const GuiasView = (() => {
         .catch(e => _toastResultado(null, 'cantidad', e));
     }
     if (vencChanged) {
-      API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc })
-        .then(r => _toastResultado(r, 'vencimiento'))
-        .catch(e => _toastResultado(null, 'vencimiento', e));
+      // [v2.13.374 · FIX VENCIMIENTO] mismo guard que la cantidad (línea arriba): si la
+      // línea es LOCAL (no sellada), su idDetalle es temporal → el backend no lo encontraría
+      // y el vencimiento se perdería. Ya quedó en d.fechaVencimiento y se persiste al sellar.
+      if (d.idDetalle && !d._local) {
+        API.actualizarFechaVencimiento({ idDetalle: _editItemId, fechaVencimiento: _editItemVenc })
+          .then(r => _toastResultado(r, 'vencimiento'))
+          .catch(e => _toastResultado(null, 'vencimiento', e));
+      }
     }
     toast('Ítem guardado', 'ok', 1500);
   }
@@ -7708,11 +7719,17 @@ const GuiasView = (() => {
           // Preservar cantidad local: puede haberse incrementado mientras GAS respondía
           const localQty = parseFloat(_guiaActual.detalle[idx].cantidadRecibida) || 1;
           const gasQty   = parseFloat(res.data.cantidadRecibida) || 1;
+          // [v2.13.374 · FIX VENCIMIENTO] Preservar el vencimiento que el operador puso
+          // mientras la línea aún era LOCAL. res.data lo trae vacío (el add se manda sin
+          // venc → se pone después por edición inline) → sin esto el spread {...res.data}
+          // lo borraba. Causa de "las guías no guardan el vencimiento" (intermitente).
+          const localVenc = String(_guiaActual.detalle[idx].fechaVencimiento || '').trim();
           const itemFinal = {
             ...res.data,
             idGuia: res.data.idGuia || _idGuia,
             descripcionProducto: res.data.descripcionProducto || desc,
             cantidadRecibida: localQty,
+            fechaVencimiento: localVenc || res.data.fechaVencimiento || '',
             _local: false, _indirect: !!indirecto
           };
           _guiaActual.detalle[idx] = itemFinal;
@@ -7721,6 +7738,10 @@ const GuiasView = (() => {
           // Si el local fue incrementado mientras GAS estaba en vuelo → sincronizar.
           // [v2.13.218] Vía la cola serializada (itemFinal ya tiene idDetalle real y _local=false).
           if (localQty > gasQty) _persistirCantidad(itemFinal);
+          // [v2.13.374 · FIX VENCIMIENTO] El inline-edit lo mandó al idDetalle LOCAL (DL…)
+          // mientras la línea no sellaba → el backend no lo encontraba → se perdía. Ahora
+          // que selló (idDetalle REAL), lo persistimos con ese id.
+          if (localVenc) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle: itemFinal.idDetalle, fechaVencimiento: localVenc }), 'el vencimiento');
         }
         _renderCamList(); // quitar ⏳
       } else if (!res.offline) {
