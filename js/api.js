@@ -2718,7 +2718,29 @@ const API = (() => {
         return await res.json().catch(() => ({ ok: false }));
       } catch (e) { return { ok: false, error: e.message }; }
     },
-    imprimirAvisoCajeros:(p)     => post({ action: 'imprimirAvisoCajeros', ...p }),
+    // [cero-GAS] aviso a cajas: intenta la Edge `aviso-cajas` (lee preingreso+cajas de
+    // Postgres, arma ESC/POS, PrintNode). Gated server por WH_AVISO_DIRECTO: si está OFF,
+    // o la Edge no confirma (p.ej. preingreso aún no en Supabase), cae a GAS. Nunca doble
+    // (es Edge O GAS, no ambos).
+    imprimirAvisoCajeros: async (p) => {
+      p = p || {};
+      try {
+        const token = await _mintTokenWH();
+        if (token) {
+          const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/aviso-cajas`, {
+            method: 'POST',
+            headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ idPreingreso: String(p.idPreingreso || ''), idemKey: String(p.idemKey || ''), reporteUrl: String(p.reporteUrl || '') })
+          }, 15000);
+          const d = await res.json().catch(() => null);
+          if (res.ok && d && d.ok === true) {
+            return { ok: true, data: { impresiones: Array.isArray(d.impresiones) ? d.impresiones : [], enviados: d.enviados || 0, cajas: d.cajas || 0, yaImpreso: !!d.yaImpreso, via: 'edge' } };
+          }
+          // d.ok===false (AVISO_OFF / preingreso no en Supabase / error) → cae a GAS abajo.
+        }
+      } catch (_) { /* cae a GAS */ }
+      return post({ action: 'imprimirAvisoCajeros', ...p });
+    },
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
     // [F6 push] Registro de token FCM directo a Supabase (mos.registrar_push_token). Aditivo al registro GAS
     // durante la transición; cuando los disparadores migren, la audiencia ya está en mos.push_tokens.
