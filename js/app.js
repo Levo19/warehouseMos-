@@ -7753,6 +7753,15 @@ const GuiasView = (() => {
           if (localVenc) _avisarFalloDetalle(API.actualizarFechaVencimiento({ idDetalle: itemFinal.idDetalle, fechaVencimiento: localVenc }), 'el vencimiento');
         }
         _renderCamList(); // quitar ⏳
+      } else if (res.offline) {
+        // [v2.13.377 · cierra ventana in-flight] Alta encolada OFFLINE: la op ya está en la
+        // cola. Si el operador puso el vencimiento en la ventana ANTES del encolado,
+        // patchPendingDetalleVenc no encontró la op todavía; ahora que está encolada, lo
+        // re-aplicamos con el venc actual de la línea → viaja con el alta al sincronizar.
+        const dLoc = (_guiaActual.detalle || []).find(x => x.idDetalle === localId);
+        if (dLoc && dLoc.fechaVencimiento) {
+          try { OfflineManager.patchPendingDetalleVenc?.(localId, dLoc.fechaVencimiento); } catch(_){}
+        }
       } else if (!res.offline) {
         // GAS rechazó → revertir detalle y limpiar sesión cámara
         _guiaActual.detalle = _guiaActual.detalle.filter(d => d.idDetalle !== localId);
