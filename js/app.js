@@ -1545,6 +1545,10 @@ const Session = (() => {
       if (document.visibilityState === 'visible') _whHeartbeatAccesos();
     }, 5 * 60 * 1000);
 
+    // [companion WH] extensión de dispositivo (2º equipo se ata a la misma sesión) +
+    // nota compartida. 100% Supabase, gated server por MOS_EXTENSION_DIRECTO. Fire-and-forget.
+    try { _wextIniciar(); } catch (_) {}
+
     // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
     // Cuando el admin abra el modal de elegir impresora, ya estará cacheado
     // → modal abre INSTANT en vez de "⏳ Cargando impresoras..." por 2-3s.
@@ -1560,6 +1564,200 @@ const Session = (() => {
       }, 1500);
     }
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // COMPANION WH — extensión de dispositivo + nota compartida (100% Supabase)
+  //   Espeja el companion de MosExpress, pero la sesión WH se llavea por
+  //   idPersonal (no MEX temporal) → pedir_extension/nota reciben idPersonal.
+  // ══════════════════════════════════════════════════════════════════════════
+  let _wextPollReq = null, _wextPollPpal = null, _wextShownAppr = {}, _wextApprCooldown = {}, _wextPedirAbierto = false, _wextApprAbierto = false;
+  let _wnotaTimer = null, _wnotaSesionTs = 0, _wnotaLocal = '', _wnotaEditando = false, _wnotaOv = null;
+  const _wextRpc = (fn, body) => (typeof API !== 'undefined' && API.extRpcSB) ? API.extRpcSB(fn, body) : Promise.resolve(null);
+  const _wextHaptic = (pat) => { try { navigator.vibrate && navigator.vibrate(pat); } catch (e) {} };
+  const _wextEsc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const _wextDevId = () => { try { return (window._getDeviceIdWH && window._getDeviceIdWH()) || ''; } catch (e) { return ''; } };
+  const _wextIdentidad = () => {
+    const s = sesionActual; if (!s || !(s.idPersonal || s.id_personal)) return null;
+    const nombre = String((s.nombre || '') + ' ' + (s.apellido || '')).trim() || String(s.nombre || '');
+    return { nombre, zona: (window.WH_CONFIG && window.WH_CONFIG.zona) || '', idPersonal: String(s.idPersonal || s.id_personal), rol: String(s.rol || '') };
+  };
+  const _wextCssOnce = () => {
+    if (document.getElementById('_wextCss')) return;
+    const st = document.createElement('style'); st.id = '_wextCss';
+    st.textContent = `
+    @keyframes _wextIn{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:none}}
+    @keyframes _wextBeam{0%{left:-40%}100%{left:110%}}
+    @keyframes _wextRoll{0%{opacity:0;transform:translateY(-16px) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
+    @keyframes _wextBurst{0%{transform:scale(0);opacity:.9}70%{opacity:.35}100%{transform:scale(2.4);opacity:0}}
+    @keyframes _wnotaPulseK{0%,100%{box-shadow:0 6px 20px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 4px rgba(56,189,248,.5),0 6px 24px rgba(56,189,248,.4)}}
+    ._wextBk{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:blur(4px);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px}
+    ._wextCard{background:#0f172a;border:1px solid #1e293b;border-radius:18px;padding:22px;max-width:340px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:_wextIn .3s cubic-bezier(.2,.9,.3,1.2);position:relative;overflow:hidden}
+    ._wextBeamLine{position:absolute;top:0;height:2px;width:35%;background:linear-gradient(90deg,transparent,#38bdf8,transparent);animation:_wextBeam 1.6s ease-in-out infinite}
+    ._wextCode{font-size:34px;font-weight:800;letter-spacing:10px;color:#38bdf8;text-align:center;margin:10px 0;font-variant-numeric:tabular-nums}
+    ._wextCode span{display:inline-block;animation:_wextRoll .5s cubic-bezier(.2,.9,.3,1.3) both}
+    ._wextBurst{position:absolute;left:50%;top:38%;width:80px;height:80px;margin:-40px 0 0 -40px;border-radius:50%;background:radial-gradient(circle,#10b981,transparent 70%);animation:_wextBurst .8s ease-out forwards;pointer-events:none}
+    ._wextBtn{flex:1;padding:12px;border-radius:12px;border:none;font-weight:700;font-size:14px;cursor:pointer}
+    ._wextBtnOk{background:linear-gradient(135deg,#10b981,#059669);color:#fff;position:relative;overflow:hidden}
+    ._wextBtnNo{background:#1e293b;color:#cbd5e1}
+    ._wextRing{position:absolute;inset:0;pointer-events:none}
+    ._wnotaFab{position:fixed;left:14px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:99992;width:46px;height:46px;border-radius:50%;border:1px solid #1e293b;background:#0f172a;color:#38bdf8;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,.4);cursor:pointer}
+    ._wnotaFab.pulso{animation:_wnotaPulseK 1.4s ease-in-out infinite}
+    ._wnotaFab .dot{position:absolute;top:-2px;right:-2px;width:12px;height:12px;border-radius:50%;background:#38bdf8;border:2px solid #0f172a;display:none}
+    ._wnotaFab.pulso .dot{display:block}
+    ._wnotaTa{width:100%;min-height:96px;background:#0b1220;border:1px solid #1e293b;border-radius:12px;color:#e2e8f0;padding:12px;font-size:15px;resize:none;outline:none}
+    `;
+    document.head.appendChild(st);
+  };
+  const _wextOverlay = (html) => {
+    _wextCssOnce();
+    const bk = document.createElement('div'); bk.className = '_wextBk';
+    bk.innerHTML = `<div class="_wextCard"><div class="_wextBeamLine"></div>${html}</div>`;
+    document.body.appendChild(bk);
+    return bk;
+  };
+  const _wextCodeHtml = (code) => String(code == null ? '' : code).split('').map((d, i) =>
+    `<span style="animation-delay:${i * 0.09}s">${_wextEsc(d)}</span>`).join(' ');
+  const _wextBurst = (ov) => { try { const c = ov.querySelector('._wextCard'); if (!c) return; const b = document.createElement('div'); b.className = '_wextBurst'; c.appendChild(b); setTimeout(() => { try { b.remove(); } catch (e) {} }, 850); } catch (e) {} };
+  // ── LADO SOLICITANTE (2º equipo) ──
+  const _wextPedir = async () => {
+    if (_wextPedirAbierto) return;
+    const id = _wextIdentidad(); if (!id) return;
+    const dev = _wextDevId(); if (!dev) return;
+    const res = await _wextRpc('pedir_extension', { nombre: id.nombre, zona: id.zona, idPersonal: id.idPersonal, deviceId: dev, rol: id.rol, pushToken: (window._whPushToken || '') });
+    if (!res || !res.ok || !res.needsApproval || !res.idReq) return;
+    _wextPedirAbierto = true; _wextHaptic([40, 60, 40]);
+    const ov = _wextOverlay(`
+      <div style="text-align:center">
+        <div style="font-size:34px">🔗</div>
+        <div style="font-weight:800;color:#e2e8f0;font-size:16px;margin-top:6px">Vincular este equipo</div>
+        <div style="color:#94a3b8;font-size:12px;margin-top:4px">Mostrá este código en tu equipo principal y aprobá ahí.</div>
+        <div class="_wextCode">${_wextCodeHtml(res.codigo)}</div>
+        <div style="color:#64748b;font-size:11px" id="_wextWait">Esperando aprobación…</div>
+        <button class="_wextBtn _wextBtnNo" id="_wextCancel" style="margin-top:14px;width:100%">Cancelar</button>
+      </div>`);
+    let done = false;
+    const cerrar = () => { done = true; _wextPedirAbierto = false; try { ov.remove(); } catch (e) {} if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } };
+    ov.querySelector('#_wextCancel').onclick = () => { _wextRpc('rechazar_extension', { idReq: res.idReq }); cerrar(); };
+    if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; }
+    _wextPollReq = setInterval(async () => {
+      try {
+        if (done) return;
+        const st = await _wextRpc('extension_estado', { idReq: res.idReq, deviceId: dev });
+        if (!st || !st.ok) return;
+        if (st.estado === 'APROBADA') { _wextHaptic([10, 30, 10]); _wextBurst(ov); const w = ov.querySelector('#_wextWait'); if (w) { w.textContent = '✓ ¡Vinculado!'; w.style.color = '#10b981'; } setTimeout(cerrar, 900); }
+        else if (st.estado === 'RECHAZADA' || st.estado === 'EXPIRADA' || st.estado === 'NO_ENCONTRADA') { _wextHaptic([80]); const w = ov.querySelector('#_wextWait'); if (w) { w.textContent = st.estado === 'EXPIRADA' ? 'Expiró — reintentá' : 'Rechazado'; w.style.color = '#ef4444'; } setTimeout(cerrar, 1400); }
+      } catch (e) {}
+    }, 3000);
+    setTimeout(() => { if (!done) cerrar(); }, 130000);
+  };
+  // ── LADO PRINCIPAL ──
+  const _wextPrincipalTick = async () => {
+    try {
+      const dev = _wextDevId(); if (!dev) return;
+      const res = await _wextRpc('extension_pendientes', { deviceId: dev });
+      if (!res || !res.ok || !Array.isArray(res.pendientes) || !res.pendientes.length) return;
+      const req = res.pendientes[0];
+      if (_wextApprAbierto) return;
+      if (_wextShownAppr[req.idReq]) return;
+      if (_wextApprCooldown[req.idReq] && Date.now() < _wextApprCooldown[req.idReq]) return;
+      _wextShownAppr[req.idReq] = true; _wextApprAbierto = true; _wextHaptic([40, 60, 40]);
+      const ov = _wextOverlay(`
+        <div style="text-align:center">
+          <div style="font-size:34px">🔗</div>
+          <div style="font-weight:800;color:#e2e8f0;font-size:16px;margin-top:6px">Un equipo quiere entrar como</div>
+          <div style="color:#38bdf8;font-weight:800;font-size:18px">${_wextEsc(req.nombre || 'este usuario')}</div>
+          <div style="color:#94a3b8;font-size:12px;margin-top:6px">Verificá que el código coincida:</div>
+          <div class="_wextCode">${_wextCodeHtml(req.codigo)}</div>
+          <div style="display:flex;gap:10px;margin-top:14px">
+            <button class="_wextBtn _wextBtnNo" id="_wextRej">Rechazar</button>
+            <button class="_wextBtn _wextBtnOk" id="_wextOk"><span id="_wextOkTxt">Mantené para aceptar</span>
+              <svg class="_wextRing" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="302" stroke-dashoffset="302" id="_wextRingC" style="opacity:.6;transform:rotate(-90deg);transform-origin:center"/></svg>
+            </button>
+          </div>
+        </div>`);
+      let cerrado = false, autoT = null, holdT = null, prog = 0, confirming = false;
+      const cerrar = () => { if (cerrado) return; cerrado = true; _wextApprAbierto = false; if (autoT) clearTimeout(autoT); if (holdT) { clearInterval(holdT); holdT = null; } try { ov.remove(); } catch (e) {} };
+      autoT = setTimeout(() => { delete _wextShownAppr[req.idReq]; cerrar(); }, 115000);
+      ov.querySelector('#_wextRej').onclick = () => { _wextHaptic([80]); _wextRpc('rechazar_extension', { idReq: req.idReq }); cerrar(); };
+      const ring = ov.querySelector('#_wextRingC'); const okTxt = ov.querySelector('#_wextOkTxt'); const okBtn = ov.querySelector('#_wextOk');
+      const start = () => { if (holdT || confirming) return; _wextHaptic([15]); holdT = setInterval(() => { prog += 100 / 8; if (ring) ring.style.strokeDashoffset = String(302 - 302 * Math.min(1, prog / 100)); if (prog >= 100) { clearInterval(holdT); holdT = null; confirmar(); } }, 100); };
+      const stop = () => { if (holdT) { clearInterval(holdT); holdT = null; } prog = 0; if (ring) ring.style.strokeDashoffset = '302'; };
+      const confirmar = async () => {
+        if (confirming) return; confirming = true;
+        try {
+          _wextHaptic([15, 20, 25, 20, 40]); if (okTxt) okTxt.textContent = 'Aceptando…';
+          const r = await _wextRpc('aprobar_extension', { idReq: req.idReq, codigo: req.codigo, deviceId: dev });
+          if (r && r.ok) { if (okTxt) okTxt.textContent = '✓ Vinculado'; _wextHaptic([10, 30, 10]); _wextBurst(ov); setTimeout(cerrar, 900); }
+          else { if (okTxt) okTxt.textContent = 'No se pudo'; _wextHaptic([80]); _wextApprCooldown[req.idReq] = Date.now() + 20000; setTimeout(cerrar, 1200); }
+        } catch (e) { _wextApprCooldown[req.idReq] = Date.now() + 20000; setTimeout(cerrar, 1200); }
+      };
+      okBtn.addEventListener('mousedown', start); okBtn.addEventListener('touchstart', (e) => { e.preventDefault(); start(); }, { passive: false });
+      okBtn.addEventListener('mouseup', stop); okBtn.addEventListener('mouseleave', stop); okBtn.addEventListener('touchend', stop); okBtn.addEventListener('touchcancel', stop);
+    } catch (e) {}
+  };
+  // ── NOTA COMPARTIDA (idPersonal path) ──
+  const _wnotaCtx = () => { const id = _wextIdentidad(); if (!id) return null; const dev = _wextDevId(); if (!dev) return null; return { nombre: id.nombre, zona: id.zona, idPersonal: id.idPersonal, deviceId: dev }; };
+  const _wnotaFabEl = () => document.getElementById('_wnotaFab');
+  const _wnotaEnsureFab = () => { let f = _wnotaFabEl(); if (f) return f; _wextCssOnce(); f = document.createElement('button'); f.id = '_wnotaFab'; f.className = '_wnotaFab'; f.innerHTML = '📝<span class="dot"></span>'; f.title = 'Nota compartida del equipo'; f.onclick = _wnotaAbrir; document.body.appendChild(f); return f; };
+  const _wnotaQuitarFab = () => { const f = _wnotaFabEl(); if (f) { try { f.remove(); } catch (e) {} } };
+  const _wnotaMarcarPulso = (on) => { const f = _wnotaFabEl(); if (!f) return; f.classList.toggle('pulso', !!on); };
+  const _wnotaTick = async () => {
+    const ctx = _wnotaCtx(); if (!ctx) { _wnotaQuitarFab(); return; }
+    const r = await _wextRpc('nota_sesion_get', ctx);
+    if (!r || r.ok !== true) { _wnotaQuitarFab(); return; }
+    const util = r.activa && ((r.companions || 0) > 0 || String(r.nota || '') !== '');
+    if (!util) { if (!_wnotaEditando) _wnotaQuitarFab(); return; }
+    _wnotaEnsureFab();
+    if (_wnotaEditando) return;
+    const ts = r.ts || 0;
+    if (ts > _wnotaSesionTs) {
+      const cambio = (String(r.nota || '') !== String(_wnotaLocal || '')) && _wnotaSesionTs > 0;
+      _wnotaSesionTs = ts; _wnotaLocal = String(r.nota || '');
+      if (cambio) { _wextHaptic([12, 30, 12]); _wnotaMarcarPulso(true); }
+    }
+  };
+  function _wnotaAbrir() {
+    if (_wnotaEditando || _wnotaOv) return;
+    _wnotaMarcarPulso(false); _wnotaEditando = true;
+    const ov = _wextOverlay(`
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:22px">📝</span>
+          <div style="font-weight:800;color:#e2e8f0;font-size:15px">Nota del equipo</div>
+        </div>
+        <div style="color:#94a3b8;font-size:11px;margin-bottom:8px">La ven y editan todos los equipos de esta sesión.</div>
+        <textarea class="_wnotaTa" id="_wnotaTa" maxlength="280" placeholder="Ej: falta bolsa de arroz, revisar lote 12…">${_wextEsc(_wnotaLocal)}</textarea>
+        <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:6px">
+          <span id="_wnotaCnt" style="color:#64748b;font-size:11px"></span>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <button class="_wextBtn _wextBtnNo" id="_wnotaX">Cerrar</button>
+          <button class="_wextBtn _wextBtnOk" id="_wnotaSave">Guardar</button>
+        </div>
+      </div>`);
+    const ta = ov.querySelector('#_wnotaTa'); const cnt = ov.querySelector('#_wnotaCnt');
+    const upd = () => { if (cnt) cnt.textContent = ta.value.length + '/280'; }; upd();
+    ta.addEventListener('input', upd);
+    try { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
+    _wnotaOv = ov;
+    const cerrar = () => { _wnotaEditando = false; _wnotaOv = null; try { ov.remove(); } catch (e) {} };
+    ov.querySelector('#_wnotaX').onclick = cerrar;
+    ov.querySelector('#_wnotaSave').onclick = async () => {
+      const btn = ov.querySelector('#_wnotaSave'); const txt = String(ta.value || '');
+      btn.textContent = 'Guardando…'; btn.disabled = true;
+      const ctx = _wnotaCtx();
+      const r = ctx ? await _wextRpc('nota_sesion_set', { ...ctx, nota: txt, baseTs: _wnotaSesionTs }) : null;
+      if (r && r.ok) {
+        _wnotaSesionTs = r.ts || _wnotaSesionTs; _wnotaLocal = String(r.nota != null ? r.nota : txt);
+        if (r.conflict) { _wextHaptic([80]); ta.value = _wnotaLocal; upd(); btn.textContent = 'Se actualizó ↑'; btn.disabled = false; setTimeout(() => { if (btn) btn.textContent = 'Guardar'; }, 1500); }
+        else { _wextHaptic([10, 30, 10]); btn.textContent = '✓'; setTimeout(cerrar, 500); }
+      } else { btn.textContent = 'Reintentar'; btn.disabled = false; }
+    };
+  }
+  const _wnotaIniciar = () => { if (_wnotaTimer) clearInterval(_wnotaTimer); _wnotaTick(); _wnotaTimer = setInterval(_wnotaTick, 8000); };
+  const _wnotaDetener = () => { if (_wnotaTimer) { clearInterval(_wnotaTimer); _wnotaTimer = null; } _wnotaQuitarFab(); if (_wnotaOv) { try { _wnotaOv.remove(); } catch (e) {} _wnotaOv = null; } _wnotaSesionTs = 0; _wnotaLocal = ''; _wnotaEditando = false; };
+  function _wextIniciar() { _wextPedir(); if (_wextPollPpal) clearInterval(_wextPollPpal); _wextPollPpal = setInterval(_wextPrincipalTick, 5000); _wnotaIniciar(); }
+  function _wextDetener() { if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } if (_wextPollPpal) { clearInterval(_wextPollPpal); _wextPollPpal = null; } _wextShownAppr = {}; _wextPedirAbierto = false; _wnotaDetener(); }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
     const dot    = document.getElementById('statusDot');
@@ -2135,6 +2333,7 @@ const Session = (() => {
   function _limpiarSesion() {
     localStorage.removeItem('wh_sesion');
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.detener();
+    try { _wextDetener(); } catch (_) {}   // [companion] frena polling + limpia FAB/overlay
   }
 
   function _mostrarApp() {
@@ -3302,6 +3501,7 @@ const Session = (() => {
         console.warn('[Push WH] getToken devolvió vacío');
         return;
       }
+      try { window._whPushToken = token; } catch (_) {}   // [companion] lo usa el pedido de vínculo
 
       // Registrar token en MOS GAS asociado al operador + deviceId (targeted exacto)
       const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();

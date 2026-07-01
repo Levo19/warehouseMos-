@@ -1,4 +1,4 @@
 {
- "version": "2.13.378",
+ "version": "2.13.379",
  "build": "2.13.372 (FIX pickup en ceros sin refrescar): (1) si el primer poll falla (conexion lenta -> timeout) y la lista esta vacia, reintenta cada 2.5s (hasta 4x) en vez de quedarse en '0 productos' hasta los 30s. (2) el poll de pickups ahora lee FRESCO (bypass del micro-cache de 4s) para que la consolidacion server-side (realtime) y la carga muestren los productos al instante, sin tener que refrescar la web."
 }
