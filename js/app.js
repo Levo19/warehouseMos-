@@ -8629,6 +8629,12 @@ const GuiasView = (() => {
             _guiaActual.detalle[i]._saving = false;
             _guiaActual.detalle[i]._local = true;
             _guiaActual.detalle[i]._saveFailed = false;
+            // [500x · gemelo del fix 377 para PN] alta PN encolada offline: si el operador
+            // editó el venc en la ventana antes del encolado, re-aplicarlo a la op ya encolada.
+            const dPN = _guiaActual.detalle[i];
+            if (dPN && dPN.fechaVencimiento) {
+              try { OfflineManager.patchPendingDetalleVenc?.(dPN.idDetalle, dPN.fechaVencimiento); } catch(_){}
+            }
             _mostrarDetalleSheet(_guiaActual, false);
           }
         } else if (sigueAqui) {
