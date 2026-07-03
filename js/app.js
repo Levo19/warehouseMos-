@@ -2497,17 +2497,9 @@ const Session = (() => {
             bateria: bateria,
             usuarioLogueado: usuario
           };
-          // [cero-GAS G2] Supabase-first: mos.registrar_ubicacion (flag GPS_DIRECTO). false → cae al write GAS.
-          let _viaSb = false;
-          try { _viaSb = await API.registrarUbicacionDirecto(_gp); } catch(_) { _viaSb = false; }
-          if (!_viaSb) {
-            // Fallback GAS — fire-and-forget REAL + timeout 8s (no dejar conexión colgada ~18s).
-            fetch(mosUrl, {
-              method: 'POST',
-              signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(8000) : undefined,
-              body: JSON.stringify(Object.assign({ action: 'registrarUbicacion' }, _gp))
-            }).catch(() => {});
-          }
+          // [CERO-GAS / CERO-FALLBACK] Solo directo: mos.registrar_ubicacion (GPS_DIRECTO=1 en prod).
+          // En error se salta este tick (reintenta en ~5min); ya no cae al GAS registrarUbicacion.
+          try { await API.registrarUbicacionDirecto(_gp); } catch(_) {}
         } catch(_) {}
       },
       (err) => console.warn('[GPS WH] error:', err?.message),
@@ -3607,27 +3599,14 @@ const BloqueoRemoto = (() => {
       // Ultima_Sesion en DISPOSITIVOS. Sin esto los dispositivos WH siempre muestran "hace Nh".
       const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
       const nombreFull = ((ses.nombre || '') + ' ' + (ses.apellido || '')).trim();
-      // [cero-GAS G1] Supabase-first: mos.estado_bloqueo_usuario hace heartbeat (dispositivo+personal) +
-      // lee el bloqueo en 1 RPC. null → flag WH_BLOQUEO_DIRECTO OFF / opt-out / offline / error → fallback
-      // GAS (idéntico al legacy: mismo querystring, mismo side-effect registrarSesionDispositivo).
+      // [CERO-GAS / CERO-FALLBACK] Solo directo: mos.estado_bloqueo_usuario (heartbeat dispositivo+personal +
+      // bloqueo en 1 RPC; WH_BLOQUEO_DIRECTO=1 en prod). En error → null → se salta este tick; ya no cae al GAS.
       let j = null;
       try {
         j = await API.estadoBloqueoUsuarioDirecto({
           idPersonal: ses.idPersonal, nombre: nombreFull, appOrigen: 'warehouseMos', deviceId: devId
         });
       } catch (_) { j = null; }
-      if (!j) {
-        if (!_mosUrl()) return;
-        const _ua = (navigator.userAgent || '').substring(0, 200);
-        const url = _mosUrl() + '?action=getEstadoBloqueoUsuario'
-                  + '&idPersonal=' + encodeURIComponent(ses.idPersonal)
-                  + '&nombre=' + encodeURIComponent(nombreFull)
-                  + '&deviceId=' + encodeURIComponent(devId)
-                  + '&userAgent=' + encodeURIComponent(_ua)
-                  + '&appOrigen=warehouseMos';
-        const r = await fetch(url);
-        j = await r.json();
-      }
       if (!j || !j.ok || !j.data) return;
       const prev = _state;
       _state = {

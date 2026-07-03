@@ -1,1 +1,1 @@
-{"version":"2.13.384","build":"2.13.384 (CERO-GAS auth ola 3): seguridad-modal alertas/dispositivos -> RPCs mos.* via DeviceAuth.rpc. Pin seguridad-modal 2.13.165."}
+{"version":"2.13.385","build":"2.13.385 (CERO-FALLBACK punto 2b): quitado el fallback GAS de bloqueo (getEstadoBloqueoUsuario) y GPS (registrarUbicacion). Directos vivos (WH_BLOQUEO_DIRECTO=1, GPS_DIRECTO=1)."}
