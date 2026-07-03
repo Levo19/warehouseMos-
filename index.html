@@ -4672,6 +4672,22 @@
     let _APP_VERSION_BL = null; // baseline: versión vista al cargar la app
     let _forceUpdateTriggered = false;
 
+    // [FIX pickup] ¿El operador tiene trabajo en curso? (pickup activo / cart / lista sombra).
+    // Si sí, NO recargamos la app por un update automático — el operador perdería el contexto de su
+    // lista (aunque los datos están en la base, tendría que re-armar/re-ubicar). El reload se difiere:
+    // se aplica solo cuando termina (pickup cerrado → keys limpias) o en la próxima acción crítica vía
+    // _preCheckVersion (que ya recarga de forma segura, con el pickup preservado en base+localStorage).
+    function _whHayTrabajoActivo() {
+      try {
+        if (localStorage.getItem('wh_despacho_pickup_activo')) return true;
+        var cart = localStorage.getItem('wh_despacho_cart');
+        if (cart && cart !== '[]' && cart !== 'null' && cart !== '') return true;
+        var sombra = localStorage.getItem('wh_lista_sombra');
+        if (sombra && sombra !== '[]' && sombra !== 'null' && sombra !== '') return true;
+      } catch(_) {}
+      return false;
+    }
+    let _updateDiferidaAvisada = false;
     async function _checkForcedUpdate() {
       if (_forceUpdateTriggered) return;
       try {
@@ -4684,6 +4700,15 @@
           return;
         }
         if (j.version !== _APP_VERSION_BL) {
+          // [FIX pickup] Trabajo en curso → NO interrumpir: diferir el reload (se re-chequea cada 3min;
+          // al terminar el pickup las keys se limpian y el siguiente tick sí actualiza).
+          if (_whHayTrabajoActivo()) {
+            if (!_updateDiferidaAvisada) {
+              _updateDiferidaAvisada = true;
+              try { if (typeof toast === 'function') toast('🔄 Hay una versión nueva · se aplicará al terminar tu lista (no pierdes nada)', 'info', 6000); } catch(_){}
+            }
+            return;
+          }
           _forceUpdateTriggered = true;
           // Mostrar overlay no-dismissable
           const el = document.getElementById('whUpdateOverlay');
