@@ -5071,9 +5071,8 @@
       if (window._WH_WIZARD_FORZADO) {
         try {
           const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
-          fetch(window.cfg?.mosGasUrl || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec', {
-            method:'POST', body: JSON.stringify({ action:'marcarWizardMostrado', deviceId: id })
-          });
+          // [CERO-GAS] marcarWizardMostrado → RPC mos.marcar_wizard_mostrado (via DeviceAuth.rpc).
+          if (window.DeviceAuth && typeof DeviceAuth.rpc === 'function') DeviceAuth.rpc('marcar_wizard_mostrado', { deviceId: id });
         } catch(_){}
         window._WH_WIZARD_FORZADO = false;
       }
@@ -5128,11 +5127,10 @@
                       : (window._WH_INSTALL_PROMPT ? 'prompt' : 'unsupported');
         perms.storage = await _pedirPersistentStorageWH();
         _whPermsHooked = true;
-        const url = (window.cfg && window.cfg.mosGasUrl) || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
-        await fetch(url, {
-          method:'POST',
-          body: JSON.stringify({ action:'registrarPermisosDispositivo', deviceId:id, permisos:perms })
-        });
+        // [CERO-GAS] registrarPermisosDispositivo → RPC mos.registrar_permisos_dispositivo (via DeviceAuth.rpc).
+        if (window.DeviceAuth && typeof DeviceAuth.rpc === 'function') {
+          await DeviceAuth.rpc('registrar_permisos_dispositivo', { deviceId: id, permisos: perms });
+        }
       } catch(_){}
     }
     window._reportarPermisosWH = _reportarPermisosWH;

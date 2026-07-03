@@ -1,1 +1,1 @@
-{"version":"2.13.382","build":"2.13.382 (CERO-GAS auth ola 1): consultarEstadoDispositivo (boot _autoTrigger) -> RPC mos.consultar_estado_dispositivo via DeviceAuth.rpc. seguridad-modal pin 2.13.164. Sin GAS."}
+{"version":"2.13.383","build":"2.13.383 (CERO-GAS auth ola 2): registrarPermisosDispositivo/marcarWizardMostrado -> RPCs mos.* (SQL 335) via DeviceAuth.rpc. Boot WH sin esas 2 llamadas GAS."}
