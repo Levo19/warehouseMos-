@@ -2837,8 +2837,10 @@ const API = (() => {
                    nombre: r.nombre || '', rol: r.rol || '', nivel: r.nivel,
                    validadoPor: r.validado_por || '', idPersonal: r.id_personal || '', idAccion: r.id_accion || '' };
         }
-      } catch (_) { /* → GAS kill-switch */ }
-      return post({ action: 'verificarClaveAdmin', ...p });
+      } catch (_) {}
+      // [CERO-GAS / CERO-FALLBACK] Sin fallback GAS: si el directo falla, fail-closed (autorizado:false).
+      // La RPC mos.verificar_clave_admin ya trae bcrypt + lockout + auditoría server-side. Nunca autoriza por error.
+      return { ok: false, autorizado: false, error: 'No se pudo verificar — reintenta' };
     },
 
     // ── [cero-GAS G1] Estado de bloqueo + heartbeat (dispositivo+personal) en 1 RPC ──

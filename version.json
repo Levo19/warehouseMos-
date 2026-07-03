@@ -1,1 +1,1 @@
-{"version":"2.13.385","build":"2.13.385 (CERO-FALLBACK punto 2b): quitado el fallback GAS de bloqueo (getEstadoBloqueoUsuario) y GPS (registrarUbicacion). Directos vivos (WH_BLOQUEO_DIRECTO=1, GPS_DIRECTO=1)."}
+{"version":"2.13.386","build":"2.13.386 (CERO-FALLBACK punto 2c): API.verificarClaveAdmin sin fallback GAS -> fail-closed (autorizado:false) en error."}
