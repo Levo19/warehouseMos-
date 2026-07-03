@@ -1352,21 +1352,17 @@ const Session = (() => {
       // los 15 min de gracia para acomodarse antes del primer bloqueo.
       _yaSeBloqueoUnaVez = false;
       _aplicarSesion();
-      // Notificar a master+admin que ingresó este operador (push). Idempotente.
+      // [CERO-GAS] Push "operador conectado" a master+admin vía Edge `push` (antes GAS
+      // notificarInicioSesionVendedor). Anti-spam: no repetir <30min por dispositivo.
       try {
-        const _mosUrlPush = window.WH_CONFIG?.mosGasUrl || '';
-        if (_mosUrlPush) {
-          const _devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
+        const _k = 'wh_login_push_ts', _last = parseInt(localStorage.getItem(_k) || '0', 10);
+        if (Date.now() - _last >= 30 * 60 * 1000) {
+          localStorage.setItem(_k, String(Date.now()));
           const _nombreFull = ((res.data.nombre || '') + ' ' + (res.data.apellido || '')).trim();
-          fetch(_mosUrlPush, {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'notificarInicioSesionVendedor',
-              nombre: _nombreFull,
-              appOrigen: 'warehouseMos',
-              deviceId: _devId
-            })
-          }).catch(() => {});
+          API.pushEdge({ roles: ['MASTER', 'ADMINISTRADOR', 'ADMIN'] },
+            '🏭 Operador conectado',
+            (_nombreFull || 'Operador') + ' ingresó a almacén',
+            { tipo: 'login_operador' });
         }
       } catch(_) {}
       if (res.data.yaEnSesionHoy) {

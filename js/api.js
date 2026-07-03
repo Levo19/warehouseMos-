@@ -120,6 +120,19 @@ const API = (() => {
     } catch (_) { return false; }
   }
 
+  // [CERO-GAS push] Envía push a una AUDIENCIA vía Edge `push` (resuelve tokens de mos.push_tokens server-side).
+  // Reemplaza el fetch a GAS notificarInicioSesionVendedor. Fire-and-forget, sin fallback GAS.
+  async function _pushEdgeWH(audiencia, titulo, cuerpo, data) {
+    try {
+      const token = await _mintTokenWH();
+      await _whFetchTimeout(`${_SB_URL}/functions/v1/push`, {
+        method: 'POST',
+        headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ op: 'send', audiencia, title: titulo, body: cuerpo, data: data || null })
+      }, 8000);
+    } catch (_) { /* informativo, no bloquea */ }
+  }
+
   // [PASO 5 · B5] Subir foto a Supabase Storage (bucket wh-fotos) en MÁXIMA calidad. path: <tipo>/<id>/<único>.
   // Devuelve {url} (original, full quality) + {preview} (render on-the-fly liviano para listas) + {path}.
   async function _subirFotoStorage(tipo, id, base64, mime, nombreSeed) {
@@ -2800,6 +2813,7 @@ const API = (() => {
     // ── F0+ : genéricos para módulos nuevos ─────────────────────
     get:  (action, p={}) => call({ action, ...p }),
     post: (action, p={}) => post({ action, ...p }),
+    pushEdge: (audiencia, titulo, cuerpo, data) => _pushEdgeWH(audiencia, titulo, cuerpo, data),
 
     // [40x cruce] usados SOLO por la cola offline (offline.js:sincronizar) para evitar el duplicado del cruce:
     //   _escrituraDirectaActiva() → si está ON, la cola reintenta vía _postCola (directo, dedupea por id sembrado)
