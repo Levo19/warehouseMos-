@@ -1,1 +1,1 @@
-{"version":"2.13.383","build":"2.13.383 (CERO-GAS auth ola 2): registrarPermisosDispositivo/marcarWizardMostrado -> RPCs mos.* (SQL 335) via DeviceAuth.rpc. Boot WH sin esas 2 llamadas GAS."}
+{"version":"2.13.384","build":"2.13.384 (CERO-GAS auth ola 3): seguridad-modal alertas/dispositivos -> RPCs mos.* via DeviceAuth.rpc. Pin seguridad-modal 2.13.165."}
