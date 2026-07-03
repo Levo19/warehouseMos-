@@ -5152,10 +5152,9 @@
       let forzado = false;
       try {
         const id = window._getDeviceIdWH ? _getDeviceIdWH() : '';
-        if (id) {
-          const url = (window.cfg && window.cfg.mosGasUrl) || 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
-          const r2 = await fetch(url + '?action=consultarEstadoDispositivo&deviceId=' + encodeURIComponent(id));
-          const j = await r2.json();
+        if (id && window.DeviceAuth && typeof DeviceAuth.rpc === 'function') {
+          // [CERO-GAS] consultarEstadoDispositivo → RPC mos.consultar_estado_dispositivo (via DeviceAuth.rpc).
+          const j = await DeviceAuth.rpc('consultar_estado_dispositivo', { deviceId: id });
           if (j?.data?.forzar_wizard) { forzado = true; window._WH_WIZARD_FORZADO = true; }
         }
       } catch(_){}
@@ -10610,7 +10609,7 @@
      adhesivo de envasado. PIXEL-PERFECT match con TSPL backend Envasados.gs. -->
 <script src="https://levo19.github.io/MOS/assets/adhesivo/preview.js?v=1.3.0"></script>
 <!-- [v2.13.121] Sistema centralizado de seguridad (CDN MOS) -->
-<script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=2.13.163"></script>
+<script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=2.13.164"></script>
 <script src="js/offline.js"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
 <script src="js/impresion-directa.js"></script>
