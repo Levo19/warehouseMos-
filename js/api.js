@@ -54,28 +54,15 @@ const API = (() => {
     return d;
   }
 
-  // GAS `mintTokenWH` (B1): fallback histórico. Mantiene el login vivo si la Edge no responde.
-  async function _mintViaGAS(deviceId) {
-    const GAS_URL = _gasUrl();
-    if (!GAS_URL) throw new Error('sin gasUrl');
-    const res = await _whFetchTimeout(GAS_URL, {
-      method: 'POST', headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ action: 'mintTokenWH', deviceId })
-    }, 6000);
-    const d = await res.json();
-    if (!d || !d.ok || !d.token) throw new Error('mint-token gas: ' + ((d && d.error) || 'sin token'));
-    return d;
-  }
-
   async function _mintTokenWH() {
     const now = Math.floor(Date.now() / 1000);
     if (_sbTok.token && (_sbTok.exp - now) > 30) { _agendarRefresh(); return _sbTok.token; }
     if (_mintInFlight) return _mintInFlight;
     _mintInFlight = (async () => {
       const deviceId = _whDeviceId();
-      let d;
-      try { d = await _mintViaEdge(deviceId); }       // primario: Edge (rápido, sin GAS)
-      catch (_) { d = await _mintViaGAS(deviceId); }   // fallback: GAS (no romper login si la Edge cae)
+      // [CERO-GAS / CERO-FALLBACK] Solo Edge mint-wh. Si falla, propaga el throw → el caller reintenta
+      // (el finally de abajo limpia _mintInFlight); ya no cae al GAS mintTokenWH.
+      const d = await _mintViaEdge(deviceId);
       const n = Math.floor(Date.now() / 1000);
       _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
       _agendarRefresh();
@@ -87,7 +74,7 @@ const API = (() => {
 
   // Refresh PROACTIVO en background: re-mintea ~120s ANTES de expirar, fuera del camino crítico, para que una
   // navegación NUNCA dispare el mint sincrónico (la causa del "se congela al rato"). Fire-and-forget: si falla,
-  // el camino sincrónico (con su fallback a GAS) sigue siendo la red de seguridad en la próxima lectura.
+  // el camino sincrónico (Edge mint-wh, cero-GAS) reintenta en la próxima lectura.
   let _refreshTid = null;
   function _agendarRefresh() {
     if (_refreshTid) return;                                   // ya hay un refresh agendado

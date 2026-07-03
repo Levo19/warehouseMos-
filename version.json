@@ -1,1 +1,1 @@
-{"version":"2.13.386","build":"2.13.386 (CERO-FALLBACK punto 2c): API.verificarClaveAdmin sin fallback GAS -> fail-closed (autorizado:false) en error."}
+{"version":"2.13.387","build":"2.13.387 (CERO-FALLBACK punto 2d): device-auth.js v1.0.25 gate solo directo + _mintTokenWH solo Edge mint-wh (quitado _mintViaGAS). Auth 100% Supabase."}
