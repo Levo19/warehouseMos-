@@ -1340,6 +1340,8 @@
     .pkck-name {
       font-size:.92em;font-weight:800;color:#f1f5f9;letter-spacing:.005em;
       line-height:1.25;margin-bottom:2px;
+      /* [FIX nombres largos] hasta 2 renglones (override el .truncate que tapaba nombres largos) */
+      white-space:normal !important; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
     }
     .pkck-meta { font-size:.68em;color:#64748b;font-family:ui-monospace,Menlo,monospace; }
     .pkck-qty-wrap { flex-shrink:0;text-align:right; }

@@ -12368,7 +12368,7 @@ const DespachoView = (() => {
         return `<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #1e293b">
           <div style="flex:1;min-width:0">
             <p style="font-size:.82em;font-weight:700;color:#f1f5f9;
-                      white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(it.descripcion || it.codigoBarra)}</p>
+                      display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.2">${escHtml(it.descripcion || it.codigoBarra)}</p>
             <p style="font-size:.66em;color:#64748b;font-family:monospace">${escHtml(it.codigoBarra)}</p>
           </div>
           <span style="font-size:.92em;font-weight:900;color:#38bdf8;flex-shrink:0">${qtyFmt}</span>
@@ -12982,9 +12982,12 @@ const DespachoView = (() => {
     const cNorm  = normCb(codStr);
     if (!cNorm) return [];
 
-    // 1. Exacto en PRODUCTOS_MASTER
-    const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
-    if (exacto) return [{ ...exacto, _exacto: true }];
+    // 1. Exacto en PRODUCTOS_MASTER. [FIX bifurcación] Puede haber MÁS DE UNO con el MISMO codigoBarra exacto
+    //    (el proveedor le puso el mismo código físico a 2 productos, ej. wantán dorado/azul). Si hay varios →
+    //    picker para que el operador elija cuál (NO se toma el primero a ciegas). 1 solo → directo.
+    const exactos = prods.filter(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
+    if (exactos.length === 1) return [{ ...exactos[0], _exacto: true }];
+    if (exactos.length > 1)  return exactos.map(p => ({ ...p, _bifurcado: true }));  // → _onDespResult muestra picker
 
     // 2. Exacto en EQUIVALENCIAS → resolver al producto base (factor=1); guardar código escaneado
     const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
@@ -13117,7 +13120,7 @@ const DespachoView = (() => {
       const cbHtml  = display.startsWith(codStr)
         ? `<strong style="color:#fbbf24">${escHtml(codStr)}</strong>${escHtml(display.slice(codStr.length))}`
         : escHtml(display);
-      return `<button onclick="DespachoView.seleccionarItemDesp('${escAttr(cb)}')"
+      return `<button onclick="DespachoView.seleccionarItemDesp('${escAttr(cb)}', '${escAttr(p.idProducto || '')}')"
               style="width:100%;text-align:left;padding:11px 13px;border-radius:11px;
                      border:1px solid #1e293b;margin-bottom:7px;
                      background:#1e293b;display:flex;align-items:center;gap:10px;
@@ -13129,7 +13132,7 @@ const DespachoView = (() => {
           <span style="font-size:.75em;color:#38bdf8;font-weight:700">CB</span>
         </div>
         <div style="flex:1;min-width:0">
-          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(String(p.descripcion || cb))}</p>
+          <p style="font-size:.83em;font-weight:700;color:#f1f5f9;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.2">${escHtml(String(p.descripcion || cb))}</p>
           <p style="font-size:.69em;color:#64748b;font-family:monospace;margin-top:2px">${cbHtml}</p>
         </div>
       </button>`;
@@ -13143,11 +13146,18 @@ const DespachoView = (() => {
     _setDespStatus('ready');
   }
 
-  function seleccionarItemDesp(scannedCb) {
+  function seleccionarItemDesp(scannedCb, idProd) {
     const picker = document.getElementById('despCamPicker');
     if (picker) picker.style.display = 'none';
-    const candidatos = _buscarDespCandidatos(scannedCb);
-    const prod = candidatos[0];
+    // [FIX bifurcación] Si el picker pasó el idProducto, seleccionar ESE producto exacto (no re-resolver y tomar
+    // el primero) — así cuando 2 productos comparten el mismo codigoBarra, la elección A/B del operador SE RESPETA.
+    let prod = null;
+    if (idProd) {
+      const _prods = OfflineManager.getProductosCache();
+      const _p = _prods.find(p => String(p.idProducto) === String(idProd));
+      if (_p) prod = { ..._p, _scannedCb: String(scannedCb), _exacto: true };
+    }
+    if (!prod) { const candidatos = _buscarDespCandidatos(scannedCb); prod = candidatos[0]; }
     if (!prod) return;
     _agregarDespDirecto(prod);
     const cb     = String(prod._scannedCb || prod.codigoBarra || scannedCb);
@@ -13575,7 +13585,7 @@ const DespachoView = (() => {
                 margin-bottom:7px">
         <div style="flex:1;min-width:0">
           <p style="font-size:.83em;font-weight:700;color:#f1f5f9;
-                    white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(item.descripcion)}</p>
+                    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.2">${escHtml(item.descripcion)}</p>
           <p style="font-size:.67em;color:#64748b;font-family:monospace">${escHtml(item.codigoBarra)}${overW}</p>
         </div>
         <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
@@ -14719,11 +14729,16 @@ const DespachoView = (() => {
     const base = parseFloat(item.despachadoBaseline) || 0;
     const qty = Math.max(base, qtyIn);
     const cb = _pkckCodigoDe(item);
-    // Granel: el input SETEA el total pesado (no acumula). 1 código domina.
+    // [FIX modelo padre/hijo] Granel: el input SETEA el peso de ESTE código (re-escanear el mismo código
+    // re-pesa ese código, no acumula). El TOTAL despachado del item = SUMA de todos sus códigos (el skuBase
+    // es el padre; codigoBarra/codigoEquivalente son hijos). Así un granel repartido en 2 códigos (2kg + 3kg)
+    // suma 5kg, y el guía descuenta stock del código ESPECÍFICO vía despachadoPorCodigo. Antes SETEABA el total
+    // ("1 código domina") → en multi-código el total quedaba inconsistente con la suma por-código = sobre-descuento.
     item._ultimoCb = cb;
-    item.despachado = qty;
     item.despachadoPorCodigo = item.despachadoPorCodigo || {};
     item.despachadoPorCodigo[cb] = qty;
+    item.despachado = Object.keys(item.despachadoPorCodigo)
+      .reduce((s, k) => s + (parseFloat(item.despachadoPorCodigo[k]) || 0), 0);
     _pickupItemActivo = item.skuBase;
     _afterPickupChange(item, prevDesp, sol);
   }
@@ -15020,14 +15035,20 @@ const DespachoView = (() => {
       let ctrlsHtml = '';
       if (esActivo) {
         if (esKg) {
+          // [FIX modelo padre/hijo] El input muestra el peso del CÓDIGO ACTUAL (no el total del skuBase), para que
+          // el operador pese/entre cada código por separado; el total del item = suma de todos los códigos.
+          const _cbAct = it._ultimoCb || (it.despachadoPorCodigo && Object.keys(it.despachadoPorCodigo)[0]) || '';
+          const despCod = (_cbAct && it.despachadoPorCodigo && it.despachadoPorCodigo[_cbAct] != null)
+            ? (parseFloat(it.despachadoPorCodigo[_cbAct]) || 0) : desp;
+          const _multi = it.despachadoPorCodigo && Object.keys(it.despachadoPorCodigo).length > 1;
           ctrlsHtml = `
           <div class="pkck-ctrls">
-            <span class="pkck-ctrl-lbl">Peso despachado:</span>
+            <span class="pkck-ctrl-lbl">Peso ${_multi ? '(este código)' : 'despachado'}:</span>
             <input type="number" inputmode="decimal" step="0.001" min="0"
-                   class="pkck-ctrl-granel" value="${fmt(desp,3)}"
+                   class="pkck-ctrl-granel" value="${fmt(despCod,3)}"
                    onchange="DespachoView.pkckSetGranel('${skuAttr}', this.value)"
                    onkeydown="if(event.key==='Enter'){this.blur();}">
-            <span class="pkck-ctrl-unit">${unidadLbl}</span>
+            <span class="pkck-ctrl-unit">${unidadLbl}</span>${_multi ? `<span class="pkck-ctrl-unit" style="color:#fbbf24" title="Suma de todos los códigos">· total ${fmt(desp,3)}</span>` : ''}
           </div>`;
         } else {
           ctrlsHtml = `
