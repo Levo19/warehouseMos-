@@ -4064,7 +4064,9 @@ const App = (() => {
           idPersonal:     function() { return (window.WH_CONFIG && WH_CONFIG.idPersonal) || ''; },
           app:            'warehouseMos',
           unwrapData:     true,
-          endpointPrefix: ''
+          endpointPrefix: '',
+          // [CERO-GAS] Hook de push por audiencia para seguridad-modal (desbloqueo temp / cierre extendido).
+          pushAudiencia:  function(aud, titulo, cuerpo, data) { try { return API.pushEdge(aud, titulo, cuerpo, data); } catch(_) {} }
         });
       }
     } catch(_) {}

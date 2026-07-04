@@ -1,1 +1,1 @@
-{"version":"2.13.391","build":"2.13.391 (CERO-GAS push fase1): notificarInicioSesionVendedor -> API.pushEdge (Edge push, audiencia roles, anti-spam 30min). Sin GAS."}
+{"version":"2.13.392","build":"2.13.392 (CERO-GAS seguridad-modal): init pushAudiencia hook (Edge audiencia) para desbloqueo/cierre-extendido; reads/writes horario + #25 -> RPC directo."}
