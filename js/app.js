@@ -13208,32 +13208,45 @@ const DespachoView = (() => {
       const statusEl = document.getElementById('despScanInlineStatus');
 
       if (e.key === 'Enter' || e.key === 'Tab') {
-        if (_scanHidBuffer.length >= SCAN_HID_MIN_LEN) {
-          // Fue una RÁFAGA (scanner). Si el foco estaba en el peso granel, restaurar su valor previo (deshacer
-          // el/los char que se hayan filtrado) y tratar el Enter como scan, NO como confirmación del peso.
-          if (_scanPreGranelTgt) { try { _scanPreGranelTgt.value = _scanPreGranelVal; } catch(_){} }
+        // Discriminador scan vs peso manual:
+        //  • Fuera del peso granel (foco body/readonly): cualquier Enter con buffer>=MIN_LEN = scan (clásico).
+        //  • SOBRE el peso granel: exigimos además que el Enter llegue DENTRO de la ráfaga (dt<=GAP). El humano
+        //    tipea el peso, PAUSA, y recién pulsa Enter (dt>GAP) → confirmar peso; el scanner manda el Enter
+        //    pegado al último dígito (dt<=GAP) → es scan. Así un peso tipeado no se confunde con un código.
+        const enterDeRafaga = dt <= SCAN_HID_GAP_MS;
+        const fueScan = _scanHidBuffer.length >= SCAN_HID_MIN_LEN && (!_scanPreGranelTgt || enterDeRafaga);
+        if (fueScan) {
+          // Si arrancó sobre el peso granel, restaurar su valor previo (los dígitos del código que se filtraron
+          // al <input type=number> se deshacen) SOBRE EL NODO VIVO (el checklist puede haberse re-renderizado).
+          if (_scanPreGranelTgt) {
+            const act = document.activeElement;
+            const live = (act && act.classList && act.classList.contains('pkck-ctrl-granel')) ? act
+                       : (_scanPreGranelTgt.isConnected ? _scanPreGranelTgt : null);
+            if (live) { try { live.value = _scanPreGranelVal; } catch(_){} }
+            e.stopPropagation();   // evitar que el onkeydown inline (this.blur→onchange) reprocese el peso
+          }
           if (inputBox) inputBox.value = _scanHidBuffer;
           submitDespScanInline();
-          _scanHidBuffer = ''; _scanPreGranelTgt = null;
+          _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = '';
           e.preventDefault();
           return;
         }
-        // No fue ráfaga → Enter manual (confirmar peso u otro): dejar pasar sin interferir.
-        _scanHidBuffer = ''; _scanPreGranelTgt = null;
+        // No fue scan → Enter manual (confirmar peso u otro): dejar pasar sin interferir.
+        _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = '';
         return;
       }
 
       // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
       if (!/^[a-zA-Z0-9\-_.]$/.test(e.key)) return;
 
-      const eraRafaga = _scanHidBuffer.length > 0 && dt <= SCAN_HID_GAP_MS;
       // Si NO es el primero y dt es muy grande, es tipeo humano → reiniciar (no es scan).
-      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; }
+      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       // Al arrancar un buffer nuevo sobre el peso granel, recordar su valor previo por si resulta ser un scan.
       if (_scanHidBuffer.length === 0 && esGranelInp) { _scanPreGranelTgt = tgt; _scanPreGranelVal = String(tgt.value || ''); }
       _scanHidBuffer += e.key;
-      // Si venimos en ráfaga sobre el peso granel → bloquear que el char entre al casillero (lo maneja el scan).
-      if (esGranelInp && eraRafaga) { e.preventDefault(); }
+      // NO bloqueamos los chars sobre el peso: los dejamos fluir (el <input type=number> rechaza letras y no tiene
+      // oninput, así que no procesa basura) para no perder dígitos del TIPEO HUMANO rápido. Si al final resultó
+      // ser un scan (Enter en ráfaga), arriba restauramos el valor previo del peso. Peso manual = intacto siempre.
       if (inputBox) inputBox.value = _scanHidBuffer;
       if (statusEl && _scanHidBuffer.length === 1) {
         statusEl.textContent = '⚡ Capturando...';
@@ -15288,12 +15301,26 @@ const DespachoView = (() => {
       if (!await _whConfirm(`¿Cerrar despacho con ${falt} item${falt!==1?'s':''} sin completar?\n\nLos faltantes quedarán en observación de la guía.`, { warning: true, titulo: 'Cerrar despacho parcial', okText: 'Cerrar' })) return;
     }
 
-    // Construir despachoDetalle desde despachadoPorCodigo de cada item
+    // Construir despachoDetalle desde despachadoPorCodigo de cada item.
+    // [FIX money — baseline rezagado] La cantidad NUEVA a descontar de stock = despachado_total − baseline
+    // (el baseline es lo que YA salió en una guía previa del acumulado/rezagado y YA descontó stock; NO se
+    // re-descuenta acá). Asimetría del modelo: en UNIDADES `despachadoPorCodigo` ya es el incremental
+    // (Σdpc = total − baseline) → factor=1, tal cual. En GRANEL `_pkckSetGranel` guarda el TOTAL (Σdpc = total,
+    // incluye baseline) → escalar proporcionalmente a `neto` para no sobre-descontar el baseline. Cuando
+    // baseline=0 (pickup normal, 99% de los casos) factor=1 → IDÉNTICO al comportamiento anterior (cero regresión).
     const despachoDetalle = [];
     (_pickupActivo.items || []).forEach(it => {
       const dpc = it.despachadoPorCodigo || {};
-      Object.keys(dpc).forEach(cod => {
-        const qty = parseFloat(dpc[cod]) || 0;
+      const cods = Object.keys(dpc);
+      if (!cods.length) return;
+      const dpcSum    = cods.reduce((s, k) => s + (parseFloat(dpc[k]) || 0), 0);
+      const baseline  = parseFloat(it.despachadoBaseline) || 0;
+      const despTotal = parseFloat(it.despachado) || 0;
+      const neto      = Math.max(0, despTotal - baseline);
+      // Escalar SOLO cuando el dpc incluye el baseline (granel: Σdpc > neto). Unidades: Σdpc == neto → factor=1.
+      const factor    = (baseline > 0 && dpcSum > neto + 1e-9 && dpcSum > 0) ? (neto / dpcSum) : 1;
+      cods.forEach(cod => {
+        const qty = Math.round((parseFloat(dpc[cod]) || 0) * factor * 1000) / 1000; // 3 dec (peso); enteros intactos
         if (qty > 0) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
       });
     });
@@ -16579,12 +16606,11 @@ const DespachoView = (() => {
     try { SoundFX.click(); } catch(_){}
   }
 
-  // [v2.13.21] Identificar skuBase canónico priorizando código sobre descripción.
-  // Pasos:
-  //   1. Si codigoVisto está set → match exacto contra canónicos.codigoBarra
-  //      o equivalencias.codigoBarra (resolviendo al skuBase del canónico).
-  //   2. Si no encuentra por código → fuzzy match por descripción (>=0.7, gap>=0.15).
-  //   3. Si ni código ni descripción → null (queda como "libre" en la UI).
+  // [v2.13.397] Identificar skuBase canónico (modelo padre/hijo). Prioridad ESTRICTA:
+  //   1. NOMBRE: TODAS las palabras del item presentes en la descripción (orden indistinto, sin fuzzy).
+  //      Exactamente 1 match → usar. 0 ó varios (rojo/verde) → ambiguo, pasar a código.
+  //   2. CÓDIGO (codigoVisto): match exacto contra canónico.codigoBarra o equivalencia → resuelve al padre.
+  //   3. Ni nombre ni código → null → el item queda skuBase='' + nombre LITERAL (el picker humano decide al escanear).
   function _lsIdentificarSkuBase(nombre, productos, codigoVisto) {
     // [MODELO padre/hijo — pedido del dueño] Prioridad: NOMBRE (todas las palabras) → CÓDIGO (desambigua) → nada.
     const _norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
