@@ -13200,7 +13200,7 @@ const DespachoView = (() => {
 
       const now = Date.now();
       // Reset buffer si pasó mucho tiempo desde el último char (evita mezclas)
-      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; }
+      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       const dt = now - _scanHidLastTs;
       _scanHidLastTs = now;
 
@@ -13214,7 +13214,11 @@ const DespachoView = (() => {
         //    tipea el peso, PAUSA, y recién pulsa Enter (dt>GAP) → confirmar peso; el scanner manda el Enter
         //    pegado al último dígito (dt<=GAP) → es scan. Así un peso tipeado no se confunde con un código.
         const enterDeRafaga = dt <= SCAN_HID_GAP_MS;
-        const fueScan = _scanHidBuffer.length >= SCAN_HID_MIN_LEN && (!_scanPreGranelTgt || enterDeRafaga);
+        // Red de seguridad para lectores lentos/BT cuyo Enter llega con dt>GAP sobre el peso: un buffer de 8+
+        // dígitos PUROS es inequívocamente un código de barras (un peso real jamás es 8+ dígitos sin separador),
+        // así que lo tratamos como scan aunque el Enter no viniera pegado → restaura el peso + agrega el producto.
+        const formaBarcode = /^[0-9]{8,}$/.test(_scanHidBuffer);
+        const fueScan = _scanHidBuffer.length >= SCAN_HID_MIN_LEN && (!_scanPreGranelTgt || enterDeRafaga || formaBarcode);
         if (fueScan) {
           // Si arrancó sobre el peso granel, restaurar su valor previo (los dígitos del código que se filtraron
           // al <input type=number> se deshacen) SOBRE EL NODO VIVO (el checklist puede haberse re-renderizado).
