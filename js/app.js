@@ -13177,6 +13177,8 @@ const DespachoView = (() => {
   let _scanHidBuffer = '';
   let _scanHidLastTs = 0;
   let _scanHidListener = null;
+  let _scanPreGranelTgt = null;   // [FIX foco] input de peso granel y su valor previo, para restaurarlo si se
+  let _scanPreGranelVal = '';     // detecta que lo que entró fue un SCAN (ráfaga) y no tipeo de peso.
   const SCAN_HID_GAP_MS = 80;       // tiempo máx entre chars de un scanner real
   const SCAN_HID_RESET_MS = 600;    // si pasa más, reinicia el buffer
   const SCAN_HID_MIN_LEN = 3;       // mínimo de chars para considerar "código válido"
@@ -13186,17 +13188,19 @@ const DespachoView = (() => {
     _scanHidBuffer = '';
     _scanHidLastTs = 0;
     _scanHidListener = (e) => {
-      // Si el target es OTRO input editable, no interceptar (evita robar foco
-      // a otros campos). El input de scan es readonly, así que no entra acá.
       const tgt = e.target;
       const idTgt = tgt && tgt.id;
+      // [FIX foco/scan] El casillero de peso granel (.pkck-ctrl-granel) NO debe bloquear al scanner: si el
+      // operador ESCANEA con el peso enfocado, el scan debe capturarse como CÓDIGO (agregar producto nuevo),
+      // no tipearse dentro del peso. Distinguimos por TIMING: ráfaga rápida = scanner; tipeo lento = peso manual.
+      const esGranelInp = !!(tgt && tgt.classList && tgt.classList.contains('pkck-ctrl-granel'));
       const esOtroInput = tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA') &&
-                          idTgt !== 'despScanInlineInput' && !tgt.readOnly;
+                          idTgt !== 'despScanInlineInput' && !tgt.readOnly && !esGranelInp;
       if (esOtroInput) return;
 
       const now = Date.now();
       // Reset buffer si pasó mucho tiempo desde el último char (evita mezclas)
-      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) _scanHidBuffer = '';
+      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; }
       const dt = now - _scanHidLastTs;
       _scanHidLastTs = now;
 
@@ -13205,24 +13209,31 @@ const DespachoView = (() => {
 
       if (e.key === 'Enter' || e.key === 'Tab') {
         if (_scanHidBuffer.length >= SCAN_HID_MIN_LEN) {
+          // Fue una RÁFAGA (scanner). Si el foco estaba en el peso granel, restaurar su valor previo (deshacer
+          // el/los char que se hayan filtrado) y tratar el Enter como scan, NO como confirmación del peso.
+          if (_scanPreGranelTgt) { try { _scanPreGranelTgt.value = _scanPreGranelVal; } catch(_){} }
           if (inputBox) inputBox.value = _scanHidBuffer;
           submitDespScanInline();
+          _scanHidBuffer = ''; _scanPreGranelTgt = null;
+          e.preventDefault();
+          return;
         }
-        _scanHidBuffer = '';
-        e.preventDefault();
+        // No fue ráfaga → Enter manual (confirmar peso u otro): dejar pasar sin interferir.
+        _scanHidBuffer = ''; _scanPreGranelTgt = null;
         return;
       }
 
       // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
       if (!/^[a-zA-Z0-9\-_.]$/.test(e.key)) return;
 
-      // Si el primer char y dt es grande, está bien (es el inicio de la ráfaga).
-      // Si NO es el primero y dt es muy grande, probablemente es tipeo humano → ignorar.
-      // Pero si _scanHidBuffer está vacío, aceptamos (inicio nuevo).
-      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) {
-        _scanHidBuffer = '';
-      }
+      const eraRafaga = _scanHidBuffer.length > 0 && dt <= SCAN_HID_GAP_MS;
+      // Si NO es el primero y dt es muy grande, es tipeo humano → reiniciar (no es scan).
+      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; }
+      // Al arrancar un buffer nuevo sobre el peso granel, recordar su valor previo por si resulta ser un scan.
+      if (_scanHidBuffer.length === 0 && esGranelInp) { _scanPreGranelTgt = tgt; _scanPreGranelVal = String(tgt.value || ''); }
       _scanHidBuffer += e.key;
+      // Si venimos en ráfaga sobre el peso granel → bloquear que el char entre al casillero (lo maneja el scan).
+      if (esGranelInp && eraRafaga) { e.preventDefault(); }
       if (inputBox) inputBox.value = _scanHidBuffer;
       if (statusEl && _scanHidBuffer.length === 1) {
         statusEl.textContent = '⚡ Capturando...';
@@ -16575,73 +16586,45 @@ const DespachoView = (() => {
   //   2. Si no encuentra por código → fuzzy match por descripción (>=0.7, gap>=0.15).
   //   3. Si ni código ni descripción → null (queda como "libre" en la UI).
   function _lsIdentificarSkuBase(nombre, productos, codigoVisto) {
-    // PASO 1: match exacto por código (más confiable)
+    // [MODELO padre/hijo — pedido del dueño] Prioridad: NOMBRE (todas las palabras) → CÓDIGO (desambigua) → nada.
+    const _norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+                        .replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const _canon = productos.filter(p => parseFloat(p.factorConversion || 1) === 1 && String(p.estado) !== '0');
+    const _shape = (p, via) => ({
+      skuBase:     String(p.skuBase || p.idProducto || p.codigoBarra || ''),
+      codigoBarra: String(p.codigoBarra || ''),
+      descripcion: String(p.descripcion || nombre),
+      unidad:      String(p.unidad || ''),
+      via, score: 1.0
+    });
+    // PASO 1 — NOMBRE: TODAS las palabras del item presentes en la descripción (orden indistinto). ESTRICTO
+    // (no fuzzy/score): "ajinomoto granel" NO matchea "ajinomoto sopa" (falta 'granel'). Único match → usar.
+    // Si 0 o VARIOS (ej. rojo/verde) → ambiguo → se intenta desambiguar por código abajo.
+    const palabras = _norm(nombre).split(' ').filter(w => w.length >= 2);
+    if (palabras.length) {
+      const conTodas = _canon.filter(p => { const d = _norm(p.descripcion); return palabras.every(w => d.includes(w)); });
+      if (conTodas.length === 1) return _shape(conTodas[0], 'nombre_todas_palabras');
+    }
+    // PASO 2 — CÓDIGO (codigoVisto exacto): canónico directo o vía equivalencia. Desambigua rojo/verde y rescata
+    // items cuyo nombre no fue concluyente pero traían un código.
     if (codigoVisto) {
       const cb = normCb(codigoVisto);
       if (cb) {
-        // Canónico directo (factor=1, activo)
-        const canon = productos.find(p =>
-          parseFloat(p.factorConversion || 1) === 1 &&
-          String(p.estado) !== '0' && String(p.estado) !== 0 &&
-          String(p.codigoBarra || '').trim().toUpperCase() === cb
-        );
-        if (canon) {
-          return {
-            skuBase:     String(canon.skuBase || canon.idProducto || canon.codigoBarra || ''),
-            codigoBarra: String(canon.codigoBarra || ''),
-            descripcion: String(canon.descripcion || nombre),
-            unidad:      String(canon.unidad || ''),
-            via:         'codigo_canonico',
-            score:       1.0
-          };
-        }
-        // Equivalencia → resolver al canónico
-        const equivs = OfflineManager.getEquivalenciasCache() || [];
-        const eq = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cb);
+        const canon = _canon.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cb);
+        if (canon) return _shape(canon, 'codigo_canonico');
+        const eq = (OfflineManager.getEquivalenciasCache() || []).find(e => String(e.codigoBarra || '').trim().toUpperCase() === cb);
         if (eq) {
           const skuB = String(eq.skuBase || '').trim().toUpperCase();
-          const prod = productos.find(p =>
-            parseFloat(p.factorConversion || 1) === 1 &&
-            String(p.estado) !== '0' && String(p.estado) !== 0 &&
-            (String(p.idProducto || '').trim().toUpperCase() === skuB ||
-             String(p.codigoBarra || '').trim().toUpperCase() === skuB)
-          );
-          if (prod) {
-            return {
-              skuBase:     String(prod.skuBase || prod.idProducto || prod.codigoBarra || ''),
-              codigoBarra: String(prod.codigoBarra || ''),
-              descripcion: String(prod.descripcion || nombre),
-              unidad:      String(prod.unidad || ''),
-              via:         'codigo_equivalencia',
-              score:       1.0
-            };
-          }
+          const prod = _canon.find(p =>
+            String(p.idProducto || '').trim().toUpperCase() === skuB ||
+            String(p.skuBase || '').trim().toUpperCase() === skuB ||
+            String(p.codigoBarra || '').trim().toUpperCase() === skuB);
+          if (prod) return _shape(prod, 'codigo_equivalencia');
         }
       }
     }
-    // PASO 2: fuzzy match por descripción (fallback)
-    if (!nombre) return null;
-    const candidatos = productos.filter(p => {
-      const factor = parseFloat(p.factorConversion || 1);
-      const activo = String(p.estado) !== '0' && String(p.estado) !== 0;
-      return factor === 1 && activo;
-    });
-    const scored = candidatos
-      .map(p => ({ p, s: _lsScore(nombre, p.descripcion || '') }))
-      .filter(x => x.s >= 0.7)
-      .sort((a, b) => b.s - a.s);
-    if (!scored.length) return null;
-    const ganador = scored[0];
-    const segundo = scored[1];
-    if (segundo && (ganador.s - segundo.s) < 0.15) return null;
-    return {
-      skuBase:     String(ganador.p.skuBase || ganador.p.idProducto || ganador.p.codigoBarra || ''),
-      codigoBarra: String(ganador.p.codigoBarra || ''),
-      descripcion: String(ganador.p.descripcion || nombre),
-      unidad:      String(ganador.p.unidad || ''),
-      via:         'descripcion',
-      score:       ganador.s
-    };
+    // Sin match confiable → null → el item queda skuBase='' + nombre LITERAL (el operador decide al escanear).
+    return null;
   }
 
   function activarListaSombra() {
@@ -16678,7 +16661,8 @@ const DespachoView = (() => {
       const productos = OfflineManager.getProductosCache() || [];
       let identificados = 0;
       const items = validos.map(it => {
-        const m = _lsIdentificarSkuBase(it.nombre, productos);
+        // [FIX] pasar codigoVisto → habilita el match por código (antes se omitía y solo corría el de nombre).
+        const m = _lsIdentificarSkuBase(it.nombre, productos, it.codigoVisto);
         if (m) identificados++;
         return {
           nombre: it.nombre,

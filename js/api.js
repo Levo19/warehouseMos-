@@ -1511,8 +1511,10 @@ const API = (() => {
         '{"items":[{"nombre":"...","cantidad":N.N,"codigoVisto":"..."}]}'
       ].join('\n');
       let resp;
+      // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa,
+      // nunca cae a GAS (directriz: 100% Supabase, se borra GAS en 2 días).
       try { resp = await _llamarEdgeIA({ max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] }); }
-      catch (_) { return null; }   // fallback GAS
+      catch (e) { return { ok: false, error: 'IA_EDGE_FAIL', mensaje: 'IA no disponible (Edge): ' + ((e && e.message) || 'red') }; }
       const text = (resp && resp.content && resp.content[0] && resp.content[0].text) || '';
       const first = text.indexOf('{'), last = text.lastIndexOf('}');
       if (first < 0 || last < 0) return { ok: false, error: 'PARSE_FAIL', mensaje: text.substring(0, 200) };
