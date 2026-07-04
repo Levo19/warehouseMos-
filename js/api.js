@@ -87,9 +87,9 @@ const API = (() => {
       _refreshTid = null;
       try {
         const deviceId = _whDeviceId();
-        let d;
-        try { d = await _mintViaEdge(deviceId); }
-        catch (_) { d = await _mintViaGAS(deviceId); }
+        // [CERO-GAS] Solo Edge mint-wh. Si falla, el outer catch deja que el camino sincrónico re-mintee bajo
+        // demanda (antes había un catch → _mintViaGAS(deviceId), función INEXISTENTE = ReferenceError muerto).
+        const d = await _mintViaEdge(deviceId);
         const n = Math.floor(Date.now() / 1000);
         _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
         _agendarRefresh();                                     // reencadena para el próximo ciclo

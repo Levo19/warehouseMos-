@@ -3509,50 +3509,18 @@ const Session = (() => {
           console.log('[Push WH] token registrado en Supabase ✅');
         }
       } catch(eSB) { console.warn('[Push WH] registro Supabase falló:', eSB?.message); }
-      // [perf 500x · G6 cero-GAS] El GAS es SOLO fallback: si Supabase ya registró, NO escribir doble (ni
-      // el verify GAS de abajo). Antes se escribía a ambos en cada login = round-trips GAS redundantes.
-      if (!_sbPushOk) try {
-        await fetch(mosUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'registrarPushToken',
-            token, usuario,
-            appOrigen: 'warehouseMos',
-            deviceId: _devIdToken,
-            dispositivo: 'warehouseMos · ' + (navigator.userAgent || '').substring(0, 80)
-          })
-        });
-        console.log('[Push WH] token registrado en GAS (fallback) ✅');
-      } catch(eReg) {
-        console.warn('[Push WH] registro POST falló:', eReg?.message);
-      }
-      if (_sbPushOk) return;   // Supabase autoritativo → no correr el verify GAS
-      // [v2.13.64] Auto-verify: 8s después, confirmar que el token está activo
-      // en PUSH_TOKENS. Si no, retry una vez. Resuelve casos donde el registro
-      // se perdió (red intermitente) sin que el user lo note.
+      // [CERO-GAS] Registro de push token 100% Supabase (registrarPushTokenSB → mos.push_tokens). Se eliminó el
+      // fallback GAS `registrarPushToken` + el verify GAS `verificarMiTokenRegistrado`. Push es best-effort: si el
+      // registro directo falla, se reintenta UNA vez a Supabase (sin GAS).
+      if (_sbPushOk) return;
       setTimeout(async () => {
         try {
-          const verifUrl = mosUrl + '?action=verificarMiTokenRegistrado&deviceId=' + encodeURIComponent(_devIdToken);
-          const vr = await fetch(verifUrl);
-          const vj = await vr.json();
-          const registrado = vj?.data?.registrado || vj?.registrado;
-          if (!registrado) {
-            console.warn('[Push WH] token NO está en backend tras 8s · reintento');
-            if (typeof toast === 'function') toast('⚠ Re-registrando notificaciones…', 'warn', 4000);
-            fetch(mosUrl, {
-              method: 'POST',
-              body: JSON.stringify({
-                action: 'registrarPushToken',
-                token, usuario,
-                appOrigen: 'warehouseMos',
-                deviceId: _devIdToken,
-                dispositivo: 'warehouseMos · retry · ' + (navigator.userAgent || '').substring(0, 60)
-              })
-            }).catch(() => {});
-          } else {
-            console.log('[Push WH] token verificado ✅ (' + (vj?.data?.tokens || 1) + ' activo/s)');
+          if (typeof API !== 'undefined' && API.registrarPushTokenSB) {
+            await API.registrarPushTokenSB({ token, usuario, appOrigen: 'warehouseMos', deviceId: _devIdToken,
+              dispositivo: 'warehouseMos · retry · ' + (navigator.userAgent || '').substring(0, 60) });
+            console.log('[Push WH] token registrado en Supabase (retry) ✅');
           }
-        } catch(eV) { console.warn('[Push WH] verify token falló:', eV?.message); }
+        } catch(eR) { console.warn('[Push WH] retry Supabase falló:', eR?.message); }
       }, 8000);
     } catch(e) {
       console.warn('[Push WH] init error:', e?.message);
