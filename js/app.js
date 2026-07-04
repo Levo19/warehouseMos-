@@ -13042,7 +13042,26 @@ const DespachoView = (() => {
     // ── Producto a granel SIEMPRE pide peso, esté o no dentro de pickup.
     //    Si llega aquí es porque NO matcheó con pickup activo (extra) o
     //    no hay pickup activo en absoluto. Cualquier caso → modal qty.
-    if (typeof _esProductoPeso === 'function' && _esProductoPeso(prod)) {
+    // [FIX granel sombra] Detectar granel también por el ITEM de la lista sombra (por código o skuBase →
+    // catálogo): el `prod` escaneado puede resolver a un NIU homónimo (ej. HONGO GRANEL 00456 vs 3 NIU que
+    // terminan en 456). Si el item de la sombra es KGM, abrir el casillero de peso igual (nunca entra como qty-1).
+    let _somGranel = false;
+    try {
+      if (_listaSombra && Array.isArray(_listaSombra.items)) {
+        const _cbU = String(cb).trim().toUpperCase();
+        const _skU = String(prod.skuBase || prod.idProducto || '').toUpperCase();
+        const _si = _listaSombra.items.find(it =>
+          String(it.codigoBarra || '').trim().toUpperCase() === _cbU ||
+          String(it.codigoVisto || '').trim().toUpperCase() === _cbU ||
+          (_skU && String(it.skuBase || '').toUpperCase() === _skU));
+        if (_si) {
+          const _pAll = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+          const _sp = _pAll.find(p => String(p.idProducto) === String(_si.skuBase) || String(p.skuBase) === String(_si.skuBase));
+          _somGranel = _esProductoPeso(_si) || _esProductoPeso(_sp);
+        }
+      }
+    } catch(_){}
+    if ((typeof _esProductoPeso === 'function' && _esProductoPeso(prod)) || _somGranel) {
       _abrirModalQtyGranelExtra(prod, cb);
       _despLastHistory.push(cb);
       return;
@@ -14541,7 +14560,16 @@ const DespachoView = (() => {
     // ── Producto a granel (KGM): focus inline al input de cantidad ───
     // Antes abría un modal. Ahora la card activa muestra un input decimal
     // con focus automático — el operador pesa y escribe directo.
-    if (_esProductoPeso(prod)) {
+    // [FIX granel] Detectar granel TAMBIÉN por el producto del ITEM (su skuBase → catálogo), no solo por el
+    // `prod` escaneado: el scan puede resolver a un código NIU homónimo (ej. 3 productos NIU terminan en "456"
+    // como el HONGO GRANEL 00456) y los items de pickup no llevan `unidad`. El skuBase del item es la verdad.
+    let _prodItem = null;
+    try {
+      const _prodsAll = (App.getProductosMaestro && App.getProductosMaestro()) || [];
+      _prodItem = _prodsAll.find(p => String(p.idProducto) === String(item.skuBase) ||
+                                      String(p.skuBase) === String(item.skuBase)) || null;
+    } catch(_){}
+    if (_esProductoPeso(prod) || _esProductoPeso(_prodItem)) {
       _savePickup();
       _renderPickupChecklistInSheet(item.skuBase);
       _renderPickupChecklistInline();
