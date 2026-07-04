@@ -16097,13 +16097,35 @@ const DespachoView = (() => {
 
   // [v2.13.19] Mapeo completo de items del backend al state local
   function _lsMapItemFromBackend(it) {
+    let sku = String(it.skuBase || '');
+    let uni = it.unidad || '';
+    // [FIX padre/hijo] Si el item no trae skuBase (o unidad), resolverlo del catálogo por su código
+    // (codigoBarra/codigoVisto). El skuBase es el PADRE — sin él, el match cae a fuzzy por nombre (poco fiable)
+    // y el granel no se detecta. Poblarlo al mapear garantiza padre/hijo + detección de granel para toda la lista,
+    // no importa cómo se armó (IA, pickup, despacho). Cero-GAS (solo lee el catálogo cacheado).
+    if (!sku || !uni) {
+      try {
+        const _prods = OfflineManager.getProductosCache();
+        const _cod = normCb(String(it.codigoBarra || it.codigoVisto || ''));
+        if (_cod) {
+          let _p = _prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === _cod &&
+                                    parseFloat(p.factorConversion || 1) === 1);
+          if (!_p) {
+            const _e = OfflineManager.getEquivalenciasCache().find(e => String(e.codigoBarra || '').trim().toUpperCase() === _cod);
+            if (_e) _p = _prods.find(p => String(p.skuBase || '').toUpperCase() === String(_e.skuBase || '').toUpperCase() ||
+                                          String(p.idProducto || '').toUpperCase() === String(_e.skuBase || '').toUpperCase());
+          }
+          if (_p) { if (!sku) sku = String(_p.skuBase || _p.idProducto || ''); if (!uni) uni = String(_p.unidad || ''); }
+        }
+      } catch(_){}
+    }
     return {
       nombre:       it.nombre || it.nombreMaster || '',
       cantidad:     parseFloat(it.cantidad) || 0,
-      skuBase:      String(it.skuBase || ''),
+      skuBase:      sku,
       codigoBarra:  String(it.codigoBarra || ''),
       nombreMaster: it.nombreMaster || it.nombre || '',
-      unidad:       it.unidad || '',
+      unidad:       uni,
       codigoVisto:  it.codigoVisto || '',
       cantidadEscaneada: parseFloat(it.cantidadEscaneada) || 0,
       productos:    Array.isArray(it.productos) ? it.productos : []
