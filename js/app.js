@@ -22511,9 +22511,10 @@ const Welcome = (() => {
       toast('Módulo de extensión no disponible. Recarga la app.', 'error', 5000);
       return;
     }
+    // [cero-GAS] extensor-horario v1.0.2 ya NO usa mosGasUrl (RPC mos.extender_horario_dispositivo); solo devId.
     const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
     const devId  = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-    if (!mosUrl || !devId) {
+    if (!devId) {
       toast('Configuración incompleta — recarga la app.', 'error', 4000);
       return;
     }

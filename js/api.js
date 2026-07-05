@@ -1376,6 +1376,15 @@ const API = (() => {
       return out;              // {ok:true,data:{...}} | {ok:false,error} — OpLog decide saved/failed
     }
 
+    // [kill-GAS] procesar mermas descartadas → wh.procesar_eliminacion_mermas (392): guía SALIDA_MERMA + marca.
+    if (params.action === 'procesarEliminacionMermas') {
+      const out = await _sbRpcWH('procesar_eliminacion_mermas', { p: {
+        claveAdmin: params.claveAdmin || '', usuario: params.usuario || ''
+      } });
+      if (!out) return null;
+      return out;   // {ok:true,data:{autorizado,idGuiaSalida,procesados,fallidos}}
+    }
+
     if (params.action === 'crearAjuste') {
       const out = await _sbRpcWH('crear_ajuste', { p: {
         id_ajuste: 'AJ_' + lid, codigo_producto: String(params.codigoProducto || ''),

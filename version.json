@@ -1,1 +1,1 @@
-{"version":"2.13.405","build":"2.13.405 (kill-GAS): bump modulos compartidos seguridad/membrete (verificarHorario->resolver_horario_personal grant anon; getEstadoLoteAdhesivo->adhesivo_lote_estado). Cero-GAS."}
+{"version":"2.13.406","build":"2.13.406 (kill-GAS bloque5): procesarEliminacionMermas->wh.procesar_eliminacion_mermas (392, guia SALIDA_MERMA); extensor guard ya no exige mosGasUrl; WH_AVISO_DIRECTO=1 (aviso por Edge). Cero-GAS."}
