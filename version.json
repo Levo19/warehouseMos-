@@ -1,1 +1,1 @@
-{"version":"2.13.403","build":"2.13.403 (0% GAS login): removido el fallback GAS loginPersonal — login 100% Supabase (loginPersonalSB/mos.login_pin_wh). Era el ultimo caller vivo del brazo GAS de post(); ahora inalcanzable (escrituras uncovered muertas + flags ON)."}
+{"version":"2.13.404","build":"2.13.404 (kill-GAS Mermas V2): aplicarOp -> wh.aplicar_op (387) idempotente por idOp. MERMA_AGREGAR registra (no mueve stock) / MERMA_SOLUCIONAR reusa wh.resolver_merma. Antes iba 100% GAS (uso diario). Cero-GAS."}

@@ -1365,6 +1365,17 @@ const API = (() => {
     // rollback. La RPC es idempotente (dedup por el id sembrado del localId) → reintento seguro, no duplica.
     if (!_whEscrituraDirecta() && !params._viaDirecta) return null;
 
+    // [kill-GAS · Mermas V2] motor OpLog → wh.aplicar_op (387). Idempotente por idOp. MERMA_AGREGAR (registra,
+    // no mueve stock) / MERMA_SOLUCIONAR (reusa wh.resolver_merma). OpLog lee {ok,data}. Cero-GAS.
+    if (params.action === 'aplicarOp') {
+      const out = await _sbRpcWH('aplicar_op', { p: {
+        idOp: String(params.idOp || ''), tipo: params.tipo, payload: params.payload,
+        usuario: params.usuario || '', idGuia: params.idGuia || ''
+      } });
+      if (!out) return null;   // sin respuesta (red) → cola reintenta; nunca duplica (idempotente por idOp)
+      return out;              // {ok:true,data:{...}} | {ok:false,error} — OpLog decide saved/failed
+    }
+
     if (params.action === 'crearAjuste') {
       const out = await _sbRpcWH('crear_ajuste', { p: {
         id_ajuste: 'AJ_' + lid, codigo_producto: String(params.codigoProducto || ''),
