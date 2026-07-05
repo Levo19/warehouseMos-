@@ -1399,9 +1399,10 @@ const Session = (() => {
     _aplicarSesion();
     _postLogin(null, true); // ticket se decide solo tras respuesta GAS
 
-    // 3. Confirmar con GAS en segundo plano
-    API.loginPersonal(pinIntento).then(res => {
-      if (res.ok && !res.offline) {
+    // 3. [NIVEL 1 corte-GAS] Confirmar con Supabase en segundo plano (mos.login_pin_wh vía loginPersonalSB).
+    //    Sin fallback GAS: si no hay token/backend, res=null → no confirma (la sesión local optimista sigue).
+    API.loginPersonalSB(pinIntento).then(res => {
+      if (res && res.ok && !res.offline) {
         sesionActual = { ...sesionActual, ...res.data };
         window.WH_CONFIG.idSesion = sesionActual.idSesion;
         _guardarSesion(sesionActual);
@@ -3679,17 +3680,10 @@ const BloqueoRemoto = (() => {
     if (!ses) return;
     if (elBtn) { elBtn.disabled = true; elBtn.textContent = 'VALIDANDO...'; }
     try {
-      const r = await fetch(_mosUrl(), {
-        method: 'POST',
-        body: JSON.stringify({
-          action: 'desbloquearUsuarioTemporal',
-          idPersonal: ses.idPersonal,
-          nombre: ses.nombre,
-          appOrigen: 'warehouseMos',
-          claveAdmin: clave
-        })
+      // [NIVEL 1 corte-GAS] Desbloqueo 100% Supabase (mos.desbloquear_usuario_temporal). Sin fallback GAS.
+      const j = await API.desbloquearUsuarioDirecto({
+        idPersonal: ses.idPersonal, nombre: ses.nombre, appOrigen: 'warehouseMos', claveAdmin: clave
       });
-      const j = await r.json();
       if (!j || !j.ok) {
         if (elErr) elErr.textContent = (j && j.error) || 'Error de conexión';
         return;

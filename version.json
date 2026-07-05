@@ -1,1 +1,1 @@
-{"version":"2.13.400","build":"2.13.400 (limpieza corte GAS 🟡🟢): removido _mintViaGAS (ref muerta = ReferenceError en refresh de token) → mint 100% Edge. registrarPushToken cero-GAS: quitado fallback GAS + verify GAS verificarMiTokenRegistrado, retry ahora a Supabase (best-effort)."}
+{"version":"2.13.401","build":"2.13.401 (corte GAS NIVEL 1): confirmacion de login en 2do plano 100% Supabase (mos.login_pin_wh via loginPersonalSB), sin GAS."}

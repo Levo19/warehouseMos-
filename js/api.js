@@ -2867,6 +2867,18 @@ const API = (() => {
       } catch (_) { return null; }
     },
 
+    // ── [NIVEL 1 corte-GAS] Desbloqueo temporal 15 min 100% Supabase (mos.desbloquear_usuario_temporal, SQL 363) ──
+    // Cero-GAS/cero-fallback: valida la clave admin + setea unlock_hasta en mos.bloqueos_usuario. Devuelve
+    // {ok, data:{autorizado, unlockHasta(ms), msRestantes(ms), validadoPor, error?}} = shape que consume el modal.
+    desbloquearUsuarioDirecto: async (params) => {
+      return await _sbRpcWH('desbloquear_usuario_temporal', { p: {
+        idPersonal: (params && params.idPersonal) || '',
+        nombre:     (params && params.nombre)     || '',
+        appOrigen:  (params && params.appOrigen)  || 'warehouseMos',
+        claveAdmin: (params && params.claveAdmin) || ''
+      } }, 'mos', 12000);
+    },
+
     // ── [cero-GAS G2] Registro de ubicación GPS directo a Supabase (mos.registrar_ubicacion, flag GPS_DIRECTO) ──
     // Devuelve true si escribió en Supabase; false si flag OFF / offline / error → el caller cae al write GAS.
     registrarUbicacionDirecto: async (params) => {
