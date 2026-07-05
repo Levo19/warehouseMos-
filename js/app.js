@@ -1323,9 +1323,10 @@ const Session = (() => {
     // Sin caché → validar online. [F1 cero-GAS] Supabase-first (mos.login_pin_wh, pin server-side) → fallback GAS.
     // FIX login caído: el catálogo dejó de mandar el pin (seguridad) → validarPinLocal queda null → antes solo GAS.
     if (!localOp && navigator.onLine) {
+      // [0% GAS / 0% FALLBACK] Login 100% Supabase (mos.login_pin_wh vía loginPersonalSB). Sin fallback GAS:
+      // si no responde (sin token/red), se muestra "sin conexión · reintenta" (el path GAS loginPersonal se eliminó).
       let res = (typeof API !== 'undefined' && API.loginPersonalSB) ? await API.loginPersonalSB(pinIntento).catch(() => null) : null;
-      if (!res) res = await API.loginPersonal(pinIntento).catch(() => null);
-      // [100x guard] Si NI Supabase NI GAS respondieron (red caída devolviendo vacío), no leer res.* (TypeError) → mensaje claro.
+      // [100x guard] Si Supabase no respondió (red caída devolviendo vacío), no leer res.* (TypeError) → mensaje claro.
       if (!res) {
         document.getElementById('loginError').textContent = '⚠ Sin conexión · reintenta';
         try { SoundFX.buzzer(); } catch(e) {}

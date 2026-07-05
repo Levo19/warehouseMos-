@@ -1,1 +1,1 @@
-{"version":"2.13.402","build":"2.13.402 (0% GAS/0% fallback reads): call() ya NO cae a GAS — siempre directo Supabase; si null -> cache offline, nunca GAS. Reads covered directos, uncovered degradan a cache."}
+{"version":"2.13.403","build":"2.13.403 (0% GAS login): removido el fallback GAS loginPersonal — login 100% Supabase (loginPersonalSB/mos.login_pin_wh). Era el ultimo caller vivo del brazo GAS de post(); ahora inalcanzable (escrituras uncovered muertas + flags ON)."}
