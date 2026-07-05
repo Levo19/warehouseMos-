@@ -1,1 +1,1 @@
-{"version":"2.13.406","build":"2.13.406 (kill-GAS bloque5): procesarEliminacionMermas->wh.procesar_eliminacion_mermas (392, guia SALIDA_MERMA); extensor guard ya no exige mosGasUrl; WH_AVISO_DIRECTO=1 (aviso por Edge). Cero-GAS."}
+{"version":"2.13.407","build":"2.13.407 (review 500x fixes WH): B1 agregarDetalle localId +random (no colision/linea perdida por scan rapido), B2 deshacer envasado cancela lote etiquetas (no desperdicio rollo), B3 _diasParaVencer TZ Peru (no off-by-one), B5 aprobarDesdePanel try/catch."}

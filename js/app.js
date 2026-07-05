@@ -7829,7 +7829,9 @@ const GuiasView = (() => {
       return true;
     }
 
-    const localId = 'DL' + Date.now();
+    // [FIX 500x B1] sufijo aleatorio: dos productos distintos escaneados en el mismo ms (scanner HID rápido)
+    // generaban el MISMO localId → colisión de data-det-id + el dedup del RPC colapsaba las 2 altas en 1 (línea perdida).
+    const localId = 'DL' + Date.now() + Math.random().toString(36).slice(2, 6);
     const itemOptimista = {
       idDetalle: localId, idGuia: _guiaActual.idGuia,
       codigoProducto: cb,
@@ -10580,6 +10582,9 @@ const EnvasadosView = (() => {
       // seguridad). Evita el stock fantasma y no manda un ENV_OPT_* al server.
       if (_envDeshacerPendiente.has(idEnvOptimista)) {
         _envDeshacerPendiente.delete(idEnvOptimista);
+        // [FIX 500x B2] si se disparó impresión, cancelar el lote de etiquetas (antes se imprimían físicamente
+        // etiquetas de un envasado deshecho → desperdicio de rollo). Las otras ramas ya lo hacían.
+        if (imprimir) { try { WhLoteAdhesivo.cancelarSilencioso('Envasado deshecho'); } catch(_) {} }
         OfflineManager.removerEnvasadoCache(idEnvOptimista);
         _renderDesdeCache();
         _emitirEnvasadoReconciliado();
@@ -17298,13 +17303,18 @@ const PreingresosView = (() => {
   }
 
   async function aprobarDesdePanel(id) {
-    const res = await API.aprobarPreingreso({ idPreingreso: id, usuario: window.WH_CONFIG.usuario });
-    if (res.ok) {
-      toast(`Guía ${res.data.idGuia} creada`, 'ok');
+    // [FIX 500x B5] try/catch + optional-chaining: sin esto un rechazo por red = unhandled rejection + sin
+    // feedback al operador + `res.data.idGuia` lanzaba si res venía undefined.
+    let res;
+    try {
+      res = await API.aprobarPreingreso({ idPreingreso: id, usuario: window.WH_CONFIG.usuario });
+    } catch (e) { toast('Sin conexión: ' + (e && e.message || 'reintenta'), 'danger'); return; }
+    if (res && res.ok) {
+      toast(`Guía ${res.data && res.data.idGuia || ''} creada`, 'ok');
       filtrarPanel(_panelFiltro);
       GuiasView.cargar();
     } else {
-      toast('Error: ' + res.error, 'danger');
+      toast('Error: ' + (res && res.error || 'no se pudo aprobar'), 'danger');
     }
   }
 
@@ -20490,9 +20500,14 @@ const ProductosView = (() => {
     // [v2.13.54] Helper: card de lote — colores semánticos según días para vencer
     const _diasParaVencer = (fechaIso) => {
       if (!fechaIso) return null;
-      const fv = new Date(fechaIso);
+      // [FIX 500x B3] día en TZ Perú (regla del proyecto): un date-only "YYYY-MM-DD" como medianoche UTC daba
+      // off-by-one en el día frontera en dispositivos Perú (UTC-5). Anclamos ambos a mediodía Perú → diff limpio.
+      const s = String(fechaIso).slice(0, 10);
+      const fv = new Date(s + 'T12:00:00-05:00');
       if (isNaN(fv.getTime())) return null;
-      return Math.ceil((fv.getTime() - Date.now()) / 86400000);
+      const hoyStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' }); // YYYY-MM-DD Perú
+      const hoy = new Date(hoyStr + 'T12:00:00-05:00');
+      return Math.round((fv.getTime() - hoy.getTime()) / 86400000);
     };
     const _claseLote = (dias) => {
       if (dias === null) return 'lote-sin';
