@@ -1,1 +1,1 @@
-{"version":"2.13.404","build":"2.13.404 (kill-GAS Mermas V2): aplicarOp -> wh.aplicar_op (387) idempotente por idOp. MERMA_AGREGAR registra (no mueve stock) / MERMA_SOLUCIONAR reusa wh.resolver_merma. Antes iba 100% GAS (uso diario). Cero-GAS."}
+{"version":"2.13.405","build":"2.13.405 (kill-GAS): bump modulos compartidos seguridad/membrete (verificarHorario->resolver_horario_personal grant anon; getEstadoLoteAdhesivo->adhesivo_lote_estado). Cero-GAS."}
