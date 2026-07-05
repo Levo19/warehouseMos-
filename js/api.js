@@ -2140,24 +2140,15 @@ const API = (() => {
 
   // GET: network first, cache como fallback
   async function call(params) {
-    const GAS_URL = _gasUrl();
-    // [PASO 5 · B3] lectura directa a Supabase (inerte; fallback TOTAL a GAS ante cualquier fallo)
-    if (_whLecturaDirecta() && navigator.onLine) {
+    // [0% GAS / 0% FALLBACK 2026-07-04] Lectura SIEMPRE directa a Supabase (sin gate, sin GAS). Si el directo
+    // devuelve null/lanza (acción sin RPC directo o token minteándose), cae a la CACHÉ local offline — NUNCA a GAS.
+    if (navigator.onLine) {
       try {
         const directo = await _callDirecto(params);
         if (directo) return directo;
-      } catch (_) { /* cae a GAS abajo */ }
+      } catch (_) { /* → caché */ }
     }
-    if (!GAS_URL) return _fromCache(params);
-    try {
-      const url = new URL(GAS_URL);
-      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-      const res  = await fetch(url.toString(), { redirect: 'follow' });
-      const data = await res.json();
-      return data;
-    } catch {
-      return _fromCache(params);
-    }
+    return _fromCache(params);
   }
 
   // Fallback GET desde caché offline

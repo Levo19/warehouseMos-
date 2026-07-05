@@ -1,1 +1,1 @@
-{"version":"2.13.401","build":"2.13.401 (corte GAS NIVEL 1): confirmacion de login en 2do plano 100% Supabase (mos.login_pin_wh via loginPersonalSB), sin GAS."}
+{"version":"2.13.402","build":"2.13.402 (0% GAS/0% fallback reads): call() ya NO cae a GAS — siempre directo Supabase; si null -> cache offline, nunca GAS. Reads covered directos, uncovered degradan a cache."}
