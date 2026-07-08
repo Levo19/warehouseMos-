@@ -15,16 +15,17 @@
   var LS_KEY_TS  = 'wh_cliInbox_lastTs';
   var pollTimer  = null;
 
-  // ── API helpers ────────────────────────────────────────────
-  function gasUrl() {
-    return (window.cfg && window.cfg.gasUrl) || '';
-  }
+  // ── API helper — [CERO-GAS 2026-07-08] inbox por RPC wh.cliente_inbox_polling (SQL 407), sin GAS. ──
+  var _SB_URL  = 'https://rzbzdeipbtqkzjqdchqk.supabase.co';
+  var _SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnpkZWlwYnRxa3pqcWRjaHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzYwMDQsImV4cCI6MjA5NjQ1MjAwNH0.MAlSdz_ugGUZoaU5st6dA_gb_x_IiUL0TXxH176kY9k';
   async function consultar(desde) {
-    var url = gasUrl(); if (!url) return null;
     try {
-      var qs = '?action=clienteInboxPolling&desde=' + encodeURIComponent(desde || 0);
-      var r  = await fetch(url + qs, { method: 'GET' });
-      var d  = await r.json();
+      var r = await fetch(_SB_URL + '/rest/v1/rpc/cliente_inbox_polling', {
+        method: 'POST',
+        headers: { apikey: _SB_ANON, Authorization: 'Bearer ' + _SB_ANON, 'Content-Type': 'application/json', 'Content-Profile': 'wh' },
+        body: JSON.stringify({ p: { desde: desde || 0 } })
+      });
+      var d = await r.json();
       return (d && d.ok && d.data) ? d.data : null;
     } catch(e) {
       return null;

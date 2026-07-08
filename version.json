@@ -1,1 +1,1 @@
-{"version":"2.13.408","build":"2.13.408 (corte-GAS F1): refresca el modulo compartido seguridad-modal.js (extension de horario ahora 100% Supabase). Sin cambios en WH propio."}
+{"version":"2.13.409","build":"2.13.409 (corte-GAS F5 portal cliente): pedido.html + clientes.html + clienteInbox.js migrados 100% Supabase (RPCs wh.cliente_* SQL 407/408 + Edge recibir-pedido con IA publica). Backend verificado E2E. Falta solo reporte.html (RPC read-only pendiente)."}

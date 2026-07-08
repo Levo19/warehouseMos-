@@ -124,8 +124,18 @@
  *   GET  clienteEstadoPedido?p=ID
  *        → { estado, timeline:[{paso,ts}] }
  * ════════════════════════════════════════════════════════════════════ */
-const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec';
-const DEMO_MODE   = false;  // backend ClientePortal.gs ya está deployado
+// [CERO-GAS 2026-07-08] Portal 100% Supabase. RPCs wh.cliente_* (SQL 407/408) + Edge `recibir-pedido` (IA pública).
+const SB_URL   = 'https://rzbzdeipbtqkzjqdchqk.supabase.co';
+const SB_ANON  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnpkZWlwYnRxa3pqcWRjaHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzYwMDQsImV4cCI6MjA5NjQ1MjAwNH0.MAlSdz_ugGUZoaU5st6dA_gb_x_IiUL0TXxH176kY9k';
+async function sbRpc(fn, p) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', 'Content-Profile': 'wh' },
+    body: JSON.stringify({ p: p || {} })
+  });
+  return await r.json().catch(() => null);
+}
+const DEMO_MODE   = false;  // backend 100% Supabase
 const APP_NAME    = 'Inversiones MOS';
 
 /* ──────────── STATE ──────────── */
@@ -607,10 +617,15 @@ async function enviarPedido(){
       state.items = mockIA();
       state.pedidoId = 'P'+Date.now().toString().slice(-6);
     } else {
-      const body = { action:'clienteRecibirPedido', token, adjuntos: state.adjuntos.map(a=>({tipo:a.tipo,nombre:a.nombre,mime:a.mime,b64:a.b64})), texto: state.texto };
-      const r = await fetch(BACKEND_URL, { method:'POST', body: JSON.stringify(body) });
+      // [CERO-GAS] Edge `recibir-pedido` (pública): Vision para fotos + parser IA + fallback → crea el PREVIEW.
+      const r = await fetch(`${SB_URL}/functions/v1/recibir-pedido`, {
+        method:'POST',
+        headers:{ apikey: SB_ANON, Authorization:'Bearer '+SB_ANON, 'Content-Type':'application/json' },
+        body: JSON.stringify({ token, adjuntos: state.adjuntos.map(a=>({tipo:a.tipo,nombre:a.nombre,mime:a.mime,b64:a.b64})), texto: state.texto })
+      });
       const d = await r.json();
-      state.items = d.items || []; state.pedidoId = d.idPedido;
+      const dd = (d && d.data) ? d.data : (d || {});
+      state.items = dd.items || []; state.pedidoId = dd.idPedido;
     }
     state.view='preview'; render(); soundSuccess(); vibrar([30,60,30]);
     if (state.premium && state.items.every(it=>!it.duda)) confirmarPedido();
@@ -622,10 +637,7 @@ async function enviarPedido(){
 async function confirmarPedido(){
   try {
     if (!DEMO_MODE){
-      await fetch(BACKEND_URL, {
-        method:'POST',
-        body: JSON.stringify({ action:'clienteConfirmarPedido', idPedido: state.pedidoId, items: state.items, token: token })
-      });
+      await sbRpc('cliente_confirmar_pedido', { idPedido: state.pedidoId, items: state.items, token: token });
     }
     // Guardar histórico local
     state.historial.unshift({ ts: Date.now(), pedidoId: state.pedidoId, items: state.items });
@@ -659,8 +671,7 @@ async function initCliente(){
   // Si hay token en URL, traer datos reales del cliente
   if (token) {
     try {
-      const r = await fetch(BACKEND_URL + '?action=clienteInfo&token=' + encodeURIComponent(token));
-      const d = await r.json();
+      const d = await sbRpc('cliente_info', { token });
       if (d?.ok && d.data?.existe) {
         state.cliente.nombre = d.data.nombre;
         state.cliente.premium = !!d.data.premium;
@@ -679,11 +690,7 @@ async function registrarme(){
   const telefono = ($('#regTel')?.value || '').trim();
   if (!nombre) { toast('⚠ Falta tu nombre'); soundError(); return; }
   try {
-    const r = await fetch(BACKEND_URL, {
-      method:'POST',
-      body: JSON.stringify({ action:'clienteRegistrar', token, nombre, telefono, tipo:'minorista' })
-    });
-    const d = await r.json();
+    const d = await sbRpc('cliente_registrar', { token, nombre, telefono, tipo:'minorista' });
     if (d?.ok && d.data?.token) {
       toast('✓ Listo, ' + d.data.nombre);
       soundSuccess(); vibrar([30,60,30]);
