@@ -107,11 +107,12 @@
 <script>
 // ── Config ────────────────────────────────────────────────────
 const REFRESH_SEC = 30;
-const GAS_EMBEBIDO = 'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec';
+// [CERO-GAS 2026-07-08] reporte 100% Supabase (RPC wh.get_reporte, SQL 410).
+const SB_URL  = 'https://rzbzdeipbtqkzjqdchqk.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnpkZWlwYnRxa3pqcWRjaHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzYwMDQsImV4cCI6MjA5NjQ1MjAwNH0.MAlSdz_ugGUZoaU5st6dA_gb_x_IiUL0TXxH176kY9k';
 const p    = new URLSearchParams(location.search);
 const TIPO = p.get('tipo') || '';
 const ID   = p.get('id')   || '';
-const GAS  = (() => { try { return atob(p.get('g') || '') || GAS_EMBEBIDO; } catch { return GAS_EMBEBIDO; } })();
 
 let _last    = null;
 let _timer   = null;
@@ -119,14 +120,13 @@ let _tick    = REFRESH_SEC;
 
 // ── Fetch ─────────────────────────────────────────────────────
 async function fetchData() {
-  if (!GAS) throw new Error('URL de servicio no configurada. Usa el enlace original de la app.');
-  const url = new URL(GAS);
-  url.searchParams.set('action', 'getReporte');
-  url.searchParams.set('tipo', TIPO);
-  url.searchParams.set('id', ID);
-  const res  = await fetch(url.toString(), { redirect: 'follow' });
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/get_reporte`, {
+    method: 'POST',
+    headers: { apikey: SB_ANON, Authorization: 'Bearer ' + SB_ANON, 'Content-Type': 'application/json', 'Content-Profile': 'wh' },
+    body: JSON.stringify({ p: { tipo: TIPO, id: ID } })
+  });
   const json = await res.json();
-  if (!json.ok) throw new Error(json.error || 'Error al obtener datos');
+  if (!json || !json.ok) throw new Error((json && json.error) || 'Error al obtener datos');
   return json.data;
 }
 
