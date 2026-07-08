@@ -2416,7 +2416,9 @@ const Session = (() => {
           const b64 = await _audioBlobToBase64WH(evt.data);
           const idx = _audioChunkIdx++;
           // [CERO-GAS F4] audio chunk → Edge espia-chunk (Storage + registro) en vez de GAS→Drive.
-          await API.espiaSubirChunkEdge({ idSesion: _audioSesionId, tipo: 'audio', idx: idx, ts: Date.now(), audioBase64: b64, mime: mimeType });
+          // [FIX 500x] deviceId incluido: sin él el chunk se registraba con '' y el timeline del admin
+          // (que filtra por deviceId) nunca lo mostraba.
+          await API.espiaSubirChunkEdge({ idSesion: _audioSesionId, deviceId: _getDeviceIdWH(), tipo: 'audio', idx: idx, ts: Date.now(), audioBase64: b64, mime: mimeType });
         } catch(e) { console.warn('[Audio WH] chunk falló:', e?.message); }
       };
 

@@ -2332,12 +2332,15 @@ const API = (() => {
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
 
     // [CERO-GAS F2] Prints de reporte admin → Edge `imprimir` (antes GAS). Historial: el front ya arma `texto`.
-    //   Cargadores: se lee wh.resumen_cargadores_dia + se arma el ESC/POS client-side. Sin GAS.
+    //   Cargadores: se arma el ESC/POS client-side. Sin GAS.
     if (params.action === 'imprimirHistorialStock') {
       return await _imprimirTextoTicketWH(params.texto || '', 'Historial ' + (params.codigoProducto || ''), params.printerIdOverride);
     }
     if (params.action === 'imprimirCargadoresDia') {
-      const rd = await _sbRpcWH('resumen_cargadores_dia', { p: { fecha: String(params.fecha || '') } }, 'wh');
+      // [FIX 500x] _armarCargadoresEscPos espera el shape RICO (carretasTotal/llenasTotal/mediasTotal/vaciasTotal +
+      // preingresos[]). `resumen_cargadores_dia` solo trae {fecha,total,cargadores:[{nombre,count}]} → el ticket
+      // salía en 0/blanco. La data rica la produce `getCargadoresDelDia` (lee wh.preingresos y consolida carretas).
+      const rd = await call({ action: 'getCargadoresDelDia', fecha: String(params.fecha || '') });
       const d = (rd && rd.data) ? rd.data : null;
       if (!d) return { ok: false, error: 'No se pudo leer cargadores del día' };
       return await _imprimirTextoTicketWH(_armarCargadoresEscPos(d), 'Cargadores ' + (d.fecha || ''), params.printerIdOverride);

@@ -1,1 +1,1 @@
-{"version":"2.13.414","build":"2.13.414 (corte-GAS F4): chunks de audio/video del espia -> API.espiaSubirChunkEdge (Edge espia-chunk, Storage) en vez de GAS->Drive."}
+{"version":"2.13.415","build":"2.13.415 (revision 500x): fix ticket Cargadores (usaba RPC del badge, salia en 0/blanco -> data rica getCargadoresDelDia) + audio espia manda deviceId + portal pedido.html valida confirmacion real (sin confetti falso)."}

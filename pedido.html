@@ -637,7 +637,10 @@ async function enviarPedido(){
 async function confirmarPedido(){
   try {
     if (!DEMO_MODE){
-      await sbRpc('cliente_confirmar_pedido', { idPedido: state.pedidoId, items: state.items, token: token });
+      // [FIX 500x] sbRpc devuelve el objeto crudo (o null): un HTTP 400 (error DB → {code,message}) o {ok:false}
+      // NO lanzan. Sin este chequeo se mostraba confetti "confirmado" aunque el backend rechazara el pedido.
+      const d = await sbRpc('cliente_confirmar_pedido', { idPedido: state.pedidoId, items: state.items, token: token });
+      if (!d || d.ok !== true) throw new Error((d && (d.error || d.message)) || 'No se pudo confirmar el pedido. Reintenta.');
     }
     // Guardar histórico local
     state.historial.unshift({ ts: Date.now(), pedidoId: state.pedidoId, items: state.items });
