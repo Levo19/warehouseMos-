@@ -120,6 +120,50 @@ const API = (() => {
     } catch (_) { return false; }
   }
 
+  // [CERO-GAS F2] Resuelve el printerId de ticket para reportes admin (historial/cargadores):
+  //   override explícito (selector admin) → WH_TICKET_PRINTER_ID de config → default conocido.
+  let _whTicketPrinterCache = '';
+  async function _resolverPrinterTicketWH(override) {
+    if (override) return String(override).trim();
+    if (_whTicketPrinterCache) return _whTicketPrinterCache;
+    try {
+      const cfg = await _sbRpcWH('get_config', {}, 'wh');
+      const v = cfg && cfg.data && (cfg.data.WH_TICKET_PRINTER_ID || cfg.data.wh_ticket_printer_id);
+      if (v) { _whTicketPrinterCache = String(v).trim(); return _whTicketPrinterCache; }
+    } catch (_) {}
+    return '75247847';   // impresora del almacén (fallback conocido)
+  }
+  // [CERO-GAS F2] Imprime un texto ya formateado (ESC/POS 80mm) vía la Edge `imprimir`. Envuelve con init+feed+corte.
+  async function _imprimirTextoTicketWH(texto, title, printerIdOverride) {
+    const printerId = await _resolverPrinterTicketWH(printerIdOverride);
+    if (!printerId) return { ok: false, error: 'sin impresora de ticket' };
+    const escpos = '\x1b\x40' + String(texto || '') + '\n\x1b\x4a\x60\x1d\x56\x00';   // init + texto + feed 96 + corte
+    const ok = await _imprimirDirecto(printerId, _escposB64(escpos), title || 'warehouseMos');
+    return ok ? { ok: true, data: { impreso: true } } : { ok: false, error: 'PrintNode rechazó' };
+  }
+  // [CERO-GAS F2] Arma el ESC/POS del reporte de cargadores del día (port del layout GAS). Defensivo ante shape vacío.
+  function _armarCargadoresEscPos(d) {
+    const SEP = '================================================', SEP2 = '------------------------------------------------';
+    const pad = (a, b) => { a = String(a || ''); b = String(b || ''); const n = 48 - a.length - b.length; return a + (n > 0 ? ' '.repeat(n) : ' ') + b; };
+    let t = '\x1b\x61\x01\x1b\x21\x38CARGADORES\n\x1b\x21\x00\x1b\x45\x01' + String(d.fecha || '').toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
+    t += pad('Preingresos del dia:', String(d.preingresos != null ? d.preingresos : (d.total || 0))) + '\n';
+    t += pad('Carretas totales:', String(d.totalCarretas != null ? d.totalCarretas : '')) + '\n' + SEP2 + '\n';
+    const cargs = Array.isArray(d.cargadores) ? d.cargadores : [];
+    if (!cargs.length) t += '  (sin cargadores registrados ese dia)\n';
+    cargs.forEach(c => {
+      t += '\x1b\x45\x01' + String(c.nombre || '').toUpperCase() + '\x1b\x45\x00\n';
+      t += pad('  ' + (c.carretasTotal != null ? c.carretasTotal : (c.carretas || 0)) + ' carretas',
+               'L' + (c.llenasTotal || 0) + ' M' + (c.mediasTotal || 0) + ' CV' + (c.vaciasTotal || 0)) + '\n';
+      (Array.isArray(c.preingresos) ? c.preingresos : []).forEach(pi => {
+        t += pad('  - ' + (pi.idPreingreso || '') + ' ' + String(pi.proveedor || '').substring(0, 20),
+                 (pi.carretas || 0) + 'c') + '\n';
+      });
+      t += '\n';
+    });
+    t += SEP + '\n\x1b\x61\x01\x1b\x45\x01TOTAL DEL DIA\x1b\x45\x00\n\x1b\x21\x38\x1b\x45\x01' + (d.totalCarretas || 0) + ' CARRETAS\x1b\x21\x00\x1b\x45\x00\n\x1b\x61\x00' + SEP;
+    return t;
+  }
+
   // [CERO-GAS push] Envía push a una AUDIENCIA vía Edge `push` (resuelve tokens de mos.push_tokens server-side).
   // Reemplaza el fetch a GAS notificarInicioSesionVendedor. Fire-and-forget, sin fallback GAS.
   async function _pushEdgeWH(audiencia, titulo, cuerpo, data) {
@@ -2286,6 +2330,18 @@ const API = (() => {
     const GAS_URL = _gasUrl();
     const idSesion = window.WH_CONFIG?.idSesion;
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
+
+    // [CERO-GAS F2] Prints de reporte admin → Edge `imprimir` (antes GAS). Historial: el front ya arma `texto`.
+    //   Cargadores: se lee wh.resumen_cargadores_dia + se arma el ESC/POS client-side. Sin GAS.
+    if (params.action === 'imprimirHistorialStock') {
+      return await _imprimirTextoTicketWH(params.texto || '', 'Historial ' + (params.codigoProducto || ''), params.printerIdOverride);
+    }
+    if (params.action === 'imprimirCargadoresDia') {
+      const rd = await _sbRpcWH('resumen_cargadores_dia', { p: { fecha: String(params.fecha || '') } }, 'wh');
+      const d = (rd && rd.data) ? rd.data : null;
+      if (!d) return { ok: false, error: 'No se pudo leer cargadores del día' };
+      return await _imprimirTextoTicketWH(_armarCargadoresEscPos(d), 'Cargadores ' + (d.fecha || ''), params.printerIdOverride);
+    }
 
     // Inyectar localId para acciones idempotentes (si no viene ya)
     if (_IDEMPOTENT_ACTIONS.has(params.action) && !params.localId) {
