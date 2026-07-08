@@ -1735,7 +1735,17 @@ const API = (() => {
         usuario: params.usuario || '', comentario: params.nota || params.comentario || '',
         items, local_id: lid
       } });
-      if (!out || out.ok === false) return null;   // *_OFF o error → GAS (no commiteó → fallback seguro)
+      // [fix diagnóstico 2026-07-08] Un `EXCEPCION` de la RPC (ej. statement timeout en despachos grandes) hacía
+      //   ROLLBACK atómico (no commiteó nada) y acá se tragaba como null → caía a GAS y el operador solo veía
+      //   "Error al generar guía". Ahora: *_OFF (kill-switch) sigue cayendo a GAS; un error REAL se SURFACE con su
+      //   detalle (SQLERRM) para que el front lo muestre y quede diagnosticable — cero-GAS. El timeout ya subió a 20s.
+      if (!out) return null;
+      if (out.ok === false) {
+        const _e = String(out.error || '');
+        if (/_OFF$/.test(_e)) return null;   // kill-switch server apagado → GAS
+        try { console.warn('[crearDespachoRapido] RPC error:', _e, '·', out.detalle || ''); } catch (_) {}
+        return { ok: false, error: _e || 'error', detalle: String(out.detalle || '') };
+      }
       // tracking (best-effort) — solo en la creación real, no en reintentos dedupados
       if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }); } catch (_) {} }
       // [shape-fix] el front (app.js ~13275) lee res.data.idGuia, res.data.errores, res.data.esperados/items.

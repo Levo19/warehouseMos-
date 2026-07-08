@@ -14088,8 +14088,10 @@ const DespachoView = (() => {
         SoundFX.error(); vibrate([80, 40, 80]);
         try { GuiasView.removeOptimisticGuia(_optTempId); } catch (_) {}   // [fix lag] quitar tarjeta optimista si falló
         _saveHist({ ...histBase, idGuia: '—', ok: false });
-        toast('Error al generar guía: ' + (res.error || 'Sin respuesta'), 'danger', 8000);
-        // Restaurar carrito para que el usuario pueda reintentar
+        // [diagnóstico] mostrar el detalle real (SQLERRM) si la RPC lo mandó (ej. "statement timeout").
+        const _det = (res && res.detalle) ? ' (' + String(res.detalle).slice(0, 80) + ')' : '';
+        toast('Error al generar guía: ' + (res.error || 'Sin respuesta') + _det, 'danger', 9000);
+        // Restaurar carrito para que el usuario pueda reintentar (los ítems NO se pierden)
         if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
       }
       _renderHist();
