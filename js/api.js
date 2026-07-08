@@ -1709,7 +1709,7 @@ const API = (() => {
       // ruta usaba wh.cerrar_guia(jsonb) que dejaba cantidad_aplicada=0 → el cron de inactividad
       // re-aplicaba el total = DOBLE CONTEO. La firma es texto plano (no envoltura {p}).
       // Idempotente: si ya CERRADA/AUTOCERRADA, la RPC devuelve lineasSaltadas (no reaplica).
-      const out = await _sbRpcWH('cerrar_guia_idempotente', { p_id_guia: String(params.idGuia || '') });
+      const out = await _sbRpcWH('cerrar_guia_idempotente', { p_id_guia: String(params.idGuia || '') }, 'wh', 30000);   // [fix] 30s > 20s base
       if (!out || out.ok === false) return null;
       const _yaCerrada = String(out.eraEstado || '').toUpperCase() === 'CERRADA' || String(out.eraEstado || '').toUpperCase() === 'AUTOCERRADA' || !!(out.yaCerrada || out.ya_cerrada);
       if (!_yaCerrada) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }); } catch (_) {} }
@@ -1734,7 +1734,7 @@ const API = (() => {
         id_guia: gid, tipo: params.tipo || 'SALIDA_ZONA', id_zona: params.idZona || '',
         usuario: params.usuario || '', comentario: params.nota || params.comentario || '',
         items, local_id: lid
-      } });
+      } }, 'wh', 30000);   // [fix 2026-07-08] timeout cliente 30s > 20s de la base: despachos grandes ya NO se cortan a los 12s ni se falsean como "offline". Cliente > base = nunca aborta con la tx viva (sin commit-fantasma).
       // [fix diagnóstico 2026-07-08] Un `EXCEPCION` de la RPC (ej. statement timeout en despachos grandes) hacía
       //   ROLLBACK atómico (no commiteó nada) y acá se tragaba como null → caía a GAS y el operador solo veía
       //   "Error al generar guía". Ahora: *_OFF (kill-switch) sigue cayendo a GAS; un error REAL se SURFACE con su
@@ -1775,7 +1775,7 @@ const API = (() => {
         usuario:          params.usuario || '',
         items:            Array.isArray(params.items) ? params.items : [],
         despacho_detalle: Array.isArray(params.despachoDetalle) ? params.despachoDetalle : []
-      } });
+      } }, 'wh', 30000);   // [fix] 30s > 20s base
       // SOLO *_OFF (flag server apagado) cae a GAS — kill-switch instantáneo. Cualquier
       // otra respuesta (ok:true / yaCerrado / error real) viene de Supabase, que es el
       // master de pickups → devolverla tal cual (NO doble-path a GAS, que para RIZ daría
