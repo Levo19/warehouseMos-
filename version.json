@@ -1,1 +1,1 @@
-{"version":"2.13.414","build":"2.13.414 (corte-GAS F4 espia): chunks audio/video del espia -> Edge espia-chunk (Storage bucket espia, via API.espiaSubirChunkEdge) en vez de Drive/GAS."}
+{"version":"2.13.414","build":"2.13.414 (corte-GAS F4): chunks de audio/video del espia -> API.espiaSubirChunkEdge (Edge espia-chunk, Storage) en vez de GAS->Drive."}

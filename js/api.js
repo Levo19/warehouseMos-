@@ -2831,18 +2831,17 @@ const API = (() => {
       if (!out || (out.ok === false && String(out.error || '') === 'APP_NO_AUTORIZADA')) return null;
       return out;
     },
-    // [cero-GAS F4] Sube un chunk de media del espía a la Edge `espia-chunk` (Storage bucket espia). Antes Drive/GAS.
-    espiaSubirChunkEdge: async (payload) => {
+    // [CERO-GAS F4] Sube un chunk de audio/video del espía a la Edge `espia-chunk` (Storage + registro).
+    espiaSubirChunkEdge: async (params) => {
       try {
         const token = await _mintTokenWH();
-        if (!token) return { ok: false };
         const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/espia-chunk`, {
           method: 'POST',
           headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload || {})
-        }, 20000);
-        return await res.json().catch(() => ({ ok: false }));
-      } catch (_) { return { ok: false }; }
+          body: JSON.stringify(params || {})
+        }, 12000);
+        return await res.json().catch(() => null);
+      } catch (_) { return null; }
     },
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
     imprimirCargadoresDia:(p)    => post({ action: 'imprimirCargadoresDia', ...p }),

