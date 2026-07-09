@@ -2410,7 +2410,15 @@ const API = (() => {
 
     if (!GAS_URL || !navigator.onLine) {
       if (params._fromQueue) return { ok: false, error: 'sin-conexion', _retry: true };
-      const localId = OfflineManager.encolar(params.action, params);
+      // [FIX pre-corte GAS · auditoría 2026-07-08] Encolar OFFLINE sella la VÍA DIRECTA (si la app
+      // opera en escritura directa, que en prod es SIEMPRE): sin el sello, sincronizar() replayaba
+      // estos ítems a GAS al reconectar → escrituras de dinero/stock hechas sin señal MORÍAN con el
+      // corte de GAS (quedaban 'error' eternos con el operador creyendo que se guardó). Con el sello,
+      // el replay va SIEMPRE por API._postCola → _postDirecto (idempotente por el id del localId).
+      // Acciones no cableadas quedan 'error' visibles en cola — jamás van a GAS.
+      const _sellado = (_whEscrituraDirecta() || _whImpresionDirecta() || _whLoteAdhesivoDirecto())
+        ? { ...params, _viaDirecta: true } : params;
+      const localId = OfflineManager.encolar(params.action, _sellado);
       return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
 

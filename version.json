@@ -1,1 +1,1 @@
-{"version":"2.13.415","build":"2.13.415 (revision 500x): fix ticket Cargadores (usaba RPC del badge, salia en 0/blanco -> data rica getCargadoresDelDia) + audio espia manda deviceId + portal pedido.html valida confirmacion real (sin confetti falso)."}
+{"version":"2.13.416","build":"2.13.416 (pre-corte GAS): cola offline sella _viaDirecta al encolar sin red -> replay SIEMPRE directo a Supabase (antes replayaba a GAS = guias/envasados/despachos offline perdidos al corte)."}
