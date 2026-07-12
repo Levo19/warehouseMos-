@@ -10176,6 +10176,11 @@ const EnvasadosView = (() => {
     document.getElementById('envBuscarDerivado').value = '';
     // Reset checkbox imprimir — siempre arranca marcado (bug #9)
     document.getElementById('envImprimirEtiq').checked = true;
+    // [418 · review HIGH1] Reset del estado 🤝 al abrir: si el operador marcó
+    // colaborativo, eligió a alguien y cerró SIN registrar, el check y _colabSel
+    // quedaban vivos → el siguiente envasado se registraba colaborativo por error
+    // (el compañero cobraba el 50% de algo en lo que no participó).
+    try { _colabReset(); } catch(_){}
     // [Fix v2.9.1] Resetear el botón "Registrar". Si un envasado previo está
     // colgado en background (timeout largo) y el operador abre otro, el botón
     // conservaba "Registrando..." + disabled del flujo anterior.
@@ -10397,9 +10402,16 @@ const EnvasadosView = (() => {
   // operador (comparación tolerante trim+lower, misma regla que la visibilidad).
   let _colabSel = '';
   function _colabCandidatos() {
+    // [418 · review LOW4] normalización IDÉNTICA a WH_CONFIG.usuario (nombre+' '+apellido,
+    // trim, SIN colapsar espacios internos) para que el badge/visibilidad del invitado
+    // (que comparan trim+lower) igualen exactamente el valor guardado.
     const yo = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
     return (OfflineManager.getPersonalCache?.() || [])
-      .map(p => String((p.nombre || '') + ' ' + (p.apellido || '')).replace(/\s+/g, ' ').trim())
+      // [418 · review MED3] solo personal ACTIVO y rol envasado/almacén (el cache
+      // incluye inactivos) → no ofrecer a un ex-empleado como colaborador.
+      .filter(p => String(p.estado) === '1')
+      .filter(p => { const r = String(p.rol || '').toUpperCase(); return r === 'ENVASADOR' || r === 'ALMACENERO'; })
+      .map(p => String((p.nombre || '') + ' ' + (p.apellido || '')).trim())
       .filter(n => n && n.toLowerCase() !== yo)
       .filter((n, i, a) => a.indexOf(n) === i);   // dedup
   }
