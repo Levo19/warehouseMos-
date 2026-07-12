@@ -10171,6 +10171,11 @@ const EnvasadosView = (() => {
     document.getElementById('envUnidades').value = 1;
     document.getElementById('envNombreProducto').textContent = '';
     document.getElementById('envasadoFactorInfo').classList.add('hidden');
+    document.getElementById('envConsumoWrap')?.classList.add('hidden');   // [423]
+    _envCtx = null;
+    // [423] consumo en vivo mientras tipea unidades (listener una sola vez)
+    const _u = document.getElementById('envUnidades');
+    if (_u && !_u.dataset.consumoHook) { _u.dataset.consumoHook = '1'; _u.addEventListener('input', _envRefrescarConsumo); }
     document.getElementById('envHistorialMini').classList.add('hidden');
     document.getElementById('envProductoDerivado').value = '';
     document.getElementById('envBuscarDerivado').value = '';
@@ -10318,11 +10323,27 @@ const EnvasadosView = (() => {
       </div>`;
   }
 
+  // [423] Contexto del derivado seleccionado + tarifa (para el consumo/pago en vivo)
+  let _envCtx = null;
+  let _envTarifa = 0.10;
+  let _envTarifaCargada = false;
+  function _envCargarTarifa() {
+    if (_envTarifaCargada) return;
+    _envTarifaCargada = true;
+    try {
+      API.getTarifaEnvasado().then(r => {
+        if (r && r.ok && parseFloat(r.tarifa) > 0) { _envTarifa = parseFloat(r.tarifa); _envRefrescarConsumo(); }
+      }).catch(() => {});
+    } catch (_) {}
+  }
+
   function onDerivadoChange(idDerivado) {
     const prod = derivados.find(p => p.idProducto === idDerivado);
     if (!prod) {
       document.getElementById('envNombreProducto').textContent = '';
       document.getElementById('envasadoFactorInfo').classList.add('hidden');
+      document.getElementById('envConsumoWrap').classList.add('hidden');
+      _envCtx = null;
       return;
     }
 
@@ -10337,13 +10358,71 @@ const EnvasadosView = (() => {
     const cbBase     = prodBase ? String(prodBase.codigoBarra) : '';
     const stockEntry = OfflineManager.getStockCache().find(s => String(s.codigoProducto) === cbBase);
     const stockBase  = stockEntry ? (parseFloat(stockEntry.cantidadDisponible) || 0) : 0;
-    const unidadBase = prodBase ? (prodBase.unidad || '') : '';
-    const maxProd    = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
+    const unidadBase = prodBase ? (prodBase.unidad || 'kg') : 'kg';
 
+    _envCtx = { prod, prodBase, factorBase, stockBase, unidadBase };
     document.getElementById('envNombreProducto').textContent = prod.descripcion;
-    document.getElementById('envInfoStock').textContent      = `${fmt(stockBase, 1)} ${unidadBase}`;
-    document.getElementById('envInfoMax').textContent        = `${maxProd} uds`;
+    // [423] ORIGEN: granel + porción por unidad (lo que el operador necesita entender)
+    document.getElementById('envOrigenNombre').textContent = prodBase
+      ? (prodBase.descripcion || cbBase) + ' · '
+      : '⚠ granel no resuelto en catálogo · ';
+    document.getElementById('envOrigenPorcion').textContent = factorBase > 0
+      ? `1 u = ${fmt(factorBase, 3)} ${unidadBase}`
+      : 'sin porción configurada';
     document.getElementById('envasadoFactorInfo').classList.remove('hidden');
+    _envCargarTarifa();
+    _envRefrescarConsumo();
+  }
+
+  // [423] CONSUMO EN VIVO — reacciona a unidades/colaborativo. NUNCA bloquea:
+  // stock 0/negativo = barra ROJA + alerta con el negativo, pero se registra igual
+  // (regla del dueño: muchas veces el stock aún no se ajusta).
+  function _envRefrescarConsumo() {
+    const wrap = document.getElementById('envConsumoWrap');
+    if (!wrap) return;
+    if (!_envCtx) { wrap.classList.add('hidden'); return; }
+    const { factorBase, stockBase, unidadBase } = _envCtx;
+    const uds = parseInt(document.getElementById('envUnidades')?.value) || 0;
+    const consumo = Math.round(uds * factorBase * 1000) / 1000;
+    const queda   = Math.round((stockBase - consumo) * 1000) / 1000;
+    wrap.classList.remove('hidden');
+
+    document.getElementById('envConsumoCalc').textContent  = uds > 0 && factorBase > 0 ? `${uds} × ${fmt(factorBase, 3)}` : '';
+    document.getElementById('envConsumoTotal').textContent = `${fmt(consumo, 2)} ${unidadBase}`;
+
+    const quedaEl = document.getElementById('envQuedaVal');
+    const bar     = document.getElementById('envConsumoBar');
+    const alerta  = document.getElementById('envStockAlerta');
+    const alcanza = (factorBase > 0 && queda > 0) ? Math.floor(queda / factorBase) : 0;
+
+    if (queda >= 0 && stockBase > 0) {
+      quedaEl.textContent = `${fmt(queda, 2)} ${unidadBase} · alcanza ${alcanza} uds más`;
+      quedaEl.style.color = '#e2e8f0';
+      const pct = Math.min(100, stockBase > 0 ? (consumo / stockBase) * 100 : 0);
+      bar.style.width = pct + '%';
+      bar.style.background = pct >= 85 ? 'linear-gradient(90deg,#fbbf24,#d97706)' : 'linear-gradient(90deg,#34d399,#059669)';
+      alerta.classList.add('hidden');
+    } else {
+      // stock insuficiente O granel ya en 0/negativo → ROJO, sin bloquear
+      quedaEl.textContent = `${fmt(queda, 2)} ${unidadBase}`;
+      quedaEl.style.color = '#fca5a5';
+      bar.style.width = '100%';
+      bar.style.background = 'linear-gradient(90deg,#f87171,#dc2626)';
+      alerta.textContent = stockBase <= 0
+        ? `⚠ El granel figura con ${fmt(stockBase, 2)} ${unidadBase} en sistema — puedes registrar igual y ajustar el stock después`
+        : `⚠ El stock quedará NEGATIVO (${fmt(queda, 2)} ${unidadBase}) — puedes registrar igual y ajustar después`;
+      alerta.classList.remove('hidden');
+    }
+
+    // 💵 pago proyectado (con 🤝 muestra la mitad de cada uno)
+    const pagoEl = document.getElementById('envPagoVal');
+    if (pagoEl) {
+      const colabOn = !!document.getElementById('envColabCheck')?.checked && !!_colabSel;
+      const total = Math.round(uds * _envTarifa * 100) / 100;
+      pagoEl.textContent = colabOn
+        ? `S/${total.toFixed(2)} · 🤝 S/${(Math.round(total / 2 * 100) / 100).toFixed(2)} c/u`
+        : `${uds} × S/${_envTarifa.toFixed(2)} = S/${total.toFixed(2)}`;
+    }
   }
 
   // [Bug #7 cleanup] calcularProyeccion era código muerto: leía envCantBase
@@ -10367,34 +10446,19 @@ const EnvasadosView = (() => {
     actualizarResumen();
   }
 
-  function actualizarResumen() {
-    const idDerivado  = document.getElementById('envProductoDerivado').value;
-    const prod = derivados.find(p => p.idProducto === idDerivado);
-    if (!prod) return;
-
-    const cantBase    = parseFloat(document.getElementById('envCantBase').value)   || 0;
-    const producidas  = parseInt(document.getElementById('envUnidades').value)     || 0;
-    const factor      = parseFloat(prod.factorConversion)  || 1;
-    const merma       = parseFloat(prod.mermaEsperadaPct)   || 0;
-    const esperadas   = Math.floor(cantBase * factor * (1 - merma / 100));
-    const mermaReal   = Math.max(0, esperadas - producidas);
-    const efic        = esperadas > 0 ? (producidas / esperadas * 100).toFixed(1) : '—';
-
-    document.getElementById('rEsperadas').textContent = esperadas;
-    document.getElementById('rProducidas').textContent = producidas;
-    document.getElementById('rMerma').textContent = mermaReal;
-    document.getElementById('rEficiencia').textContent = efic + '%';
-    document.getElementById('rEficiencia').className = parseFloat(efic) >= 95 ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold';
-    document.getElementById('envResumen').classList.remove('hidden');
-  }
+  // [423] actualizarResumen ELIMINADO: era código 100% muerto (leía #envCantBase y
+  // pintaba #envResumen, elementos que NO existen en el DOM; merma_esperada_pct=0 en
+  // los 218 derivados). El reemplazo real es _envRefrescarConsumo (consumo en vivo).
 
   function ajustarUnidades(delta) {
     const el = document.getElementById('envUnidades');
     el.value = Math.max(0, (parseInt(el.value) || 0) + delta);
+    _envRefrescarConsumo();   // [423] consumo/pago en vivo
   }
 
   function setUnidades(n) {
     document.getElementById('envUnidades').value = n;
+    _envRefrescarConsumo();   // [423]
   }
 
   // ── [418] 🤝 COLABORATIVO: el pago se divide 50/50 con UN compañero elegido ──
@@ -10419,8 +10483,9 @@ const EnvasadosView = (() => {
     const on = document.getElementById('envColabCheck').checked;
     const box = document.getElementById('envColabPicker');
     box.classList.toggle('hidden', !on);
-    if (!on) { _colabSel = ''; return; }
+    if (!on) { _colabSel = ''; _envRefrescarConsumo(); return; }
     _renderColabChips();
+    _envRefrescarConsumo();   // [423] el pago muestra la mitad 🤝
   }
   function _renderColabChips() {
     const cont = document.getElementById('envColabChips');
@@ -10436,6 +10501,7 @@ const EnvasadosView = (() => {
   function elegirColab(nombre) {
     _colabSel = (_colabSel === nombre) ? '' : nombre;   // toggle
     _renderColabChips();
+    _envRefrescarConsumo();   // [423] pago 🤝 en vivo
   }
   function _colabReset() {
     _colabSel = '';

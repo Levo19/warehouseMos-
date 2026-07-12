@@ -9251,15 +9251,14 @@
     </div>
   </div>
 
-  <!-- Info pills: stock base + máx producibles -->
-  <div id="envasadoFactorInfo" class="hidden grid grid-cols-2 gap-2 mb-4">
-    <div class="bg-slate-800 rounded-xl px-3 py-2 text-center">
-      <p class="text-xs text-slate-400 mb-0.5">Stock base</p>
-      <p id="envInfoStock" class="text-sm font-bold text-emerald-400"></p>
-    </div>
-    <div class="bg-slate-800 rounded-xl px-3 py-2 text-center">
-      <p class="text-xs text-slate-400 mb-0.5">Máx. producibles</p>
-      <p id="envInfoMax" class="text-sm font-bold text-white"></p>
+  <!-- [423] ORIGEN: de qué granel sale y qué porción consume cada unidad -->
+  <div id="envasadoFactorInfo" class="hidden mb-4">
+    <div class="rounded-xl px-3 py-2.5" style="background:linear-gradient(180deg,rgba(52,211,153,.10),transparent);border:1px solid rgba(52,211,153,.35)">
+      <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-400">🌾 Sale del granel · porción por unidad</p>
+      <p class="text-sm font-bold text-white mt-0.5 leading-snug">
+        <span id="envOrigenNombre"></span>
+        <span id="envOrigenPorcion" class="font-mono text-emerald-300 whitespace-nowrap"></span>
+      </p>
     </div>
   </div>
 
@@ -9284,6 +9283,28 @@
     <button onclick="EnvasadosView.setUnidades(25)"  class="btn btn-outline text-sm py-2">25</button>
     <button onclick="EnvasadosView.setUnidades(50)"  class="btn btn-outline text-sm py-2">50</button>
     <button onclick="EnvasadosView.setUnidades(100)" class="btn btn-outline text-sm py-2">100</button>
+  </div>
+
+  <!-- [423] CONSUMO EN VIVO: cuánto granel usa, cuánto queda, barra y pago.
+       NUNCA bloquea: stock 0/negativo = alerta ROJA pero se puede registrar
+       (muchas veces el stock aún no se ajusta). -->
+  <div id="envConsumoWrap" class="hidden rounded-xl px-3 py-2.5 mb-4" style="background:rgba(52,211,153,.07);border:1px solid rgba(52,211,153,.3)">
+    <div class="flex items-center justify-between text-[12px] text-slate-300 mb-1">
+      <span>Consumo de granel <b id="envConsumoCalc" class="font-mono text-slate-400"></b></span>
+      <b id="envConsumoTotal" class="font-mono text-white"></b>
+    </div>
+    <div class="flex items-center justify-between text-[12px] text-slate-300 mb-1.5">
+      <span>Queda en stock</span>
+      <b id="envQuedaVal" class="font-mono"></b>
+    </div>
+    <div class="h-2 rounded-full overflow-hidden" style="background:#0e1626;border:1px solid #2b3852">
+      <div id="envConsumoBar" style="height:100%;width:0%;transition:width .25s,background .25s"></div>
+    </div>
+    <p id="envStockAlerta" class="hidden text-[11px] font-bold mt-1.5" style="color:#fca5a5"></p>
+    <div class="flex items-center justify-between mt-2.5 pt-2" style="border-top:1px solid rgba(52,211,153,.2)">
+      <span class="text-[10px] font-bold uppercase tracking-wide text-slate-400">💵 Tu pago</span>
+      <span id="envPagoVal" class="text-base font-extrabold text-emerald-400 font-mono"></span>
+    </div>
   </div>
 
   <!-- Fecha y checkbox en línea -->

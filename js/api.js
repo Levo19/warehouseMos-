@@ -2250,6 +2250,12 @@ const API = (() => {
     if (action === 'getStock')       return { ok: true, data: OfflineManager.getStockCache() };
     if (action === 'getProveedores') return { ok: true, data: OfflineManager.getProveedoresCache() };
     if (action === 'getPersonal')    return { ok: true, data: OfflineManager.getPersonalCache().map(p => { const s = {...p}; delete s.pin; return s; }) };
+    // [423] tarifa de envasado (lectura mínima; fallback silencioso → el front usa 0.10)
+    if (action === 'getTarifaEnvasado') {
+      return _sbRpcWH('get_tarifa_envasado', {})
+        .then(out => (out && out.ok) ? out : { ok: false })
+        .catch(() => ({ ok: false }));
+    }
     if (action === 'getConfig')      return { ok: true, data: OfflineManager.getConfigCache() };
     if (action === 'getGuias')       return { ok: true, data: OfflineManager.getGuiasCache() };
     if (action === 'getPreingresos') return { ok: true, data: OfflineManager.getPreingresosCache() };
@@ -2919,6 +2925,8 @@ const API = (() => {
     },
     cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
     getPersonal:        ()       => call({ action: 'getPersonal' }),
+    // [423] tarifa por unidad de envasado (mos.config vía wh.get_tarifa_envasado) — para el "Tu pago" del modal
+    getTarifaEnvasado:  ()       => call({ action: 'getTarifaEnvasado' }),
     getSesionActiva:    (id)     => call({ action: 'getSesionActiva', idSesion: id }),
     getDesempenoDia:    (p={})   => call({ action: 'getDesempenoDia', ...p }),
     getResumenPersonal: (fecha)  => call({ action: 'getResumenPersonal', fecha: fecha || '' }),
