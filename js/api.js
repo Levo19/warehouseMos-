@@ -396,7 +396,7 @@ const API = (() => {
     stock_movimientos: [['id_mov','idMov','text'],['fecha','fecha','date'],['cod_producto','codigoProducto','text'],['delta','delta','num'],['stock_antes','stockAntes','num'],['stock_despues','stockDespues','num'],['tipo_operacion','tipoOperacion','text'],['origen','origen','text'],['usuario','usuario','text']],
     pickups: [['id_pickup','idPickup','text'],['fuente','fuente','text'],['estado','estado','text'],['items','items','json'],['id_zona','idZona','text'],['notas','notas','text'],['creado_por','creadoPor','text'],['fecha_creado','fechaCreado','ts'],['fecha_atendido','fechaAtendido','date'],['atendido_por','atendidoPor','text'],['ultima_actividad','ultimaActividad','ts']],
     guia_detalle: [['id_guia','idGuia','text'],['linea','linea','int'],['cod_producto','codigoProducto','text'],['cant_esperada','cantidadEsperada','num'],['cant_recibida','cantidadRecibida','num'],['precio_unitario','precioUnitario','num'],['id_lote','idLote','text'],['observacion','observacion','text'],['id_producto_nuevo','idProductoNuevo','text'],['id_detalle','idDetalle','text'],['fecha_vencimiento','fechaVencimiento','date']],
-    envasados: [['id_envasado','idEnvasado','text'],['cod_producto_base','codigoProductoBase','text'],['cantidad_base','cantidadBase','num'],['unidad_base','unidadBase','text'],['cod_producto_envasado','codigoProductoEnvasado','text'],['unidades_esperadas','unidadesEsperadas','num'],['unidades_producidas','unidadesProducidas','num'],['merma_real','mermaReal','num'],['eficiencia_pct','eficienciaPct','num'],['fecha','fecha','date'],['usuario','usuario','text'],['estado','estado','text'],['id_guia_salida','idGuiaSalida','text'],['id_guia_ingreso','idGuiaIngreso','text'],['observacion','observacion','text']]
+    envasados: [['id_envasado','idEnvasado','text'],['cod_producto_base','codigoProductoBase','text'],['cantidad_base','cantidadBase','num'],['unidad_base','unidadBase','text'],['cod_producto_envasado','codigoProductoEnvasado','text'],['unidades_esperadas','unidadesEsperadas','num'],['unidades_producidas','unidadesProducidas','num'],['merma_real','mermaReal','num'],['eficiencia_pct','eficienciaPct','num'],['fecha','fecha','date'],['usuario','usuario','text'],['estado','estado','text'],['id_guia_salida','idGuiaSalida','text'],['id_guia_ingreso','idGuiaIngreso','text'],['observacion','observacion','text'],['colaborador','colaborador','text']]
   };
   // Resolver de descripciones para ENVASADOS — RÉPLICA FIEL de getEnvasados (GAS): mapPorCb>mapPorSku>mapPorId, fallback ''.
   // (distinto de _prodMapWH: acá skuBase indexa TODOS sin filtro de factor/estado, y el fallback es '' no el código.)
@@ -1457,7 +1457,9 @@ const API = (() => {
       const out = await _sbRpcWH('registrar_envasado', { p: {
         id_envasado: 'ENV_' + lid, cod_producto_base: String(base.codigoBarra), cod_producto_envasado: cod,
         cantidad_base: unidades * factor, unidades_producidas: unidades, unidad_base: base.unidad || '',
-        fecha_vencimiento: params.fechaVencimiento || '', usuario: params.usuario || ''
+        fecha_vencimiento: params.fechaVencimiento || '', usuario: params.usuario || '',
+        // [418] 🤝 colaborativo: el pago se divide 50/50 (SQL 418). '' = registro normal.
+        colaborador: String(params.colaborador || '')
       } });
       if (!out || out.ok === false) return null;
       if (!out.dedup) {

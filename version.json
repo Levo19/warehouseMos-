@@ -1,1 +1,1 @@
-{"version":"2.13.416","build":"2.13.416 (pre-corte GAS): cola offline sella _viaDirecta al encolar sin red -> replay SIEMPRE directo a Supabase (antes replayaba a GAS = guias/envasados/despachos offline perdidos al corte)."}
+{"version":"2.13.417","build":"2.13.417 envasado colaborativo: check + picker de companero en registrar (pago 50/50, SQL 418), badge en cards, el invitado ve los registros donde colaboro."}

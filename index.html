@@ -9295,6 +9295,18 @@
     </label>
   </div>
 
+  <!-- [418] 🤝 Colaborativo: el pago del envasado se divide 50/50 con un compañero -->
+  <div class="mb-4">
+    <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+      <input id="envColabCheck" type="checkbox" class="w-4 h-4" onchange="EnvasadosView.toggleColab()"/>
+      🤝 Colaborativo <span class="text-[11px] text-slate-500">— el pago se divide mitad y mitad</span>
+    </label>
+    <div id="envColabPicker" class="hidden mt-2">
+      <p class="text-[11px] text-slate-400 mb-1.5">¿Con quién envasaste? (elige 1)</p>
+      <div id="envColabChips" class="flex flex-wrap gap-2"></div>
+    </div>
+  </div>
+
   <button id="btnRegistrarEnvasado" onclick="EnvasadosView.registrar()"
           class="btn btn-primary btn-lg w-full">
     Registrar envasado

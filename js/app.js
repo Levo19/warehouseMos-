@@ -9813,8 +9813,10 @@ function _renderEnvasadosPorDia(list, container, opts) {
     visible = list.filter(e => String(e.fecha || '').substring(0, 10) === hoy);
   }
   if (!esAdminMaster && usuarioActual) {
+    // [418] 🤝 el INVITADO también ve los registros donde colaboró (cobra su mitad)
     visible = visible.filter(e =>
-      String(e.usuario || '').trim().toLowerCase() === usuarioActual
+      String(e.usuario || '').trim().toLowerCase() === usuarioActual ||
+      String(e.colaborador || '').trim().toLowerCase() === usuarioActual
     );
   }
   // [v2.13.116] Buscador: producto (derivado o base) + usuario (solo admin/master)
@@ -9916,6 +9918,7 @@ function _renderEnvasadosPorDia(list, container, opts) {
             <span class="font-bold text-slate-100">${fmt(e.unidadesProducidas)} uds</span>
             ${mermaReal > 0 ? `<span class="text-amber-400 ml-2">· Merma: ${fmt(mermaReal)}</span>` : ''}
             <span class="text-slate-400 ml-2">· 👤 ${escHtml(e.usuario || '—')}</span>
+            ${String(e.colaborador || '').trim() ? `<span class="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded" style="background:rgba(99,102,241,.15);color:#a5b4fc" title="Colaborativo: el pago se divide 50/50">🤝 ${escHtml(String(e.colaborador).trim())}</span>` : ''}
           </div>
           <div class="flex gap-1 shrink-0">${acciones}</div>
         </div>
@@ -10389,14 +10392,62 @@ const EnvasadosView = (() => {
     document.getElementById('envUnidades').value = n;
   }
 
+  // ── [418] 🤝 COLABORATIVO: el pago se divide 50/50 con UN compañero elegido ──
+  // Candidatos = personal WH activo (cache local del login), excluyendo al propio
+  // operador (comparación tolerante trim+lower, misma regla que la visibilidad).
+  let _colabSel = '';
+  function _colabCandidatos() {
+    const yo = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
+    return (OfflineManager.getPersonalCache?.() || [])
+      .map(p => String((p.nombre || '') + ' ' + (p.apellido || '')).replace(/\s+/g, ' ').trim())
+      .filter(n => n && n.toLowerCase() !== yo)
+      .filter((n, i, a) => a.indexOf(n) === i);   // dedup
+  }
+  function toggleColab() {
+    const on = document.getElementById('envColabCheck').checked;
+    const box = document.getElementById('envColabPicker');
+    box.classList.toggle('hidden', !on);
+    if (!on) { _colabSel = ''; return; }
+    _renderColabChips();
+  }
+  function _renderColabChips() {
+    const cont = document.getElementById('envColabChips');
+    const lista = _colabCandidatos();
+    if (!lista.length) { cont.innerHTML = '<p class="text-xs text-slate-500">Sin compañeros en el cache — reintenta tras sincronizar</p>'; return; }
+    cont.innerHTML = lista.map(n => {
+      const sel = (n === _colabSel);
+      return `<button type="button" onclick="EnvasadosView.elegirColab('${escAttr(n)}')"
+        class="text-xs font-bold px-3 py-2 rounded-full transition-all active:scale-95"
+        style="${sel ? 'background:#6366f1;color:#fff;box-shadow:0 0 0 2px rgba(99,102,241,.4)' : 'background:rgba(148,163,184,.12);color:#cbd5e1;border:1px solid rgba(148,163,184,.25)'}">${sel ? '🤝 ' : ''}${escHtml(n)}</button>`;
+    }).join('');
+  }
+  function elegirColab(nombre) {
+    _colabSel = (_colabSel === nombre) ? '' : nombre;   // toggle
+    _renderColabChips();
+  }
+  function _colabReset() {
+    _colabSel = '';
+    const chk = document.getElementById('envColabCheck');
+    if (chk) chk.checked = false;
+    const box = document.getElementById('envColabPicker');
+    if (box) box.classList.add('hidden');
+  }
+
   async function registrar() {
     const idDerivado = document.getElementById('envProductoDerivado').value;
     const producidas = parseInt(document.getElementById('envUnidades').value) || 0;
     const fechaVenc  = document.getElementById('envFechaVenc').value;
     const imprimir   = document.getElementById('envImprimirEtiq').checked;
+    // [418] 🤝 colaborador elegido (check activo exige elegir a alguien)
+    const colabOn    = !!document.getElementById('envColabCheck')?.checked;
+    const colaborador = colabOn ? _colabSel : '';
 
     if (!idDerivado || producidas <= 0) {
       toast('Selecciona producto e ingresa las unidades producidas', 'warn');
+      return;
+    }
+    if (colabOn && !colaborador) {
+      toast('🤝 Elegiste colaborativo: toca al compañero con quien envasaste', 'warn');
       return;
     }
 
@@ -10466,10 +10517,12 @@ const EnvasadosView = (() => {
       fecha:                  (typeof _hoyLima === 'function') ? _hoyLima() : new Date().toISOString().split('T')[0],
       usuario:                window.WH_CONFIG.usuario,
       estado:                 'COMPLETADO',
+      colaborador:            colaborador,   // [418] 🤝 visible en la card al instante
       descripcionProductoEnvasado: prod.descripcion || '',
       descripcionProductoBase:     prodBase?.descripcion || ''
     });
-    toast(`${producidas} uds registradas${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
+    _colabReset();   // [418] no arrastrar el 🤝 al siguiente registro
+    toast(`${producidas} uds registradas${colaborador ? ' · 🤝 con ' + colaborador : ''}${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
     // [v2.10.4] TTS optimista: hablar AL TOCAR el botón (no al volver del
     // backend). Antes el operador esperaba 5+ segundos hasta escuchar la voz,
     // perdiendo el efecto anti-fraude. Ahora suena inmediato.
@@ -10550,6 +10603,7 @@ const EnvasadosView = (() => {
       fechaVencimiento:   fechaVenc,
       imprimirEtiquetas:  false,    // ← el lote se encarga ahora
       usuario:            window.WH_CONFIG.usuario,
+      colaborador:        colaborador,   // [418] 🤝 pago 50/50 (SQL 418)
       idempotencyKey:     idempotencyKey
     }).then(res => {
       if (!res || res.ok === false) {
@@ -11131,6 +11185,7 @@ const EnvasadosView = (() => {
 
   return { cargar, nuevo, onDerivadoChange, calcularProyeccion, ajustarUnidades, setUnidades, registrar, anular,
            filtrarDerivados, seleccionarDerivado, cambiarDerivado,
+           toggleColab, elegirColab,
            pedirAuthEditar, pedirAuthAnular, cerrarAuth, validarAuth, cerrarAccion, confirmarAccion,
            _dispararDeshacer };
 })();
