@@ -1444,7 +1444,15 @@ const API = (() => {
       const prods = (typeof OfflineManager !== 'undefined' && OfflineManager.getProductosCache) ? (OfflineManager.getProductosCache() || []) : [];
       const cod = String(params.codigoBarra || '').trim();
       const der = prods.find(p => String(p.codigoBarra) === cod);
-      if (!der || !der.codigoProductoBase) return null;  // no resoluble → GAS
+      // [418 · review MED2] Un registro 🤝 COLABORATIVO jamás cae a GAS en silencio:
+      // el GAS no conoce `colaborador` → se registraría como normal y el compañero
+      // perdería su mitad sin que nadie lo vea. Mejor fallar VISIBLE (el rollback
+      // optimista del front avisa "volvé a intentar").
+      const _esColab = !!String(params.colaborador || '').trim();
+      if (!der || !der.codigoProductoBase) {
+        if (_esColab) throw new Error('Envasado colaborativo: producto no resuelto en el catálogo local — sincroniza y reintenta');
+        return null;  // no resoluble → GAS
+      }
       // [FIX envasado-directo] El catálogo guarda codigoProductoBase como skuBase del granel
       // (ej "LEV1155"), NO como idProducto/codigoBarra. Antes solo se buscaba por idProducto/codigoBarra
       // → base=undefined SIEMPRE → return null → TODO el envasado caía a GAS (0 filas directas). Mismo
@@ -1453,7 +1461,10 @@ const API = (() => {
       const base = prods.find(p => String(p.skuBase) === claveBase || String(p.idProducto) === claveBase || String(p.codigoBarra) === claveBase);
       const factor = parseFloat(der.factorConversionBase) || 0;
       const unidades = parseInt(params.unidadesProducidas) || 0;
-      if (!base || factor <= 0 || unidades <= 0) return null;  // datos incompletos → GAS
+      if (!base || factor <= 0 || unidades <= 0) {
+        if (_esColab) throw new Error('Envasado colaborativo: datos del producto incompletos — no se puede registrar por la vía directa; reintenta');
+        return null;  // datos incompletos → GAS
+      }
       const out = await _sbRpcWH('registrar_envasado', { p: {
         id_envasado: 'ENV_' + lid, cod_producto_base: String(base.codigoBarra), cod_producto_envasado: cod,
         cantidad_base: unidades * factor, unidades_producidas: unidades, unidad_base: base.unidad || '',
@@ -1461,7 +1472,12 @@ const API = (() => {
         // [418] 🤝 colaborativo: el pago se divide 50/50 (SQL 418). '' = registro normal.
         colaborador: String(params.colaborador || '')
       } });
-      if (!out || out.ok === false) return null;
+      if (!out || out.ok === false) {
+        // [418 · MED2] error de la RPC en un 🤝 (p.ej. COLABORADOR_NO_ENCONTRADO/AMBIGUO)
+        // → error VISIBLE, nunca GAS silencioso que registre sin colaborador.
+        if (_esColab) throw new Error('Envasado colaborativo rechazado: ' + ((out && out.error) || 'sin conexión directa') + ' — revisa el compañero elegido y reintenta');
+        return null;
+      }
       if (!out.dedup) {
         const ses = (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '';
         try { await _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'ENVASADO_REGISTRADO', p_cantidad: 1 }); } catch (_) {}

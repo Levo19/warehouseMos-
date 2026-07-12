@@ -1,1 +1,1 @@
-{"version":"2.13.418","build":"2.13.418 revision 100x envasado colab: reset del check al abrir (no arrastra), solo personal ACTIVO envasador/almacenero como colaborador, normalizacion de nombre alineada con backend."}
+{"version":"2.13.419","build":"2.13.419 MED2: un envasado colaborativo JAMAS cae a GAS en silencio (3 puertas: catalogo no resuelto, datos incompletos, RPC rechaza) -> error visible + rollback optimista, el companero nunca pierde su mitad sin aviso."}
