@@ -5105,15 +5105,16 @@ const App = (() => {
       }
       const idGuia = _reabrirCtx.idGuia;
       cerrarReabrirAdmin();
-      await _ejecutarReabrir(idGuia);
+      await _ejecutarReabrir(idGuia, clave);
     } catch(e) {
       if (typeof toast === 'function') toast('Error de conexión', 'warn');
     }
   }
-  async function _ejecutarReabrir(idGuia) {
+  async function _ejecutarReabrir(idGuia, claveAdmin) {
     try {
       const usuario = getUsuario();
-      const res = await API.reabrirGuia({ idGuia, usuario });
+      // [cero-caída · SQL 440] la clave se re-verifica server-side en wh.reabrir_guia
+      const res = await API.reabrirGuia({ idGuia, usuario, claveAdmin: claveAdmin || '' });
       if (res && res.ok) {
         if (typeof toast === 'function') toast('✓ Guía reabierta', 'ok');
         if (typeof SoundFX !== 'undefined' && SoundFX.done) SoundFX.done();
@@ -7132,7 +7133,8 @@ const GuiasView = (() => {
     document.getElementById('adminPinModal').style.display = 'none';
     _adminPinBuf = '';
     _updAdminDots(0);
-    const res = await API.reabrirGuia({ idGuia: _pinGuiaTarget });
+    // [cero-caída · SQL 440] la clave se re-verifica server-side en wh.reabrir_guia
+    const res = await API.reabrirGuia({ idGuia: _pinGuiaTarget, claveAdmin: clave });
     if (res.ok || res.offline) {
       // [v2.13.186 BUG reabrir] Parchear TAMBIÉN el cache wh_guias — sin esto,
       // el próximo silentRefresh (sync tick) revertía el estado a CERRADA y la
@@ -15714,7 +15716,8 @@ const DespachoView = (() => {
       });
       if (!res || !res.ok) { try { SoundFX.error(); } catch(_){} toast('✗ ' + (res?.error || 'Clave incorrecta'), 'danger', 5000); return; }
       // Autorizado → marcar ELIMINADO (gateado por WH_PICKUP_ESTADO_DIRECTO; el guard de cierre ya protege)
-      await API.actualizarPickup({ idPickup, estado: 'ELIMINADO', usuario: window.WH_CONFIG?.usuario || '' });
+      // [cero-caída · SQL 440] la clave se re-verifica server-side en wh.actualizar_pickup (non-strict)
+      await API.actualizarPickup({ idPickup, estado: 'ELIMINADO', usuario: window.WH_CONFIG?.usuario || '', claveAdmin: String(clave) });
       if (_pickupActivo && String(_pickupActivo.idPickup) === idPickup) {
         _pickupActivo = null; try { _clearPickup(); } catch(_){} try { _renderPickupActivoBanner(); } catch(_){}
       }

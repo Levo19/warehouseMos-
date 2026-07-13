@@ -1,1 +1,1 @@
-{"version":"2.13.421","build":"2.13.421 cero-GAS seguridad: elimina credencial legacy adminPin de Sheet (ESTACIONES.adminPin) — deja de bajarse/persistirse al cliente y se purga wh_admin_pin; historial autoriza solo por rol. Verificacion de clave admin 100% Supabase."}
+{"version":"2.13.422","build":"2.13.422 cero-caida seguridad: reabrir-guia y eliminar-pickup ahora re-verifican la clave admin server-side (wh.reabrir_guia/wh.actualizar_pickup + SQL 440, non-strict) y ya NO caen a GAS ante un rechazo de clave (fix bypass en reabrirGuia). Verificacion 100% Supabase."}

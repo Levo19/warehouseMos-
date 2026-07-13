@@ -1858,7 +1858,8 @@ const API = (() => {
         estado:       params.estado || '',
         lock_usuario: params.lockUsuario || '',
         tomar_lock:   params.tomarLock === true,
-        liberar_lock: params.liberarLock === true
+        liberar_lock: params.liberarLock === true,
+        claveAdmin:   params.claveAdmin || ''   // [SQL 440] re-verificada server-side (non-strict) en el path ELIMINAR
       } });
       if (!out || out.error === 'WH_PICKUP_ESTADO_DIRECTO_OFF') return null;
       return out;   // {ok:true} | {ok:false,error,atendidoPor,conflicto}
@@ -1887,8 +1888,12 @@ const API = (() => {
       // ultima_actividad). El stock aplicado se preserva → al recerrar (idempotente) delta = cant_recibida −
       // cantidad_aplicada = 0 sin editar → NO dobla. Idempotente por estado (FOR UPDATE). La autorización admin
       // (REABRIR_GUIA) se valida ANTES en el flujo. id_guia real (no generado).
-      const out = await _sbRpcWH('reabrir_guia', { p: { id_guia: String(params.idGuia || ''), usuario: params.usuario || '' } });
-      if (!out || out.ok === false) return null;
+      const out = await _sbRpcWH('reabrir_guia', { p: { id_guia: String(params.idGuia || ''), usuario: params.usuario || '', claveAdmin: params.claveAdmin || '' } });
+      // [cero-caída · fix bypass] un rechazo de re-verificación (autorizado:false) NO debe caer a GAS
+      // (el GAS reabrirGuia no valida clave → bypass). Solo caemos a GAS por transporte caído (null).
+      if (!out) return null;
+      if (out.autorizado === false) return out;   // clave rechazada → propagar, NO GAS
+      if (out.ok === false) return null;           // otros errores → comportamiento previo
       return out;
     }
     if (params.action === 'agregarDetalleGuia') {
