@@ -744,17 +744,10 @@ function descargarMaestros() {
     }) : [];
   } catch(e) { errores.push('zonas: ' + e.message); }
 
-  // ESTACIONES — adminPin de ALMACEN (para reabrir guías)
-  try {
-    var estSheet = mosSS.getSheetByName('ESTACIONES');
-    if (estSheet) {
-      var estaciones = _sheetToObjects(estSheet);
-      var almacen = estaciones.find(function(e) {
-        return String(e.idEstacion || e.nombre || '').toUpperCase() === 'ALMACEN';
-      });
-      if (almacen && almacen.adminPin) result.adminPin = String(almacen.adminPin);
-    }
-  } catch(e) { errores.push('adminPin: ' + e.message); }
+  // [CERO-GAS · audit 2026-07-13] ELIMINADO: ya NO se emite result.adminPin (ESTACIONES.adminPin).
+  // Era un PIN de almacén en texto plano, paralelo al global de Supabase, que se descargaba al
+  // cliente (localStorage wh_admin_pin) sin ningún consumidor vivo. La reautorización de reabrir
+  // guías va por la ruta central Supabase (mos.verificar_clave_admin).
 
   return { ok: true, data: result, errores: errores, generadoEn: new Date().toISOString() };
 }

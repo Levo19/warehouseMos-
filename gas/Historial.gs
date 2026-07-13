@@ -256,13 +256,10 @@ function getHistorialGuia(params) {
 
 // ── Helpers ──────────────────────────────────────────────────
 function _checkAutorizacionHistorial(params) {
-  // Opción 1: clave admin válida
-  var clave = String(params.claveAdmin || '').trim();
-  if (clave) {
-    var adminPin = _getAdminPinAlmacen();
-    if (adminPin && clave === adminPin) return { ok: true, via: 'clave' };
-  }
-  // Opción 2: usuario con rol admin o master
+  // [CERO-GAS · audit 2026-07-13] La "Opción 1: clave contra _getAdminPinAlmacen()" fue
+  // ELIMINADA: esa función no existía (ReferenceError) y habría comparado contra un PIN
+  // de Sheet (ESTACIONES.adminPin) fuera de Supabase. La autorización de historial es SOLO
+  // por rol admin/master (abajo). Para gate por clave se usa la ruta central Supabase.
   var idPersonal = String(params.idPersonal || '').trim();
   var usuario    = String(params.usuario || '').trim();
   if (idPersonal || usuario) {

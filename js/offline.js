@@ -431,7 +431,9 @@ const OfflineManager = (() => {
         if (d.proveedores   != null) guardar(KEYS.PROVEEDORES,   d.proveedores);
         if (d.impresoras    != null) guardar(KEYS.IMPRESORAS,    d.impresoras);
         if (d.zonas         != null) guardar(KEYS.ZONAS,         d.zonas);
-        if (d.adminPin)            localStorage.setItem(KEYS.ADMIN_PIN, d.adminPin);
+        // [CERO-GAS · audit 2026-07-13] El servidor ya NO emite d.adminPin (PIN plano de Sheet).
+        // Purgamos activamente cualquier valor que haya quedado cacheado en equipos.
+        try { localStorage.removeItem(KEYS.ADMIN_PIN); } catch (_) {}
         // [delta] guardar el punto de corte del servidor → el próximo refresh por versión baja solo el delta.
         if (maestros.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(maestros.server_ts)); } catch (_) {} }
         if (maestros.errores?.length) console.warn('[Offline] descargarMaestros errores:', maestros.errores);
@@ -972,7 +974,7 @@ const OfflineManager = (() => {
   const getAuditoriasCache    = () => cargar(KEYS.AUDITORIAS_C)  || [];
   // [G4 online-only] Se eliminó el caché de PINs admin (getAdminCache + sincronizarAdminCache): la verificación
   // de clave admin es siempre online (mos.verificar_clave_admin). Ya no se baja ni almacena material de PIN.
-  const getAdminPin           = () => localStorage.getItem(KEYS.ADMIN_PIN) || null;  // (legacy; sigue exportado)
+  // [CERO-GAS · audit 2026-07-13] getAdminPin ELIMINADO (sin consumidor; era el PIN plano de Sheet).
   const getPNCache            = () => cargar(KEYS.PN)            || [];
   const setPNCache            = (v) => guardar(KEYS.PN, v);
   const getEnvasadosCache     = () => cargar(KEYS.ENVASADOS)     || [];
@@ -1070,7 +1072,6 @@ const OfflineManager = (() => {
     getImpresorasCache, getZonasCache, getConfigCache,
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
-    getAdminPin,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
     patchGuiaCache,
     getPNCache, setPNCache,
