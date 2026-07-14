@@ -4,6 +4,17 @@
 const API = (() => {
   function _gasUrl() { return window.WH_CONFIG?.gasUrl || ''; }
 
+  // [cero-GAS · WH 2026-07-14] Acciones PROPIAS de WH que NO deben tocar GAS jamás. Si un POST de estas llega
+  // al fallback GAS es porque su directo no commiteó (no cableada / Edge caída / rama muerta detrás de OpLog).
+  // Fail-closed con error claro en vez de caer a GAS. Reads ya son 100% cero-GAS (call()→caché, nunca GAS).
+  // NO incluye los módulos EXTERNOS Membrete/Seguridad (se cargan de assets MOS y conservan su fallback hasta
+  // migrarse en su repo): agregarlos acá los rompería. Auditoría: solo estas 7 quedaban SOLO-GAS y propias.
+  const _WH_NO_GAS = new Set([
+    'iniciarTestDiagnostico', 'finalizarTestDiagnostico', 'runInternalTests',  // panel de diagnóstico QA (marginal)
+    'agregarAMermas', 'solucionarMerma',                                        // ramas muertas detrás de OpLog
+    'subirFotoEntidad', 'eliminarFotoEntidad'                                   // sin callers
+  ]);
+
   // ════════════════════════════════════════════════════════════════════
   // [PASO 5 · B3-frontend] Lectura DIRECTA a Supabase (navegador→PostgREST).
   // INERTE por defecto: solo se activa con localStorage 'wh_lectura_navegador'='1'
@@ -2434,7 +2445,13 @@ const API = (() => {
         const localId = OfflineManager.encolar(params.action, { ...params, _viaDirecta: true });
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
-      // (si llegamos acá, _postDirecto devolvió null → seguir a GAS abajo, seguro)
+      // (si llegamos acá, _postDirecto devolvió null → seguir abajo)
+    }
+
+    // [cero-GAS · WH] Acción propia de WH cuyo directo no commiteó → FAIL-CLOSED: ni GAS ni encolar-a-GAS.
+    // Error claro para el caller (el panel de diagnóstico / la rama muerta de mermas). Nunca toca gasUrl.
+    if (_WH_NO_GAS.has(params.action)) {
+      return { ok: false, error: 'Acción no disponible sin conexión directa (cero-GAS)', _ceroGas: true };
     }
 
     if (!GAS_URL || !navigator.onLine) {
@@ -2855,10 +2872,13 @@ const API = (() => {
           if (res.ok && d && d.ok === true) {
             return { ok: true, data: { impresiones: Array.isArray(d.impresiones) ? d.impresiones : [], enviados: d.enviados || 0, cajas: d.cajas || 0, yaImpreso: !!d.yaImpreso, via: 'edge' } };
           }
-          // d.ok===false (AVISO_OFF / preingreso no en Supabase / error) → cae a GAS abajo.
+          // d.ok===false (AVISO_OFF / preingreso no en Supabase / error) → degradar (NO GAS).
         }
-      } catch (_) { /* cae a GAS */ }
-      return post({ action: 'imprimirAvisoCajeros', ...p });
+      } catch (_) { /* degradar (NO GAS) */ }
+      // [cero-GAS] Antes caía a GAS `imprimirAvisoCajeros`. Ahora el preingreso ya vive en Supabase (crearPreingreso
+      // es directo), así que la Edge `aviso-cajas` cubre el caso; si aún así falla es transitorio → degradamos con
+      // aviso claro (el operador reimprime desde el preingreso), NUNCA a GAS.
+      return { ok: false, error: 'Aviso a cajas: servicio no disponible ahora · reintenta o reimprime desde el preingreso', via: 'edge-fail' };
     },
     getImpresorasEcosistema: () => call({ action: 'getImpresorasEcosistema' }),
     // [F6 push] Registro de token FCM directo a Supabase (mos.registrar_push_token). Aditivo al registro GAS
