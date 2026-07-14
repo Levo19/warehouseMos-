@@ -117,11 +117,12 @@ const OfflineManager = (() => {
         // wh_queue se borraban → mismo bug v2.13.99 (login no funciona offline)
         // pero disparado por el upgrade en vez de quota cleanup.
         // Ahora se preservan TODOS los TIER0 (críticos para que la PWA funcione).
-        // [FIX pickup · data-loss] wh_despacho_pickup_activo / wh_despacho_cart / wh_lista_sombra son
-        // TRABAJO EN CURSO del operador (progreso de su lista pickup + carrito + lista sombra), NO caches
-        // regenerables. Estaban FUERA de la allowlist → el cleanup por cambio de versión los borraba y el
-        // operador perdía su lista al actualizar. Se preservan igual que los TIER0 críticos.
-        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_pickup_activo|wh_despacho_cart|wh_lista_sombra)$/;
+        // [BLINDAJE carrito · data-loss] Todo el namespace `wh_despacho_*` (carrito, pickup activo, zona,
+        // historial y CUALQUIER estado futuro de despacho) + la lista sombra son TRABAJO EN CURSO del operador,
+        // NO caches regenerables. Estaban fuera de la allowlist → el cleanup por cambio de versión los borraba y
+        // se perdía la lista al actualizar. Se preservan por PREFIJO (no por key puntual) para que un estado
+        // nuevo de despacho quede protegido automáticamente sin tener que acordarse de agregarlo aquí.
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_.*|wh_lista_sombra)$/;
         let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;

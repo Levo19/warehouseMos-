@@ -7736,18 +7736,38 @@ const GuiasView = (() => {
   //   - Si vacío → ofrecer "registrar producto nuevo" (registrarPN)
   // En guías de SALIDA, vacío = error "no existe en catálogo".
   // _scannedCb: código que físicamente se escaneó (puede ser equiv ≠ prod canónico).
+  // [EFICIENCIA · celular lento] Índice O(1) código→producto/equivalencia. Antes CADA escaneo hacía 1-2
+  // .find() lineales sobre todo el catálogo → con catálogo grande + celular lento = jank por escaneo. Se
+  // memoiza por REFERENCIA del array: el _parseCache de offline.js devuelve la MISMA ref hasta que el catálogo
+  // cambia (guardar()/TTL), así el índice se reconstruye solo cuando toca — no en cada escaneo.
+  let _scanIdxProds = null, _scanIdxProdsRef = null;
+  let _scanIdxEquivs = null, _scanIdxEquivsRef = null;
+  function _idxPorCodigo(arr, refPropName) {
+    const isProds = refPropName === 'prods';
+    if (isProds && arr === _scanIdxProdsRef && _scanIdxProds) return _scanIdxProds;
+    if (!isProds && arr === _scanIdxEquivsRef && _scanIdxEquivs) return _scanIdxEquivs;
+    const m = new Map();
+    for (const it of arr) {
+      const k = String(it.codigoBarra || '').trim().toUpperCase();
+      if (k && !m.has(k)) m.set(k, it);   // primer match gana (paridad con el .find() original)
+    }
+    if (isProds) { _scanIdxProds = m; _scanIdxProdsRef = arr; }
+    else         { _scanIdxEquivs = m; _scanIdxEquivsRef = arr; }
+    return m;
+  }
+
   function _buscarCandidatos(codStr) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     const cNorm  = normCb(codStr);
     if (!cNorm) return [];
 
-    // 1. Exacto en PRODUCTOS_MASTER → código escaneado ES el canónico
-    const exacto = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);
+    // 1. Exacto en PRODUCTOS_MASTER → código escaneado ES el canónico (O(1) por índice)
+    const exacto = _idxPorCodigo(prods, 'prods').get(cNorm);
     if (exacto) return [{ ...exacto, _exacto: true }];
 
-    // 2. Exacto en EQUIVALENCIAS → resolver al producto base (factor=1); guardar código escaneado
-    const equiv = equivs.find(e => String(e.codigoBarra || '').trim().toUpperCase() === cNorm);
+    // 2. Exacto en EQUIVALENCIAS → resolver al producto base (factor=1); guardar código escaneado (O(1) por índice)
+    const equiv = _idxPorCodigo(equivs, 'equivs').get(cNorm);
     if (equiv) {
       const skuB = String(equiv.skuBase || '').trim().toUpperCase();
       const prod = prods.find(p =>
@@ -13294,8 +13314,13 @@ const DespachoView = (() => {
       if (esOtroInput) return;
 
       const now = Date.now();
-      // Reset buffer si pasó mucho tiempo desde el último char (evita mezclas)
-      if (now - _scanHidLastTs > SCAN_HID_RESET_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
+      // Reset del buffer por inactividad (evita mezclar dos scans). En el modal de scan PURO no hay ambigüedad
+      // con tipeo humano, así que toleramos mucho más tiempo entre chars: un CELULAR LENTO + lector Bluetooth
+      // procesa los keydown con gaps grandes (el dt se mide al PROCESAR, no al recibir) y con la ventana corta
+      // se perdía el código a medio escanear. Sobre el peso granel mantenemos la ventana corta (distinguir el
+      // tipeo lento del peso de una ráfaga de scan).
+      const _resetMs = (esGranelInp || _scanPreGranelTgt) ? SCAN_HID_RESET_MS : 2000;
+      if (now - _scanHidLastTs > _resetMs) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       const dt = now - _scanHidLastTs;
       _scanHidLastTs = now;
 
