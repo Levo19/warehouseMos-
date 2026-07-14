@@ -1543,8 +1543,8 @@ const Session = (() => {
       if (document.visibilityState === 'visible') _whHeartbeatAccesos();
     }, 5 * 60 * 1000);
 
-    // [companion WH] extensión de dispositivo (2º equipo se ata a la misma sesión) +
-    // nota compartida. 100% Supabase, gated server por MOS_EXTENSION_DIRECTO. Fire-and-forget.
+    // [companion WH] extensión de dispositivo (2º equipo se ata a la misma sesión).
+    // 100% Supabase, gated server por MOS_EXTENSION_DIRECTO. Fire-and-forget.
     try { _wextIniciar(); } catch (_) {}
 
     // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
@@ -1564,9 +1564,9 @@ const Session = (() => {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // COMPANION WH — extensión de dispositivo + nota compartida (100% Supabase)
+  // COMPANION WH — extensión de dispositivo (100% Supabase)
   //   Espeja el companion de MosExpress, pero la sesión WH se llavea por
-  //   idPersonal (no MEX temporal) → pedir_extension/nota reciben idPersonal.
+  //   idPersonal (no MEX temporal) → pedir_extension recibe idPersonal.
   // ══════════════════════════════════════════════════════════════════════════
   let _wextPollReq = null, _wextPollPpal = null, _wextShownAppr = {}, _wextApprCooldown = {}, _wextPedirAbierto = false, _wextApprAbierto = false;
   const _wextRpc = (fn, body) => (typeof API !== 'undefined' && API.extRpcSB) ? API.extRpcSB(fn, body) : Promise.resolve(null);
