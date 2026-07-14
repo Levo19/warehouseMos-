@@ -655,15 +655,32 @@ function _fmtCorta(s) {
   return `${d.getDate()} ${months[d.getMonth()]}`;
 }
 
-// Hora desde timestamp embebido en ID, en TZ Lima.
-// [v2.13.209] IDs viejos (GAS): 'G1745123456789' → 13 dígitos limpios. IDs nuevos (escritura
-// directa): 'G_L1745123456789ab3xy9' → localId 'L'+Date.now()+random base36; el random PUEDE
-// traer dígitos, así que un replace(/\D/g,'') global concatenaba basura (ej. 15 dígitos → año 7615).
-// Extraemos SOLO la primera corrida de 13 dígitos (el ms epoch). Para PI1745... también funciona.
+// [dueño 2026-07-14] Extrae el ms-epoch de creación embebido en el idGuia, ROBUSTO a prefijos con
+// dígitos. BUG que arregla: las guías de reconciliación de zona nacen con id 'G_RECONZ2<epoch>' (o
+// 'G_RECONZ1<epoch>'); el '2'/'1' del prefijo se PEGA al epoch → un match ingenuo de \d{13} agarraba la
+// ventana equivocada. Ej: 'G_RECONZ21783527921681' → '2178352792168' = ENERO 2039 (¡fecha fantasma!), en
+// vez del real '1783527921681' = 8-jul-2026. Solución: de TODAS las ventanas de 13 dígitos, tomar la
+// primera cuyo valor caiga en un rango de epoch SENSATO (2022-01-01 .. 2035-01-01). Así el '2' de RECONZ2
+// (→2039, fuera de rango) y el '1' de RECONZ1 (→2007, fuera de rango) se descartan y queda el epoch real.
+function _epochMsDeId(id) {
+  const s = String(id || '');
+  const MIN = 1640995200000;  // 2022-01-01
+  const MAX = 2051222400000;  // 2035-01-01
+  const runs = s.match(/\d{13,}/g);
+  if (!runs) return 0;
+  for (const run of runs) {
+    for (let i = 0; i + 13 <= run.length; i++) {
+      const n = parseInt(run.slice(i, i + 13), 10);
+      if (n >= MIN && n <= MAX) return n;
+    }
+  }
+  return 0;
+}
+
+// Hora desde timestamp embebido en ID, en TZ Lima. Usa _epochMsDeId (robusto a prefijos con dígitos).
 function _horaDesdeId(id) {
-  const m = String(id || '').match(/(\d{13})/);   // primer bloque de 13 dígitos = ms epoch
-  const ts = m ? parseInt(m[1]) : 0;
-  if (!ts || ts < 1e12) return '';
+  const ts = _epochMsDeId(id);
+  if (!ts) return '';
   try {
     return new Intl.DateTimeFormat('es-PE', { timeZone: WH_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ts));
   } catch (e) {
@@ -1030,11 +1047,10 @@ function _guiaSortTs(g) {
   const f = String((g && g.fecha) || '');
   // OJO: el transformer de api.js trunca las columnas `date` a 'yyyy-MM-dd' (sin hora), así que para las
   // guías `fecha` casi siempre viene sin hora → todas las del día empatan. Por eso el orden REAL sale del
-  // ms epoch embebido en el idGuia (G_L<ms><random>), EXACTAMENTE 13 dígitos (igual que _horaDesdeId, que
-  // por eso muestra la hora correcta). Antes usábamos \d{12,} (codicioso) → capturaba 13 o 14 dígitos según
-  // el sufijo aleatorio → orden inconsistente. \d{13} = solo el ms → orden estable y alineado con la hora.
-  const m = String((g && g.idGuia) || '').match(/(\d{13})/);
-  if (m) { const n = parseInt(m[1], 10); if (n > 1e12) return n; }
+  // ms epoch embebido en el idGuia. Usamos _epochMsDeId (robusto a prefijos con dígitos como 'RECONZ2',
+  // que antes producían una ventana equivocada → fecha 2039). Alinea orden, hora y agrupación por día.
+  const ep = _epochMsDeId(g && g.idGuia);
+  if (ep) return ep;
   if (f.includes('T') || (f.length > 10 && f.includes(':'))) {
     const d = _parseLocalDate(f);
     if (!isNaN(d)) return d.getTime();
