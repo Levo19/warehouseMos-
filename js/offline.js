@@ -83,6 +83,16 @@ const OfflineManager = (() => {
   window.addEventListener('online',  () => { _notificar(); sincronizar(); });
   window.addEventListener('offline', () => _notificar());
 
+  // [FIX lag sync] Reintento PERIÓDICO de la cola. Antes sincronizar() solo corría en el evento 'online',
+  // al aplicar sesión o con el botón manual → un ítem que falló (timeout de escritura directa) quedaba
+  // pegado mostrando "N operaciones por sincronizar" hasta que la red parpadeara ("demora mucho").
+  // Cada 20s drenamos la cola si hay red e ítems pendientes/error. Idempotente (dedup por localId) y
+  // reentrante-seguro (el guard _syncing evita solapes). No hace nada si la cola está vacía.
+  setInterval(() => {
+    if (!navigator.onLine || _syncing) return;
+    if (getQueue().some(i => i.status === 'pending' || i.status === 'error')) sincronizar();
+  }, 20000);
+
   // [v2.13.74] Auto-cleanup AGRESIVO al cambio de versión. Al actualizar la
   // app, todos los caches grandes (productos/stock/etc) se regeneran del
   // backend en la próxima precarga. NO tiene sentido conservarlos viejos —
@@ -107,7 +117,11 @@ const OfflineManager = (() => {
         // wh_queue se borraban → mismo bug v2.13.99 (login no funciona offline)
         // pero disparado por el upgrade en vez de quota cleanup.
         // Ahora se preservan TODOS los TIER0 (críticos para que la PWA funcione).
-        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url)$/;
+        // [FIX pickup · data-loss] wh_despacho_pickup_activo / wh_despacho_cart / wh_lista_sombra son
+        // TRABAJO EN CURSO del operador (progreso de su lista pickup + carrito + lista sombra), NO caches
+        // regenerables. Estaban FUERA de la allowlist → el cleanup por cambio de versión los borraba y el
+        // operador perdía su lista al actualizar. Se preservan igual que los TIER0 críticos.
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_pickup_activo|wh_despacho_cart|wh_lista_sombra)$/;
         let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;

@@ -13338,8 +13338,13 @@ const DespachoView = (() => {
       // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
       if (!/^[a-zA-Z0-9\-_.]$/.test(e.key)) return;
 
-      // Si NO es el primero y dt es muy grande, es tipeo humano → reiniciar (no es scan).
-      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
+      // El discriminador por TIMING (gap>80ms = tipeo humano → reiniciar) SOLO tiene sentido SOBRE el peso
+      // granel, donde el humano tipea dígitos lentamente. En el modal de scan puro (foco readonly/body) NO hay
+      // tipeo humano: un lector lento/Bluetooth —o un dispositivo con lag— manda los dígitos con >80ms entre sí,
+      // y resetear por gap dejaba SOLO 1 dígito con "Capturando..." eterno (el código nunca se completaba).
+      // Ahí acumulamos siempre; solo la ventana total RESET_MS (600ms) limpia un buffer viejo.
+      const _ambiguoPeso = esGranelInp || !!_scanPreGranelTgt;
+      if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS && _ambiguoPeso) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       // Al arrancar un buffer nuevo sobre el peso granel, recordar su valor previo por si resulta ser un scan.
       if (_scanHidBuffer.length === 0 && esGranelInp) { _scanPreGranelTgt = tgt; _scanPreGranelVal = String(tgt.value || ''); }
       _scanHidBuffer += e.key;

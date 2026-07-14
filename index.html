@@ -4659,6 +4659,19 @@
         } catch(_){}
       };
       navigator.serviceWorker.addEventListener('controllerchange', () => {
+        // [FIX pickup · data-loss] El auto-skipWaiting del SW hace que el SW nuevo tome control y dispare
+        // controllerchange SIN pasar por _checkForcedUpdate. La página sigue OK con el JS viejo, así que si
+        // el operador tiene trabajo en curso (pickup/cart/lista sombra) NO recargamos ahora — perdería el
+        // contexto de su lista. Se difiere: el watcher _aplicarReloadDiferidoSiListo recarga al terminar
+        // (keys limpias). Sin trabajo activo, reload inmediato como antes.
+        if (window._whHayTrabajoActivo && window._whHayTrabajoActivo()) {
+          window._whReloadDiferidoPend = true;
+          if (!window._whUpdateAvisada) {
+            window._whUpdateAvisada = true;
+            try { if (typeof toast === 'function') toast('🔄 Versión nueva lista · se aplicará al terminar tu lista (no pierdes nada)', 'info', 6000); } catch(_){}
+          }
+          return;
+        }
         window._cleanupWHAntesReload();
         window.location.reload();
       });
@@ -4689,6 +4702,19 @@
       } catch(_) {}
       return false;
     }
+    // [FIX pickup · data-loss] Exponer el chequeo a window para que el handler de controllerchange
+    // (otro scope, dentro del .then del SW) también difiera su reload. Watcher: cuando el trabajo
+    // termina (pickup/cart/sombra limpios) y había un reload diferido por controllerchange, recién ahí
+    // recarga — así la actualización se aplica sin interrumpir ni perder la lista en curso.
+    window._whHayTrabajoActivo = _whHayTrabajoActivo;
+    function _aplicarReloadDiferidoSiListo() {
+      if (window._whReloadDiferidoPend && !_whHayTrabajoActivo()) {
+        window._whReloadDiferidoPend = false;
+        try { window._cleanupWHAntesReload && window._cleanupWHAntesReload(); } catch(_){}
+        window.location.reload();
+      }
+    }
+    setInterval(_aplicarReloadDiferidoSiListo, 15000);
     let _updateDiferidaAvisada = false;
     async function _checkForcedUpdate() {
       if (_forceUpdateTriggered) return;
@@ -4734,7 +4760,7 @@
     setInterval(_checkForcedUpdate, 3 * 60 * 1000);
     // Cada vez que la app vuelve al foreground (cambio de pestaña / unlock)
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') _checkForcedUpdate();
+      if (document.visibilityState === 'visible') { _checkForcedUpdate(); _aplicarReloadDiferidoSiListo(); }
     });
 
     // ── PRE-CHECK síncrono para acciones críticas ─────────────────────
