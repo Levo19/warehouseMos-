@@ -10428,7 +10428,10 @@ const EnvasadosView = (() => {
       // [418 · review MED3] solo personal ACTIVO y rol envasado/almacén (el cache
       // incluye inactivos) → no ofrecer a un ex-empleado como colaborador.
       .filter(p => String(p.estado) === '1')
-      .filter(p => { const r = String(p.rol || '').toUpperCase(); return r === 'ENVASADOR' || r === 'ALMACENERO'; })
+      // [dueño 2026-07-14] incluir TODO el personal master activo (ENVASADOR/ALMACENERO + ADMIN/MASTER),
+      // MENOS los de zona (CAJERO/VENDEDOR de mosExpress) — un admin/master también envasa en WH y cobra su
+      // mitad 50/50 (recomputar_dia le paga el envasado con base=0; registrar_envasado le asegura la fila).
+      .filter(p => { const r = String(p.rol || '').toUpperCase(); return r === 'ENVASADOR' || r === 'ALMACENERO' || r === 'ADMIN' || r === 'ADMINISTRADOR' || r === 'MASTER'; })
       .map(p => String((p.nombre || '') + ' ' + (p.apellido || '')).trim())
       .filter(n => n && n.toLowerCase() !== yo)
       .filter((n, i, a) => a.indexOf(n) === i);   // dedup
