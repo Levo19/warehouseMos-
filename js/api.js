@@ -2854,10 +2854,10 @@ const API = (() => {
         return await res.json().catch(() => ({ ok: false }));
       } catch (e) { return { ok: false, error: e.message }; }
     },
-    // [cero-GAS] aviso a cajas: intenta la Edge `aviso-cajas` (lee preingreso+cajas de
-    // Postgres, arma ESC/POS, PrintNode). Gated server por WH_AVISO_DIRECTO: si está OFF,
-    // o la Edge no confirma (p.ej. preingreso aún no en Supabase), cae a GAS. Nunca doble
-    // (es Edge O GAS, no ambos).
+    // [cero-GAS 2026-07-14] aviso a cajas: Edge `aviso-cajas` (lee preingreso+cajas de Postgres, arma ESC/POS,
+    // PrintNode). El preingreso ya vive en Supabase (crearPreingreso es directo) → la Edge lo cubre. Ya NO cae
+    // a GAS: si la Edge falla/timeout/*_OFF, DEGRADA con aviso claro (el operador reimprime desde el preingreso).
+    // Flag server WH_AVISO_DIRECTO=1 en prod (verificado). Sin doble impresión (idemKey en la Edge).
     imprimirAvisoCajeros: async (p) => {
       p = p || {};
       try {

@@ -628,6 +628,7 @@ const OfflineManager = (() => {
     //   • legacy (sin la marca) → GAS, exactamente como hoy.
     // Con la escritura directa nunca activada, ningún ítem lleva la marca → 100% GAS = comportamiento actual (INERTE).
     var huboEnvasado = false;
+    try {
     for (const item of queue) {
       try {
         const viaDirecta = !!(item._viaDirecta || (item.params && item.params._viaDirecta));
@@ -667,8 +668,14 @@ const OfflineManager = (() => {
     }
 
     limpiarSincronizados();
-    _syncing = false;
     localStorage.setItem(KEYS.LAST_SYNC, new Date().toLocaleTimeString('es-PE'));
+    } finally {
+      // [F1 · fix revisión 500x] _syncing SIEMPRE se resetea, aunque el loop / limpiarSincronizados() / setItem
+      // lancen (ej. QuotaExceededError con la cola congestionada). Sin esto _syncing quedaba pegado en true y el
+      // drainer periódico (20s) + el sync por evento 'online' morían hasta un reload completo — justo el bug
+      // que el drainer venía a resolver.
+      _syncing = false;
+    }
     _notificar();
 
     // [Fix v2.9.1] Si se sincronizó un envasado optimistic, avisar a la UI
