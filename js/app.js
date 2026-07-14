@@ -1569,7 +1569,6 @@ const Session = (() => {
   //   idPersonal (no MEX temporal) → pedir_extension/nota reciben idPersonal.
   // ══════════════════════════════════════════════════════════════════════════
   let _wextPollReq = null, _wextPollPpal = null, _wextShownAppr = {}, _wextApprCooldown = {}, _wextPedirAbierto = false, _wextApprAbierto = false;
-  let _wnotaTimer = null, _wnotaSesionTs = 0, _wnotaLocal = '', _wnotaEditando = false, _wnotaOv = null;
   const _wextRpc = (fn, body) => (typeof API !== 'undefined' && API.extRpcSB) ? API.extRpcSB(fn, body) : Promise.resolve(null);
   const _wextHaptic = (pat) => { try { navigator.vibrate && navigator.vibrate(pat); } catch (e) {} };
   const _wextEsc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1587,7 +1586,6 @@ const Session = (() => {
     @keyframes _wextBeam{0%{left:-40%}100%{left:110%}}
     @keyframes _wextRoll{0%{opacity:0;transform:translateY(-16px) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
     @keyframes _wextBurst{0%{transform:scale(0);opacity:.9}70%{opacity:.35}100%{transform:scale(2.4);opacity:0}}
-    @keyframes _wnotaPulseK{0%,100%{box-shadow:0 6px 20px rgba(0,0,0,.4)}50%{box-shadow:0 0 0 4px rgba(56,189,248,.5),0 6px 24px rgba(56,189,248,.4)}}
     ._wextBk{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:blur(4px);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px}
     ._wextCard{background:#0f172a;border:1px solid #1e293b;border-radius:18px;padding:22px;max-width:340px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:_wextIn .3s cubic-bezier(.2,.9,.3,1.2);position:relative;overflow:hidden}
     ._wextBeamLine{position:absolute;top:0;height:2px;width:35%;background:linear-gradient(90deg,transparent,#38bdf8,transparent);animation:_wextBeam 1.6s ease-in-out infinite}
@@ -1598,11 +1596,6 @@ const Session = (() => {
     ._wextBtnOk{background:linear-gradient(135deg,#10b981,#059669);color:#fff;position:relative;overflow:hidden}
     ._wextBtnNo{background:#1e293b;color:#cbd5e1}
     ._wextRing{position:absolute;inset:0;pointer-events:none}
-    ._wnotaFab{position:fixed;left:14px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:99992;width:46px;height:46px;border-radius:50%;border:1px solid #1e293b;background:#0f172a;color:#38bdf8;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,.4);cursor:pointer}
-    ._wnotaFab.pulso{animation:_wnotaPulseK 1.4s ease-in-out infinite}
-    ._wnotaFab .dot{position:absolute;top:-2px;right:-2px;width:12px;height:12px;border-radius:50%;background:#38bdf8;border:2px solid #0f172a;display:none}
-    ._wnotaFab.pulso .dot{display:block}
-    ._wnotaTa{width:100%;min-height:96px;background:#0b1220;border:1px solid #1e293b;border-radius:12px;color:#e2e8f0;padding:12px;font-size:15px;resize:none;outline:none}
     `;
     document.head.appendChild(st);
   };
@@ -1693,69 +1686,8 @@ const Session = (() => {
       okBtn.addEventListener('mouseup', stop); okBtn.addEventListener('mouseleave', stop); okBtn.addEventListener('touchend', stop); okBtn.addEventListener('touchcancel', stop);
     } catch (e) {}
   };
-  // ── NOTA COMPARTIDA (idPersonal path) ──
-  const _wnotaCtx = () => { const id = _wextIdentidad(); if (!id) return null; const dev = _wextDevId(); if (!dev) return null; return { nombre: id.nombre, zona: id.zona, idPersonal: id.idPersonal, deviceId: dev }; };
-  const _wnotaFabEl = () => document.getElementById('_wnotaFab');
-  const _wnotaEnsureFab = () => { let f = _wnotaFabEl(); if (f) return f; _wextCssOnce(); f = document.createElement('button'); f.id = '_wnotaFab'; f.className = '_wnotaFab'; f.innerHTML = '📝<span class="dot"></span>'; f.title = 'Nota compartida del equipo'; f.onclick = _wnotaAbrir; document.body.appendChild(f); return f; };
-  const _wnotaQuitarFab = () => { const f = _wnotaFabEl(); if (f) { try { f.remove(); } catch (e) {} } };
-  const _wnotaMarcarPulso = (on) => { const f = _wnotaFabEl(); if (!f) return; f.classList.toggle('pulso', !!on); };
-  const _wnotaTick = async () => {
-    const ctx = _wnotaCtx(); if (!ctx) { _wnotaQuitarFab(); return; }
-    const r = await _wextRpc('nota_sesion_get', ctx);
-    if (!r || r.ok !== true) { _wnotaQuitarFab(); return; }
-    const util = r.activa && ((r.companions || 0) > 0 || String(r.nota || '') !== '');
-    if (!util) { if (!_wnotaEditando) _wnotaQuitarFab(); return; }
-    _wnotaEnsureFab();
-    if (_wnotaEditando) return;
-    const ts = r.ts || 0;
-    if (ts > _wnotaSesionTs) {
-      const cambio = (String(r.nota || '') !== String(_wnotaLocal || '')) && _wnotaSesionTs > 0;
-      _wnotaSesionTs = ts; _wnotaLocal = String(r.nota || '');
-      if (cambio) { _wextHaptic([12, 30, 12]); _wnotaMarcarPulso(true); }
-    }
-  };
-  function _wnotaAbrir() {
-    if (_wnotaEditando || _wnotaOv) return;
-    _wnotaMarcarPulso(false); _wnotaEditando = true;
-    const ov = _wextOverlay(`
-      <div>
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <span style="font-size:22px">📝</span>
-          <div style="font-weight:800;color:#e2e8f0;font-size:15px">Nota del equipo</div>
-        </div>
-        <div style="color:#94a3b8;font-size:11px;margin-bottom:8px">La ven y editan todos los equipos de esta sesión.</div>
-        <textarea class="_wnotaTa" id="_wnotaTa" maxlength="280" placeholder="Ej: falta bolsa de arroz, revisar lote 12…">${_wextEsc(_wnotaLocal)}</textarea>
-        <div style="display:flex;justify-content:flex-end;align-items:center;margin-top:6px">
-          <span id="_wnotaCnt" style="color:#64748b;font-size:11px"></span>
-        </div>
-        <div style="display:flex;gap:10px;margin-top:12px">
-          <button class="_wextBtn _wextBtnNo" id="_wnotaX">Cerrar</button>
-          <button class="_wextBtn _wextBtnOk" id="_wnotaSave">Guardar</button>
-        </div>
-      </div>`);
-    const ta = ov.querySelector('#_wnotaTa'); const cnt = ov.querySelector('#_wnotaCnt');
-    const upd = () => { if (cnt) cnt.textContent = ta.value.length + '/280'; }; upd();
-    ta.addEventListener('input', upd);
-    try { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } catch (e) {}
-    _wnotaOv = ov;
-    const cerrar = () => { _wnotaEditando = false; _wnotaOv = null; try { ov.remove(); } catch (e) {} };
-    ov.querySelector('#_wnotaX').onclick = cerrar;
-    ov.querySelector('#_wnotaSave').onclick = async () => {
-      const btn = ov.querySelector('#_wnotaSave'); const txt = String(ta.value || '');
-      btn.textContent = 'Guardando…'; btn.disabled = true;
-      const ctx = _wnotaCtx();
-      const r = ctx ? await _wextRpc('nota_sesion_set', { ...ctx, nota: txt, baseTs: _wnotaSesionTs }) : null;
-      if (r && r.ok) {
-        _wnotaSesionTs = r.ts || _wnotaSesionTs; _wnotaLocal = String(r.nota != null ? r.nota : txt);
-        if (r.conflict) { _wextHaptic([80]); ta.value = _wnotaLocal; upd(); btn.textContent = 'Se actualizó ↑'; btn.disabled = false; setTimeout(() => { if (btn) btn.textContent = 'Guardar'; }, 1500); }
-        else { _wextHaptic([10, 30, 10]); btn.textContent = '✓'; setTimeout(cerrar, 500); }
-      } else { btn.textContent = 'Reintentar'; btn.disabled = false; }
-    };
-  }
-  const _wnotaIniciar = () => { if (_wnotaTimer) clearInterval(_wnotaTimer); _wnotaTick(); _wnotaTimer = setInterval(_wnotaTick, 8000); };
-  const _wnotaDetener = () => { if (_wnotaTimer) { clearInterval(_wnotaTimer); _wnotaTimer = null; } _wnotaQuitarFab(); if (_wnotaOv) { try { _wnotaOv.remove(); } catch (e) {} _wnotaOv = null; } _wnotaSesionTs = 0; _wnotaLocal = ''; _wnotaEditando = false; };
-  function _wextIniciar() { _wextPedir(); if (_wextPollPpal) clearInterval(_wextPollPpal); _wextPollPpal = setInterval(_wextPrincipalTick, 5000); _wnotaIniciar(); }
-  function _wextDetener() { if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } if (_wextPollPpal) { clearInterval(_wextPollPpal); _wextPollPpal = null; } _wextShownAppr = {}; _wextPedirAbierto = false; _wnotaDetener(); }
+  function _wextIniciar() { _wextPedir(); if (_wextPollPpal) clearInterval(_wextPollPpal); _wextPollPpal = setInterval(_wextPrincipalTick, 5000); }
+  function _wextDetener() { if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } if (_wextPollPpal) { clearInterval(_wextPollPpal); _wextPollPpal = null; } _wextShownAppr = {}; _wextPedirAbierto = false; }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
     const dot    = document.getElementById('statusDot');
