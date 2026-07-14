@@ -2900,13 +2900,13 @@ const API = (() => {
     // Guías — acciones extra
     reabrirGuia:        (p)      => post({ action: 'reabrirGuia', ...p }),
     anularDetalle:      (p)      => post({ action: 'anularDetalle', ...p }),
-    autoCloseDayGuias:  ()       => post({ action: 'autoCloseDayGuias' }),
+    // [cero-GAS] `autoCloseDayGuias` (post→GAS) ELIMINADO: era dead code (ningún caller) y un rastro de GAS.
 
     // Personal / Sesiones
-    loginPersonal:      (pin)    => post({ action: 'loginPersonal', pin }),
     // [F1 login · cero-GAS + seguro] Valida el PIN SERVER-SIDE (mos.login_pin_wh; el pin nunca sale del server) +
-    // crea/reusa sesión wh.sesiones. APP_NO_AUTORIZADA/sin-token → null → caller cae a GAS loginPersonal.
-    // FIX del login caído: catalogo_wh_rls dejó de mandar el pin (seguridad) → validarPinLocal no podía matchear.
+    // crea/reusa sesión wh.sesiones. APP_NO_AUTORIZADA/sin-token → null → el caller muestra "⚠ Sin conexión ·
+    // reintenta" (login 100% Supabase). El GAS `loginPersonal` se ELIMINÓ de este api: era dead code (ningún
+    // caller lo invocaba) y un rastro de GAS. FIX del login caído: catalogo_wh_rls dejó de mandar el pin.
     loginPersonalSB: async (pin) => {
       // [accesos unificados] mandamos deviceId → el hook server-side registra el ingreso
       // en liquidaciones_dia y el cierre 11pm puede forzar logout de este dispositivo.

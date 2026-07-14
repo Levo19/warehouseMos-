@@ -13315,11 +13315,12 @@ const DespachoView = (() => {
 
       const now = Date.now();
       // Reset del buffer por inactividad (evita mezclar dos scans). En el modal de scan PURO no hay ambigüedad
-      // con tipeo humano, así que toleramos mucho más tiempo entre chars: un CELULAR LENTO + lector Bluetooth
-      // procesa los keydown con gaps grandes (el dt se mide al PROCESAR, no al recibir) y con la ventana corta
-      // se perdía el código a medio escanear. Sobre el peso granel mantenemos la ventana corta (distinguir el
-      // tipeo lento del peso de una ráfaga de scan).
-      const _resetMs = (esGranelInp || _scanPreGranelTgt) ? SCAN_HID_RESET_MS : 2000;
+      // con tipeo humano, así que toleramos más tiempo entre chars: un CELULAR LENTO + lector Bluetooth procesa
+      // los keydown con gaps grandes (el dt se mide al PROCESAR, no al recibir) y con la ventana corta se perdía
+      // el código a medio escanear. 1200ms: holgado para los gaps de un lector lento, pero acotado para que si un
+      // scan pierde su Enter, el siguiente escaneo (>1.2s después) NO se concatene con el anterior. Sobre el peso
+      // granel mantenemos la ventana corta (distinguir el tipeo lento del peso de una ráfaga de scan).
+      const _resetMs = (esGranelInp || _scanPreGranelTgt) ? SCAN_HID_RESET_MS : 1200;
       if (now - _scanHidLastTs > _resetMs) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       const dt = now - _scanHidLastTs;
       _scanHidLastTs = now;
@@ -13367,7 +13368,7 @@ const DespachoView = (() => {
       // granel, donde el humano tipea dígitos lentamente. En el modal de scan puro (foco readonly/body) NO hay
       // tipeo humano: un lector lento/Bluetooth —o un dispositivo con lag— manda los dígitos con >80ms entre sí,
       // y resetear por gap dejaba SOLO 1 dígito con "Capturando..." eterno (el código nunca se completaba).
-      // Ahí acumulamos siempre; solo la ventana total RESET_MS (600ms) limpia un buffer viejo.
+      // Ahí NO reseteamos por gap; solo la ventana de inactividad (_resetMs, arriba) limpia un buffer viejo.
       const _ambiguoPeso = esGranelInp || !!_scanPreGranelTgt;
       if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS && _ambiguoPeso) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       // Al arrancar un buffer nuevo sobre el peso granel, recordar su valor previo por si resulta ser un scan.
