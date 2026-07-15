@@ -1559,10 +1559,6 @@ const Session = (() => {
       if (document.visibilityState === 'visible') _whHeartbeatAccesos();
     }, 5 * 60 * 1000);
 
-    // [companion WH] extensión de dispositivo (2º equipo se ata a la misma sesión).
-    // 100% Supabase, gated server por MOS_EXTENSION_DIRECTO. Fire-and-forget.
-    try { _wextIniciar(); } catch (_) {}
-
     // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
     // Cuando el admin abra el modal de elegir impresora, ya estará cacheado
     // → modal abre INSTANT en vez de "⏳ Cargando impresoras..." por 2-3s.
@@ -1578,132 +1574,6 @@ const Session = (() => {
       }, 1500);
     }
   }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // COMPANION WH — extensión de dispositivo (100% Supabase)
-  //   Espeja el companion de MosExpress, pero la sesión WH se llavea por
-  //   idPersonal (no MEX temporal) → pedir_extension recibe idPersonal.
-  // ══════════════════════════════════════════════════════════════════════════
-  let _wextPollReq = null, _wextPollPpal = null, _wextShownAppr = {}, _wextApprCooldown = {}, _wextPedirAbierto = false, _wextApprAbierto = false;
-  const _wextRpc = (fn, body) => (typeof API !== 'undefined' && API.extRpcSB) ? API.extRpcSB(fn, body) : Promise.resolve(null);
-  const _wextHaptic = (pat) => { try { navigator.vibrate && navigator.vibrate(pat); } catch (e) {} };
-  const _wextEsc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const _wextDevId = () => { try { return (window._getDeviceIdWH && window._getDeviceIdWH()) || ''; } catch (e) { return ''; } };
-  const _wextIdentidad = () => {
-    const s = sesionActual; if (!s || !(s.idPersonal || s.id_personal)) return null;
-    const nombre = String((s.nombre || '') + ' ' + (s.apellido || '')).trim() || String(s.nombre || '');
-    return { nombre, zona: (window.WH_CONFIG && window.WH_CONFIG.zona) || '', idPersonal: String(s.idPersonal || s.id_personal), rol: String(s.rol || '') };
-  };
-  const _wextCssOnce = () => {
-    if (document.getElementById('_wextCss')) return;
-    const st = document.createElement('style'); st.id = '_wextCss';
-    st.textContent = `
-    @keyframes _wextIn{from{opacity:0;transform:scale(.9) translateY(10px)}to{opacity:1;transform:none}}
-    @keyframes _wextBeam{0%{left:-40%}100%{left:110%}}
-    @keyframes _wextRoll{0%{opacity:0;transform:translateY(-16px) scale(.7)}60%{opacity:1}100%{opacity:1;transform:none}}
-    @keyframes _wextBurst{0%{transform:scale(0);opacity:.9}70%{opacity:.35}100%{transform:scale(2.4);opacity:0}}
-    ._wextBk{position:fixed;inset:0;background:rgba(2,6,23,.72);backdrop-filter:blur(4px);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px}
-    ._wextCard{background:#0f172a;border:1px solid #1e293b;border-radius:18px;padding:22px;max-width:340px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:_wextIn .3s cubic-bezier(.2,.9,.3,1.2);position:relative;overflow:hidden}
-    ._wextBeamLine{position:absolute;top:0;height:2px;width:35%;background:linear-gradient(90deg,transparent,#38bdf8,transparent);animation:_wextBeam 1.6s ease-in-out infinite}
-    ._wextCode{font-size:34px;font-weight:800;letter-spacing:10px;color:#38bdf8;text-align:center;margin:10px 0;font-variant-numeric:tabular-nums}
-    ._wextCode span{display:inline-block;animation:_wextRoll .5s cubic-bezier(.2,.9,.3,1.3) both}
-    ._wextBurst{position:absolute;left:50%;top:38%;width:80px;height:80px;margin:-40px 0 0 -40px;border-radius:50%;background:radial-gradient(circle,#10b981,transparent 70%);animation:_wextBurst .8s ease-out forwards;pointer-events:none}
-    ._wextBtn{flex:1;padding:12px;border-radius:12px;border:none;font-weight:700;font-size:14px;cursor:pointer}
-    ._wextBtnOk{background:linear-gradient(135deg,#10b981,#059669);color:#fff;position:relative;overflow:hidden}
-    ._wextBtnNo{background:#1e293b;color:#cbd5e1}
-    ._wextRing{position:absolute;inset:0;pointer-events:none}
-    `;
-    document.head.appendChild(st);
-  };
-  const _wextOverlay = (html) => {
-    _wextCssOnce();
-    const bk = document.createElement('div'); bk.className = '_wextBk';
-    bk.innerHTML = `<div class="_wextCard"><div class="_wextBeamLine"></div>${html}</div>`;
-    document.body.appendChild(bk);
-    return bk;
-  };
-  const _wextCodeHtml = (code) => String(code == null ? '' : code).split('').map((d, i) =>
-    `<span style="animation-delay:${i * 0.09}s">${_wextEsc(d)}</span>`).join(' ');
-  const _wextBurst = (ov) => { try { const c = ov.querySelector('._wextCard'); if (!c) return; const b = document.createElement('div'); b.className = '_wextBurst'; c.appendChild(b); setTimeout(() => { try { b.remove(); } catch (e) {} }, 850); } catch (e) {} };
-  // ── LADO SOLICITANTE (2º equipo) ──
-  const _wextPedir = async () => {
-    if (_wextPedirAbierto) return;
-    const id = _wextIdentidad(); if (!id) return;
-    const dev = _wextDevId(); if (!dev) return;
-    const res = await _wextRpc('pedir_extension', { nombre: id.nombre, zona: id.zona, idPersonal: id.idPersonal, deviceId: dev, rol: id.rol, pushToken: (window._whPushToken || '') });
-    if (!res || !res.ok || !res.needsApproval || !res.idReq) return;
-    _wextPedirAbierto = true; _wextHaptic([40, 60, 40]);
-    const ov = _wextOverlay(`
-      <div style="text-align:center">
-        <div style="font-size:34px">🔗</div>
-        <div style="font-weight:800;color:#e2e8f0;font-size:16px;margin-top:6px">Vincular este equipo</div>
-        <div style="color:#94a3b8;font-size:12px;margin-top:4px">Mostrá este código en tu equipo principal y aprobá ahí.</div>
-        <div class="_wextCode">${_wextCodeHtml(res.codigo)}</div>
-        <div style="color:#64748b;font-size:11px" id="_wextWait">Esperando aprobación…</div>
-        <button class="_wextBtn _wextBtnNo" id="_wextCancel" style="margin-top:14px;width:100%">Cancelar</button>
-      </div>`);
-    let done = false;
-    const cerrar = () => { done = true; _wextPedirAbierto = false; try { ov.remove(); } catch (e) {} if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } };
-    ov.querySelector('#_wextCancel').onclick = () => { _wextRpc('rechazar_extension', { idReq: res.idReq }); cerrar(); };
-    if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; }
-    _wextPollReq = setInterval(async () => {
-      try {
-        if (done) return;
-        const st = await _wextRpc('extension_estado', { idReq: res.idReq, deviceId: dev });
-        if (!st || !st.ok) return;
-        if (st.estado === 'APROBADA') { _wextHaptic([10, 30, 10]); _wextBurst(ov); const w = ov.querySelector('#_wextWait'); if (w) { w.textContent = '✓ ¡Vinculado!'; w.style.color = '#10b981'; } setTimeout(cerrar, 900); }
-        else if (st.estado === 'RECHAZADA' || st.estado === 'EXPIRADA' || st.estado === 'NO_ENCONTRADA') { _wextHaptic([80]); const w = ov.querySelector('#_wextWait'); if (w) { w.textContent = st.estado === 'EXPIRADA' ? 'Expiró — reintentá' : 'Rechazado'; w.style.color = '#ef4444'; } setTimeout(cerrar, 1400); }
-      } catch (e) {}
-    }, 3000);
-    setTimeout(() => { if (!done) cerrar(); }, 130000);
-  };
-  // ── LADO PRINCIPAL ──
-  const _wextPrincipalTick = async () => {
-    try {
-      const dev = _wextDevId(); if (!dev) return;
-      const res = await _wextRpc('extension_pendientes', { deviceId: dev });
-      if (!res || !res.ok || !Array.isArray(res.pendientes) || !res.pendientes.length) return;
-      const req = res.pendientes[0];
-      if (_wextApprAbierto) return;
-      if (_wextShownAppr[req.idReq]) return;
-      if (_wextApprCooldown[req.idReq] && Date.now() < _wextApprCooldown[req.idReq]) return;
-      _wextShownAppr[req.idReq] = true; _wextApprAbierto = true; _wextHaptic([40, 60, 40]);
-      const ov = _wextOverlay(`
-        <div style="text-align:center">
-          <div style="font-size:34px">🔗</div>
-          <div style="font-weight:800;color:#e2e8f0;font-size:16px;margin-top:6px">Un equipo quiere entrar como</div>
-          <div style="color:#38bdf8;font-weight:800;font-size:18px">${_wextEsc(req.nombre || 'este usuario')}</div>
-          <div style="color:#94a3b8;font-size:12px;margin-top:6px">Verificá que el código coincida:</div>
-          <div class="_wextCode">${_wextCodeHtml(req.codigo)}</div>
-          <div style="display:flex;gap:10px;margin-top:14px">
-            <button class="_wextBtn _wextBtnNo" id="_wextRej">Rechazar</button>
-            <button class="_wextBtn _wextBtnOk" id="_wextOk"><span id="_wextOkTxt">Mantené para aceptar</span>
-              <svg class="_wextRing" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="302" stroke-dashoffset="302" id="_wextRingC" style="opacity:.6;transform:rotate(-90deg);transform-origin:center"/></svg>
-            </button>
-          </div>
-        </div>`);
-      let cerrado = false, autoT = null, holdT = null, prog = 0, confirming = false;
-      const cerrar = () => { if (cerrado) return; cerrado = true; _wextApprAbierto = false; if (autoT) clearTimeout(autoT); if (holdT) { clearInterval(holdT); holdT = null; } try { ov.remove(); } catch (e) {} };
-      autoT = setTimeout(() => { delete _wextShownAppr[req.idReq]; cerrar(); }, 115000);
-      ov.querySelector('#_wextRej').onclick = () => { _wextHaptic([80]); _wextRpc('rechazar_extension', { idReq: req.idReq }); cerrar(); };
-      const ring = ov.querySelector('#_wextRingC'); const okTxt = ov.querySelector('#_wextOkTxt'); const okBtn = ov.querySelector('#_wextOk');
-      const start = () => { if (holdT || confirming) return; _wextHaptic([15]); holdT = setInterval(() => { prog += 100 / 8; if (ring) ring.style.strokeDashoffset = String(302 - 302 * Math.min(1, prog / 100)); if (prog >= 100) { clearInterval(holdT); holdT = null; confirmar(); } }, 100); };
-      const stop = () => { if (holdT) { clearInterval(holdT); holdT = null; } prog = 0; if (ring) ring.style.strokeDashoffset = '302'; };
-      const confirmar = async () => {
-        if (confirming) return; confirming = true;
-        try {
-          _wextHaptic([15, 20, 25, 20, 40]); if (okTxt) okTxt.textContent = 'Aceptando…';
-          const r = await _wextRpc('aprobar_extension', { idReq: req.idReq, codigo: req.codigo, deviceId: dev });
-          if (r && r.ok) { if (okTxt) okTxt.textContent = '✓ Vinculado'; _wextHaptic([10, 30, 10]); _wextBurst(ov); setTimeout(cerrar, 900); }
-          else { if (okTxt) okTxt.textContent = 'No se pudo'; _wextHaptic([80]); _wextApprCooldown[req.idReq] = Date.now() + 20000; setTimeout(cerrar, 1200); }
-        } catch (e) { _wextApprCooldown[req.idReq] = Date.now() + 20000; setTimeout(cerrar, 1200); }
-      };
-      okBtn.addEventListener('mousedown', start); okBtn.addEventListener('touchstart', (e) => { e.preventDefault(); start(); }, { passive: false });
-      okBtn.addEventListener('mouseup', stop); okBtn.addEventListener('mouseleave', stop); okBtn.addEventListener('touchend', stop); okBtn.addEventListener('touchcancel', stop);
-    } catch (e) {}
-  };
-  function _wextIniciar() { _wextPedir(); if (_wextPollPpal) clearInterval(_wextPollPpal); _wextPollPpal = setInterval(_wextPrincipalTick, 5000); }
-  function _wextDetener() { if (_wextPollReq) { clearInterval(_wextPollReq); _wextPollReq = null; } if (_wextPollPpal) { clearInterval(_wextPollPpal); _wextPollPpal = null; } _wextShownAppr = {}; _wextPedirAbierto = false; }
 
   function _actualizarEstadoHeader({ online, pending, syncing }) {
     const dot    = document.getElementById('statusDot');
@@ -2279,7 +2149,6 @@ const Session = (() => {
   function _limpiarSesion() {
     localStorage.removeItem('wh_sesion');
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.detener();
-    try { _wextDetener(); } catch (_) {}   // [companion] frena polling + limpia FAB/overlay
   }
 
   function _mostrarApp() {
@@ -3431,8 +3300,6 @@ const Session = (() => {
         console.warn('[Push WH] getToken devolvió vacío');
         return;
       }
-      try { window._whPushToken = token; } catch (_) {}   // [companion] lo usa el pedido de vínculo
-
       // Registrar token en MOS GAS asociado al operador + deviceId (targeted exacto)
       const usuario = (sesionActual.nombre + ' ' + (sesionActual.apellido || '')).trim();
       const _devIdToken = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';

@@ -2942,12 +2942,6 @@ const API = (() => {
       try { return await _sbRpcWH('heartbeat_personal', { p: { idPersonal: String(idPersonal) } }, 'mos'); }
       catch (_) { return null; }
     },
-    // [companion WH] RPC directa mos.* del sistema de extensión de dispositivo + nota
-    //   compartida. cero-GAS: si el directo falla, devuelve null (degrada, NO cae a GAS).
-    extRpcSB: async (fn, body) => {
-      try { return await _sbRpcWH(String(fn), { p: body || {} }, 'mos'); }
-      catch (_) { return null; }
-    },
     cerrarTurno:        (p)      => post({ action: 'cerrarTurno', ...p }),
     getPersonal:        ()       => call({ action: 'getPersonal' }),
     // [423] tarifa por unidad de envasado (mos.config vía wh.get_tarifa_envasado) — para el "Tu pago" del modal
