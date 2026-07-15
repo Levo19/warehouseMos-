@@ -726,6 +726,11 @@ const ChatAlmacen = (() => {
   function _render() {
     const body = document.getElementById('chatAlmacenBody');
     if (!body) return;
+    // [perf] tope del historial en memoria/DOM: conservar los últimos 60 turnos (a Claude solo se
+    // reenvían MAX_HIST=8). Evita que _hist y el rebuild total del DOM crezcan toda la jornada.
+    // [fix rev 500x] al recortar del frente, desplazar _celebrarIdx (índice absoluto) por los removidos,
+    // si no el sparkle de la respuesta nueva deja de aparecer pasados 60 turnos.
+    if (_hist.length > 60) { const _rm = _hist.length - 60; _hist.splice(0, _rm); if (_celebrarIdx >= 0) _celebrarIdx -= _rm; }
     let html = '';
     if (!_hist.length && !_pensando) {
       html += '<div class="cam-hint">Pregunta en lenguaje natural.<br>Ejemplo: «¿cuánto azúcar entró esta semana?»</div>';

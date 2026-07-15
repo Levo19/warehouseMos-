@@ -853,6 +853,7 @@ const OfflineManager = (() => {
     // repetido). Es redundante: el poller de versión (50s) + realtime detectan cambios del catálogo y bajan
     // SOLO el delta (~42KB) cuando la versión sube. Aquí solo refrescamos lo operacional (guías/stock).
     _opRefreshTimer = setInterval(() => {
+      if (document.hidden) return;     // [perf] no precargar con la pestaña oculta (el handler visible refresca al volver)
       precargarOperacional();          // throttled internamente
     }, 60000);
   }

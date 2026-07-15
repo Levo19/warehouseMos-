@@ -263,8 +263,8 @@
   function _escHtml(s) { return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]); }
   function _escAttr(s) { return String(s||'').replace(/'/g, '&#39;'); }
 
-  // Polling badge cada 90s
-  setInterval(() => { refreshBadge(); }, 90000);
+  // Polling badge cada 90s (pausa con la pestaña oculta para no consultar en background)
+  setInterval(() => { if (!document.hidden) refreshBadge(); }, 90000);
   // Bind inputs cuando el DOM esté listo
   if (document.readyState !== 'loading') setTimeout(_bindInputs, 500);
   else document.addEventListener('DOMContentLoaded', () => setTimeout(_bindInputs, 500));

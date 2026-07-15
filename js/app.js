@@ -3364,6 +3364,7 @@ const BloqueoRemoto = (() => {
   function _mosUrl() { return window.WH_CONFIG?.mosGasUrl || ''; }
 
   async function _check() {
+    if (document.hidden) return;   // [perf] BloqueoRemoto no consulta MOS con la pestaña oculta
     const ses = Session.getSesion();
     if (!ses || !ses.idPersonal) return;
     if (!navigator.onLine) return;
@@ -3857,6 +3858,9 @@ const App = (() => {
     // refrescar datos operacionales para ver cambios de otros dispositivos
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
+      // [perf sesión larga] Al volver al frente, refrescar de una lo importante (los pollers se pausan
+      // mientras la pestaña está oculta). Pickups por su evento realtime; el resto reanuda en su próximo tick.
+      try { window.dispatchEvent(new Event('wh:pickups-realtime')); } catch (_) {}
       if (typeof OfflineManager === 'undefined') return;
       // El throttle interno de 15s previene spam
       OfflineManager.precargarOperacional(false).catch(() => {});
@@ -14155,6 +14159,8 @@ const DespachoView = (() => {
       if (_pickupActivo) {
         listaEl.style.display = 'none';
         listaEl.innerHTML = '';
+        listaEl._lastHtml = '';   // [fix dirty-render] invalidar la firma: si no, al volver a inactivo con el
+                                  // mismo set de pickups el dirty-check saltaría el render y el feed quedaría vacío.
       } else if (_pickupsPendientes.length > 0 || sombras.length > 0) {
         listaEl.style.display = 'block';
         const pickupsHtml = _pickupsPendientes.slice(0, 8).map(p => {
@@ -14318,7 +14324,10 @@ const DespachoView = (() => {
               ${btnX}
             </div>`;
         }).join('');
-        listaEl.innerHTML = pickupsHtml + sombrasHtml;
+        // [perf sesión larga] dirty-render: si el HTML es idéntico al último, NO reescribir el DOM
+        // (evita el reparse + layout cada 30s cuando nada cambió → menos churn acumulado en la jornada).
+        const _htmlFeed = pickupsHtml + sombrasHtml;
+        if (listaEl._lastHtml !== _htmlFeed) { listaEl.innerHTML = _htmlFeed; listaEl._lastHtml = _htmlFeed; }
       } else {
         listaEl.style.display = 'none';
       }
@@ -14326,6 +14335,10 @@ const DespachoView = (() => {
   }
 
   async function _pollPickups(_retry) {
+    // [perf sesión larga] No pollear/renderizar con la pestaña oculta: el feed se refresca al volver a
+    // 'visible' (handler central). Ahorra red + re-render de fondo todo el turno. El realtime/manual re-llama
+    // esta función al volver. (El timer sigue tickeando pero sale barato.)
+    if (document.hidden) return;
     // [v2.13.372] force=true → lectura FRESCA (bypass caché 4s) para que la consolidación
     // server-side (realtime) y la carga inicial muestren los productos al instante, sin refrescar.
     const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO', force: true }).catch(() => ({ ok: false }));
@@ -16072,6 +16085,7 @@ const DespachoView = (() => {
     if (_lsPanelTimer) { clearInterval(_lsPanelTimer); _lsPanelTimer = null; }
   }
   function _lsRefrescarPanel() {
+    if (document.hidden) return;   // [perf] no refrescar el panel con la pestaña oculta (se refresca al volver)
     API.getListasSombra({}).then(r => {
       if (!r || !r.ok) return;
       _lsPanelData = (r.data?.listas) || [];
@@ -17062,8 +17076,10 @@ const PreingresosView = (() => {
         dots[prev]?.classList.remove('on');
         dots[el._rotIdx]?.classList.add('on');
       };
+      // [perf] al parar, quitar el id del array (antes solo hacía clearInterval y el array crecía con cada
+      // hover start/stop hasta el próximo re-render → ids muertos acumulados en una vista estática con mucho hover).
       const start = () => { if (!timer) { timer = setInterval(tick, 2700); _fotoRotTimers.push(timer); } };
-      const stop  = () => { if (timer) { clearInterval(timer); timer = null; } };
+      const stop  = () => { if (timer) { clearInterval(timer); const i = _fotoRotTimers.indexOf(timer); if (i >= 0) _fotoRotTimers.splice(i, 1); timer = null; } };
       el.addEventListener('mouseenter', stop);
       el.addEventListener('mouseleave', start);
       el.addEventListener('touchstart', stop, { passive: true });
@@ -23828,4 +23844,23 @@ window.WhAdhesivoReprint = WhAdhesivoReprint;
 // ════════════════════════════════════════════════
 // Init
 // ════════════════════════════════════════════════
+// [perf sesión larga · Fase 4] Red de seguridad anti-degradación: si la app lleva >12h abierta, está OCULTA
+// (nadie mirando) y NO hay un despacho de pickup en curso, recargar suave para limpiar DOM/memoria acumulada
+// sin depender del F5 manual. Cart/pickup/cola se persisten en localStorage y se recuperan al recargar.
+// Desactivable con localStorage 'wh_no_autoreload'='1'. Chequea cada 30 min.
+(function _whHousekeepReload() {
+  var _bootTs = Date.now();
+  setInterval(function () {
+    try {
+      if (localStorage.getItem('wh_no_autoreload') === '1') return;
+      if (!document.hidden) return;                                  // solo si nadie está interactuando
+      if (Date.now() - _bootTs < 12 * 3600 * 1000) return;           // solo tras 12h de sesión
+      // [fix rev 500x] usar el detector canónico de trabajo activo (pickup + carrito de despacho + lista
+      // sombra), el mismo que usa el reload diferido (index.html:4695) — antes solo miraba el pickup activo.
+      if (window._whHayTrabajoActivo && window._whHayTrabajoActivo()) return;
+      location.reload();
+    } catch (_) {}
+  }, 30 * 60 * 1000);
+})();
+
 document.addEventListener('DOMContentLoaded', () => App.init());

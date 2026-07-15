@@ -160,6 +160,7 @@
   function startPolling() {
     if (_polling) return;
     _polling = setInterval(() => {
+      if (document.hidden) return;   // [perf] no consultar el resumen con la pestaña oculta
       _cargarResumen(_hoyStr()).then(() => {
         if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
       });
