@@ -2148,8 +2148,14 @@
     .ls-upload-btn:hover { border-color:#a78bfa; background:rgba(168,85,247,.1); }
     .ls-upload-btn:active { transform:scale(.97); }
     .ls-upload-ico { font-size:1.6em; line-height:1; }
-    .ls-archivo-preview { margin-top:12px; display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(168,85,247,.1); border:1px solid rgba(168,85,247,.3); }
+    .ls-archivo-preview { margin-top:12px; display:flex; align-items:center; flex-wrap:wrap; gap:10px 12px; padding:10px 12px; border-radius:12px; background:rgba(168,85,247,.1); border:1px solid rgba(168,85,247,.3); }
     .ls-archivo-preview img { width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid rgba(168,85,247,.3); }
+    .ls-thumbs { display:flex; flex-wrap:wrap; gap:8px; }
+    .ls-thumb-wrap { position:relative; }
+    .ls-thumb { width:52px; height:52px; border-radius:8px; border:1px solid rgba(168,85,247,.35); background-size:cover; background-position:center; background-repeat:no-repeat; display:flex; align-items:center; justify-content:center; font-size:1.6em; }
+    .ls-thumb-pdf { background:rgba(168,85,247,.15); }
+    .ls-thumb-x { position:absolute; top:-6px; right:-6px; width:20px; height:20px; border-radius:50%; border:none; background:#ef4444; color:#fff; font-weight:900; font-size:.85em; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,.4); -webkit-tap-highlight-color:transparent; }
+    .ls-thumb-x:active { transform:scale(.9); }
     .ls-archivo-info { flex:1; min-width:0; }
     .ls-archivo-nombre { font-size:.8em; font-weight:800; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
     .ls-archivo-tipo { font-size:.66em; color:#a5b4fc; margin-top:2px; line-height:1.35; }
@@ -6499,8 +6505,9 @@
       <!-- Paso 1: pegado -->
       <div id="lsModalPaso1" class="ls-modal-paso">
         <p class="ls-modal-hint">
-          Pega una lista, o subí una <b>foto</b> / <b>PDF</b> (captura de Excel, WhatsApp, tabla).
-          La IA detecta cada producto y su cantidad <b>solicitada</b>, e ignora cabeceras y columnas de mín/máx/stock/precio.
+          Pega una lista, o subí <b>foto(s)</b> / <b>PDF</b> (captura de Excel, WhatsApp, tabla).
+          Podés subir <b>varias fotos</b> de la misma lista y la IA las combina.
+          Detecta cada producto y su cantidad <b>solicitada</b>, e ignora columnas de mín/máx/stock/precio.
         </p>
         <textarea id="lsTextoCrudo" class="ls-textarea"
                   oninput="DespachoView.lsTextoInput(this.value)"
@@ -6513,8 +6520,8 @@
             <span class="ls-upload-ico">📷</span><span>Tomar foto</span>
           </label>
           <label class="ls-upload-btn">
-            <input type="file" accept="image/*,application/pdf" style="display:none" onchange="DespachoView.lsArchivoElegido(this)">
-            <span class="ls-upload-ico">🖼️</span><span>Imagen o PDF</span>
+            <input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="DespachoView.lsArchivoElegido(this)">
+            <span class="ls-upload-ico">🖼️</span><span>Imágenes o PDF</span>
           </label>
         </div>
         <div id="lsArchivoPreview" class="ls-archivo-preview" style="display:none"></div>

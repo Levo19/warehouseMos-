@@ -16407,48 +16407,56 @@ const DespachoView = (() => {
   // ── Modal IA — pegado y análisis ──────────────────────────
   let _lsPreviewBuffer = [];
   let _lsZonaSel = 'ZONA-01';   // [v2.13.370] zona destino de la lista (default Zona 1)
-  let _lsArchivo = null;        // [foto/PDF] {b64,mime,nombre,esPdf} — imagen o PDF a leer por la IA (visión)
+  let _lsArchivos = [];         // [multi] {b64,mime,nombre,esPdf}[] — 1 PDF o VARIAS imágenes (partes de la misma lista)
+  const _LS_MAX_IMG = 8;        // tope de fotos por lista
 
-  // [foto/PDF] El operador eligió una foto/imagen/PDF: la leemos a base64 y la mostramos.
-  // La IA (Sonnet, visión) la lee directo y detecta la columna SOLICITADO, ignorando min/máx/stock/precio.
+  // [multi] El operador eligió foto(s)/imagen(es)/PDF. Varias imágenes = partes de la MISMA lista.
+  // La IA (Sonnet, visión) las combina y detecta la columna SOLICITADO, ignorando min/máx/stock/precio.
   function lsArchivoElegido(input) {
-    const f = input && input.files && input.files[0];
-    if (!f) return;
-    const esPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
-    // Imagen: se reduce antes de mandar (tope alto ok). PDF: va SIN reducir → tope bajo el límite de Claude
-    // (~32MB en base64) y del upload móvil de almacén.
-    const MAX = esPdf ? 15 * 1024 * 1024 : 25 * 1024 * 1024;
-    if (f.size > MAX) {
-      toast(esPdf ? 'PDF muy pesado (máx 15 MB) — reducilo o sacá fotos de las hojas'
-                  : 'Imagen muy grande (máx 25 MB) — sacá una foto más liviana', 'warn', 6000);
-      input.value = ''; return;
-    }
-    const reader = new FileReader();
-    reader.onload = async () => {
-      let b64 = String(reader.result || '');
-      let mime = f.type || (esPdf ? 'application/pdf' : 'image/jpeg');
-      if (!esPdf) {
-        // Redimensiona/normaliza la foto: convierte HEIC→JPEG (iPhone), baja resolución a ~1600px
-        // → payload chico y confiable con la IA, sin perder legibilidad de la tabla.
-        let d = null;
-        try { d = await _lsPrepararImagen(b64); } catch(_){}
-        if (d) { b64 = d; mime = 'image/jpeg'; }
-        else if (!/^image\/(jpe?g|png|webp|gif)$/i.test(mime)) {
-          // No se pudo decodificar (ej. HEIC en Android) y el formato no lo acepta la IA → avisar, no mandar y fallar.
-          toast('No pude leer esa foto (formato ' + (mime.split('/')[1] || '?') + '). Probá con JPG/PNG o una captura de pantalla.', 'warn', 6000);
-          return;   // input.value ya quedó '' abajo
-        }
+    const files = input && input.files ? Array.prototype.slice.call(input.files) : [];
+    input.value = '';   // permite re-elegir los mismos archivos
+    if (!files.length) return;
+    files.forEach(f => {
+      const esPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+      // Imagen: se reduce antes de mandar. PDF: va SIN reducir → tope bajo el límite de Claude (~32MB base64).
+      const MAX = esPdf ? 15 * 1024 * 1024 : 25 * 1024 * 1024;
+      if (f.size > MAX) {
+        toast(esPdf ? 'PDF muy pesado (máx 15 MB) — reducilo o sacá fotos de las hojas'
+                    : 'Una imagen supera 25 MB — sacá una foto más liviana', 'warn', 6000);
+        return;
       }
-      _lsArchivo = { b64, mime, nombre: f.name || (esPdf ? 'documento.pdf' : 'foto.jpg'), esPdf };
-      const ta = document.getElementById('lsTextoCrudo'); if (ta) ta.value = '';   // archivo y texto son mutuamente excluyentes
-      _lsRenderArchivoPreview();
-      try { SoundFX.click(); } catch(_){}
-    };
-    reader.onerror = () => toast('No pude leer el archivo, probá de nuevo', 'warn');
-    reader.readAsDataURL(f);
-    input.value = '';   // permite re-elegir el mismo archivo
+      const reader = new FileReader();
+      reader.onload = async () => {
+        let b64 = String(reader.result || '');
+        let mime = f.type || (esPdf ? 'application/pdf' : 'image/jpeg');
+        if (!esPdf) {
+          // Redimensiona/normaliza (HEIC→JPEG iPhone, ~1600px) → legible y liviano para la IA.
+          let d = null;
+          try { d = await _lsPrepararImagen(b64); } catch(_){}
+          if (d) { b64 = d; mime = 'image/jpeg'; }
+          else if (!/^image\/(jpe?g|png|webp|gif)$/i.test(mime)) {
+            toast('No pude leer una foto (formato ' + (mime.split('/')[1] || '?') + '). Probá con JPG/PNG o una captura.', 'warn', 6000);
+            return;
+          }
+        }
+        const item = { b64, mime, nombre: f.name || (esPdf ? 'documento.pdf' : 'foto.jpg'), esPdf };
+        if (esPdf) {
+          _lsArchivos = [item];                                   // un PDF reemplaza todo (no se mezcla con imágenes)
+        } else {
+          if (_lsArchivos.some(a => a.esPdf)) _lsArchivos = [];   // había un PDF → lo reemplazan las imágenes
+          if (_lsArchivos.length >= _LS_MAX_IMG) { toast('Máx ' + _LS_MAX_IMG + ' fotos por lista', 'warn'); return; }
+          _lsArchivos.push(item);
+        }
+        const ta = document.getElementById('lsTextoCrudo'); if (ta) ta.value = '';   // archivo y texto son mutuamente excluyentes
+        _lsRenderArchivoPreview();
+        try { SoundFX.click(); } catch(_){}
+      };
+      reader.onerror = () => toast('No pude leer un archivo, probá de nuevo', 'warn');
+      reader.readAsDataURL(f);
+    });
   }
-  // [foto] Redimensiona una imagen (data URL) a máx 1600px lado mayor, JPEG 0.85. Devuelve data URL o null.
+  // [foto] Redimensiona una imagen (data URL) a máx 1600px lado mayor, JPEG 0.85 (óptimo para la visión de
+  // Claude: legible + liviano). Convierte HEIC→JPEG. Devuelve data URL o null si no pudo decodificar.
   function _lsPrepararImagen(dataUrl) {
     return new Promise((resolve) => {
       const img = new Image();
@@ -16470,21 +16478,31 @@ const DespachoView = (() => {
   function _lsRenderArchivoPreview() {
     const box = document.getElementById('lsArchivoPreview');
     if (!box) return;
-    if (!_lsArchivo) { box.style.display = 'none'; box.innerHTML = ''; return; }
-    const thumb = _lsArchivo.esPdf
-      ? '<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:1.9em;background:rgba(168,85,247,.15);border-radius:8px">📄</div>'
-      : '<img src="' + _lsArchivo.b64 + '" alt="vista previa">';
-    box.innerHTML = thumb +
-      '<div class="ls-archivo-info">' +
-        '<div class="ls-archivo-nombre">' + escHtml(_lsArchivo.nombre) + '</div>' +
-        '<div class="ls-archivo-tipo">' + (_lsArchivo.esPdf ? 'PDF' : 'Imagen') + ' listo · la IA leerá la tabla y detectará el pedido</div>' +
-      '</div>' +
-      '<button class="ls-archivo-x" onclick="DespachoView.lsQuitarArchivo()">Quitar</button>';
+    if (!_lsArchivos.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const esPdf = _lsArchivos[0].esPdf;
+    const thumbs = _lsArchivos.map((a, i) =>
+      '<div class="ls-thumb-wrap">' +
+        (a.esPdf ? '<div class="ls-thumb ls-thumb-pdf">📄</div>'
+                 : '<div class="ls-thumb" style="background-image:url(' + a.b64 + ')"></div>') +
+        '<button class="ls-thumb-x" title="Quitar" onclick="DespachoView.lsQuitarArchivo(' + i + ')">×</button>' +
+      '</div>').join('');
+    const info = esPdf ? 'PDF listo · la IA leerá la tabla y detectará el pedido'
+      : (_lsArchivos.length + (_lsArchivos.length > 1
+          ? ' fotos · la IA las combina en UNA sola lista'
+          : ' foto · agregá más si la lista sigue') );
+    box.innerHTML =
+      '<div class="ls-thumbs">' + thumbs + '</div>' +
+      '<div class="ls-archivo-info"><div class="ls-archivo-tipo">' + info + '</div></div>' +
+      '<button class="ls-archivo-x" onclick="DespachoView.lsQuitarArchivo()">Quitar todo</button>';
     box.style.display = 'flex';
   }
-  function lsQuitarArchivo() { _lsArchivo = null; _lsRenderArchivoPreview(); try { SoundFX.click(); } catch(_){} }
-  // [foto/PDF] Si el operador empieza a escribir/pegar texto, descartamos el archivo elegido (son mutuamente excluyentes).
-  function lsTextoInput(v) { if (_lsArchivo && String(v || '').trim()) { _lsArchivo = null; _lsRenderArchivoPreview(); } }
+  function lsQuitarArchivo(i) {
+    if (typeof i === 'number') { _lsArchivos.splice(i, 1); } else { _lsArchivos = []; }
+    _lsRenderArchivoPreview();
+    try { SoundFX.click(); } catch(_){}
+  }
+  // [multi] Si el operador empieza a escribir/pegar texto, descartamos los archivos (mutuamente excluyentes).
+  function lsTextoInput(v) { if (_lsArchivos.length && String(v || '').trim()) { _lsArchivos = []; _lsRenderArchivoPreview(); } }
 
   // Botones de zona del modal de lista sombra: marca la elegida y resalta el botón.
   function lsSetZona(z) {
@@ -16499,7 +16517,7 @@ const DespachoView = (() => {
   function abrirModalLista() {
     document.getElementById('modalSubirLista').style.display = 'flex';
     _lsMostrarPaso(1);
-    _lsArchivo = null; _lsRenderArchivoPreview();   // [foto/PDF] empezar limpio en cada apertura
+    _lsArchivos = []; _lsRenderArchivoPreview();   // [foto/PDF] empezar limpio en cada apertura
     lsSetZona('ZONA-01');   // reset a Zona 1 por defecto en cada apertura
     setTimeout(() => document.getElementById('lsTextoCrudo')?.focus(), 250);
     try { SoundFX.click(); } catch(_){}
@@ -16509,7 +16527,7 @@ const DespachoView = (() => {
     document.getElementById('modalSubirLista').style.display = 'none';
     document.getElementById('lsTextoCrudo').value = '';
     _lsPreviewBuffer = [];
-    _lsArchivo = null; _lsRenderArchivoPreview();   // [foto/PDF] limpiar archivo elegido
+    _lsArchivos = []; _lsRenderArchivoPreview();   // [foto/PDF] limpiar archivo elegido
     try { SoundFX.click(); } catch(_){}
   }
 
@@ -16528,18 +16546,20 @@ const DespachoView = (() => {
   // de ~30 productos y procesa secuencialmente con progreso visible. Esto
   // permite pegar listas de cualquier tamaño sin esperar gigante ni saturar
   // el rate-limit de Claude. Costo: ~$0.0005 por chunk, prácticamente gratis.
-  // [foto/PDF] Analiza la imagen/PDF con la IA de visión (Sonnet). 1 sola llamada, sin chunking.
+  // [multi] Analiza la(s) imagen(es)/PDF con la IA de visión (Sonnet). 1 sola llamada, sin chunking.
   async function _analizarArchivoConIA() {
-    if (!_lsArchivo) return;
+    if (!_lsArchivos.length) return;
+    const esPdf = _lsArchivos[0].esPdf;
+    const nImg = _lsArchivos.length;
     _lsMostrarPaso(2);
     try { SoundFX.beep(); } catch(_){}
     const subEl = document.getElementById('lsLoadingSub');
-    if (subEl) subEl.textContent = _lsArchivo.esPdf
+    if (subEl) subEl.textContent = esPdf
       ? 'Leyendo el PDF y separando columnas (pedido vs mín/máx)…'
-      : 'Leyendo la imagen y separando columnas (pedido vs mín/máx)…';
+      : (nImg > 1 ? 'Combinando ' + nImg + ' fotos y separando columnas…' : 'Leyendo la imagen y separando columnas (pedido vs mín/máx)…');
     let res;
     try {
-      res = await API.analizarListaSombra({ archivoB64: _lsArchivo.b64, mimeType: _lsArchivo.mime });
+      res = await API.analizarListaSombra({ archivos: _lsArchivos.map(a => ({ b64: a.b64, mime: a.mime })) });
     } catch (e) {
       res = { error: 'NETWORK', mensaje: (e && e.message) || 'red' };
     }
@@ -16549,24 +16569,30 @@ const DespachoView = (() => {
       _lsMostrarPaso(3);
       try { SoundFX.done(); } catch(_){}
       vibrate([20, 30, 40]);
-      toast('✓ ' + res.data.items.length + ' productos detectados de la ' + (_lsArchivo.esPdf ? 'PDF' : 'imagen'), 'ok', 4000);
+      toast('✓ ' + res.data.items.length + ' productos detectados', 'ok', 4000);
     } else {
       const err = (res && res.error) || 'Error';
+      const msgRaw = String((res && res.mensaje) || '');
+      const esTimeout = err === 'IA_EDGE_FAIL' && /abort|timeout|signal/i.test(msgRaw);
       const sinItems = res && res.ok && res.data && Array.isArray(res.data.items) && !res.data.items.length;
       document.getElementById('lsErrorTitulo').textContent =
-        err === 'KEY_NOT_SET' ? 'IA no configurada' : (sinItems ? 'No detecté productos' : 'No pude analizar');
+        err === 'KEY_NOT_SET' ? 'IA no configurada'
+        : esTimeout ? 'Tardó demasiado'
+        : (sinItems ? 'No detecté productos' : 'No pude analizar');
       document.getElementById('lsErrorMsg').textContent =
         err === 'KEY_NOT_SET' ? 'La API key de Claude no está configurada. Avisa al administrador.'
-        : (sinItems ? 'La IA no encontró productos en la imagen/PDF. Probá con una foto más nítida y derecha, o pegá la lista como texto.'
-                    : ((res && res.mensaje) || 'Probá con una foto más clara o pegá la lista como texto.'));
+        : esTimeout ? (esPdf ? 'El PDF es muy pesado o la conexión está lenta. Probá con un PDF más liviano, o sacá fotos de las hojas y súbelas.'
+                             : 'La conexión está lenta o hay muchas fotos. Probá con menos fotos o con mejor señal.')
+        : (sinItems ? 'La IA no encontró productos. Probá con fotos más nítidas y derechas, agregá más fotos si la lista sigue, o pegá la lista como texto.'
+                    : (msgRaw || 'Probá con fotos más claras o pegá la lista como texto.'));
       _lsMostrarPaso(4);
       try { SoundFX.warn(); } catch(_){}
     }
   }
 
   async function analizarListaConIA() {
-    // [foto/PDF] Si hay una foto/imagen/PDF cargada, la IA la lee directo (visión).
-    if (_lsArchivo) return _analizarArchivoConIA();
+    // [multi] Si hay foto(s)/imagen(es)/PDF cargadas, la IA las lee directo (visión).
+    if (_lsArchivos.length) return _analizarArchivoConIA();
     const texto = document.getElementById('lsTextoCrudo').value.trim();
     if (!texto) { toast('Pega una lista o subí una foto/PDF primero', 'warn'); return; }
     if (texto.length < 10) { toast('La lista parece muy corta', 'warn'); return; }

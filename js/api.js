@@ -235,13 +235,13 @@ const API = (() => {
   }
 
   // [PASO 5 · B5] Llama la Edge `ia` (proxy a Claude). body = {messages, system?, model?, max_tokens?}. Devuelve el JSON de Claude.
-  async function _llamarEdgeIA(body) {
+  async function _llamarEdgeIA(body, timeoutMs) {
     const token = await _mintTokenWH();
     const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/ia`, {
       method: 'POST',
       headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
-    }, 40000);   // la IA puede tardar
+    }, timeoutMs || 40000);   // la IA puede tardar; visión/PDF necesita MÁS (subida del archivo en red móvil)
     if (!res.ok) throw new Error('ia ' + res.status);
     return res.json();   // {content:[{text}], ...} de Claude
   }
@@ -1586,16 +1586,19 @@ const API = (() => {
       } catch (_) { return null; }
     }
     if (params.action === 'analizarListaSombra') {
-      // IA directa vía Edge `ia` (Claude). Acepta TEXTO pegado o una FOTO/IMAGEN/PDF (visión, Sonnet).
-      const archivoB64 = String(params.archivoB64 || '').trim();
-      const esArchivo = !!archivoB64;
+      // IA directa vía Edge `ia` (Claude). Acepta TEXTO pegado, o UNA o VARIAS fotos/imágenes, o un PDF (visión, Sonnet).
+      // [multi] archivos = [{b64,mime}] (varias imágenes = partes de la misma lista, o 1 PDF). Back-compat: archivoB64 único.
+      let archivos = Array.isArray(params.archivos) ? params.archivos.filter(a => a && a.b64) : [];
+      if (!archivos.length && params.archivoB64) archivos = [{ b64: params.archivoB64, mime: params.mimeType }];
+      const esArchivo = archivos.length > 0;
       const texto = String(params.texto || '').trim();
       if (!esArchivo && !texto) return { ok: false, error: 'TEXTO_VACIO' };
       if (!esArchivo && texto.length > 50000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Chunk demasiado grande' };
       // System prompt COLUMNA-CONSCIENTE: la IA nunca confunde "solicitado" con mín/máx/stock/precio.
       const system = [
         'Eres un asistente experto en leer listas/tablas de PEDIDOS de almacén y extraer SOLO los productos con la cantidad SOLICITADA (lo que hay que despachar).',
-        'La lista puede venir como texto pegado, foto, captura de Excel, tabla o PDF (WhatsApp, email, ticket impreso).', '',
+        'La lista puede venir como texto pegado, foto(s), captura de Excel, tabla o PDF (WhatsApp, email, ticket impreso).',
+        'Si recibes VARIAS imágenes, son PARTES DE LA MISMA lista (varias fotos o varias hojas): combínalas en UN SOLO resultado, sin duplicar productos ni sumar cantidades repetidas. Lee con cuidado incluso fotos inclinadas, con sombra o de baja calidad; si un renglón es ilegible, omítelo antes que inventar.', '',
         'REGLA DE ORO — COLUMNAS DE CANTIDAD:',
         'Muchas listas traen VARIAS columnas numéricas por producto. Ejemplo:',
         '  Producto            Solicitado   Cant.Min   Cant.Max   Stock   Precio',
@@ -1614,29 +1617,32 @@ const API = (() => {
         'RESPONDE EXCLUSIVAMENTE con JSON válido en este formato (sin markdown, sin comentarios):',
         '{"items":[{"nombre":"...","cantidad":N.N,"codigoVisto":"..."}]}'
       ].join('\n');
-      // Mensaje: archivo (visión, Sonnet — no confunde columnas) o texto (default Haiku, ya chunkeado por el front).
+      // Mensaje: archivo(s) (visión, Sonnet — no confunde columnas) o texto (default Haiku, ya chunkeado por el front).
       let body;
       if (esArchivo) {
-        const data = archivoB64.replace(/^data:[^;]+;base64,/, '');   // Claude rechaza el prefijo data-URI
-        const m = /^data:([^;]+);/.exec(archivoB64);
-        const mime = (m && m[1]) || String(params.mimeType || '') || 'image/jpeg';
-        const esPdf = /pdf/i.test(mime);
-        const bloque = esPdf
-          ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
-          : { type: 'image',    source: { type: 'base64', media_type: mime, data } };
-        body = {
-          model: 'claude-sonnet-5', max_tokens: 8192, system,
-          messages: [{ role: 'user', content: [
-            bloque,
-            { type: 'text', text: 'Lee esta lista/tabla y extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio). Devuelve solo el JSON indicado.' }
-          ] }]
-        };
+        const bloques = [];
+        for (const a of archivos.slice(0, 8)) {   // tope 8 bloques (varias fotos de la misma lista)
+          const raw = String(a.b64 || '').trim(); if (!raw) continue;
+          const data = raw.replace(/^data:[^;]+;base64,/, '');   // Claude rechaza el prefijo data-URI
+          const m = /^data:([^;]+);/.exec(raw);
+          const mime = (m && m[1]) || String(a.mime || '') || 'image/jpeg';
+          bloques.push(/pdf/i.test(mime)
+            ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+            : { type: 'image',    source: { type: 'base64', media_type: mime, data } });
+        }
+        if (!bloques.length) return { ok: false, error: 'TEXTO_VACIO' };
+        const nImg = bloques.length;
+        bloques.push({ type: 'text', text: (nImg > 1
+          ? 'Estas ' + nImg + ' imágenes son partes de la MISMA lista: combínalas en un solo resultado, sin duplicar. '
+          : '') + 'Extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio). Devuelve solo el JSON indicado.' });
+        body = { model: 'claude-sonnet-5', max_tokens: 8192, system, messages: [{ role: 'user', content: bloques }] };
       } else {
         body = { max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] };
       }
       let resp;
       // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa.
-      try { resp = await _llamarEdgeIA(body); }
+      // Visión/PDF: timeout amplio (subida del/los archivo(s) en red móvil + procesamiento). Texto: 40s.
+      try { resp = await _llamarEdgeIA(body, esArchivo ? 120000 : 40000); }
       catch (e) { return { ok: false, error: 'IA_EDGE_FAIL', mensaje: 'IA no disponible (Edge): ' + ((e && e.message) || 'red') }; }
       // [robusto] Sonnet-5 puede emitir un bloque `thinking` ANTES del texto → tomar el primer bloque type==='text',
       // no content[0] (que podría ser el thinking con .text vacío → PARSE_FAIL falso).
