@@ -1495,7 +1495,7 @@ const Session = (() => {
     //   · Diagnóstico → solo por consola: App.nav('diagnostico').
     //   · Herramientas (dev) → Config ▸ Avanzado ▸ "Abrir Herramientas (dev)" (admin-gated).
     const rolUp = String(sesionActual.rol || '').toUpperCase();
-    const esAdmin  = (rolUp === 'MASTER' || rolUp === 'ADMINISTRADOR');
+    const esAdmin  = (rolUp === 'ADMIN' || rolUp === 'ADMINISTRADOR' || rolUp === 'MASTER');   // [fix 501] incluir 'ADMIN' (rol real del admin) + ascendidos (login devuelve rol efectivo ADMIN)
     const sideLogs = document.getElementById('sideRowLogs');
     if (sideLogs) sideLogs.style.display = esAdmin ? '' : 'none';   // auditoría: admin + master
 
@@ -11516,7 +11516,7 @@ const PrintHub = (() => {
 
   function _esAdminMaster() {
     const r = String(window.WH_CONFIG?.rol || '').toUpperCase();
-    return r === 'MASTER' || r === 'ADMINISTRADOR';
+    return r === 'ADMIN' || r === 'ADMINISTRADOR' || r === 'MASTER';   // [fix 501] 'ADMIN' faltaba → ni el admin real (ni ascendido) tenían multi-impresora
   }
 
   // [v2.13.37] Filtros del modal — persisten entre aperturas en sesión.
@@ -11781,7 +11781,7 @@ const ConfigPanel = (() => {
     try {
       const s = (typeof Session !== 'undefined' && Session.getSesion) ? Session.getSesion() : null;
       const rol = String((s && s.rol) || '').toUpperCase();
-      return rol === 'MASTER' || rol === 'ADMINISTRADOR';
+      return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER';   // [fix 501] incluir 'ADMIN'
     } catch (_) { return false; }
   }
 
