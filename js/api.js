@@ -1586,29 +1586,63 @@ const API = (() => {
       } catch (_) { return null; }
     }
     if (params.action === 'analizarListaSombra') {
-      // IA directa vía Edge `ia` (Claude). Réplica fiel de analizarListaSombra (IA.gs): mismo system + parse + normalización.
+      // IA directa vía Edge `ia` (Claude). Acepta TEXTO pegado o una FOTO/IMAGEN/PDF (visión, Sonnet).
+      const archivoB64 = String(params.archivoB64 || '').trim();
+      const esArchivo = !!archivoB64;
       const texto = String(params.texto || '').trim();
-      if (!texto) return { ok: false, error: 'TEXTO_VACIO' };
-      if (texto.length > 50000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Chunk demasiado grande' };
+      if (!esArchivo && !texto) return { ok: false, error: 'TEXTO_VACIO' };
+      if (!esArchivo && texto.length > 50000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Chunk demasiado grande' };
+      // System prompt COLUMNA-CONSCIENTE: la IA nunca confunde "solicitado" con mín/máx/stock/precio.
       const system = [
-        'Eres un asistente que limpia listas de productos de almacén.',
-        'Recibes texto pegado de cualquier formato (Excel, WhatsApp, email, ticket impreso).',
-        'Tu trabajo: extraer SOLO los productos reales con su cantidad pedida.', '',
-        'IGNORA:', '- Cabeceras (Código, Descripción, Pedido, etc.)', '- Totales / subtotales',
-        '- Líneas separadoras (---, ===, ...)', '- Comentarios o notas que no sean producto', '',
+        'Eres un asistente experto en leer listas/tablas de PEDIDOS de almacén y extraer SOLO los productos con la cantidad SOLICITADA (lo que hay que despachar).',
+        'La lista puede venir como texto pegado, foto, captura de Excel, tabla o PDF (WhatsApp, email, ticket impreso).', '',
+        'REGLA DE ORO — COLUMNAS DE CANTIDAD:',
+        'Muchas listas traen VARIAS columnas numéricas por producto. Ejemplo:',
+        '  Producto            Solicitado   Cant.Min   Cant.Max   Stock   Precio',
+        '  AJINOMOTO 1KG          15           10         40       120    12.50',
+        'Debes usar SIEMPRE la cantidad SOLICITADA/PEDIDA (aquí 15) y NUNCA el mínimo, máximo, stock, precio ni el código.',
+        '- Identifica la columna correcta por su encabezado: "solicitado","pedido","cantidad","cant","pedir","despachar","requerido","req","a despachar".',
+        '- "min/minimo/mín" y "max/maximo/máx" son límites de reposición, NO el pedido: IGNÓRALOS.',
+        '- "stock/saldo/existencia" y "precio/costo/P.U./importe" (suelen llevar decimales o S/) NO son el pedido: IGNÓRALOS.',
+        '- Si NO hay encabezados claros y hay varios números, elige el que representa lo pedido; ante duda, el más plausible como pedido, NUNCA el precio ni el stock.',
+        '- Si solo hay UNA cantidad por producto, úsala.', '',
+        'IGNORA: cabeceras de tabla, totales/subtotales, separadores (---, ===), notas y columnas de código/stock/precio/mín/máx.', '',
         'POR CADA PRODUCTO devuelve:',
         '- nombre: descripción del producto en MAYÚSCULAS, limpia, sin códigos pegados',
-        '- cantidad: número decimal con 1 decimal (ej: 5.0, 18.0, 0.5)',
-        '- codigoVisto: opcional — si el texto traía un código/sku al lado, ponlo (string), si no, omite el campo', '',
+        '- cantidad: número decimal con 1 decimal (ej: 15.0, 80.0, 0.5)',
+        '- codigoVisto: opcional — si trae un código/sku al lado, ponlo (string), si no, omite el campo', '',
         'RESPONDE EXCLUSIVAMENTE con JSON válido en este formato (sin markdown, sin comentarios):',
         '{"items":[{"nombre":"...","cantidad":N.N,"codigoVisto":"..."}]}'
       ].join('\n');
+      // Mensaje: archivo (visión, Sonnet — no confunde columnas) o texto (default Haiku, ya chunkeado por el front).
+      let body;
+      if (esArchivo) {
+        const data = archivoB64.replace(/^data:[^;]+;base64,/, '');   // Claude rechaza el prefijo data-URI
+        const m = /^data:([^;]+);/.exec(archivoB64);
+        const mime = (m && m[1]) || String(params.mimeType || '') || 'image/jpeg';
+        const esPdf = /pdf/i.test(mime);
+        const bloque = esPdf
+          ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }
+          : { type: 'image',    source: { type: 'base64', media_type: mime, data } };
+        body = {
+          model: 'claude-sonnet-5', max_tokens: 8192, system,
+          messages: [{ role: 'user', content: [
+            bloque,
+            { type: 'text', text: 'Lee esta lista/tabla y extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio). Devuelve solo el JSON indicado.' }
+          ] }]
+        };
+      } else {
+        body = { max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] };
+      }
       let resp;
-      // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa,
-      // nunca cae a GAS (directriz: 100% Supabase, se borra GAS en 2 días).
-      try { resp = await _llamarEdgeIA({ max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] }); }
+      // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa.
+      try { resp = await _llamarEdgeIA(body); }
       catch (e) { return { ok: false, error: 'IA_EDGE_FAIL', mensaje: 'IA no disponible (Edge): ' + ((e && e.message) || 'red') }; }
-      const text = (resp && resp.content && resp.content[0] && resp.content[0].text) || '';
+      // [robusto] Sonnet-5 puede emitir un bloque `thinking` ANTES del texto → tomar el primer bloque type==='text',
+      // no content[0] (que podría ser el thinking con .text vacío → PARSE_FAIL falso).
+      const text = (resp && Array.isArray(resp.content)
+        ? ((resp.content.find(b => b && b.type === 'text' && b.text) || {}).text || '')
+        : '') || '';
       const first = text.indexOf('{'), last = text.lastIndexOf('}');
       if (first < 0 || last < 0) return { ok: false, error: 'PARSE_FAIL', mensaje: text.substring(0, 200) };
       let parsed;

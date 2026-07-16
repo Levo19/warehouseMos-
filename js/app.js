@@ -16407,6 +16407,84 @@ const DespachoView = (() => {
   // ── Modal IA — pegado y análisis ──────────────────────────
   let _lsPreviewBuffer = [];
   let _lsZonaSel = 'ZONA-01';   // [v2.13.370] zona destino de la lista (default Zona 1)
+  let _lsArchivo = null;        // [foto/PDF] {b64,mime,nombre,esPdf} — imagen o PDF a leer por la IA (visión)
+
+  // [foto/PDF] El operador eligió una foto/imagen/PDF: la leemos a base64 y la mostramos.
+  // La IA (Sonnet, visión) la lee directo y detecta la columna SOLICITADO, ignorando min/máx/stock/precio.
+  function lsArchivoElegido(input) {
+    const f = input && input.files && input.files[0];
+    if (!f) return;
+    const esPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+    // Imagen: se reduce antes de mandar (tope alto ok). PDF: va SIN reducir → tope bajo el límite de Claude
+    // (~32MB en base64) y del upload móvil de almacén.
+    const MAX = esPdf ? 15 * 1024 * 1024 : 25 * 1024 * 1024;
+    if (f.size > MAX) {
+      toast(esPdf ? 'PDF muy pesado (máx 15 MB) — reducilo o sacá fotos de las hojas'
+                  : 'Imagen muy grande (máx 25 MB) — sacá una foto más liviana', 'warn', 6000);
+      input.value = ''; return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let b64 = String(reader.result || '');
+      let mime = f.type || (esPdf ? 'application/pdf' : 'image/jpeg');
+      if (!esPdf) {
+        // Redimensiona/normaliza la foto: convierte HEIC→JPEG (iPhone), baja resolución a ~1600px
+        // → payload chico y confiable con la IA, sin perder legibilidad de la tabla.
+        let d = null;
+        try { d = await _lsPrepararImagen(b64); } catch(_){}
+        if (d) { b64 = d; mime = 'image/jpeg'; }
+        else if (!/^image\/(jpe?g|png|webp|gif)$/i.test(mime)) {
+          // No se pudo decodificar (ej. HEIC en Android) y el formato no lo acepta la IA → avisar, no mandar y fallar.
+          toast('No pude leer esa foto (formato ' + (mime.split('/')[1] || '?') + '). Probá con JPG/PNG o una captura de pantalla.', 'warn', 6000);
+          return;   // input.value ya quedó '' abajo
+        }
+      }
+      _lsArchivo = { b64, mime, nombre: f.name || (esPdf ? 'documento.pdf' : 'foto.jpg'), esPdf };
+      const ta = document.getElementById('lsTextoCrudo'); if (ta) ta.value = '';   // archivo y texto son mutuamente excluyentes
+      _lsRenderArchivoPreview();
+      try { SoundFX.click(); } catch(_){}
+    };
+    reader.onerror = () => toast('No pude leer el archivo, probá de nuevo', 'warn');
+    reader.readAsDataURL(f);
+    input.value = '';   // permite re-elegir el mismo archivo
+  }
+  // [foto] Redimensiona una imagen (data URL) a máx 1600px lado mayor, JPEG 0.85. Devuelve data URL o null.
+  function _lsPrepararImagen(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAXDIM = 1600;
+          let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+          if (!w || !h) { resolve(null); return; }
+          if (w > MAXDIM || h > MAXDIM) { const r = Math.min(MAXDIM / w, MAXDIM / h); w = Math.round(w * r); h = Math.round(h * r); }
+          const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cv.toDataURL('image/jpeg', 0.85));
+        } catch (_) { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  }
+  function _lsRenderArchivoPreview() {
+    const box = document.getElementById('lsArchivoPreview');
+    if (!box) return;
+    if (!_lsArchivo) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    const thumb = _lsArchivo.esPdf
+      ? '<div style="width:56px;height:56px;display:flex;align-items:center;justify-content:center;font-size:1.9em;background:rgba(168,85,247,.15);border-radius:8px">📄</div>'
+      : '<img src="' + _lsArchivo.b64 + '" alt="vista previa">';
+    box.innerHTML = thumb +
+      '<div class="ls-archivo-info">' +
+        '<div class="ls-archivo-nombre">' + escHtml(_lsArchivo.nombre) + '</div>' +
+        '<div class="ls-archivo-tipo">' + (_lsArchivo.esPdf ? 'PDF' : 'Imagen') + ' listo · la IA leerá la tabla y detectará el pedido</div>' +
+      '</div>' +
+      '<button class="ls-archivo-x" onclick="DespachoView.lsQuitarArchivo()">Quitar</button>';
+    box.style.display = 'flex';
+  }
+  function lsQuitarArchivo() { _lsArchivo = null; _lsRenderArchivoPreview(); try { SoundFX.click(); } catch(_){} }
+  // [foto/PDF] Si el operador empieza a escribir/pegar texto, descartamos el archivo elegido (son mutuamente excluyentes).
+  function lsTextoInput(v) { if (_lsArchivo && String(v || '').trim()) { _lsArchivo = null; _lsRenderArchivoPreview(); } }
 
   // Botones de zona del modal de lista sombra: marca la elegida y resalta el botón.
   function lsSetZona(z) {
@@ -16421,6 +16499,7 @@ const DespachoView = (() => {
   function abrirModalLista() {
     document.getElementById('modalSubirLista').style.display = 'flex';
     _lsMostrarPaso(1);
+    _lsArchivo = null; _lsRenderArchivoPreview();   // [foto/PDF] empezar limpio en cada apertura
     lsSetZona('ZONA-01');   // reset a Zona 1 por defecto en cada apertura
     setTimeout(() => document.getElementById('lsTextoCrudo')?.focus(), 250);
     try { SoundFX.click(); } catch(_){}
@@ -16430,6 +16509,7 @@ const DespachoView = (() => {
     document.getElementById('modalSubirLista').style.display = 'none';
     document.getElementById('lsTextoCrudo').value = '';
     _lsPreviewBuffer = [];
+    _lsArchivo = null; _lsRenderArchivoPreview();   // [foto/PDF] limpiar archivo elegido
     try { SoundFX.click(); } catch(_){}
   }
 
@@ -16448,9 +16528,47 @@ const DespachoView = (() => {
   // de ~30 productos y procesa secuencialmente con progreso visible. Esto
   // permite pegar listas de cualquier tamaño sin esperar gigante ni saturar
   // el rate-limit de Claude. Costo: ~$0.0005 por chunk, prácticamente gratis.
+  // [foto/PDF] Analiza la imagen/PDF con la IA de visión (Sonnet). 1 sola llamada, sin chunking.
+  async function _analizarArchivoConIA() {
+    if (!_lsArchivo) return;
+    _lsMostrarPaso(2);
+    try { SoundFX.beep(); } catch(_){}
+    const subEl = document.getElementById('lsLoadingSub');
+    if (subEl) subEl.textContent = _lsArchivo.esPdf
+      ? 'Leyendo el PDF y separando columnas (pedido vs mín/máx)…'
+      : 'Leyendo la imagen y separando columnas (pedido vs mín/máx)…';
+    let res;
+    try {
+      res = await API.analizarListaSombra({ archivoB64: _lsArchivo.b64, mimeType: _lsArchivo.mime });
+    } catch (e) {
+      res = { error: 'NETWORK', mensaje: (e && e.message) || 'red' };
+    }
+    if (res && res.ok && res.data && Array.isArray(res.data.items) && res.data.items.length) {
+      _lsPreviewBuffer = res.data.items;
+      _renderPreview();
+      _lsMostrarPaso(3);
+      try { SoundFX.done(); } catch(_){}
+      vibrate([20, 30, 40]);
+      toast('✓ ' + res.data.items.length + ' productos detectados de la ' + (_lsArchivo.esPdf ? 'PDF' : 'imagen'), 'ok', 4000);
+    } else {
+      const err = (res && res.error) || 'Error';
+      const sinItems = res && res.ok && res.data && Array.isArray(res.data.items) && !res.data.items.length;
+      document.getElementById('lsErrorTitulo').textContent =
+        err === 'KEY_NOT_SET' ? 'IA no configurada' : (sinItems ? 'No detecté productos' : 'No pude analizar');
+      document.getElementById('lsErrorMsg').textContent =
+        err === 'KEY_NOT_SET' ? 'La API key de Claude no está configurada. Avisa al administrador.'
+        : (sinItems ? 'La IA no encontró productos en la imagen/PDF. Probá con una foto más nítida y derecha, o pegá la lista como texto.'
+                    : ((res && res.mensaje) || 'Probá con una foto más clara o pegá la lista como texto.'));
+      _lsMostrarPaso(4);
+      try { SoundFX.warn(); } catch(_){}
+    }
+  }
+
   async function analizarListaConIA() {
+    // [foto/PDF] Si hay una foto/imagen/PDF cargada, la IA la lee directo (visión).
+    if (_lsArchivo) return _analizarArchivoConIA();
     const texto = document.getElementById('lsTextoCrudo').value.trim();
-    if (!texto) { toast('Pega una lista primero', 'warn'); return; }
+    if (!texto) { toast('Pega una lista o subí una foto/PDF primero', 'warn'); return; }
     if (texto.length < 10) { toast('La lista parece muy corta', 'warn'); return; }
     if (texto.length > 200000) {
       toast('Lista enorme (>200k chars). Divídela manualmente en 2 pegados.', 'warn', 6000);
@@ -16745,6 +16863,7 @@ const DespachoView = (() => {
            renderFlotante: _renderDespFlotante,
            // [v2.13.8] Lista sombra
            abrirModalLista, cerrarModalLista, analizarListaConIA, lsSetZona,
+           lsArchivoElegido, lsQuitarArchivo, lsTextoInput,
            volverPaso1, activarListaSombra, toggleListaSombra, cerrarListaSombra,
            _lsPrevSetCant, _lsPrevDel,
            // [v2.13.9] Tap-to-search en item de sombra

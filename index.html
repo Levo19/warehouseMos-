@@ -2140,6 +2140,22 @@
     .ls-btn-sec:active { transform:scale(.97); }
     .lsa-sparkle { animation: dslSparkle 1.8s ease-in-out infinite; }
 
+    /* [foto/PDF] Subida de imagen o PDF para la IA de listas */
+    .ls-or { display:flex; align-items:center; gap:10px; margin:16px 0 12px; color:#64748b; font-size:.68em; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .ls-or::before, .ls-or::after { content:''; flex:1; height:1px; background:rgba(148,163,184,.22); }
+    .ls-upload-row { display:flex; gap:10px; }
+    .ls-upload-btn { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:16px 10px; border-radius:12px; cursor:pointer; background:rgba(15,23,42,.7); border:1.5px dashed rgba(168,85,247,.4); color:#c4b5fd; font-weight:800; font-size:.74em; text-align:center; transition:all .18s; -webkit-tap-highlight-color:transparent; }
+    .ls-upload-btn:hover { border-color:#a78bfa; background:rgba(168,85,247,.1); }
+    .ls-upload-btn:active { transform:scale(.97); }
+    .ls-upload-ico { font-size:1.6em; line-height:1; }
+    .ls-archivo-preview { margin-top:12px; display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:12px; background:rgba(168,85,247,.1); border:1px solid rgba(168,85,247,.3); }
+    .ls-archivo-preview img { width:56px; height:56px; object-fit:cover; border-radius:8px; border:1px solid rgba(168,85,247,.3); }
+    .ls-archivo-info { flex:1; min-width:0; }
+    .ls-archivo-nombre { font-size:.8em; font-weight:800; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .ls-archivo-tipo { font-size:.66em; color:#a5b4fc; margin-top:2px; line-height:1.35; }
+    .ls-archivo-x { background:rgba(248,113,113,.15); border:1px solid rgba(248,113,113,.4); color:#fca5a5; border-radius:8px; padding:8px 12px; cursor:pointer; font-weight:800; font-size:.72em; flex:none; -webkit-tap-highlight-color:transparent; }
+    .ls-archivo-x:active { transform:scale(.95); }
+
     /* Loading */
     .ls-loading {
       padding:40px 20px; text-align:center;
@@ -6483,12 +6499,25 @@
       <!-- Paso 1: pegado -->
       <div id="lsModalPaso1" class="ls-modal-paso">
         <p class="ls-modal-hint">
-          Pega cualquier lista (Excel, WhatsApp, email).
-          La IA detecta productos y cantidades, ignora cabeceras.
+          Pega una lista, o subí una <b>foto</b> / <b>PDF</b> (captura de Excel, WhatsApp, tabla).
+          La IA detecta cada producto y su cantidad <b>solicitada</b>, e ignora cabeceras y columnas de mín/máx/stock/precio.
         </p>
         <textarea id="lsTextoCrudo" class="ls-textarea"
-                  placeholder="Ejemplo:&#10;Código    DESCRIPCIÓN              PEDIDO&#10;0000001   AJI PANCA DESVENADO      80&#10;0000002   AJINOMOTO GLUTAMATO 1KG  18&#10;..."
-                  rows="10"></textarea>
+                  oninput="DespachoView.lsTextoInput(this.value)"
+                  placeholder="Pega aquí, o usá los botones de abajo para subir foto/PDF.&#10;&#10;Ejemplo:&#10;Producto              Solicitado  Min  Max&#10;AJINOMOTO 1KG            15        10   40&#10;AJI PANCA DESVENADO      80        20   90&#10;..."
+                  rows="8"></textarea>
+        <div class="ls-or"><span>o subí una foto / PDF</span></div>
+        <div class="ls-upload-row">
+          <label class="ls-upload-btn">
+            <input type="file" accept="image/*" capture="environment" style="display:none" onchange="DespachoView.lsArchivoElegido(this)">
+            <span class="ls-upload-ico">📷</span><span>Tomar foto</span>
+          </label>
+          <label class="ls-upload-btn">
+            <input type="file" accept="image/*,application/pdf" style="display:none" onchange="DespachoView.lsArchivoElegido(this)">
+            <span class="ls-upload-ico">🖼️</span><span>Imagen o PDF</span>
+          </label>
+        </div>
+        <div id="lsArchivoPreview" class="ls-archivo-preview" style="display:none"></div>
         <div class="ls-modal-actions">
           <button onclick="DespachoView.cerrarModalLista()" class="ls-btn-sec">Cancelar</button>
           <button onclick="DespachoView.analizarListaConIA()" class="ls-btn-pri" id="lsBtnAnalizar">
