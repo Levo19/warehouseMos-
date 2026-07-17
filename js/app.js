@@ -1414,7 +1414,7 @@ const Session = (() => {
     // también merece los 15 min de gracia.
     _yaSeBloqueoUnaVez = false;
     _aplicarSesion();
-    _postLogin(null, true); // ticket se decide solo tras respuesta GAS
+    _postLogin(null, true); // [cero-GAS] ticket se decide solo tras la confirmación Supabase (login_pin_wh)
 
     // 3. [NIVEL 1 corte-GAS] Confirmar con Supabase en segundo plano (mos.login_pin_wh vía loginPersonalSB).
     //    Sin fallback GAS: si no hay token/backend, res=null → no confirma (la sesión local optimista sigue).
@@ -4731,7 +4731,7 @@ const App = (() => {
     } else if (tipo === 'jefatura') {
       lista = (OfflineManager.getPersonalCache() || []).filter(p => {
         const rol = String(p.rol || '').toUpperCase();
-        return rol === 'ADMIN' || rol === 'MASTER';
+        return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER';   // [fix 500x S3] 'ADMINISTRADOR' (rol real) faltaba
       });
     } else if (tipo === 'zona') {
       lista = OfflineManager.getZonasCache?.() || [];
@@ -4760,7 +4760,7 @@ const App = (() => {
         } else if (tipo === 'jefatura') {
           nueva = (OfflineManager.getPersonalCache() || []).filter(p => {
             const rol = String(p.rol || '').toUpperCase();
-            return rol === 'ADMIN' || rol === 'MASTER';
+            return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER';   // [fix 500x S3] 'ADMINISTRADOR' faltaba
           });
         } else if (tipo === 'zona') {
           nueva = OfflineManager.getZonasCache?.() || [];
@@ -6036,7 +6036,7 @@ const GuiasView = (() => {
           </svg>
           Editar
         </button>` : ''}
-        ${(['ADMIN','MASTER'].includes(String(window.WH_CONFIG?.rol || '').toUpperCase())) ? `
+        ${(['ADMIN','ADMINISTRADOR','MASTER'].includes(String(window.WH_CONFIG?.rol || '').toUpperCase())) ? `
         <button onclick="App.abrirHistorial('${escAttr(g.idGuia)}','${escAttr(_getProvNombre(g.idProveedor) || g.usuario || '')}')"
                 class="flex items-center gap-1.5 py-1.5 px-3 rounded-lg text-xs bg-slate-800 text-slate-400 transition-colors ml-auto"
                 title="Historial completo (admin/master)">
@@ -9618,7 +9618,7 @@ function _renderEnvasadosPorDia(list, container, opts) {
   const modo  = opts.modo || 'hoy';
   const query = String(opts.query || '').trim().toLowerCase();
   const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
-  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
+  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN' || rol === 'ADMINISTRADOR');   // [fix 500x S3] 'ADMINISTRADOR' faltaba
   const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
   const hoy           = new Date().toISOString().split('T')[0];
   const desde14       = (typeof _fechaDesde14Dias === 'function') ? _fechaDesde14Dias() : hoy;
@@ -9845,7 +9845,7 @@ function _renderLiquidacionSemanaEnvasado(list) {
   if (!cont) return;
 
   const rol           = String(window.WH_CONFIG?.rol || '').toUpperCase();
-  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN');
+  const esAdminMaster = (rol === 'MASTER' || rol === 'ADMIN' || rol === 'ADMINISTRADOR');   // [fix 500x S3] 'ADMINISTRADOR' faltaba
   const usuarioActual = String(window.WH_CONFIG?.usuario || '').trim().toLowerCase();
   const lunes = _lunesDeEstaSemanaLima();
   const hoy   = _hoyLima();
@@ -16416,6 +16416,13 @@ const DespachoView = (() => {
     const files = input && input.files ? Array.prototype.slice.call(input.files) : [];
     input.value = '';   // permite re-elegir los mismos archivos
     if (!files.length) return;
+    // [fix 500x S5] Validar la COMPOSICIÓN de la selección ANTES de procesar. Los reader.onload son async y
+    // corren en orden no determinista → una selección que mezcle PDF+imágenes dejaría _lsArchivos en estado
+    // inconsistente (PDF y fotos juntos) por la carrera. Se rechaza de entrada.
+    const _esPdfF = (f) => /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
+    const _pdfsSel = files.filter(_esPdfF), _imgsSel = files.filter(f => !_esPdfF(f));
+    if (_pdfsSel.length > 1) { toast('Solo un PDF por lista — subí uno o usá fotos de las hojas', 'warn', 6000); return; }
+    if (_pdfsSel.length && _imgsSel.length) { toast('No mezcles PDF con fotos en la misma lista — elegí uno u otro', 'warn', 6000); return; }
     files.forEach(f => {
       const esPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
       // Imagen: se reduce antes de mandar. PDF: va SIN reducir → tope bajo el límite de Claude (~32MB base64).
@@ -16445,6 +16452,13 @@ const DespachoView = (() => {
         } else {
           if (_lsArchivos.some(a => a.esPdf)) _lsArchivos = [];   // había un PDF → lo reemplazan las imágenes
           if (_lsArchivos.length >= _LS_MAX_IMG) { toast('Máx ' + _LS_MAX_IMG + ' fotos por lista', 'warn'); return; }
+          // [fix 500x S5] guard de tamaño AGREGADO: la suma de base64 de todas las fotos debe caber en el límite
+          // de la visión de Claude (~32MB b64). Cortamos a ~20MB combinados con margen para el prompt/overhead.
+          const _pesoActual = _lsArchivos.reduce((s, a) => s + (a.b64 ? a.b64.length : 0), 0);
+          if (_pesoActual + item.b64.length > 20 * 1024 * 1024) {
+            toast('Las fotos juntas pesan demasiado para la IA — subí menos hojas o combinálas', 'warn', 6000);
+            return;
+          }
           _lsArchivos.push(item);
         }
         const ta = document.getElementById('lsTextoCrudo'); if (ta) ta.value = '';   // archivo y texto son mutuamente excluyentes

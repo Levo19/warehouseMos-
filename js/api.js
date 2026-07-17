@@ -1635,7 +1635,8 @@ const API = (() => {
         bloques.push({ type: 'text', text: (nImg > 1
           ? 'Estas ' + nImg + ' imágenes son partes de la MISMA lista: combínalas en un solo resultado, sin duplicar. '
           : '') + 'Extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio). Devuelve solo el JSON indicado.' });
-        body = { model: 'claude-sonnet-5', max_tokens: 8192, system, messages: [{ role: 'user', content: bloques }] };
+        // [fix 500x S5] thinking desactivado: baja latencia y evita el bloque `thinking` que arriesgaba el timeout de visión.
+        body = { model: 'claude-sonnet-5', max_tokens: 8192, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: bloques }] };
       } else {
         body = { max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] };
       }
