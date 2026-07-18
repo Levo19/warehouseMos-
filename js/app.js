@@ -2387,20 +2387,13 @@ const Session = (() => {
         if (rpc && window.ESPIA_DIRECTO !== false && typeof API !== 'undefined' && API.espiaRpc) {
           try {
             const out = await API.espiaRpc(rpc, params || {});
-            if (out) return out;   // {ok,data} o {ok:false,error de negocio} — el loop lo maneja igual que GAS
-          } catch(_) { /* → GAS */ }
+            if (out) return out;   // {ok,data} o {ok:false,error de negocio} — el loop lo maneja igual
+          } catch(_) { /* RPC falló → null; el loop reintenta en el próximo tick */ }
         }
-        try {
-          const url = window.WH_CONFIG?.mosGasUrl;
-          if (!url) return null;
-          // [v2.13.80] Inyectar token HMAC automáticamente. Endpoints sensibles
-          // del backend lo exigen (compat: si no llega, log warning + permitir).
-          const body = Object.assign({ action: accion }, params || {});
-          const token = window._espiaCliWH?.token;
-          if (token && body.token === undefined) body.token = token;
-          const r = await fetch(url, { method: 'POST', body: JSON.stringify(body) });
-          return await r.json();
-        } catch(_) { return null; }
+        // [CERO-GAS 2026-07-18] Sin fallback GAS: el espía WH va 100% por mos.espia_* (RPC arriba). Las 7
+        // acciones (_ESPIA_RPC) están cubiertas. Si el RPC falla / ESPIA_DIRECTO=false → null → el loop del
+        // espía se salta este tick (no cae a mosGasUrl). Vigilancia, no dinero/acceso → fail-soft correcto.
+        return null;
       }
       function _espiaCliWHBlobToB64(blob) {
         return new Promise((res, rej) => {
@@ -3222,25 +3215,10 @@ const Session = (() => {
         }
         _espiaCliWHOcultarIndicador();
       };
-      window.addEventListener('beforeunload', () => {
-        const ref = window._espiaCliWH;
-        if (!ref?.sesionId) return;
-        // [v2.13.80] sendBeacon con Blob application/json para que el backend
-        // doPost parsee correctamente. Antes sendBeacon de string crudo enviaba
-        // Content-Type text/plain → en raras ocasiones Apps Script ignoraba el
-        // body → cierre nunca se registraba en RTC_SIGNALING.
-        try {
-          const url = window.WH_CONFIG?.mosGasUrl || '';
-          const payload = JSON.stringify({
-            action: 'espiaCerrarSesion',
-            sesionId: ref.sesionId,
-            motivo: 'page_unload', lado: 'device',
-            token: ref.token
-          });
-          const blob = new Blob([payload], { type: 'application/json' });
-          navigator.sendBeacon(url, blob);
-        } catch(_){}
-      });
+      // [CERO-GAS 2026-07-18] beforeunload sendBeacon(mosGasUrl) ELIMINADO — era el último salto GAS del espía WH.
+      // El cierre normal ya va por RPC (_espiaCliWHPost('espiaCerrarSesion') arriba). En page-unload no se puede
+      // await un RPC (mint+Edge no completa), pero la expiración server-side (mos.espia_purgar) barre las sesiones
+      // huérfanas — mismo criterio que ME (que eliminó su sendBeacon por la misma razón). Espía = vigilancia, no dinero.
 
       // Handler de primer plano (la app está abierta).
       // 1) Comandos data-only (audio_start, audio_stop, gps_locate) → ejecutar silencioso.
@@ -3351,7 +3329,7 @@ const Session = (() => {
 
 // ════════════════════════════════════════════════
 // BLOQUEO REMOTO — el admin desactiva al operador en MOS
-// Polling 30s a getEstadoBloqueoUsuario; muestra overlay de
+// Polling 120s a mos.estado_bloqueo_usuario (RPC directo, cero-GAS); muestra overlay de
 // candado y pide clave de admin para acceso temporal de 15 min.
 // ════════════════════════════════════════════════
 const BloqueoRemoto = (() => {
@@ -3523,7 +3501,7 @@ const BloqueoRemoto = (() => {
     if (_activo) return;
     _activo = true;
     setTimeout(_check, 4000);
-    _pollTimer = setInterval(_check, 120 * 1000);  // [FIX cuota GAS] 30s→120s: pollea MOS GAS getEstadoBloqueoUsuario; 30s todo el día agotaba urlfetch (rompia otros fetch GAS). 2min de latencia en bloqueo aceptable.
+    _pollTimer = setInterval(_check, 120 * 1000);  // [CERO-GAS] pollea RPC mos.estado_bloqueo_usuario (directo, cero-fallback). 120s: 2min de latencia en bloqueo aceptable.
   }
 
   function detener() {
