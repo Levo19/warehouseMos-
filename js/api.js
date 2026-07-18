@@ -1491,8 +1491,8 @@ const API = (() => {
       }
       if (!out.dedup) {
         const ses = (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '';
-        try { await _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'ENVASADO_REGISTRADO', p_cantidad: 1 }); } catch (_) {}
-        try { await _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'UNIDADES_ENVASADAS', p_cantidad: unidades }); } catch (_) {}
+        _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'ENVASADO_REGISTRADO', p_cantidad: 1 }).catch(function(){});   // [fix red frágil] fire-and-forget
+        _sbRpcWH('registrar_actividad', { p_id_sesion: ses, p_tipo: 'UNIDADES_ENVASADAS', p_cantidad: unidades }).catch(function(){});   // [fix red frágil] fire-and-forget
       }
       // [shape-fix] el front lee res.data?.idEnvasado (app.js:8916). La RPC devuelve {ok,id_envasado,dedup} al nivel raíz →
       // envolver al shape GAS {ok:true, data:{idEnvasado, unidadesProducidas, dedup?}, dedup?}. id determinista 'ENV_'+lid.
@@ -1522,7 +1522,7 @@ const API = (() => {
         id_auditoria: 'AUD_' + lid, id_ajuste: 'AJ_' + lid, id_stock_nuevo: 'STK_' + lid, id_mov: 'MOV_' + lid
       } });
       if (!out || out.ok === false) return null;
-      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }).catch(function(){}); }
       return out;
     }
     if (params.action === 'asignarAuditoria') {
@@ -1544,7 +1544,7 @@ const API = (() => {
         observacion: params.observacion || '', usuario: params.usuario || ''
       } });
       if (!out || out.ok === false) return null;
-      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }).catch(function(){}); }
       // [shape] el front lee res.data?.diferencia/resultado (paridad con GAS ejecutarAuditoria → data:{idAuditoria,diferencia,resultado}).
       return { ok: true, data: { idAuditoria: String(params.idAuditoria || ''), diferencia: (out.diferencia != null ? out.diferencia : 0), resultado: String(out.resultado || '') }, dedup: !!out.dedup };
     }
@@ -1736,7 +1736,7 @@ const API = (() => {
       // [100x] guard de dedup (paridad con crearGuia/cerrarGuia/auditarProducto): en un reintento desde la
       // cola la merma se dedupea (out.dedup=true) pero SIN este guard el contador de actividad se incrementaba
       // de nuevo (inflaba la métrica). registrar_merma devuelve dedup:true cuando la fila ya existía. Verificado.
-      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }).catch(function(){}); }
       return out;
     }
     // ── [Grupo A] Listas-sombra: escritura DIRECTA a wh.listas_sombra (RPCs 216). getListasSombra ya lee
@@ -1810,7 +1810,7 @@ const API = (() => {
       } });
       if (!out || out.ok === false) return null;
       // tracking de actividad (best-effort) — solo si NO fue dedup (no contar reintentos)
-      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }).catch(function(){}); }
       // [shape-fix] el front lee res.data?.idGuia (app.js:7634) y res.offline. La RPC devuelve {ok,id_guia,dedup}
       // al nivel raíz → envolver al shape GAS {ok:true, data:{idGuia, estado:'ABIERTA'}}. idGuia = id determinista 'G_'+lid.
       return { ok: true, data: { idGuia: 'G_' + lid, estado: 'ABIERTA' }, dedup: !!out.dedup };
@@ -1826,7 +1826,7 @@ const API = (() => {
       const out = await _sbRpcWH('cerrar_guia_idempotente', { p_id_guia: String(params.idGuia || '') }, 'wh', 30000);   // [fix] 30s > 20s base
       if (!out || out.ok === false) return null;
       const _yaCerrada = String(out.eraEstado || '').toUpperCase() === 'CERRADA' || String(out.eraEstado || '').toUpperCase() === 'AUTOCERRADA' || !!(out.yaCerrada || out.ya_cerrada);
-      if (!_yaCerrada) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!_yaCerrada) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CERRADA', p_cantidad: 1 }).catch(function(){}); }
       // [shape-fix] el front lee res.data?.montoTotal (app.js:7571). La RPC devuelve el monto al nivel raíz →
       // envolver al shape GAS {ok:true, data:{idGuia, estado:'CERRADA', montoTotal, yaCerrada?}}. Tolerante al nombre de campo.
       const _monto = (out.montoTotal != null ? out.montoTotal : (out.monto_total != null ? out.monto_total : (out.monto != null ? out.monto : 0)));
@@ -1861,7 +1861,7 @@ const API = (() => {
         return { ok: false, error: _e || 'error', detalle: String(out.detalle || '') };
       }
       // tracking (best-effort) — solo en la creación real, no en reintentos dedupados
-      if (!out.dedup) { try { await _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }); } catch (_) {} }
+      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'GUIA_CREADA', p_cantidad: 1 }).catch(function(){}); }
       // [shape-fix] el front (app.js ~13275) lee res.data.idGuia, res.data.errores, res.data.esperados/items.
       // La RPC devuelve {ok,idGuia,items,errores} al nivel raíz → envolver al shape GAS. impresion:{ok:false,omitido}
       // porque la impresión la dispara el front por separado (imprimir:false). dedup propagado para coherencia.

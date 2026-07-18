@@ -14073,12 +14073,21 @@ const DespachoView = (() => {
       }
       _renderHist();
     }).catch(e => {
-      const msg = e?.timeout ? 'Tiempo agotado — verifica tu conexión' : 'Sin conexión';
       SoundFX.error(); vibrate([80, 40, 80]);
       try { GuiasView.removeOptimisticGuia(_optTempId); } catch (_) {}     // [fix lag] quitar tarjeta optimista si falló
-      _saveHist({ ...histBase, idGuia: '—', ok: false });
-      toast('Error: ' + msg, 'danger', 8000);
-      if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
+      if (e?.timeout) {
+        // [fix red frágil 2026-07-18] El race de resguardo (55s) venció: la RPC PUDO commitear (guía creada)
+        // pero la respuesta se perdió, o post() sigue procesando. NO es un fallo → encolamos la guía (idempotente
+        // por idempotencyKey → NUNCA duplica stock/guía) para que la cola la cree+imprima SOLA al reconectar
+        // (evento wh:guia-sincronizada). NO restauramos el carrito (evita re-despacho manual) ni alarmamos.
+        try { OfflineManager.encolar('crearDespachoRapido', { ...payload, _viaDirecta: true }); } catch (_) {}
+        toast('⏳ Conexión lenta — la guía quedó EN COLA; se crea e imprime sola al reconectar', 'warn', 9000);
+        _saveHist({ ...histBase, idGuia: '⏳ en cola', ok: true });
+      } else {
+        toast('Error: Sin conexión', 'danger', 8000);
+        _saveHist({ ...histBase, idGuia: '—', ok: false });
+        if (!_cart.length) { _cart = cartSnapshot; _saveCart(); _renderCart(); _updateFooter(); badgeUpdate(); }
+      }
       _renderHist();
     }).finally(() => {
       _setDspGenerarBusy(false);
