@@ -15336,8 +15336,13 @@ const DespachoView = (() => {
         const d = res.data || {};
         try { SoundFX.pickupOk(); } catch(_){}
         vibrate([30, 20, 60, 20, 100]);
-        _confettiCelebracion();
-        toast(`✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
+        // [fix Rep#3] d.idempotente = re-confirmación de un cierre que YA ocurrió (la respuesta original se
+        // perdió en red frágil y el operador reintentó): imprimir el ticket, pero SIN confetti ni doble
+        // historial. despachados=0 en ese caso → no mostrar "0 líneas".
+        if (!d.idempotente) _confettiCelebracion();
+        toast(d.idempotente
+          ? `✅ Guía ${d.idGuia || ''} ya generada · reimprimiendo ticket…`
+          : `✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
 
         // [v2.13.31] PRINT con reintento auto + cola persistente offline.
         // Antes: 1 solo intento fire-and-forget → si PrintNode/red fallaba,
@@ -15379,20 +15384,22 @@ const DespachoView = (() => {
           _dispararAdhesivosGranel(_granelAdh, d.idGuia);
         } catch (_) {}
 
-        // Historial local
-        const items = (pickupSnap.items || []).filter(it => (parseFloat(it.despachado)||0) > 0).map(it => ({
-          codigoBarra: it.skuBase, descripcion: it.nombre, cantidad: it.despachado
-        }));
-        const zonas = OfflineManager.getZonasCache();
-        const zonaObj = zonas.find(z => String(z.idZona) === String(pickupSnap.idZona));
-        _saveHist({
-          ts: Date.now(), n: items.length, tipo: 'SALIDA_ZONA',
-          idZona: pickupSnap.idZona,
-          nombreZona: zonaObj ? (zonaObj.nombre || zonaObj.idZona) : (pickupSnap.idZona || ''),
-          nota: 'Pickup ' + pickupSnap.idPickup,
-          items, idGuia: d.idGuia || '—', ok: true
-        });
-        _renderHist();
+        // Historial local (no en re-confirmación idempotente → evita entrada duplicada)
+        if (!d.idempotente) {
+          const items = (pickupSnap.items || []).filter(it => (parseFloat(it.despachado)||0) > 0).map(it => ({
+            codigoBarra: it.skuBase, descripcion: it.nombre, cantidad: it.despachado
+          }));
+          const zonas = OfflineManager.getZonasCache();
+          const zonaObj = zonas.find(z => String(z.idZona) === String(pickupSnap.idZona));
+          _saveHist({
+            ts: Date.now(), n: items.length, tipo: 'SALIDA_ZONA',
+            idZona: pickupSnap.idZona,
+            nombreZona: zonaObj ? (zonaObj.nombre || zonaObj.idZona) : (pickupSnap.idZona || ''),
+            nota: 'Pickup ' + pickupSnap.idPickup,
+            items, idGuia: d.idGuia || '—', ok: true
+          });
+          _renderHist();
+        }
 
         // Limpiar pickup local + renders inline
         _pickupActivo = null;
