@@ -3925,6 +3925,25 @@ const App = (() => {
       try { if (currentView === 'envasador' && EnvasadorView.reconciliarHistorial) EnvasadorView.reconciliarHistorial(); } catch(_){}
     });
 
+    // [FIX Rep#1 · auto-print] La cola drenó una GUÍA que se había encolado por red lenta (offline.js emite este
+    // evento con el idGuia REAL). Disparamos la impresión del ticket + refrescamos la lista. Sin esto la guía
+    // quedaba creada en Supabase pero sin ticket → el operador debía "imprimir copia" a mano. El dedup atómico
+    // wh.reservar_ticket garantiza que si ya se había impreso NO sale un 2º ticket (ya_impresa → no-op).
+    window.addEventListener('wh:guia-sincronizada', (ev) => {
+      const idGuia = ev && ev.detail && ev.detail.idGuia;
+      if (!idGuia) return;
+      const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
+      const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
+      toast(`✅ Guía ${idGuia} sincronizada · imprimiendo ticket…`, 'ok', 6000);
+      try { SoundFX.done(); vibrate([30, 15, 30, 15, 60]); } catch(_){}
+      API.imprimirTicketGuia({ idGuia, reporteUrl }).then(r => {
+        if (r && r.ya_impresa) return;                              // el dedup dice que ya salió → nada que hacer
+        if (r && r.data && r.data.incierto) return;                 // timeout de red al imprimir → "imprimir copia" recupera
+        if (!r || !r.ok) toast('⚠ Guía sincronizada, pero el ticket no salió — usá "🖨 imprimir copia" del historial', 'warn', 9000);
+      }).catch(() => {});
+      try { if (currentView === 'guias') GuiasView.cargar(); } catch(_){}
+    });
+
     // Pull-to-refresh en la vista principal — también dispara OpLog.flush()
     // para que el operador pueda forzar reconciliación de ops pendientes.
     const mainContent = document.getElementById('mainContent');
@@ -13955,11 +13974,23 @@ const DespachoView = (() => {
       });
     } catch (_) {}
 
-    // GAS en segundo plano — timeout generoso 55s
+    // [cero-GAS] RPC directo wh.crear_despacho_rapido (timeout cliente 30s en api.js) — race externo de resguardo 55s.
     Promise.race([
       API.crearDespachoRapido(payload),
       new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
     ]).then(res => {
+      // [FIX Rep#1 · conexión] La op se ENCOLÓ por red lenta/caída (post devolvió {ok:true, offline:true} SIN idGuia
+      // real). Sin este guard, el flujo entraba al camino de ÉXITO con d.idGuia=undefined → "Guía undefined generada"
+      // e imprimía con idGuia undefined (fallaba). La guía se crea + imprime SOLA al reconectar (idempotente por el
+      // localId sembrado + auto-print de la cola vía evento wh:guia-sincronizada). NO reimprimir a mano, NO restaurar carrito.
+      if (res && res.offline) {
+        toast('⏳ Conexión lenta — la guía quedó EN COLA; se crea e imprime sola al reconectar', 'warn', 9000);
+        SoundFX.done(); vibrate([30, 15, 60]);
+        try { GuiasView.removeOptimisticGuia(_optTempId); } catch (_) {}
+        _saveHist({ ...histBase, idGuia: '⏳ en cola', ok: true });
+        _renderHist();
+        return;
+      }
       if (res.ok) {
         const d = res.data;
         toast(`✅ Guía ${d.idGuia} generada · Imprimiendo...`, 'ok', 6000);
@@ -15290,6 +15321,17 @@ const DespachoView = (() => {
         }),
         new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
       ]);
+      // [FIX Rep#1 · paridad pickup] Mismo guard que DespachoView: si la op se ENCOLÓ por red lenta (post devolvió
+      // {ok:true, offline:true, data:{idLocal}} SIN idGuia real), NO mostrar falso éxito/confetti, NO limpiar el
+      // pickup activo (se perdería el checklist), NO guardar historial con idGuia '—'. La guía se crea + imprime SOLA
+      // al drenar la cola (idempotente por GPCK_<idPickup> + evento wh:guia-sincronizada); el pickup se marca
+      // COMPLETADO server-side y getPickups lo reconcilia. El finally del try limpia _pickupClosing/busy.
+      if (res && res.offline) {
+        toast('⏳ Conexión lenta — la guía quedó EN COLA; se crea e imprime sola al reconectar', 'warn', 9000);
+        try { SoundFX.done(); } catch(_){}
+        vibrate([30, 15, 60]);
+        return;
+      }
       if (res.ok) {
         const d = res.data || {};
         try { SoundFX.pickupOk(); } catch(_){}

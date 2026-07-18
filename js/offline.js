@@ -643,11 +643,11 @@ const OfflineManager = (() => {
           }
           res = await API._postCola(item.params);
         } else {
-          res = await fetch(window.WH_CONFIG.gasUrl, {
-            method:  'POST',
-            headers: { 'Content-Type': 'text/plain' },
-            body:    JSON.stringify(item.params)
-          }).then(r => r.json());
+          // [CERO-GAS Rep#1] Ítem legacy SIN sello _viaDirecta. En prod NO existe (todo se sella al encolar bajo
+          // escritura directa, que está permanentemente ON). Antes se replayaba a GAS (window.WH_CONFIG.gasUrl);
+          // eso era el último rastro de GAS de la cola. Ahora fail-closed: NO va a GAS (evita reejecutar/duplicar).
+          // Queda visible como 'error' — si algún día apareciera uno, se ve en la cola en vez de duplicarse en GAS.
+          res = { ok: false, error: 'cero-GAS: ítem sin vía directa (no se replaya a GAS)', _ceroGas: true };
         }
 
         // [400-loop fix] Un ítem `_viaDirecta` rechazado por el servidor con un 4xx
@@ -662,6 +662,13 @@ const OfflineManager = (() => {
         }
         _actualizarItemQueue(item.localId, (res && res.ok) ? 'synced' : 'error');
         if (res && res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
+        // [FIX Rep#1 · auto-print] Al drenar una GUÍA creada por red lenta, disparar la impresión del ticket con el
+        // idGuia REAL. Sin esto la guía se sincronizaba en Supabase pero el ticket nunca salía → el operador debía
+        // "imprimir copia" a mano. El dedup atómico wh.reservar_ticket evita cualquier doble ticket (idempotente).
+        if (res && res.ok && res.data && res.data.idGuia &&
+            (item.action === 'crearDespachoRapido' || item.action === 'cerrarPickupConDespacho')) {
+          try { window.dispatchEvent(new CustomEvent('wh:guia-sincronizada', { detail: { idGuia: String(res.data.idGuia), action: item.action } })); } catch (_) {}
+        }
       } catch {
         _actualizarItemQueue(item.localId, 'error');
       }
