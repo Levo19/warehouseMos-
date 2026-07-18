@@ -2944,6 +2944,13 @@ const API = (() => {
         return await res.json().catch(() => null);
       } catch (_) { return null; }
     },
+
+    // [cero-GAS] El device cierra su sesión de audio en la sombra (mos.espia_audio_detener, SQL 508) al
+    // auto-detenerse. Idempotente; sin fallback GAS. Best-effort (la escucha ya paró localmente).
+    espiaAudioDetener: async (idSesion, deviceId) => {
+      try { return await _sbRpcWH('espia_audio_detener', { p: { idSesion: idSesion || '', deviceId: deviceId || '' } }, 'mos'); }
+      catch (_) { return null; }
+    },
     getCargadoresDelDia:  (p={}) => call({ action: 'getCargadoresDelDia', ...p }),
     imprimirCargadoresDia:(p)    => post({ action: 'imprimirCargadoresDia', ...p }),
     getAlertasStock:    (p={})   => call({ action: 'getAlertasStock', ...p }),

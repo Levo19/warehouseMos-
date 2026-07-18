@@ -2215,8 +2215,7 @@ const Session = (() => {
   });
 
   async function _audioRemotoIniciarWH(sesionId, duracionMaxSeg) {
-    const mosUrl = window.WH_CONFIG?.mosGasUrl;
-    if (!mosUrl) return;
+    // [CERO-GAS] ya no requiere mosGasUrl: los chunks van por Edge espia-chunk y el cierre de sesión por RPC.
     if (_audioRecorder) await _audioRemotoDetenerWH();
     try {
       _audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -2245,12 +2244,8 @@ const Session = (() => {
       console.log('[Audio WH] Grabación iniciada, sesión', sesionId);
     } catch(e) {
       console.error('[Audio WH] No se pudo iniciar:', e?.message);
-      try {
-        await fetch(mosUrl, {
-          method: 'POST',
-          body: JSON.stringify({ action: 'detenerEscuchaAudio', idSesion: sesionId })
-        });
-      } catch(_) {}
+      // [CERO-GAS] cerrar la sesión en la sombra (RPC mos.espia_audio_detener), no GAS.
+      try { await API.espiaAudioDetener(sesionId, (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : ''); } catch(_) {}
       _audioRecorder = null;
       _audioStream = null;
       _audioSesionId = null;
@@ -2269,15 +2264,8 @@ const Session = (() => {
     _audioSesionId = null;
     _audioChunkIdx = 0;
     if (sid) {
-      const mosUrl = window.WH_CONFIG?.mosGasUrl;
-      if (mosUrl) {
-        try {
-          await fetch(mosUrl, {
-            method: 'POST',
-            body: JSON.stringify({ action: 'detenerEscuchaAudio', idSesion: sid })
-          });
-        } catch(_) {}
-      }
+      // [CERO-GAS] cerrar la sesión de audio en la sombra (RPC mos.espia_audio_detener), no GAS. Best-effort.
+      try { await API.espiaAudioDetener(sid, (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : ''); } catch(_) {}
     }
     console.log('[Audio WH] Grabación detenida');
   }
