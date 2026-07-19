@@ -2823,6 +2823,25 @@ const API = (() => {
 
     // Mermas
     getMermas:          (p={})   => call({ action: 'getMermas', ...p }),
+    // ── [🎯 Sorpresas + ♻️ Mermas v2 · SQL 516/517] directo a wh.* (cero-GAS) ──
+    sorpresasLista:     (p={})   => _sbRpcWH('sorpresas_lista', { p }),
+    registrarSorpresa:  (p)      => _sbRpcWH('registrar_sorpresa', { p }),
+    mermasV2Lista:      ()       => _sbRpcWH('mermas_lista', { p: { alcance: 'wh' } }),
+    procesarMerma:      (p)      => _sbRpcWH('procesar_merma', { p }),
+    mermaDesdeGuia:     async (p) => {
+      if (p && p.fotoBase64) {
+        try { p = { ...p, foto: (await _subirFotoStorage('mermas', 'MRM_' + (p.id_merma || Date.now()), p.fotoBase64, p.mimeType || 'image/jpeg', p.id_merma || '')).url }; delete p.fotoBase64; }
+        catch (_) { return { ok: false, error: 'FOTO_UPLOAD' }; }
+      }
+      return _sbRpcWH('merma_desde_guia', { p });
+    },
+    mermaAltaManualV2:  async (p) => {
+      if (p && p.fotoBase64) {
+        try { p = { ...p, foto: (await _subirFotoStorage('mermas', 'MRM_' + (p.id_merma || Date.now()), p.fotoBase64, p.mimeType || 'image/jpeg', p.id_merma || '')).url }; delete p.fotoBase64; }
+        catch (_) { return { ok: false, error: 'FOTO_UPLOAD' }; }
+      }
+      return _sbRpcWH('merma_alta_manual', { p });
+    },
     registrarMerma:     (p)      => post({ action: 'registrarMerma', ...p }),
     resolverMerma:      (p)      => post({ action: 'resolverMerma', ...p }),
     getMermasEnProceso: (p={})   => call({ action: 'getMermasEnProceso', ...p }),

@@ -5573,6 +5573,13 @@ const GuiasView = (() => {
       class="card-act card-act-wa" title="Compartir por WhatsApp">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413Z"/></svg>
     </button>`;
+    // [🎯 SORPRESAS] botón en el CARD (solo admins/ascendidos — decisión dueño #5):
+    // un toque desde la lista, sin entrar al detalle. Server re-verifica clave en cada registro.
+    const sorpBtn = (g.tipo === 'SALIDA_ZONA' && window.SorpresasWH && SorpresasWH.esAdmin())
+      ? `<button onclick="event.stopPropagation();SorpresasWH.abrir('${escAttr(g.idGuia)}')"
+           class="card-act" style="background:rgba(245,184,73,.16);border:1px solid rgba(245,184,73,.5);color:#fcd34d;font-size:12px"
+           title="Producto sorpresa (solo admin)">🎯</button>`
+      : '';
     const printBtn = `<button onclick="event.stopPropagation();GuiasView.imprimirTicket('${escAttr(g.idGuia)}')"
       class="card-act card-act-print" title="Imprimir ticket">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg>
@@ -5599,7 +5606,7 @@ const GuiasView = (() => {
         <div class="flex items-center gap-1.5 flex-wrap" style="margin-top:1px">${countPill}${staleChip}</div>
         <div class="card-row-bottom">
           <span class="card-meta">${fechaCorta}${hora ? ' · ' + hora : ''}</span>
-          <div class="card-actions">${waBtn}${printBtn}</div>
+          <div class="card-actions">${waBtn}${printBtn}${sorpBtn}</div>
         </div>
       </div>
     </div>`;
@@ -6218,6 +6225,10 @@ const GuiasView = (() => {
           <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
                style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px;position:relative"
                data-det-id="${d.idDetalle || ''}" data-det-cb="${escAttr(String(d.codigoProducto || ''))}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
+            ${(!abierta && g.tipo === 'INGRESO_DEVOLUCION_ZONA' && (parseFloat(d.cantidadRecibida) || 0) > 0)
+              ? `<button onclick="event.stopPropagation();MermasV2.desdeGuia('${escAttr(g.idGuia)}','${escAttr(String(d.codigoProducto || ''))}',${parseFloat(d.cantidadRecibida) || 0},'${escAttr(g.idZona || '')}')"
+                   style="position:absolute;top:6px;right:6px;background:rgba(220,38,38,.14);border:1px solid rgba(220,38,38,.4);color:#fca5a5;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:7px;z-index:2"
+                   title="Enviar todo o parte a mermas">♻️ a mermas</button>` : ''}
             <div class="flex-1 min-w-0">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 ${matchBadge}
@@ -19436,16 +19447,28 @@ const MermasView = (() => {
 
   async function cargar() {
     loading('listMermas', true);
-    const res = await API.getMermas({ limit: 200 }).catch(() => ({ ok: false }));
-    _all = res.ok ? res.data : [];
+    // [v2 · SQL 517] fuente directa wh.mermas_lista (trae culpa/pendiente/vencida/guía transformación);
+    // fallback al camino legacy si la RPC no responde.
+    let res = null;
+    try { res = await API.mermasV2Lista(); } catch (_) {}
+    if (res && res.ok && Array.isArray(res.data)) {
+      _all = res.data.map(m => ({ ...m, codigoProducto: m.codProducto || m.codigoProducto }));
+    } else {
+      res = await API.getMermas({ limit: 200 }).catch(() => ({ ok: false }));
+      _all = res.ok ? res.data : [];
+    }
     // Calcular días en proceso para flag vencidas (>3 días)
     const ahora = Date.now();
     _all.forEach(m => {
-      if (!m.fechaIngreso) { m.diasEnProceso = 0; m.vencida = false; return; }
-      const ms = ahora - new Date(m.fechaIngreso).getTime();
-      m.diasEnProceso = Math.floor(ms / (24 * 60 * 60 * 1000));
-      m.vencida = String(m.estado || '').toUpperCase() === 'EN_PROCESO' && ms > (3 * 24 * 60 * 60 * 1000);
+      if (m.diasPendiente != null) { m.diasEnProceso = m.diasPendiente; }  // v2: server ya lo calcula
+      else if (!m.fechaIngreso) { m.diasEnProceso = 0; m.vencida = false; return; }
+      else {
+        const ms = ahora - new Date(m.fechaIngreso).getTime();
+        m.diasEnProceso = Math.floor(ms / (24 * 60 * 60 * 1000));
+        m.vencida = String(m.estado || '').toUpperCase() === 'EN_PROCESO' && ms > (3 * 24 * 60 * 60 * 1000);
+      }
     });
+    try { MermasV2.badge(_all); } catch (_) {}
     _renderTabs();
     _render();
   }
@@ -19510,6 +19533,9 @@ const MermasView = (() => {
 
       // Badges: motivo + antigüedad
       const badges = [];
+      if (m.culpa) badges.push(`<span class="merma-badge" style="background:rgba(125,211,252,.13);color:#7dd3fc;border-color:rgba(125,211,252,.35)">culpa ${escHtml(m.culpa)}</span>`);
+      if (enProceso && !m.vencida) badges.push(`<span class="merma-badge" style="background:rgba(245,184,73,.12);color:#fbd989;border-color:rgba(245,184,73,.3)">⏳ ${Math.max(0, 3 - (m.diasEnProceso || 0))}d restantes</span>`);
+      if (m.idGuiaTransformacion) badges.push(`<span class="merma-badge" style="background:rgba(167,139,250,.14);color:#c4b5fd;border-color:rgba(167,139,250,.35)">🔄 transformada</span>`);
       if (m.motivo) badges.push(`<span class="merma-badge merma-badge-motivo">${escHtml(m.motivo)}</span>`);
       if (enProceso && m.vencida) badges.push(`<span class="merma-badge merma-badge-venc">⚠ ${m.diasEnProceso}d sin resolver</span>`);
       else if (enProceso && (m.diasEnProceso || 0) > 7) badges.push(`<span class="merma-badge merma-badge-aged">${m.diasEnProceso}d</span>`);
@@ -19518,7 +19544,8 @@ const MermasView = (() => {
       let bottom = '';
       if (_filtro === 'EN_PROCESO') {
         bottom = `<div class="merma-card-actions">
-            <button onclick="MermasView.abrirResolver('${safeId}')" class="merma-act merma-act-primary">✓ Solucionar</button>
+            <button onclick="MermasV2.procesar('${safeId}')" class="merma-act merma-act-primary">▶ Procesar</button>
+            <button onclick="MermasV2.toggleSel('${safeId}', this)" class="merma-act merma-act-ghost mermaSelBtn" data-id="${safeId}" title="Seleccionar para eliminar en lote">☐</button>
             ${m.foto ? `<button onclick="MermasView.verFoto('${escAttr(m.foto)}')" class="merma-act merma-act-ghost" title="Ver foto">📷</button>` : ''}
           </div>`;
       } else {
@@ -19809,7 +19836,7 @@ const MermasView = (() => {
     window.open(url, '_blank');
   }
 
-  return { cargar, crear, nueva, setFiltro, onFotoSeleccionada,
+  return { all: () => _all, cargar, crear, nueva, setFiltro, onFotoSeleccionada,
            abrirResolver, balancearResolucion, confirmarResolver, verFoto,
            abrirCesta, procesar, toggleResumenBanda };
 })();
@@ -24044,6 +24071,344 @@ window.WhAdhesivoReprint = WhAdhesivoReprint;
       location.reload();
     } catch (_) {}
   }, 30 * 60 * 1000);
+})();
+
+
+// ════════════════════════════════════════════════════════════════════
+// [🎯 SORPRESAS · WH] Registro desde el CARD de guía (solo admins) — SQL 516.
+// La sorpresa corrige la guía; el server re-verifica la clave admin (acceso_mos ok).
+// ════════════════════════════════════════════════════════════════════
+const SorpresasWH = (() => {
+  let _clave = '';         // en memoria (no se persiste); el server valida cada registro
+  let _guia = null, _delta = -1, _cod = '';
+
+  function esAdmin() {
+    try {
+      const ses = Session.getSesion() || {};
+      const rol = String(ses.rol || '').toUpperCase();
+      if (rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER') return true;
+      const p = (OfflineManager.getPersonalCache() || []).find(x => x.idPersonal === ses.idPersonal);
+      if (!p) return false;
+      const r2 = String(p.rol || '').toUpperCase();
+      return r2 === 'ADMIN' || r2 === 'ADMINISTRADOR' || r2 === 'MASTER' ||
+             p.accesoMos === true || p.accesoMos === '1' || p.accesoMos === 1;
+    } catch (_) { return false; }
+  }
+
+  function _lineas(idGuia) {
+    return (OfflineManager.getGuiaDetalleCache() || [])
+      .filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO');
+  }
+
+  function abrir(idGuia) {
+    _guia = idGuia; _delta = -1; _cod = '';
+    let ov = document.getElementById('sorpOverlayWH');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'sorpOverlayWH'; document.body.appendChild(ov); }
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9600;display:flex;align-items:flex-end;justify-content:center;padding:10px';
+    _pintar();
+  }
+  function cerrar() { const ov = document.getElementById('sorpOverlayWH'); if (ov) ov.remove(); }
+
+  function _pintar(msg, esError) {
+    const ov = document.getElementById('sorpOverlayWH'); if (!ov) return;
+    const lin = _lineas(_guia);
+    const filas = lin.map(d => {
+      const on = _cod === String(d.codigoProducto);
+      return `<div onclick="SorpresasWH.pick('${escAttr(String(d.codigoProducto))}')"
+        style="display:flex;align-items:center;gap:8px;padding:9px 11px;border-radius:10px;margin-bottom:6px;cursor:pointer;
+               background:${on ? 'rgba(245,184,73,.12)' : 'rgba(30,41,59,.5)'};border:1px solid ${on ? 'rgba(245,184,73,.55)' : 'rgba(51,65,85,.6)'}">
+        <div style="flex:1;min-width:0"><b style="font-size:13px;color:#f1f5f9">${escHtml(d.descripcionProducto || d.codigoProducto)}</b>
+        <div style="font-size:10px;color:#64748b;font-family:monospace">${escHtml(String(d.codigoProducto))} · en guía: ${d.cantidadRecibida}</div></div>
+        ${on ? '<span style="color:#fcd34d;font-weight:800">✓</span>' : ''}</div>`;
+    }).join('') || '<div style="color:#64748b;text-align:center;padding:12px">Sin líneas en esta guía</div>';
+    ov.innerHTML = `
+    <div style="background:linear-gradient(180deg,#0e1f3a,#0b1526);border:1px solid #26375a;border-radius:18px 18px 0 0;max-width:520px;width:100%;max-height:86vh;overflow-y:auto;padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:22px">🎯</span>
+        <div style="flex:1"><b style="font-size:15px;color:#fff">Producto sorpresa</b>
+        <div style="font-size:10px;color:#5f7290">${escHtml(_guia)} · solo tú lo ves · corrige la guía</div></div>
+        <button onclick="SorpresasWH.cerrar()" style="width:28px;height:28px;border-radius:8px;border:1px solid #26375a;background:none;color:#5f7290;font-size:15px">✕</button>
+      </div>
+      <div style="border:1.5px dashed rgba(74,168,255,.45);border-radius:12px;padding:10px;text-align:center;color:#8fd0ff;font-size:12px;margin-bottom:10px"
+           onclick="document.getElementById('sorpCodManual').focus()">📷 Toca una línea o escribe/escanea el código abajo</div>
+      ${filas}
+      <input id="sorpCodManual" placeholder="o código manual…" value="${escAttr(_cod && !lin.some(d => String(d.codigoProducto) === _cod) ? _cod : '')}"
+        onchange="SorpresasWH.codManual(this.value)"
+        style="width:100%;background:#0a1424;border:1px solid #26375a;border-radius:10px;padding:9px 11px;color:#eaf1fb;font-size:13px;margin:4px 0 10px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-size:10px;color:#5f7290;font-weight:800;text-transform:uppercase">Delta</span>
+        <button onclick="SorpresasWH.delta(-1)" style="font-size:17px;padding:5px 15px;border-radius:10px;border:1px solid #26375a;background:#0e1c34;color:#eaf1fb">−</button>
+        <b id="sorpDeltaWH" style="font-size:19px;color:${_delta > 0 ? '#7ff0c4' : '#fcd34d'};min-width:44px;text-align:center;font-family:monospace">${_delta > 0 ? '+' : '−'}${Math.abs(_delta)}</b>
+        <button onclick="SorpresasWH.delta(1)" style="font-size:17px;padding:5px 15px;border-radius:10px;border:1px solid #26375a;background:#0e1c34;color:#eaf1fb">＋</button>
+        <span style="font-size:10px;color:#5f7290;flex:1;min-width:120px">− quitas físico · ＋ mandas de más</span>
+      </div>
+      <input id="sorpClaveWH" type="password" inputmode="numeric" maxlength="8" placeholder="clave admin (8 dígitos)${_clave ? ' · recordada ✓' : ''}"
+        style="width:100%;background:#0a1424;border:1px solid ${_clave ? 'rgba(16,185,129,.4)' : '#26375a'};border-radius:10px;padding:9px 11px;color:#eaf1fb;font-size:13px;letter-spacing:.25em;margin-bottom:10px">
+      ${msg ? `<div style="border:1px solid ${esError ? 'rgba(239,68,68,.45)' : 'rgba(16,185,129,.45)'};background:${esError ? 'rgba(239,68,68,.08)' : 'rgba(16,185,129,.08)'};border-radius:10px;padding:9px 11px;font-size:12px;color:#e2e8f0;margin-bottom:10px">${msg}</div>` : ''}
+      <button onclick="SorpresasWH.registrar()" style="width:100%;padding:12px;border-radius:12px;border:0;background:linear-gradient(135deg,#eab308,#f5b849);color:#1a1206;font-weight:800;font-size:14px">🎯 Registrar sorpresa</button>
+    </div>`;
+  }
+  function pick(cod) { _cod = String(cod); _pintar(); }
+  function codManual(v) {
+    const cod = String(v || '').trim();
+    if (!cod) return;
+    // GUARDIA en cliente (el server re-valida): el código debe pertenecer a la guía
+    if (!_lineas(_guia).some(d => String(d.codigoProducto).toUpperCase() === cod.toUpperCase())) {
+      try { vibrate([120, 60, 120]); } catch (_) {}
+      try { window.SoundFX && SoundFX.error && SoundFX.error(); } catch (_) {}
+      _pintar(`⛔ <b>${escHtml(cod)}</b> no está en ${escHtml(_guia)} — ese producto no fue despachado en esta guía`, true);
+      return;
+    }
+    _cod = cod; _pintar();
+  }
+  function delta(dir) { _delta += dir; if (_delta === 0) _delta = dir > 0 ? 1 : -1; _pintar(); }
+
+  async function registrar() {
+    const claveInp = String(document.getElementById('sorpClaveWH')?.value || '').trim();
+    if (claveInp) _clave = claveInp;
+    if (!_cod) { _pintar('Elige el producto (toca una línea)', true); return; }
+    if (!_clave) { _pintar('Falta la clave admin (8 dígitos)', true); return; }
+    _pintar('Registrando…');
+    const ses = Session.getSesion() || {};
+    let r = null;
+    try {
+      r = await API.registrarSorpresa({
+        id_sorpresa: 'SORP_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e4),
+        id_guia: _guia, cod_producto: _cod, delta: _delta,
+        clave_admin: _clave, admin: ses.nombre || '', app: 'WH',
+        device: String(localStorage.getItem('wh_device_id') || '').slice(0, 12)
+      });
+    } catch (e) { r = { ok: false, error: String(e.message || e) }; }
+    if (r && r.ok) {
+      try { window.SoundFX && SoundFX.success && SoundFX.success(); } catch (_) {}
+      try { vibrate(30); } catch (_) {}
+      // refrescar cache local de la línea corregida (para que el card/detalle muestren lo real)
+      try { OfflineManager.actualizarCantidadDetalleLocal && OfflineManager.actualizarCantidadDetalleLocal(_guia, _cod, r.cant_corregida); } catch (_) {}
+      _pintar(`🎯 Registrada: <b>${escHtml(_cod)}</b> ${_delta > 0 ? '+' : ''}${_delta} · papel ${r.cant_original} → real <b>${r.cant_corregida}</b> (invisible al operador de zona)`);
+      _cod = '';
+    } else {
+      if (String(r && r.error) === 'CLAVE_INVALIDA') _clave = '';
+      const msj = { PRODUCTO_NO_EN_GUIA: '⛔ Ese producto NO fue despachado en esta guía', SORPRESA_TARDE: '⏱ La zona ya cerró la recepción', CLAVE_INVALIDA: '🔑 Clave admin rechazada', GUIA_INVALIDA: 'Guía inválida (debe ser salida a zona)', DELTA_EXCEDE: 'El delta excede lo de la línea' }[r && r.error] || (r && r.error) || 'error';
+      try { vibrate([120, 60, 120]); } catch (_) {}
+      _pintar(msj + (r && r.detalle ? ' · ' + escHtml(r.detalle) : ''), true);
+    }
+  }
+  return { esAdmin, abrir, cerrar, pick, codManual, delta, registrar };
+})();
+
+// ════════════════════════════════════════════════════════════════════
+// [♻️ MERMAS v2 · WH] Procesar (todo/parte/nada + transformar) · desde guía
+// devolución · batch eliminar · badge vencidas — SQL 517.
+// ════════════════════════════════════════════════════════════════════
+const MermasV2 = (() => {
+  const _sel = new Set();
+  let _m = null;
+
+  function badge(all) {
+    const n = (all || []).filter(m => m.vencida).length;
+    // badge en el tab del bottom-nav de mermas (si existe) — creado on-demand
+    const nav = document.querySelector('[data-nav="mermas"], #navMermas') || null;
+    let host = nav;
+    if (!host) { // fallback: KPI del dashboard
+      host = null;
+    }
+    if (host) {
+      let b = host.querySelector('.mermasNavBadge');
+      if (!b) { b = document.createElement('span'); b.className = 'mermasNavBadge'; b.style.cssText = 'position:absolute;top:2px;right:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:800;border-radius:99px;padding:1px 5px'; host.style.position = 'relative'; host.appendChild(b); }
+      b.textContent = String(n); b.style.display = n > 0 ? '' : 'none';
+    }
+  }
+
+  function _ov(html) {
+    let ov = document.getElementById('mermaV2Ov');
+    if (!ov) { ov = document.createElement('div'); ov.id = 'mermaV2Ov'; document.body.appendChild(ov); }
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9600;display:flex;align-items:flex-end;justify-content:center;padding:10px';
+    ov.innerHTML = `<div style="background:linear-gradient(180deg,#0e1f3a,#0b1526);border:1px solid #26375a;border-radius:18px 18px 0 0;max-width:520px;width:100%;max-height:88vh;overflow-y:auto;padding:16px">${html}</div>`;
+  }
+  function cerrar() { const ov = document.getElementById('mermaV2Ov'); if (ov) ov.remove(); }
+
+  // ── Puerta A: desde línea de guía devolución ──
+  let _dg = null;
+  function desdeGuia(idGuia, cod, max, idZona) {
+    _dg = { idGuia, cod, max, idZona, culpa: '', fotoB64: '', mime: '' };
+    _pintarDesdeGuia();
+  }
+  function _pintarDesdeGuia(msg, esError) {
+    const d = _dg;
+    const zonaNombre = (OfflineManager.getZonasCache() || []).find(z => z.idZona === d.idZona)?.nombre || d.idZona || 'Zona';
+    _ov(`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:22px">♻️</span>
+        <div style="flex:1"><b style="font-size:15px;color:#fff">Enviar a mermas</b>
+        <div style="font-size:10px;color:#5f7290">${escHtml(d.cod)} · de ${escHtml(d.idGuia)} (dev. ${escHtml(zonaNombre)})</div></div>
+        <button onclick="MermasV2.cerrar()" style="width:28px;height:28px;border-radius:8px;border:1px solid #26375a;background:none;color:#5f7290">✕</button>
+      </div>
+      <label style="font-size:9.5px;font-weight:800;text-transform:uppercase;color:#5f7290;display:block;margin-bottom:5px">Cantidad (de ${d.max} devueltos)</label>
+      <input id="mv2Cant" type="number" inputmode="decimal" value="${d.max}" min="0.01" max="${d.max}" step="any"
+        style="width:100%;background:#0a1424;border:1px solid #26375a;border-radius:10px;padding:11px;color:#eaf1fb;font-size:17px;font-weight:800;text-align:center;margin-bottom:11px">
+      <label style="font-size:9.5px;font-weight:800;text-transform:uppercase;color:#5f7290;display:block;margin-bottom:5px">¿De quién es la culpa?</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:11px">
+        <button onclick="MermasV2.culpa('ZONA')" style="padding:11px 6px;border-radius:11px;border:1.5px solid ${d.culpa === 'ZONA' ? 'rgba(125,211,252,.7)' : '#26375a'};background:${d.culpa === 'ZONA' ? 'rgba(125,211,252,.12)' : '#0a1424'};color:#7dd3fc;font-weight:750;font-size:12.5px">🏬 ${escHtml(zonaNombre)}<br><span style="font-size:9px;opacity:.7">devolvió dañado</span></button>
+        <button onclick="MermasV2.culpa('ALMACEN')" style="padding:11px 6px;border-radius:11px;border:1.5px solid ${d.culpa === 'ALMACEN' ? 'rgba(251,191,36,.7)' : '#26375a'};background:${d.culpa === 'ALMACEN' ? 'rgba(251,191,36,.1)' : '#0a1424'};color:#fbd989;font-weight:750;font-size:12.5px">🏭 Almacén<br><span style="font-size:9px;opacity:.7">se envió dañado</span></button>
+      </div>
+      <label style="font-size:9.5px;font-weight:800;text-transform:uppercase;color:#5f7290;display:block;margin-bottom:5px">Foto del estado (obligatoria)</label>
+      <label style="display:block;border:1.5px dashed rgba(74,168,255,.45);border-radius:12px;padding:11px;text-align:center;color:#8fd0ff;font-size:12px;margin-bottom:11px;cursor:pointer">
+        ${d.fotoB64 ? '✅ foto lista — tocar para cambiar' : '📷 tomar foto'}
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="MermasV2.foto(this)">
+      </label>
+      ${msg ? `<div style="border:1px solid ${esError ? 'rgba(239,68,68,.45)' : 'rgba(16,185,129,.45)'};background:${esError ? 'rgba(239,68,68,.08)' : 'rgba(16,185,129,.08)'};border-radius:10px;padding:9px 11px;font-size:12px;color:#e2e8f0;margin-bottom:10px">${msg}</div>` : ''}
+      <button onclick="MermasV2.enviarDesdeGuia()" style="width:100%;padding:12px;border-radius:12px;border:1px solid rgba(220,38,38,.5);background:rgba(220,38,38,.15);color:#fca5a5;font-weight:800;font-size:14px">♻️ Enviar a mermas</button>`);
+  }
+  function culpa(c) { if (_dg) { _dg.culpa = c; const v = document.getElementById('mv2Cant'); if (v) _dg.cantTmp = v.value; _pintarDesdeGuia(); const v2 = document.getElementById('mv2Cant'); if (v2 && _dg.cantTmp) v2.value = _dg.cantTmp; } }
+  function foto(inp) {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { if (_dg) { _dg.fotoB64 = String(rd.result || ''); _dg.mime = f.type || 'image/jpeg'; const v = document.getElementById('mv2Cant'); if (v) _dg.cantTmp = v.value; _pintarDesdeGuia(); const v2 = document.getElementById('mv2Cant'); if (v2 && _dg.cantTmp) v2.value = _dg.cantTmp; } };
+    rd.readAsDataURL(f);
+  }
+  async function enviarDesdeGuia() {
+    const d = _dg; if (!d) return;
+    const cant = parseFloat(document.getElementById('mv2Cant')?.value || '0');
+    if (!(cant > 0) || cant > d.max) { _pintarDesdeGuia('Cantidad inválida (máx ' + d.max + ')', true); return; }
+    if (!d.culpa) { _pintarDesdeGuia('Elige de quién es la culpa', true); return; }
+    if (!d.fotoB64) { _pintarDesdeGuia('La foto del estado es obligatoria', true); return; }
+    _pintarDesdeGuia('Enviando…');
+    const ses = Session.getSesion() || {};
+    let r = null;
+    try {
+      r = await API.mermaDesdeGuia({
+        id_merma: 'MRM_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e4),
+        id_guia: d.idGuia, cod_producto: d.cod, cantidad: cant, culpa: d.culpa,
+        fotoBase64: d.fotoB64, mimeType: d.mime, usuario: ses.nombre || ''
+      });
+    } catch (e) { r = { ok: false, error: String(e.message || e) }; }
+    if (r && r.ok) {
+      try { vibrate(30); } catch (_) {}
+      cerrar(); toast('♻️ ' + cant + ' enviadas a mermas · culpa ' + (r.culpa || d.culpa), 'ok');
+      try { if (typeof MermasView !== 'undefined') MermasView.cargar(); } catch (_) {}
+    } else {
+      const msj = { GUIA_ABIERTA: 'Cierra la guía primero (el stock debe haber ingresado)', PRODUCTO_NO_EN_GUIA: 'Ese producto no está en la guía', CANTIDAD_EXCEDE: 'Excede lo devuelto', FOTO_UPLOAD: 'No se pudo subir la foto' }[r && r.error] || (r && r.error) || 'error';
+      _pintarDesdeGuia(msj + (r && r.detalle ? ' · ' + escHtml(r.detalle) : ''), true);
+    }
+  }
+
+  // ── Procesar: TODO / PARTE / NADA + transformación ──
+  function procesar(idMerma) {
+    _m = (MermasView.all ? MermasView.all() : []).find(x => x.idMerma === idMerma) || { idMerma };
+    _m._modo = 'TODO'; _m._trans = false;
+    _pintarProcesar();
+  }
+  function _pintarProcesar(msg, esError) {
+    const m = _m; const pend = m.cantidadPendiente != null ? m.cantidadPendiente : m.cantidadOriginal || 0;
+    const desc = (OfflineManager.getProductosCache() || []).find(p => String(p.codigoBarra) === String(m.codigoProducto))?.descripcion || m.codigoProducto;
+    const opt = (id, ico, tt, dd, col) => `<button onclick="MermasV2.modo('${id}')"
+      style="padding:13px 6px;border-radius:12px;border:1.5px solid ${m._modo === id ? col : '#26375a'};background:${m._modo === id ? col.replace(')', ',.12)').replace('rgb', 'rgba') : '#0a1424'};text-align:center">
+      <div style="font-size:21px">${ico}</div><div style="font-size:11.5px;font-weight:800;color:#eaf1fb;margin-top:3px">${tt}</div><div style="font-size:9px;color:#5f7290">${dd}</div></button>`;
+    _ov(`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <span style="font-size:22px">🧺</span>
+        <div style="flex:1"><b style="font-size:15px;color:#fff">${escHtml(desc)} · ${pend}</b>
+        <div style="font-size:10px;color:#5f7290">culpa ${escHtml(m.culpa || '—')}${m.vencida ? ' · 🔴 VENCIDA' : ''}</div></div>
+        <button onclick="MermasV2.cerrar()" style="width:28px;height:28px;border-radius:8px;border:1px solid #26375a;background:none;color:#5f7290">✕</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:11px">
+        ${opt('TODO', '✅', 'Recuperar TODO', pend + ' vuelven al stock', 'rgb(16,185,129)')}
+        ${opt('PARTE', '◐', 'Recuperar PARTE', 'el resto sigue pendiente', 'rgb(245,184,73)')}
+        ${opt('NADA', '🗑', 'NADA', 'se elimina → guía salida', 'rgb(239,68,68)')}
+      </div>
+      ${m._modo === 'PARTE' ? `
+        <label style="font-size:9.5px;font-weight:800;text-transform:uppercase;color:#5f7290;display:block;margin-bottom:5px">Cantidad recuperada</label>
+        <input id="mv2Rec" type="number" inputmode="decimal" value="${m._rec || ''}" placeholder="de ${pend}" min="0.01" max="${pend}" step="any"
+          style="width:100%;background:#0a1424;border:1px solid #26375a;border-radius:10px;padding:11px;color:#eaf1fb;font-size:17px;font-weight:800;text-align:center;margin-bottom:11px">` : ''}
+      ${m._modo !== 'NADA' ? `
+      <div style="background:#0a1424;border:1px solid rgba(167,139,250,.35);border-radius:11px;padding:10px 12px;margin-bottom:11px">
+        <div style="display:flex;align-items:center;gap:9px">
+          <b style="font-size:12.5px;color:#eaf1fb">🔄 ¿Se transforma en otro producto?</b>
+          <button onclick="MermasV2.trans()" style="margin-left:auto;padding:3px 10px;border-radius:99px;border:1px solid rgba(167,139,250,.4);background:${m._trans ? 'rgba(167,139,250,.2)' : 'none'};color:#c4b5fd;font-size:10px;font-weight:800">${m._trans ? 'SÍ' : 'NO'}</button>
+        </div>
+        ${m._trans ? `
+        <input id="mv2Dst" placeholder="código del producto destino" value="${escAttr(m._dst || '')}"
+          style="width:100%;background:#0b1830;border:1px solid rgba(167,139,250,.4);border-radius:9px;padding:8px 10px;color:#eaf1fb;font-size:12.5px;margin-top:8px">
+        <input id="mv2DstQ" type="number" inputmode="decimal" placeholder="cantidad destino (default = lo recuperado)" value="${m._dstQ || ''}" step="any"
+          style="width:100%;background:#0b1830;border:1px solid rgba(167,139,250,.4);border-radius:9px;padding:8px 10px;color:#eaf1fb;font-size:12.5px;margin-top:6px">
+        <div style="font-size:9.5px;color:#5f7290;margin-top:5px">→ genera guía de TRANSFORMACIÓN automática (sale ${escHtml(String(m.codigoProducto || ''))}, entra el destino)</div>` : ''}
+      </div>` : ''}
+      ${msg ? `<div style="border:1px solid ${esError ? 'rgba(239,68,68,.45)' : 'rgba(16,185,129,.45)'};background:${esError ? 'rgba(239,68,68,.08)' : 'rgba(16,185,129,.08)'};border-radius:10px;padding:9px 11px;font-size:12px;color:#e2e8f0;margin-bottom:10px">${msg}</div>` : ''}
+      <button onclick="MermasV2.confirmar()" style="width:100%;padding:12px;border-radius:12px;border:0;background:${m._modo === 'NADA' ? 'rgba(220,38,38,.85)' : '#10b981'};color:${m._modo === 'NADA' ? '#fff' : '#04150e'};font-weight:800;font-size:14px">
+        ${m._modo === 'TODO' ? '✓ Recuperar ' + pend + (m._trans ? ' y transformar' : '') : m._modo === 'PARTE' ? '✓ Recuperar parte' + (m._trans ? ' y transformar' : '') : '🗑 Eliminar ' + pend + ' (guía de salida)'}
+      </button>`);
+  }
+  function modo(x) { if (_m) { _m._modo = x; _capturarTmp(); _pintarProcesar(); } }
+  function trans() { if (_m) { _m._trans = !_m._trans; _capturarTmp(); _pintarProcesar(); } }
+  function _capturarTmp() {
+    const r = document.getElementById('mv2Rec'); if (r) _m._rec = r.value;
+    const d = document.getElementById('mv2Dst'); if (d) _m._dst = d.value;
+    const q = document.getElementById('mv2DstQ'); if (q) _m._dstQ = q.value;
+  }
+  async function confirmar() {
+    const m = _m; if (!m) return;
+    _capturarTmp();
+    const pend = m.cantidadPendiente != null ? m.cantidadPendiente : m.cantidadOriginal || 0;
+    const ses = Session.getSesion() || {};
+    const lid = 'PM_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e4);
+    let p;
+    if (m._modo === 'NADA') {
+      p = { id_merma: m.idMerma, local_id: lid, accion: 'ELIMINAR', usuario: ses.nombre || '' };
+    } else {
+      const cant = m._modo === 'TODO' ? pend : parseFloat(m._rec || '0');
+      if (!(cant > 0) || cant > pend) { _pintarProcesar('Cantidad inválida (pendiente: ' + pend + ')', true); return; }
+      p = { id_merma: m.idMerma, local_id: lid, accion: 'RECUPERAR', cantidad: cant, usuario: ses.nombre || '' };
+      if (m._trans) {
+        const dst = String(m._dst || '').trim();
+        if (!dst) { _pintarProcesar('Falta el código del producto destino', true); return; }
+        p.cod_destino = dst;
+        p.cantidad_destino = parseFloat(m._dstQ || '0') || cant;  // default = lo recuperado (decisión dueño #4)
+      }
+    }
+    _pintarProcesar('Procesando…');
+    let r = null;
+    try { r = await API.procesarMerma(p); } catch (e) { r = { ok: false, error: String(e.message || e) }; }
+    if (r && r.ok) {
+      try { vibrate(30); } catch (_) {}
+      cerrar();
+      toast(m._modo === 'NADA' ? '🗑 Eliminada · guía ' + (r.id_guia_salida || '') :
+        '✓ Recuperado ' + (r.recuperado || '') + (r.transformada ? ' · 🔄 ' + (r.id_guia_transformacion || '') : '') + (r.pendiente > 0 ? ' · quedan ' + r.pendiente : ''), 'ok');
+      try { MermasView.cargar(); } catch (_) {}
+    } else { _pintarProcesar((r && r.error) || 'error', true); }
+  }
+
+  // ── batch eliminar ──
+  function toggleSel(id, btn) {
+    if (_sel.has(id)) { _sel.delete(id); btn.textContent = '☐'; } else { _sel.add(id); btn.textContent = '☑'; }
+    _pintarBarra();
+  }
+  function _pintarBarra() {
+    let bar = document.getElementById('mermaV2Barra');
+    const host = document.getElementById('listMermas');
+    if (!host) return;
+    if (!bar) { bar = document.createElement('div'); bar.id = 'mermaV2Barra'; host.parentNode.insertBefore(bar, host.nextSibling); }
+    bar.innerHTML = _sel.size
+      ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;margin-top:8px;border:1px solid rgba(220,38,38,.4);background:rgba(220,38,38,.08);border-radius:12px">
+          <span style="font-size:12px;color:#e2e8f0">${_sel.size} seleccionada(s)</span>
+          <button onclick="MermasV2.eliminarSel()" style="margin-left:auto;padding:8px 13px;border-radius:10px;border:1px solid rgba(220,38,38,.5);background:rgba(220,38,38,.18);color:#fca5a5;font-weight:800;font-size:12px">🗑 Eliminar seleccionadas → guía de salida</button></div>`
+      : '';
+  }
+  async function eliminarSel() {
+    if (!_sel.size) return;
+    const ses = Session.getSesion() || {};
+    toast('Procesando ' + _sel.size + '…', 'info');
+    for (const id of Array.from(_sel)) {
+      try {
+        await API.procesarMerma({ id_merma: id, local_id: 'PMB_' + id + '_' + Date.now().toString(36), accion: 'ELIMINAR', usuario: ses.nombre || '' });
+      } catch (_) {}
+      _sel.delete(id);
+    }
+    _pintarBarra();
+    toast('🗑 Lote eliminado (guías de salida generadas)', 'ok');
+    try { MermasView.cargar(); } catch (_) {}
+  }
+
+  return { badge, cerrar, desdeGuia, culpa, foto, enviarDesdeGuia, procesar, modo, trans, confirmar, toggleSel, eliminarSel };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.init());
