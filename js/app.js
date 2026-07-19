@@ -5577,11 +5577,19 @@ const GuiasView = (() => {
     </button>`;
     // [🎯 SORPRESAS] botón en el CARD (solo admins/ascendidos — decisión dueño #5):
     // un toque desde la lista, sin entrar al detalle. Server re-verifica clave en cada registro.
-    const sorpBtn = (g.tipo === 'SALIDA_ZONA' && typeof SorpresasWH !== 'undefined' && SorpresasWH.esAdmin())
-      ? `<button onclick="event.stopPropagation();SorpresasWH.abrir('${escAttr(g.idGuia)}')"
-           class="card-act" style="background:rgba(245,184,73,.16);border:1px solid rgba(245,184,73,.5);color:#fcd34d;font-size:12px"
-           title="Producto sorpresa (solo admin)">🎯</button>`
-      : '';
+    // [Dueño] visible para admins SIEMPRE; si la guía no es de HOY → deshabilitado notorio
+    // (gris + 🚫 al tocar): "es imposible poner producto sorpresa de ayer".
+    let sorpBtn = '';
+    if (g.tipo === 'SALIDA_ZONA' && typeof SorpresasWH !== 'undefined' && SorpresasWH.esAdmin()) {
+      const esHoy = _diaPeru(g.fecha) === _hoyPeru();
+      sorpBtn = esHoy
+        ? `<button onclick="event.stopPropagation();SorpresasWH.abrir('${escAttr(g.idGuia)}')"
+             class="card-act" style="background:rgba(245,184,73,.16);border:1px solid rgba(245,184,73,.5);color:#fcd34d;font-size:12px"
+             title="Producto sorpresa (solo admin)">🎯</button>`
+        : `<button onclick="event.stopPropagation();toast('🚫 Sorpresas solo en despachos de HOY','warn')"
+             class="card-act" style="background:rgba(100,116,139,.12);border:1px dashed rgba(100,116,139,.5);color:#475569;font-size:12px;opacity:.7"
+             title="Solo despachos de hoy">🎯</button>`;
+    }
     const printBtn = `<button onclick="event.stopPropagation();GuiasView.imprimirTicket('${escAttr(g.idGuia)}')"
       class="card-act card-act-print" title="Imprimir ticket">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/><path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/></svg>
@@ -6227,10 +6235,14 @@ const GuiasView = (() => {
           <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
                style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px;position:relative"
                data-det-id="${d.idDetalle || ''}" data-det-cb="${escAttr(String(d.codigoProducto || ''))}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
-            ${(abierta && g.tipo === 'INGRESO_DEVOLUCION_ZONA' && _diaPeru(g.fecha) === _hoyPeru() && (parseFloat(d.cantidadRecibida) || 0) > 0)
-              ? `<button onclick="event.stopPropagation();MermasV2.desdeGuia('${escAttr(g.idGuia)}','${escAttr(String(d.codigoProducto || ''))}',${parseFloat(d.cantidadRecibida) || 0},'${escAttr(g.idZona || '')}')"
-                   style="position:absolute;top:6px;right:6px;background:rgba(220,38,38,.14);border:1px solid rgba(220,38,38,.4);color:#fca5a5;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:7px;z-index:2"
-                   title="Enviar todo o parte a mermas">♻️ a mermas</button>` : ''}
+            ${(g.tipo === 'INGRESO_DEVOLUCION_ZONA' && (parseFloat(d.cantidadRecibida) || 0) > 0)
+              ? ((abierta && _diaPeru(g.fecha) === _hoyPeru())
+                ? `<button onclick="event.stopPropagation();MermasV2.desdeGuia('${escAttr(g.idGuia)}','${escAttr(String(d.codigoProducto || ''))}',${parseFloat(d.cantidadRecibida) || 0},'${escAttr(g.idZona || '')}')"
+                     style="position:absolute;top:6px;right:6px;background:rgba(220,38,38,.14);border:1px solid rgba(220,38,38,.4);color:#fca5a5;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:7px;z-index:2"
+                     title="Enviar todo o parte a mermas">♻️ a mermas</button>`
+                : `<button onclick="event.stopPropagation();toast('🚫 A mermas solo desde devoluciones ABIERTAS de HOY' + (${abierta ? 'false' : 'true'} ? ' — esta guía ya cerró' : ' — esta guía no es de hoy'),'warn',4000)"
+                     style="position:absolute;top:6px;right:6px;background:rgba(100,116,139,.1);border:1px dashed rgba(100,116,139,.5);color:#475569;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:7px;z-index:2;opacity:.75"
+                     title="Solo devoluciones abiertas de hoy">♻️ 🚫</button>`) : ''}
             <div class="flex-1 min-w-0">
               <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
                 ${matchBadge}
@@ -24110,8 +24122,16 @@ const SorpresasWH = (() => {
   }
 
   function _lineas(idGuia) {
+    // [Dueño] mostrar el NOMBRE real del producto (la línea a veces no trae descripción):
+    // enriquecer desde el catálogo por codigoBarra/idProducto.
+    const prods = OfflineManager.getProductosCache() || [];
     return (OfflineManager.getGuiaDetalleCache() || [])
-      .filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO');
+      .filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO')
+      .map(d => {
+        if (d.descripcionProducto && d.descripcionProducto !== d.codigoProducto) return d;
+        const p = prods.find(x => String(x.codigoBarra) === String(d.codigoProducto) || String(x.idProducto) === String(d.codigoProducto));
+        return p ? { ...d, descripcionProducto: p.descripcion || d.codigoProducto } : d;
+      });
   }
 
   function abrir(idGuia) {
