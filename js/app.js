@@ -5577,7 +5577,7 @@ const GuiasView = (() => {
     </button>`;
     // [🎯 SORPRESAS] botón en el CARD (solo admins/ascendidos — decisión dueño #5):
     // un toque desde la lista, sin entrar al detalle. Server re-verifica clave en cada registro.
-    const sorpBtn = (g.tipo === 'SALIDA_ZONA' && window.SorpresasWH && SorpresasWH.esAdmin())
+    const sorpBtn = (g.tipo === 'SALIDA_ZONA' && typeof SorpresasWH !== 'undefined' && SorpresasWH.esAdmin())
       ? `<button onclick="event.stopPropagation();SorpresasWH.abrir('${escAttr(g.idGuia)}')"
            class="card-act" style="background:rgba(245,184,73,.16);border:1px solid rgba(245,184,73,.5);color:#fcd34d;font-size:12px"
            title="Producto sorpresa (solo admin)">🎯</button>`
@@ -6227,7 +6227,7 @@ const GuiasView = (() => {
           <div class="flex items-center gap-3 py-3 px-3 border-b border-slate-700/50 cursor-pointer active:bg-slate-700/20 rounded-lg${pendiente}"
                style="${rowBg ? 'background:' + rowBg + ';' : 'background:rgba(30,41,59,.4);'}border-radius:10px;margin-bottom:6px;position:relative"
                data-det-id="${d.idDetalle || ''}" data-det-cb="${escAttr(String(d.codigoProducto || ''))}" data-det-idx="${idx}" onclick="GuiasView.selectItem(${idx})">
-            ${(!abierta && g.tipo === 'INGRESO_DEVOLUCION_ZONA' && (parseFloat(d.cantidadRecibida) || 0) > 0)
+            ${(abierta && g.tipo === 'INGRESO_DEVOLUCION_ZONA' && _diaPeru(g.fecha) === _hoyPeru() && (parseFloat(d.cantidadRecibida) || 0) > 0)
               ? `<button onclick="event.stopPropagation();MermasV2.desdeGuia('${escAttr(g.idGuia)}','${escAttr(String(d.codigoProducto || ''))}',${parseFloat(d.cantidadRecibida) || 0},'${escAttr(g.idZona || '')}')"
                    style="position:absolute;top:6px;right:6px;background:rgba(220,38,38,.14);border:1px solid rgba(220,38,38,.4);color:#fca5a5;font-size:10.5px;font-weight:800;padding:3px 8px;border-radius:7px;z-index:2"
                    title="Enviar todo o parte a mermas">♻️ a mermas</button>` : ''}
@@ -19745,9 +19745,12 @@ const MermasView = (() => {
     const btn = document.getElementById('btnRegistrarMerma');
     btn.disabled = true; btn.textContent = 'Registrando...';
     try {
-      const res = await API.registrarMerma({
-        codigoProducto, responsable, motivo,
-        cantidadOriginal: cantidad,
+      // [v2 · SQL 517] hallazgo en almacén: culpa ALMACÉN fija, la unidad sale del vendible
+      // a la cesta (stock_descontado) y recuperarla la devuelve. Idempotente por id_merma.
+      const res = await API.mermaAltaManualV2({
+        id_merma: 'MRM_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e4),
+        cod_producto: codigoProducto, cantidad: cantidad,
+        motivo: motivo || ('hallado dañado' + (responsable ? ' · ' + responsable : '')),
         fotoBase64: _fotoBase64, mimeType: _fotoMime,
         usuario: window.WH_CONFIG?.usuario || ''
       });
@@ -19758,7 +19761,8 @@ const MermasView = (() => {
         cerrarSheet('sheetMerma');
         cargar();
       } else {
-        toast('Error: ' + (res.error || 'desconocido'), 'danger', 5000);
+        const msj = { FOTO_OBLIGATORIA: 'Foto obligatoria', CANTIDAD_INVALIDA: 'Cantidad inválida', FOTO_UPLOAD: 'No se pudo subir la foto' }[res.error] || res.error || 'desconocido';
+        toast('Error: ' + msj, 'danger', 5000);
       }
     } catch(e) { toast('Sin conexión', 'warn'); }
     finally { btn.disabled = false; btn.textContent = 'Registrar merma'; }
@@ -24085,16 +24089,24 @@ const SorpresasWH = (() => {
   let _guia = null, _delta = -1, _cod = '';
 
   function esAdmin() {
+    // Multi-fuente: la "sesión" WH puede ser de turno (sin rol) → caer al usuario del turno
+    // (WH_CONFIG.usuario / wh_usuario) y buscarlo en el personal cache por id O por nombre.
     try {
-      const ses = Session.getSesion() || {};
-      const rol = String(ses.rol || '').toUpperCase();
-      if (rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER') return true;
-      const p = (OfflineManager.getPersonalCache() || []).find(x => x.idPersonal === ses.idPersonal);
-      if (!p) return false;
-      const r2 = String(p.rol || '').toUpperCase();
-      return r2 === 'ADMIN' || r2 === 'ADMINISTRADOR' || r2 === 'MASTER' ||
-             p.accesoMos === true || p.accesoMos === '1' || p.accesoMos === 1;
-    } catch (_) { return false; }
+      const norm = t => String(t || '').trim().toLowerCase();
+      const esRolAdmin = r => { r = String(r || '').toUpperCase(); return r === 'ADMIN' || r === 'ADMINISTRADOR' || r === 'MASTER'; };
+      const tieneAcceso = p => !!p && (esRolAdmin(p.rol) || p.accesoMos === true || p.accesoMos === '1' || p.accesoMos === 1 || p.acceso_mos === true || p.acceso_mos === '1');
+      const ses = (typeof Session !== 'undefined' && Session.getSesion && Session.getSesion()) || {};
+      if (esRolAdmin(ses.rol)) return true;
+      const per = OfflineManager.getPersonalCache() || [];
+      if (ses.idPersonal && tieneAcceso(per.find(x => x.idPersonal === ses.idPersonal))) return true;
+      const nombres = [ses.nombre, ses.usuario, (window.WH_CONFIG && WH_CONFIG.usuario), localStorage.getItem('wh_usuario')]
+        .map(norm).filter(Boolean);
+      for (const n of nombres) {
+        const p = per.find(x => norm(x.nombre) === n || norm((x.nombre || '') + ' ' + (x.apellido || '')) === n);
+        if (tieneAcceso(p)) return true;
+      }
+    } catch (_) {}
+    return false;
   }
 
   function _lineas(idGuia) {
