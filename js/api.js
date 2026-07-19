@@ -2408,7 +2408,10 @@ const API = (() => {
 
     // [cero-GAS · WH] Acción propia de WH cuyo directo no commiteó → FAIL-CLOSED: ni GAS ni encolar-a-GAS.
     // Error claro para el caller (el panel de diagnóstico / la rama muerta de mermas). Nunca toca gasUrl.
-    if (_WH_NO_GAS.has(params.action)) {
+    // [458 · sello total] TODA acción de dinero/stock con RPC directa (_IDEMPOTENT_ACTIONS) queda
+    // igual de sellada: si la RPC devuelve error de negocio (null), ANTES caía al GAS legacy —
+    // que ya está físicamente retirado (stubs fail-closed @532) — ahora ni lo intenta.
+    if (_WH_NO_GAS.has(params.action) || _IDEMPOTENT_ACTIONS.has(params.action)) {
       return { ok: false, error: 'Acción no disponible sin conexión directa (cero-GAS)', _ceroGas: true };
     }
 

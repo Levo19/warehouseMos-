@@ -12,42 +12,13 @@
 // 1. Cierre forzado de TODAS las guías abiertas (21:00)
 // ============================================================
 function cerrarGuiasAbiertasGlobal() {
-  var sheet = getSheet('GUIAS');
-  var data  = sheet.getDataRange().getValues();
-  var hdrs  = data[0];
-  var idxId  = hdrs.indexOf('idGuia');
-  var idxEst = hdrs.indexOf('estado');
-  if (idxId < 0 || idxEst < 0) return { ok: false, error: 'Columnas no encontradas' };
-
-  var abiertas = [];
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][idxEst]).toUpperCase() === 'ABIERTA') {
-      abiertas.push(String(data[i][idxId]));
-    }
-  }
-
-  var ok = 0, err = 0;
-  abiertas.forEach(function(idGuia) {
-    try {
-      // skipMosSync: evita el UrlFetchApp por cada detalle (lento si hay muchos
-      // productos, causa timeout >6min). El sync interactivo de productos
-      // proveedor sigue funcionando cuando el usuario cierra guías manualmente.
-      var res = cerrarGuia(idGuia, 'sistema-cierre-21h', null, { skipMosSync: true });
-      if (res.ok) ok++; else err++;
-    } catch(e) { err++; Logger.log('Error cerrando ' + idGuia + ': ' + e.message); }
-  });
-
-  Logger.log('cerrarGuiasAbiertasGlobal: ' + ok + ' cerradas, ' + err + ' errores de ' + abiertas.length + ' totales');
-  return { ok: true, data: { total: abiertas.length, ok: ok, error: err } };
+  // [CERO-GAS 2026-07-19] NEUTRALIZADO: este trigger de las 21:00 cerraba guías por la HOJA
+  // (y parchaba estado en la sombra SIN aplicar stock → zombi peligroso post-cutover).
+  // El cierre del día vive en pg_cron server-side. No-op permanente.
+  Logger.log('[CERO-GAS] cerrarGuiasAbiertasGlobal legacy: no-op (pg_cron es el dueño)');
+  return { ok: true, cerradas: 0, nota: 'migrado a pg_cron' };
 }
 
-// ============================================================
-// 2. Auditoría de cuadre stock vs historial (22:00)
-//    Stock teórico = sum(AJUSTES) + sum(detalles INGRESO cerrados)
-//                    - sum(detalles SALIDA cerrados)
-//    Diff = stock_real - stock_teorico
-//    Si |diff| > 0.5 → alerta
-// ============================================================
 function auditarStockGlobal() {
   var stockSheet = getSheet('STOCK');
   var stockData  = _sheetToObjects(stockSheet);
