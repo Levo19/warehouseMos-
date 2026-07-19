@@ -29,8 +29,7 @@
   <!-- ── Configuración: cambiar GAS_URL antes de desplegar ── -->
   <script>
     window.WH_CONFIG = {
-      gasUrl:    'https://script.google.com/macros/s/AKfycbx6EgeDjgVHot1p7c-inLq8zS-Q-TAFpQd9K2I-ZbRORx4AKPawslea3pGx9cAxFjDu/exec',
-      mosGasUrl: 'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec',
+      // [CERO-GAS 2026-07-19] gasUrl/mosGasUrl ELIMINADAS: la app no tiene transporte a GAS.
       usuario:   localStorage.getItem('wh_usuario') || 'operador',
       version:   '1.0.5',
       // [CUTOVER B6] Flags server-wide (todos los dispositivos). El cutover de DATOS está COMPLETO:
@@ -5369,8 +5368,7 @@
   <script src="https://levo19.github.io/MOS/assets/auth/extensor-horario.js?v=1.0.3"></script>
   <script>
   (function(){
-    var MOS_URL = (window.WH_CONFIG && window.WH_CONFIG.mosGasUrl) ||
-                  'https://script.google.com/macros/s/AKfycbxalFhPdiVi_e4tq1f4ce6MHoLJb2_hwPts9bCttotlArIepooUwFpMl4nsX-3x4HfM/exec';
+    // [CERO-GAS 2026-07-19] MOS_URL eliminada (device-auth v1.0.29 = auth 100% Supabase).
     if (!window.DeviceAuth) return;
     // [AUTH DIRECTO] Config Supabase que WH ya usa para sus datos (mint-wh /
     // leer_tabla_rls / stock_enriquecido_rls). Misma URL + anon key públicas que
@@ -5386,7 +5384,7 @@
     // NO desactiva (el flag lee '1'); para forzar GAS, quita sbUrl/sbAnon de arriba.
     try { if (localStorage.getItem('mos_device_auth_directo') == null) localStorage.setItem('mos_device_auth_directo', '1'); } catch(_){}
     DeviceAuth.init({
-      mosGasUrl: MOS_URL,
+      // [CERO-GAS] mosGasUrl retirado (device-auth v1.0.29: auth 100% Supabase)
       sbUrl: SB_URL,
       sbAnon: SB_ANON,
       app: 'warehouseMos',
@@ -8116,7 +8114,7 @@
     <div class="card">
       <div class="space-y-1 text-xs text-slate-500">
         <p>Versión: <span id="toolsVersion" class="text-slate-300 font-mono">—</span></p>
-        <p>GAS: <span id="toolsGasUrl" class="text-slate-400 break-all">—</span></p>
+        <p>Backend: <span id="toolsGasUrl" class="text-slate-400 break-all">100% Supabase (cero-GAS)</span></p>
       </div>
     </div>
 

@@ -2,7 +2,7 @@
 'use strict';
 
 const API = (() => {
-  function _gasUrl() { return window.WH_CONFIG?.gasUrl || ''; }
+  // [CERO-GAS 2026-07-19] _gasUrl() eliminado — este módulo no tiene transporte a GAS.
 
   // [cero-GAS · WH 2026-07-14] Acciones PROPIAS de WH que NO deben tocar GAS jamás. Si un POST de estas llega
   // al fallback GAS es porque su directo no commiteó (no cableada / Edge caída / rama muerta detrás de OpLog).
@@ -1417,13 +1417,23 @@ const API = (() => {
     }
 
     // [kill-GAS] procesar mermas descartadas → wh.procesar_eliminacion_mermas (392): guía SALIDA_MERMA + marca.
-    if (params.action === 'procesarEliminacionMermas') {
-      const out = await _sbRpcWH('procesar_eliminacion_mermas', { p: {
-        claveAdmin: params.claveAdmin || '', usuario: params.usuario || ''
-      } });
-      if (!out) return null;
-      return out;   // {ok:true,data:{autorizado,idGuiaSalida,procesados,fallidos}}
+    // [CERO-GAS 2026-07-19] LISTAS SOMBRA → RPCs directas (SQL 349/350, cableadas por fin;
+    // antes estas 6 acciones eran las ÚLTIMAS escrituras que viajaban por GAS).
+    if (params.action === 'crearListaSombra' || params.action === 'tomarListaSombra' ||
+        params.action === 'cerrarListaSombra' || params.action === 'anularListaSombra' ||
+        params.action === 'liberarListaSombra' || params.action === 'actualizarProgresoListaSombra') {
+      const RPC_LS = {
+        crearListaSombra: 'crear_lista_sombra', tomarListaSombra: 'tomar_lista_sombra',
+        cerrarListaSombra: 'cerrar_lista_sombra', anularListaSombra: 'anular_lista_sombra',
+        liberarListaSombra: 'liberar_lista_sombra', actualizarProgresoListaSombra: 'actualizar_progreso_lista_sombra'
+      };
+      const { action, idSesion, _viaDirecta, _fromQueue, ...rest } = params;
+      const out = await _sbRpcWH(RPC_LS[action], { p: rest });
+      if (!out || out.ok === false) return out || null;   // error de negocio visible (sin GAS detrás)
+      return out;
     }
+
+    // [cero-rastro] procesarEliminacionMermas eliminado: sistema viejo de mermas sin callers (v2 = mermasEliminarBatch).
 
     if (params.action === 'crearAjuste') {
       const out = await _sbRpcWH('crear_ajuste', { p: {
@@ -2289,43 +2299,10 @@ const API = (() => {
   // offline (el localId garantiza idempotencia al sincronizar).
   const _FETCH_TIMEOUT_MS = 15000;
 
-  async function _doFetchWithRetry(GAS_URL, params) {
-    // 3 intentos: rápido si todo OK, recuperación si red flaquea o lock saturado.
-    // Backoff: 600ms, 1500ms (total ~2.1s antes de rendirse).
-    // params.localId se mantiene constante en los reintentos → GAS deduplica.
-    const delays = [600, 1500];
-    for (let intento = 0; intento < 3; intento++) {
-      const ctrl = new AbortController();
-      const tId  = setTimeout(() => ctrl.abort(), _FETCH_TIMEOUT_MS);
-      try {
-        const res  = await fetch(GAS_URL, {
-          method:  'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body:    JSON.stringify(params),
-          signal:  ctrl.signal
-        });
-        clearTimeout(tId);
-        const json = await res.json();
-        if (json && json.ok === false && /saturado|ocupado/i.test(json.error || '')) {
-          if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
-        }
-        return json;
-      } catch {
-        clearTimeout(tId);
-        if (intento < 2) { await new Promise(r => setTimeout(r, delays[intento])); continue; }
-        // Red falló o timeout tras 3 intentos → encolar offline (reusa localId si ya existe).
-        // [40x cruce] Si esta llamada YA viene de la cola (_fromQueue), NO re-encolar: devolver fallo
-        // para que sincronizar() lo marque 'error' y reintente luego (evita encolado doble/loop).
-        if (params._fromQueue) return { ok: false, error: 'red', _retry: true };
-        const localId = OfflineManager.encolar(params.action, params);
-        return { ok: true, offline: true, localId, data: { idLocal: localId } };
-      }
-    }
-  }
+  // [CERO-GAS 2026-07-19] _doFetchWithRetry ELIMINADO — no queda transporte a GAS en este módulo.
 
   // POST: si offline → encolar offline. GAS LockService maneja la serialización.
   async function post(params) {
-    const GAS_URL = _gasUrl();
     const idSesion = window.WH_CONFIG?.idSesion;
     if (idSesion && !params.idSesion) params = { ...params, idSesion };
 
@@ -2415,7 +2392,7 @@ const API = (() => {
       return { ok: false, error: 'Acción no disponible sin conexión directa (cero-GAS)', _ceroGas: true };
     }
 
-    if (!GAS_URL || !navigator.onLine) {
+    if (!navigator.onLine) {
       if (params._fromQueue) return { ok: false, error: 'sin-conexion', _retry: true };
       // [FIX pre-corte GAS · auditoría 2026-07-08] Encolar OFFLINE sella la VÍA DIRECTA (si la app
       // opera en escritura directa, que en prod es SIEMPRE): sin el sello, sincronizar() replayaba
@@ -2429,14 +2406,10 @@ const API = (() => {
       return { ok: true, offline: true, localId, data: { idLocal: localId } };
     }
 
-    _opsEnVuelo++;
-    _emitOpsState();
-    try {
-      return await _doFetchWithRetry(GAS_URL, params);
-    } finally {
-      _opsEnVuelo--;
-      _emitOpsState();
-    }
+    // [CERO-GAS 2026-07-19] La pata GAS de post() se ELIMINÓ físicamente (_doFetchWithRetry
+    // retirado). Cualquier acción que llegue acá no tiene camino directo commiteado →
+    // fail-closed con error claro. GAS ya no es alcanzable desde la API de WH. PUNTO.
+    return { ok: false, error: 'Acción sin camino directo (cero-GAS): ' + params.action, _ceroGas: true };
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -3061,7 +3034,6 @@ const API = (() => {
     getMermasCesta:           ()   => call({ action: 'getMermasCesta' }),
     agregarAMermas:           (p)  => post({ action: 'agregarAMermas', ...p }),
     solucionarMerma:          (p)  => post({ action: 'solucionarMerma', ...p }),
-    procesarEliminacionMermas:(p)  => post({ action: 'procesarEliminacionMermas', ...p }),
     contadorMermasPendientes: ()   => call({ action: 'contadorMermasPendientes' }),
 
     // ── F0: Fotos genérico ──────────────────────────────────────

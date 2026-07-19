@@ -416,20 +416,14 @@ const OfflineManager = (() => {
       // a GAS = leía la HOJA; un proveedor/estación escrito DIRECTO a Supabase (que NO toca la Hoja) era
       // INVISIBLE para WH (el dato estaba en mos.* pero WH cacheaba la Hoja). Mismo arreglo que ya se hizo
       // para operacional (API.descargarOperacional). getStock/getConfig siguen por GAS (fuera de scope).
+      // [CERO-GAS 2026-07-19] SOLO Supabase directo (API.*). Los fetch crudos a GAS se
+      // eliminaron: en el boot frío el primer intento directo puede perder la carrera del
+      // mint → antes degradaba a GAS (3 GETs a la Hoja stale); ahora reintenta DIRECTO
+      // (ver _retryMaestros abajo) y mientras tanto sirve el cache local.
       const [maestros, stock, config] = await Promise.all([
-        ((typeof API !== 'undefined' && API.descargarMaestros)
-          ? API.descargarMaestros().catch(() => null)
-          : fetch(_gasUrl('descargarMaestros')).then(r => r.json()).catch(() => null)),
-        // [FIX #4 asimetría stock] getStock vía API → Supabase (stock_enriquecido_rls) cuando lectura
-        // directa ON, fallback GAS. ANTES: fetch crudo a la Hoja STOCK = stale si el stock se escribe
-        // directo a Supabase. Cierra la ventana junto con precargarOperacional (que ya es Supabase-first).
-        ((typeof API !== 'undefined' && API.getStock)
-          ? API.getStock().catch(() => null)
-          : fetch(_gasUrl('getStock')).then(r => r.json()).catch(() => null)),
-        // [Frente 4] config vía API.getConfig → Supabase (wh.get_config), fallback GAS.
-        ((typeof API !== 'undefined' && API.getConfig)
-          ? API.getConfig().catch(() => null)
-          : fetch(_gasUrl('getConfig')).then(r => r.json()).catch(() => null))
+        (typeof API !== 'undefined' && API.descargarMaestros) ? API.descargarMaestros().catch(() => null) : null,
+        (typeof API !== 'undefined' && API.getStock)          ? API.getStock().catch(() => null)          : null,
+        (typeof API !== 'undefined' && API.getConfig)         ? API.getConfig().catch(() => null)         : null
       ]);
 
       console.log('[Offline] descargarMaestros respuesta:', maestros);
@@ -453,17 +447,10 @@ const OfflineManager = (() => {
         if (maestros.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(maestros.server_ts)); } catch (_) {} }
         if (maestros.errores?.length) console.warn('[Offline] descargarMaestros errores:', maestros.errores);
       } else {
-        // GAS antiguo o MOS no configurado — degradar a endpoints individuales
-        console.warn('[Offline] descargarMaestros no disponible, usando endpoints legacy');
-        const [personal, productos, proveedores] = await Promise.all([
-          fetch(_gasUrl('getPersonalConPin')).then(r => r.json()).catch(() => null),
-          fetch(_gasUrl('getProductos&estado=1')).then(r => r.json()).catch(() => null),
-          fetch(_gasUrl('getProveedores&estado=1')).then(r => r.json()).catch(() => null)
-        ]);
-        console.log('[Offline] legacy getPersonalConPin:', personal);
-        if (personal?.ok)    guardar(KEYS.PERSONAL,    personal.data);
-        if (productos?.ok)   _guardarSiCambia(KEYS.PRODUCTOS, 'productos', productos.data, 'productos', maestrosChanged);
-        if (proveedores?.ok) guardar(KEYS.PROVEEDORES, proveedores.data);
+        // [CERO-GAS 2026-07-19] El directo no respondió (boot frío: carrera del mint / red).
+        // NADA de GAS: el login sirve del cache local y programamos UN reintento directo.
+        console.warn('[Offline] descargarMaestros directo no respondió — reintento directo en 6s (cero-GAS)');
+        _retryMaestros();
       }
 
       if (stock?.ok)  guardar(KEYS.STOCK,  stock.data);
@@ -538,9 +525,16 @@ const OfflineManager = (() => {
     return { ok: true, delta: true };
   }
 
-  function _gasUrl(action) {
-    return `${window.WH_CONFIG.gasUrl}?action=${action}`;
+  // [CERO-GAS] Reintento directo del maestro tras un boot frío fallido. Máx 3 intentos
+  // espaciados; si todos fallan, los ciclos normales (login/welcome/reconexión) lo retoman.
+  let _retryMaestrosN = 0;
+  function _retryMaestros() {
+    if (_retryMaestrosN >= 3) return;
+    _retryMaestrosN++;
+    setTimeout(() => { try { _lastMasterTs = 0; precargar(true); } catch (_) {} }, 6000 * _retryMaestrosN);
   }
+
+  // [CERO-GAS 2026-07-19] _gasUrl ELIMINADO: no queda NINGÚN camino a GAS en este módulo.
 
   // ── Validación PIN local (instantánea) ───────────────────
   function validarPinLocal(pin) {
@@ -750,9 +744,10 @@ const OfflineManager = (() => {
       // listado de Guías ve sus propias guías directas 'G_L...' (antes el GAS stale nunca las
       // mostraba). API.descargarOperacional cae a GAS solo ante fallo. Fallback al fetch crudo
       // si API no está cargada (orden de scripts / arranque temprano).
+      // [CERO-GAS 2026-07-19] SOLO API (Supabase directo); el fetch crudo a GAS se eliminó.
       const r = (typeof API !== 'undefined' && API.descargarOperacional)
         ? await API.descargarOperacional().catch(() => null)
-        : await fetch(_gasUrl('descargarOperacional')).then(r => r.json()).catch(() => null);
+        : null;
       if (!r?.ok) return;
       const d = r.data;
       const changed = [];

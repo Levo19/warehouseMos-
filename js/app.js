@@ -1284,7 +1284,7 @@ const Session = (() => {
     loadingEl.style.display = 'flex';
 
     const yaHayCache = OfflineManager.getPersonalCache().length > 0;
-    if (!yaHayCache && navigator.onLine && window.WH_CONFIG.gasUrl) {
+    if (!yaHayCache && navigator.onLine) {   // [CERO-GAS] gate por gasUrl eliminado (precarga = Supabase directo)
       // [perf 500x] NO bloquear el teclado PIN esperando la descarga de ~1.9MB del catálogo. La validación
       // del PIN es server-side (loginPersonalSB, online) y NO necesita el catálogo. Disparamos la precarga
       // en BACKGROUND (fire-and-forget) y revelamos el teclado de inmediato → PIN tecleable en <100ms.
@@ -2273,8 +2273,7 @@ const Session = (() => {
   function _gpsRegistrarWH(forzar) {
     if (!navigator.geolocation) return;
     if (!sesionActual) return;
-    const mosUrl = window.WH_CONFIG?.mosGasUrl;
-    if (!mosUrl) return;
+    // [CERO-GAS] guard por mosGasUrl eliminado: el GPS va directo (mos.registrar_ubicacion)
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         let bateria = '';
@@ -2352,8 +2351,7 @@ const Session = (() => {
     try {
       if (!sesionActual) return;
       if (!window.firebase || !('Notification' in window) || !('serviceWorker' in navigator)) return;
-      const mosUrl = window.WH_CONFIG?.mosGasUrl;
-      if (!mosUrl) return;
+      // [CERO-GAS] guard por mosGasUrl eliminado: el token se registra directo (mos.push_tokens)
       if (!firebase.apps.length) firebase.initializeApp(_PUSH_CONFIG);
       const messaging = firebase.messaging();
 
@@ -3327,7 +3325,7 @@ const BloqueoRemoto = (() => {
   let _warningShown = false;
   let _activo = false;
 
-  function _mosUrl() { return window.WH_CONFIG?.mosGasUrl || ''; }
+  // [CERO-GAS] _mosUrl() eliminado (sin callers).
 
   async function _check() {
     if (document.hidden) return;   // [perf] BloqueoRemoto no consulta MOS con la pestaña oculta
@@ -3747,13 +3745,9 @@ const App = (() => {
   let todosProveedores = [];
 
   async function init() {
-    // Restaurar GAS URL si fue guardada localmente
-    const gasUrl = localStorage.getItem('wh_gas_url');
-    if (gasUrl) {
-      console.log('[App] wh_gas_url desde localStorage:', gasUrl);
-      window.WH_CONFIG.gasUrl = gasUrl;
-    }
-    console.log('[App] GAS URL activa:', window.WH_CONFIG.gasUrl);
+    // [CERO-GAS 2026-07-19] restore de wh_gas_url + log "GAS URL activa" eliminados: la app
+    // no tiene ningún transporte a GAS. Purga del residuo en equipos:
+    try { localStorage.removeItem('wh_gas_url'); } catch(_) {}
 
     // [v2.13.118] Inicializar sistema centralizado de membretes/adhesivos.
     // WH API.post retorna {ok,data} → no desempaca. Llamadas a endpoints
@@ -4143,7 +4137,7 @@ const App = (() => {
       if (el) el.textContent = v.version + ' (' + (v.build || '') + ')';
     }).catch(() => {});
     const gasEl = document.getElementById('toolsGasUrl');
-    if (gasEl) gasEl.textContent = window.WH_CONFIG?.gasUrl || '—';
+    if (gasEl) gasEl.textContent = '— (cero-GAS: 100% Supabase)';
   }
 
   async function syncForzado() {
@@ -11960,7 +11954,7 @@ const ConfigPanel = (() => {
     const online = navigator.onLine;
     let pending = 0;
     try { pending = (OfflineManager.getQueue && OfflineManager.getQueue().length) || 0; } catch (_) {}
-    const gas = (window.WH_CONFIG && WH_CONFIG.gasUrl) ? 'OK' : 'sin URL';
+    const gas = 'cero-GAS';
     const lines = [
       'Red: ' + (online ? 'online ✅' : 'offline ⚠'),
       'Backend (GAS): ' + gas,
@@ -12082,7 +12076,7 @@ const ConfigPanel = (() => {
       if (el) el.textContent = (v.version || '—') + (v.build ? ' · ' + v.build : '');
     }).catch(() => {});
     const gas = document.getElementById('cfgAdvGas');
-    if (gas) gas.textContent = (window.WH_CONFIG && WH_CONFIG.gasUrl) || '—';
+    if (gas) gas.textContent = '— (cero-GAS: 100% Supabase)';
     const q = document.getElementById('cfgAdvQueue');
     if (q) {
       let pending = 0;
@@ -22356,23 +22350,9 @@ const MembreteView = (() => {
 // CONFIG VIEW
 // ════════════════════════════════════════════════
 const ConfigView = (() => {
-  // Guardar solo la URL GAS (sección Conexión en Tools)
-  function guardar() {
-    const gasUrl = document.getElementById('cfgGasUrl').value.trim();
-    if (!gasUrl) { toast('Ingresa la URL del GAS', 'warn'); return; }
-    // [fix ALTO-4] validar formato de deployment de Apps Script antes de persistir.
-    // Sin esto, una URL errada/malformada se fijaba para SIEMPRE (wh_gas_url está en PRESERVAR)
-    // → la app quedaba pegada a un /exec equivocado (la preocupación #1 materializada).
-    if (!/^https:\/\/script\.google\.com\/macros\/s\/AKfyc[\w-]{20,}\/exec$/.test(gasUrl)) {
-      toast('URL inválida — debe ser https://script.google.com/macros/s/AKfyc.../exec', 'warn');
-      return;
-    }
-    window.WH_CONFIG.gasUrl = gasUrl;
-    localStorage.setItem('wh_gas_url', gasUrl);
-    const el = document.getElementById('toolsGasUrl');
-    if (el) el.textContent = gasUrl;
-    toast('URL guardada', 'ok');
-  }
+  // [CERO-GAS 2026-07-19] guardar() de la URL GAS RETIRADA: la app no tiene transporte a
+  // GAS — no hay URL que configurar. Stub por si el HTML viejo cacheado la invoca.
+  function guardar() { toast('WH es 100% Supabase — no hay URL GAS que configurar', 'info'); }
 
   // Guardar configuración de impresión (PrintNode + días alerta)
   async function guardarImpresion() {
@@ -22709,14 +22689,12 @@ const Welcome = (() => {
       return;
     }
     // [cero-GAS] extensor-horario v1.0.2 ya NO usa mosGasUrl (RPC mos.extender_horario_dispositivo); solo devId.
-    const mosUrl = window.WH_CONFIG?.mosGasUrl || '';
     const devId  = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
     if (!devId) {
       toast('Configuración incompleta — recarga la app.', 'error', 4000);
       return;
     }
     ExtensorHorario.abrir({
-      mosGasUrl: mosUrl,
       app:       'warehouseMos',
       deviceId:  devId,
       onSuccess: function(d) {
