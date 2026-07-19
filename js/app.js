@@ -24422,16 +24422,22 @@ const MermasV2 = (() => {
 const VencimientosView = (() => {
   let _all = [], _filtro = 'RIESGO';   // RIESGO = vencidos+críticos+alerta (default útil)
 
+  // [526] Semáforo 5 niveles del dueño: VENCIDO · CRÍTICO ≤7 · ALERTA ≤30 · URGENTE ≤90
+  // ("en zonas no debería haber producto a menos de 3 meses de vencer") · SANO >90.
+  // El server (wh.vencimientos_lista) ya manda severidad; fallback client-side por si falta.
   function _cfgDias() {
     const cfg = (OfflineManager.getConfigCache && OfflineManager.getConfigCache()) || {};
-    return { crit: parseInt(cfg.DIAS_ALERTA_VENC_CRITICO) || 7, alerta: parseInt(cfg.DIAS_ALERTA_VENC) || 30 };
+    return { crit: parseInt(cfg.DIAS_ALERTA_VENC_CRITICO) || 7, alerta: parseInt(cfg.DIAS_ALERTA_VENC) || 30,
+             urg: parseInt(cfg.DIAS_ALERTA_VENC_URGENTE) || 90 };
   }
   function _sev(l) {
+    if (l.severidad) return l.severidad === 'SANO' ? 'OK' : l.severidad;
     const d = l.diasRestantes, c = _cfgDias();
     if (d == null) return 'OK';
     if (d < 0) return 'VENCIDO';
     if (d <= c.crit) return 'CRITICO';
     if (d <= c.alerta) return 'ALERTA';
+    if (d <= c.urg) return 'URGENTE';
     return 'OK';
   }
 
@@ -24440,7 +24446,7 @@ const VencimientosView = (() => {
     if (warm) _render();
     else loading('listVencimientos', true);
     try {
-      const r = await API.getLotes({ soloActivos: 'true' });
+      const r = await API.vencimientosLista();
       _all = (r && r.ok ? r.data : []).filter(l => l.fechaVencimiento);
     } catch (e) {
       if (!warm) {
@@ -24457,26 +24463,27 @@ const VencimientosView = (() => {
   function _render() {
     const cont = document.getElementById('listVencimientos');
     if (!cont) return;
-    const grupos = { VENCIDO: [], CRITICO: [], ALERTA: [], OK: [] };
+    const grupos = { VENCIDO: [], CRITICO: [], ALERTA: [], URGENTE: [], OK: [] };
     _all.forEach(l => grupos[_sev(l)].push(l));
-    // KPIs resumen (tap = filtro)
+    // KPIs resumen (tap = filtro) — semáforo 5 niveles
     const KP = [
       ['VENCIDO', grupos.VENCIDO.length, '#fca5a5', 'Vencidos'],
       ['CRITICO', grupos.CRITICO.length, '#fdba74', 'Críticos'],
       ['ALERTA',  grupos.ALERTA.length,  '#fcd34d', '≤30 días'],
+      ['URGENTE', grupos.URGENTE.length, '#fde047', '≤90 días'],
       ['OK',      grupos.OK.length,      '#86efac', 'Sanos']
     ];
     const kEl = document.getElementById('vencResumen');
     if (kEl) kEl.innerHTML = KP.map(([k, n, col, lbl]) =>
       `<div class="venc-kpi ${_filtro === k ? 'vk-on' : ''}" onclick="VencimientosView.setFiltro('${k}')">
         <div class="vk-num" style="color:${col}">${n}</div><div class="vk-lbl">${lbl}</div></div>`).join('');
-    const FIL = [['RIESGO', '⚠ En riesgo'], ['TODOS', 'Todos'], ['VENCIDO', 'Vencidos'], ['CRITICO', 'Críticos'], ['ALERTA', '≤30d'], ['OK', 'Sanos']];
+    const FIL = [['RIESGO', '⚠ En riesgo'], ['TODOS', 'Todos'], ['VENCIDO', 'Vencidos'], ['CRITICO', 'Críticos'], ['ALERTA', '≤30d'], ['URGENTE', '≤90d'], ['OK', 'Sanos']];
     const fEl = document.getElementById('vencFiltros');
     if (fEl) fEl.innerHTML = FIL.map(([k, l]) =>
       `<button class="merma-tab ${_filtro === k ? 'tab-active' : ''}" onclick="VencimientosView.setFiltro('${k}')">${l}</button>`).join('');
     let vis;
     if (_filtro === 'TODOS') vis = _all;
-    else if (_filtro === 'RIESGO') vis = [...grupos.VENCIDO, ...grupos.CRITICO, ...grupos.ALERTA];
+    else if (_filtro === 'RIESGO') vis = [...grupos.VENCIDO, ...grupos.CRITICO, ...grupos.ALERTA, ...grupos.URGENTE];
     else vis = grupos[_filtro] || [];
     vis = vis.slice().sort((a, b) => (a.diasRestantes ?? 999) - (b.diasRestantes ?? 999));
     if (!vis.length) {
@@ -24485,7 +24492,7 @@ const VencimientosView = (() => {
     }
     const prods = OfflineManager.getProductosCache() || [];
     const nom = {}; prods.forEach(p => { if (p.codigoBarra) nom[String(p.codigoBarra)] = p.descripcion; if (p.idProducto) nom[String(p.idProducto)] = p.descripcion; });
-    const SEVC = { VENCIDO: 'sv-venc', CRITICO: 'sv-crit', ALERTA: 'sv-alerta', OK: 'sv-ok' };
+    const SEVC = { VENCIDO: 'sv-venc', CRITICO: 'sv-crit', ALERTA: 'sv-alerta', URGENTE: 'sv-urg', OK: 'sv-ok' };
     const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
     cont.innerHTML = vis.slice(0, 300).map((l, i) => {
       const sv = _sev(l), d = l.diasRestantes;

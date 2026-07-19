@@ -6844,7 +6844,7 @@
     /* ── Vista VENCIMIENTOS (por vencer) ── */
     .venc-header { display:flex; flex-direction:column; gap:10px; margin-bottom:12px; }
     .venc-title { font-size:18px; font-weight:900; color:#f1f5f9; }
-    .venc-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+    .venc-kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; }
     .venc-kpi {
       border-radius:12px; padding:9px 6px; text-align:center; cursor:pointer;
       background:rgba(30,41,59,.55); border:1px solid rgba(148,163,184,.16);
@@ -6885,6 +6885,8 @@
     .venc-card.sv-crit .venc-dias { background:rgba(249,115,22,.16); color:#fdba74; border-color:rgba(249,115,22,.4); }
     .venc-card.sv-alerta { border-left-color:#f59e0b; }
     .venc-card.sv-alerta .venc-dias { background:rgba(245,158,11,.13); color:#fcd34d; border-color:rgba(245,158,11,.35); }
+    .venc-card.sv-urg { border-left-color:#eab308; }
+    .venc-card.sv-urg .venc-dias { background:rgba(234,179,8,.11); color:#fde047; border-color:rgba(234,179,8,.3); }
     .venc-card.sv-ok { border-left-color:#334155; }
     .venc-name { font-size:14.5px; font-weight:800; color:#f1f5f9; line-height:1.25; }
     .venc-sub  { font-size:11px; color:#64748b; margin-top:3px; }
@@ -6892,7 +6894,7 @@
     .venc-qty .vq-n { font-size:17px; font-weight:900; color:#eaf1fb; }
     .venc-qty .vq-u { font-size:9.5px; color:#64748b; font-weight:700; display:block; }
     @media (min-width:768px) and (orientation:landscape), (min-width:900px) {
-      .venc-kpis { max-width:520px; }
+      .venc-kpis { max-width:600px; }
       #listVencimientos .venc-card { padding:14px 16px; }
       #listVencimientos .venc-dias { width:74px; height:74px; }
       #listVencimientos .venc-dias .vd-num { font-size:26px; }

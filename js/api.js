@@ -2744,6 +2744,7 @@ const API = (() => {
     sorpresasLista:     (p={})   => _sbRpcWH('sorpresas_lista', { p }),
     registrarSorpresa:  (p)      => _sbRpcWH('registrar_sorpresa', { p }),
     mermasV2Lista:      ()       => _sbRpcWH('mermas_lista', { p: { alcance: 'wh' } }),
+    vencimientosLista:  ()       => _sbRpcWH('vencimientos_lista', { p: {} }),   // [526] semáforo server-side unificado WH+MOS
     procesarMerma:      (p)      => _sbRpcWH('procesar_merma', { p }),
     mermasEliminarBatch:(p)      => _sbRpcWH('mermas_eliminar_batch', { p }),
     mermaDesdeGuia:     async (p) => {
