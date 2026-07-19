@@ -4248,7 +4248,18 @@ const App = (() => {
       document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
       document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
       document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
-      document.getElementById('kpiMermas').textContent     = fmt(kpis.mermasTotalMes ?? 0, 1);
+      // [mermas v2] KPI = cuantas mermas hay POR PROCESAR; alerta pulsante si alguna paso los 3 dias
+      const _mVenc = mermasPend.filter(m => m.fechaIngreso && (Date.now() - new Date(m.fechaIngreso).getTime()) > 3 * 864e5).length;
+      document.getElementById('kpiMermas').textContent = String(mermasPend.length);
+      const _kMer = document.getElementById('kpiMermas')?.closest('.kpi-card');
+      if (_kMer) {
+        _kMer.classList.toggle('kpi-mermas-venc', _mVenc > 0);
+        let ch = _kMer.querySelector('.kpi-venc-chip');
+        if (_mVenc > 0) {
+          if (!ch) { ch = document.createElement('span'); ch.className = 'kpi-venc-chip'; _kMer.appendChild(ch); }
+          ch.textContent = '\u26a0 ' + _mVenc + ' +3d';
+        } else if (ch) ch.remove();
+      }
     }
 
     // [v2.13.231] Badge "por envasar" en sidebar + acceso rápido del dashboard.
@@ -4355,14 +4366,17 @@ const App = (() => {
       </div>`).join('');
 
     // Panel Mermas pendientes
-    document.getElementById('listMermasDash').innerHTML = mermasPend.map(m => `
-      <div class="card-sm flex items-center justify-between">
-        <div>
-          <p class="font-semibold text-sm">${m.codigoProducto || m.descripcion || '—'}</p>
-          <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen || ''}</p>
+    document.getElementById('listMermasDash').innerHTML = mermasPend.map(m => {
+      const dias = m.fechaIngreso ? Math.floor((Date.now() - new Date(m.fechaIngreso).getTime()) / 864e5) : 0;
+      const venc = dias > 3;
+      return `
+      <div class="card-sm flex items-center justify-between cursor-pointer ${venc ? 'dash-merma-venc' : ''}" onclick="nav('mermas')">
+        <div style="min-width:0">
+          <p class="font-semibold text-sm truncate">${m.codigoProducto || m.descripcion || '—'}</p>
+          <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen || ''} ${venc ? `· <span class="text-red-400 font-bold">⚠ ${dias}d</span>` : `· ${Math.max(0, 3 - dias)}d restantes`}</p>
         </div>
-        <span class="tag-warn text-xs">${fmt(m.cantidadOriginal, 1)}</span>
-      </div>`).join('');
+        <span class="${venc ? 'tag-danger' : 'tag-warn'} text-xs" style="flex-shrink:0">${fmt(m.cantidadPendiente ?? m.cantidadOriginal, 1)} pend</span>
+      </div>`; }).join('');
   }
 
   // [v2.13.231] Construye la banda "Estado del día" con datos REALES derivados
@@ -19432,6 +19446,13 @@ const MermasView = (() => {
   let _fotoBase64 = null;
   let _fotoMime   = '';
 
+  // Pestaña-aspecto: qué mermas muestra cada tab (parciales aparecen en varias)
+  function _aspecto(m, f) {
+    if (f === 'EN_PROCESO') return _estadoCanon(m) === 'EN_PROCESO';
+    if (f === 'RESUELTA')   return (parseFloat(m.cantidadReparada) || 0) > 0 || !!m.idGuiaTransformacion;
+    return (parseFloat(m.cantidadDesechada) || 0) > 0;   // DESECHADA
+  }
+
   // [524] Estado CANÓNICO derivado de cantidades (fuente de verdad) — filas legacy de la
   // Hoja traían PENDIENTE/PROCESADA y el filtro por string las hacía invisibles.
   function _estadoCanon(m) {
@@ -19442,7 +19463,11 @@ const MermasView = (() => {
   }
 
   async function cargar() {
-    loading('listMermas', true);
+    // [optimista] con cache en mano pinta AL INSTANTE (sin spinner ni repintado en blanco)
+    // y refresca en background; el spinner queda solo para el arranque frío.
+    const warm = _all.length > 0;
+    if (warm) { _renderTabs(); _render(); }
+    else loading('listMermas', true);
     // [v2 · SQL 517] fuente directa wh.mermas_lista (trae culpa/pendiente/vencida/guía transformación);
     // fallback al camino legacy si la RPC no responde.
     let res = null, v2err = null;
@@ -19491,9 +19516,10 @@ const MermasView = (() => {
   }
 
   function _renderTabs() {
-    const enProceso = _all.filter(m => _estadoCanon(m) === 'EN_PROCESO').length;
-    const el = document.getElementById('tabMermasNProceso');
-    if (el) el.textContent = enProceso;
+    const setN = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+    setN('tabMermasNProceso', _all.filter(m => _aspecto(m, 'EN_PROCESO')).length);
+    setN('tabMermasNRes',     _all.filter(m => _aspecto(m, 'RESUELTA')).length);
+    setN('tabMermasNDes',     _all.filter(m => _aspecto(m, 'DESECHADA')).length);
   }
 
   // Mapa de descripciones desde caché (compartido por _render y resumen)
@@ -19512,7 +19538,10 @@ const MermasView = (() => {
     if (!container) return;
     // Siempre refrescar el panel/banda resumen (deriva del set EN_PROCESO real)
     _renderResumen();
-    const filtradas = _all.filter(m => _estadoCanon(m) === _filtro);
+    // Pestañas-ASPECTO: Pendientes = queda algo por procesar; Solucionado = TODO lo que tuvo
+    // recuperación/transformación (incluye parciales, con chip de lo que resta); Descartado =
+    // todo lo que tuvo eliminación. Una merma parcial vive en más de una pestaña a la vez.
+    const filtradas = _all.filter(m => _aspecto(m, _filtro));
     if (!filtradas.length) {
       const vacio = _filtro === 'EN_PROCESO' ? 'Sin mermas pendientes 🎉'
                   : _filtro === 'RESUELTA'   ? 'Aún nada solucionado'
@@ -19534,6 +19563,19 @@ const MermasView = (() => {
       const sevClass  = (enProceso && m.vencida) ? 'sev-venc'
                       : (enProceso && (m.diasEnProceso || 0) > 7) ? 'sev-aged'
                       : 'sev-norm';
+      const rep  = parseFloat(m.cantidadReparada) || 0;
+      const des  = parseFloat(m.cantidadDesechada) || 0;
+      const pend = parseFloat(m.cantidadPendiente) || 0;
+      const orig = parseFloat(m.cantidadOriginal) || 0;
+      // Cantidad protagonista según la pestaña (el dueño procesó 10/50 y el card seguía en 50)
+      let qtyHtml;
+      if (_filtro === 'EN_PROCESO') {
+        qtyHtml = `<span class="merma-qty">−${fmt(pend, 1)}<span class="mq-u">und</span>${(rep + des) > 0 ? `<span class="mq-de">de ${fmt(orig, 1)}</span>` : ''}</span>`;
+      } else if (_filtro === 'RESUELTA') {
+        qtyHtml = `<span class="merma-qty" style="color:#34d399">✓${fmt(rep, 1)}<span class="mq-u">und</span><span class="mq-de">de ${fmt(orig, 1)}</span></span>`;
+      } else {
+        qtyHtml = `<span class="merma-qty">🗑${fmt(des, 1)}<span class="mq-u">und</span><span class="mq-de">de ${fmt(orig, 1)}</span></span>`;
+      }
       const fotoUrl   = m.foto ? _normalizeFotoMerma(m.foto) : '';
       const thumb     = fotoUrl
         ? `<div class="merma-thumb" onclick="MermasView.verFoto('${escAttr(m.foto)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.parentNode.classList.add('placeholder');this.remove()"></div>`
@@ -19541,12 +19583,15 @@ const MermasView = (() => {
 
       // Badges: motivo + antigüedad
       const badges = [];
+      if (_filtro === 'EN_PROCESO' && rep > 0) badges.push(`<span class="merma-badge" style="background:rgba(52,211,153,.12);color:#34d399;border-color:rgba(52,211,153,.35)">✓ ${fmt(rep, 1)} ya recuperadas</span>`);
+      if (_filtro === 'EN_PROCESO' && des > 0) badges.push(`<span class="merma-badge" style="background:rgba(148,163,184,.12);color:#94a3b8;border-color:rgba(148,163,184,.3)">🗑 ${fmt(des, 1)} ya eliminadas</span>`);
+      if (_filtro !== 'EN_PROCESO' && pend > 0) badges.push(`<span class="merma-badge" style="background:rgba(245,184,73,.12);color:#fbd989;border-color:rgba(245,184,73,.3)">⏳ ${fmt(pend, 1)} aún pendientes</span>`);
       if (m.culpa) badges.push(`<span class="merma-badge" style="background:rgba(125,211,252,.13);color:#7dd3fc;border-color:rgba(125,211,252,.35)">culpa ${escHtml(m.culpa)}</span>`);
-      if (enProceso && !m.vencida) badges.push(`<span class="merma-badge" style="background:rgba(245,184,73,.12);color:#fbd989;border-color:rgba(245,184,73,.3)">⏳ ${Math.max(0, 3 - (m.diasEnProceso || 0))}d restantes</span>`);
+      if (_filtro === 'EN_PROCESO' && enProceso && !m.vencida) badges.push(`<span class="merma-badge" style="background:rgba(245,184,73,.12);color:#fbd989;border-color:rgba(245,184,73,.3)">⏳ ${Math.max(0, 3 - (m.diasEnProceso || 0))}d restantes</span>`);
       if (m.idGuiaTransformacion) badges.push(`<span class="merma-badge" style="background:rgba(167,139,250,.14);color:#c4b5fd;border-color:rgba(167,139,250,.35)">🔄 transformada</span>`);
       if (m.motivo) badges.push(`<span class="merma-badge merma-badge-motivo">${escHtml(m.motivo)}</span>`);
-      if (enProceso && m.vencida) badges.push(`<span class="merma-badge merma-badge-venc">⚠ ${m.diasEnProceso}d sin resolver</span>`);
-      else if (enProceso && (m.diasEnProceso || 0) > 7) badges.push(`<span class="merma-badge merma-badge-aged">${m.diasEnProceso}d</span>`);
+      if (_filtro === 'EN_PROCESO' && enProceso && m.vencida) badges.push(`<span class="merma-badge merma-badge-venc">⚠ ${m.diasEnProceso}d sin resolver</span>`);
+      else if (_filtro === 'EN_PROCESO' && enProceso && (m.diasEnProceso || 0) > 7) badges.push(`<span class="merma-badge merma-badge-aged">${m.diasEnProceso}d</span>`);
 
       // Acciones / footer según filtro
       let bottom = '';
@@ -19576,7 +19621,7 @@ const MermasView = (() => {
             <div class="merma-card-name">${escHtml(desc)}</div>
             <div class="merma-card-cod">${escHtml(m.codigoProducto)}</div>
           </div>
-          <span class="merma-qty">−${fmt(m.cantidadOriginal, 1)}<span class="mq-u">und</span></span>
+          ${qtyHtml}
         </div>
         ${badges.length ? `<div class="merma-badges">${badges.join('')}</div>` : ''}
         <div class="merma-meta">
@@ -19757,13 +19802,69 @@ const MermasView = (() => {
 
   // [cero-rastro 2026-07-19] abrirResolver/balancearResolucion/confirmarResolver eliminados:
   // flujo legacy sin callers — resolver mermas es MermasV2.procesar (RPC procesar_merma).
+  // ── Lightbox in-app: zoom + navegación ‹ › entre las fotos de la pestaña actual ──
+  let _lbFotos = [], _lbIdx = 0;
   function verFoto(url) {
     if (!url) return;
-    window.open(url, '_blank');
+    // galería = fotos de las mermas visibles en la pestaña actual, en su orden
+    _lbFotos = _all.filter(m => _aspecto(m, _filtro) && m.foto).map(m => _normalizeFotoMerma(m.foto));
+    const u = _normalizeFotoMerma(url);
+    _lbIdx = Math.max(0, _lbFotos.indexOf(u));
+    if (!_lbFotos.length) _lbFotos = [u];
+    _lbAbrir();
+  }
+  function _lbAbrir() {
+    let ov = document.getElementById('mermaLightbox');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'mermaLightbox'; ov.className = 'merma-lb';
+      ov.addEventListener('click', e => { if (e.target === ov) _lbCerrar(); });
+      document.body.appendChild(ov);
+    }
+    document.addEventListener('keydown', _lbKey);
+    _lbPaint();
+    ov.style.display = 'flex';
+    requestAnimationFrame(() => ov.classList.add('lb-open'));
+    vibrate(10);
+  }
+  function _lbPaint() {
+    const ov = document.getElementById('mermaLightbox'); if (!ov) return;
+    const n = _lbFotos.length;
+    ov.innerHTML = `
+      <button class="lb-x" onclick="MermasView.lbCerrar()" aria-label="Cerrar">✕</button>
+      ${n > 1 ? `<button class="lb-nav lb-prev" onclick="MermasView.lbNav(-1)" aria-label="Anterior">‹</button>` : ''}
+      <img class="lb-img" src="${escAttr(_lbFotos[_lbIdx])}"
+           onerror="this.replaceWith(Object.assign(document.createElement('div'),{textContent:'No se pudo cargar la foto',className:'lb-err'}))">
+      ${n > 1 ? `<button class="lb-nav lb-next" onclick="MermasView.lbNav(1)" aria-label="Siguiente">›</button>` : ''}
+      ${n > 1 ? `<span class="lb-count">${_lbIdx + 1} / ${n}</span>` : ''}`;
+    // swipe táctil
+    let x0 = null;
+    ov.ontouchstart = e => { x0 = e.touches[0].clientX; };
+    ov.ontouchend   = e => {
+      if (x0 == null) return;
+      const dx = e.changedTouches[0].clientX - x0; x0 = null;
+      if (Math.abs(dx) > 44) lbNav(dx < 0 ? 1 : -1);
+    };
+  }
+  function lbNav(d) {
+    const n = _lbFotos.length; if (n < 2) return;
+    _lbIdx = (_lbIdx + d + n) % n;
+    _lbPaint(); vibrate(8);
+  }
+  function _lbKey(e) {
+    if (e.key === 'Escape') _lbCerrar();
+    else if (e.key === 'ArrowRight') lbNav(1);
+    else if (e.key === 'ArrowLeft')  lbNav(-1);
+  }
+  function lbCerrar() { _lbCerrar(); }
+  function _lbCerrar() {
+    const ov = document.getElementById('mermaLightbox'); if (!ov) return;
+    ov.classList.remove('lb-open');
+    document.removeEventListener('keydown', _lbKey);
+    setTimeout(() => { ov.style.display = 'none'; ov.innerHTML = ''; }, 180);
   }
 
   return { all: () => _all, cargar, crear, nueva, setFiltro, onFotoSeleccionada,
-           verFoto,
+           verFoto, lbNav, lbCerrar,
            toggleResumenBanda };
 })();
 

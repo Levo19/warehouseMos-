@@ -514,7 +514,8 @@ const API = (() => {
     const hace48Ms = Date.now() - 48 * 60 * 60 * 1000;
     const guiasAbiertas = (guias || []).filter(g => g.estado === 'ABIERTA' && new Date(g.fecha).getTime() < hace48Ms);
     // 6/7. mermas/auditorías pendientes
-    const mermasPendientes = (mermas || []).filter(m => m.estado === 'PENDIENTE');
+    // [524] canon por CANTIDADES: los strings legacy (PENDIENTE/PROCESADA) ya no existen tras la normalización
+    const mermasPendientes = (mermas || []).filter(m => (parseFloat(m.cantidadPendiente) || 0) > 0);
     const audPendientes = (auditorias || []).filter(a => a.estado === 'PENDIENTE' || a.estado === 'ASIGNADA');
     // 8. KPIs (mes = últimos 30 días-calendario Lima)
     const hace30Ms = hoyMs - 30 * _UN_DIA;
