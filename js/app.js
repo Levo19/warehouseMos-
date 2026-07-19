@@ -4295,7 +4295,7 @@ const App = (() => {
         const TIPO_SHORT = {
           INGRESO_PROVEEDOR:'Ingreso Prov.', INGRESO_JEFATURA:'Ing. Jefatura',
           INGRESO_DEVOLUCION_ZONA:'Dev. Zona',
-          SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
+          SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución', TRANSFORMACION:'Transformación',
           SALIDA_JEFATURA:'Sal. Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
         };
         histEl.innerHTML = guiasRecientes.map(g => `
@@ -5223,6 +5223,7 @@ const GuiasView = (() => {
   const TIPO_LABELS = {
     INGRESO_PROVEEDOR: 'Proveedor', INGRESO_JEFATURA: 'Jefatura',
     INGRESO_DEVOLUCION_ZONA: 'Devolución de zona',
+    TRANSFORMACION: 'Transformación (merma)',
     SALIDA_ZONA: 'Zona',  SALIDA_DEVOLUCION: 'Devolución',
     SALIDA_JEFATURA: 'Jefatura', SALIDA_ENVASADO: 'Envasado', SALIDA_MERMA: 'Merma'
   };
@@ -5496,6 +5497,7 @@ const GuiasView = (() => {
   // [v2.13.223] Icono por tipo de guía (solo presentación, no afecta datos)
   function _tipoIcono(tipo) {
     if (tipo === 'SALIDA_MERMA') return '🗑';
+    if (tipo === 'TRANSFORMACION') return '🔄';
     if (tipo === 'SALIDA_ENVASADO' || tipo === 'INGRESO_ENVASADO') return '🔄';
     if (tipo === 'INGRESO_JEFATURA' || tipo === 'SALIDA_JEFATURA') return '👤';
     if (tipo && tipo.startsWith('INGRESO')) return '↓';
@@ -9563,8 +9565,8 @@ const GuiasView = (() => {
     const numItems  = detCache.filter(d => d.idGuia === idGuia && d.observacion !== 'ANULADO').length;
     const TIPO_LABELS_WA = {
       INGRESO_PROVEEDOR:'Ingreso Proveedor', INGRESO_JEFATURA:'Ingreso Jefatura',
-      INGRESO_DEVOLUCION_ZONA:'Ingreso Devolución de Zona',
-      SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución',
+      INGRESO_DEVOLUCION_ZONA:'Ingreso Devolución de Zona', TRANSFORMACION:'Transformación (merma)',
+      SALIDA_ZONA:'Salida Zona', SALIDA_DEVOLUCION:'Devolución', TRANSFORMACION:'Transformación',
       SALIDA_JEFATURA:'Salida Jefatura', SALIDA_ENVASADO:'Envasado', SALIDA_MERMA:'Merma'
     };
     const url    = `${location.href.split('?')[0].replace(/index\.html$/, '').replace(/\/$/, '')}/reporte.html?tipo=guia&id=${encodeURIComponent(idGuia)}`;
