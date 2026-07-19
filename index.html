@@ -10119,6 +10119,7 @@
   <input id="auditConteo" type="number" step="0.01" min="0" inputmode="decimal"
          class="input mb-3 text-lg font-bold" placeholder="0"/>
   <label class="text-xs text-slate-400 mb-1 block">Observación (opcional)</label>
+  <p id="audDiferenciaInfo" class="hidden text-xs mb-3 mt-1 text-slate-400">Diferencia vs sistema: <span id="audDifValor" class="font-black">—</span></p>
   <input id="auditObs" type="text" class="input mb-4" placeholder="Sin novedad..."/>
   <button onclick="ProductosView.confirmarAuditoria()" class="btn btn-primary w-full btn-lg">
     Confirmar auditoría
@@ -10468,7 +10469,7 @@
           <span class="cfg-mono" id="cfgAdvVersion" style="max-width:55%;text-align:right">—</span>
         </div>
         <div class="cfg-row">
-          <div class="cfg-row-label"><span>GAS endpoint</span></div>
+          <div class="cfg-row-label"><span>Backend</span></div>
           <span class="cfg-mono" id="cfgAdvGas" style="max-width:55%;text-align:right">—</span>
         </div>
         <div class="cfg-row">
