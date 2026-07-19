@@ -10,6 +10,7 @@ const API = (() => {
   // NO incluye los módulos EXTERNOS Membrete/Seguridad (se cargan de assets MOS y conservan su fallback hasta
   // migrarse en su repo): agregarlos acá los rompería. Auditoría: solo estas 7 quedaban SOLO-GAS y propias.
   const _WH_NO_GAS = new Set([
+    'registrarMerma', 'resolverMerma',   // [cero-rastro 2026-07-19] ramas retiradas: v2 = mermaAltaManualV2/procesarMerma; un replay viejo NUNCA cae a GAS
     'iniciarTestDiagnostico', 'finalizarTestDiagnostico', 'runInternalTests',  // panel de diagnóstico QA (marginal)
     'agregarAMermas', 'solucionarMerma',                                        // ramas muertas detrás de OpLog
     'subirFotoEntidad', 'eliminarFotoEntidad'                                   // sin callers
@@ -1015,24 +1016,7 @@ const API = (() => {
       });
       return { ok: true, data: lotes };
     }
-    if (action === 'getMermasEnProceso') {
-      let rows = await _sbLeerTablaWH('mermas');
-      rows = rows.filter(r => String(r.estado || '').toUpperCase() === 'EN_PROCESO');
-      const hoyMs = _diaLimaMs(new Date());   // [TZ Lima] días-calendario
-      rows.forEach(r => { const fMs = r.fechaIngreso ? _diaLimaMs(r.fechaIngreso) : hoyMs; const dd = Math.floor((hoyMs - fMs) / _UN_DIA); r.diasEnProceso = dd; r.vencida = dd > 3; });
-      rows.sort((a, b) => (_diaLimaMs(b.fechaIngreso) || 0) - (_diaLimaMs(a.fechaIngreso) || 0));   // [40x #3] || 0: fecha inválida no rompe el orden
-      return { ok: true, data: rows };
-    }
-    if (action === 'getMermasVencidas') {
-      let rows = await _sbLeerTablaWH('mermas');
-      const hoyMs = _diaLimaMs(new Date());   // [TZ Lima] días-calendario
-      const vencidas = rows.filter(r => {
-        if (String(r.estado || '').toUpperCase() !== 'EN_PROCESO') return false;
-        const fMs = r.fechaIngreso ? _diaLimaMs(r.fechaIngreso) : hoyMs;
-        return Math.floor((hoyMs - fMs) / _UN_DIA) > 3;
-      });
-      return { ok: true, data: { count: vencidas.length, mermas: vencidas } };
-    }
+    // [cero-rastro] getMermasEnProceso/getMermasVencidas eliminados: sin callers — la vista usa mermas_lista (v2).
     if (action === 'getProductosNuevosRecientes') {
       const dias = parseInt(params && params.dias) || 3;
       const corteMs = _diaLimaMs(new Date()) - dias * _UN_DIA;   // [TZ Lima] corte en días-calendario
@@ -1721,62 +1705,7 @@ const API = (() => {
       // [shape] el front lee res.data?.url (app.js:8693). Réplica del shape GAS {ok:true,data:{url}}.
       return { ok: true, data: { url: fotoUrl } };
     }
-    if (params.action === 'registrarMerma') {
-      // foto OBLIGATORIA → sube a Storage (máxima calidad) y registra la merma directo (ya no depende de GAS/Drive).
-      let fotoUrl = String(params.foto || '');
-      const b64 = String(params.fotoBase64 || '').trim();
-      if (b64) { try { fotoUrl = (await _subirFotoStorage('mermas', 'M_' + lid, b64, params.mimeType || 'image/jpeg', lid)).url; } catch (_) { return null; } }
-      if (!fotoUrl) return null;   // sin foto → que GAS valide (foto obligatoria)
-      const out = await _sbRpcWH('registrar_merma', { p: {
-        id_merma: 'M_' + lid, codigo_producto: String(params.codigoProducto || ''), cantidad: params.cantidadOriginal,
-        motivo: params.motivo || '', usuario: params.usuario || '', responsable: params.responsable || '',
-        origen: params.origen || '', id_lote: params.idLote || '', foto: fotoUrl
-      } });
-      if (!out || out.ok === false) return null;
-      // [100x] guard de dedup (paridad con crearGuia/cerrarGuia/auditarProducto): en un reintento desde la
-      // cola la merma se dedupea (out.dedup=true) pero SIN este guard el contador de actividad se incrementaba
-      // de nuevo (inflaba la métrica). registrar_merma devuelve dedup:true cuando la fila ya existía. Verificado.
-      if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'MERMA_REGISTRADA', p_cantidad: 1 }).catch(function(){}); }
-      return out;
-    }
-    // ── [Grupo A] Listas-sombra: escritura DIRECTA a wh.listas_sombra (RPCs 216). getListasSombra ya lee
-    // directo; esto cierra la asimetría. CLAVE: los errores de NEGOCIO (YA_COMPLETADA/EN_USO_POR_OTRO/
-    // NO_ES_TUYA/NO_ENCONTRADA) se PROPAGAN al front (no van a GAS, que re-evaluaría la Hoja stale).
-    // Solo *_OFF (flag) o transporte-null → null → GAS. Shape de retorno idéntico al GAS.
-    if (params.action === 'crearListaSombra' || params.action === 'tomarListaSombra' ||
-        params.action === 'liberarListaSombra' || params.action === 'actualizarProgresoListaSombra' ||
-        params.action === 'cerrarListaSombra' || params.action === 'anularListaSombra') {
-      const _lsRpc = {
-        crearListaSombra: 'crear_lista_sombra', tomarListaSombra: 'tomar_lista_sombra',
-        liberarListaSombra: 'liberar_lista_sombra', actualizarProgresoListaSombra: 'actualizar_progreso_lista_sombra',
-        cerrarListaSombra: 'cerrar_lista_sombra', anularListaSombra: 'anular_lista_sombra'
-      }[params.action];
-      // [FIX lista sombra "sin items"] el front manda items como JSON.stringify (lo
-      // necesita el path GAS); las RPC `*_lista_sombra` esperan un ARRAY jsonb nativo
-      // (jsonb_typeof = 'array'). Si llega como string, lo parseamos acá para PostgREST.
-      // El path GAS sigue usando params.items original (no se toca).
-      let _lsItems = params.items;
-      if (typeof _lsItems === 'string') {
-        try { _lsItems = JSON.parse(_lsItems); } catch (_) { /* deja el string; la RPC dará 'sin items' */ }
-      }
-      const out = await _sbRpcWH(_lsRpc, { p: {
-        idLista: params.idLista || '', usuario: params.usuario || '', items: _lsItems,
-        compartir: !!params.compartir, forzar: !!params.forzar, nota: params.nota || '',
-        idZona: params.idZona || params.zona || ''   // [v2.13.370] zona destino de la lista
-      } });
-      // *_OFF (flag server apagado) o transporte caído → GAS. Negocio (ok:false con otro error) → PROPAGAR.
-      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
-      return out;
-    }
-    // ── [Grupo B] Producto Nuevo: WH solo EMITE el PN a wh.producto_nuevo (RPC 217). Foto → Supabase
-    // Storage (NO Drive). La línea de guía se guarda aparte (agregarDetalleGuia directo). Inerte hasta
-    // prender WH_REGISTRAR_PN_DIRECTO (que va junto con migrar el LECTOR de PN de MOS a Supabase).
-    if (params.action === 'cerrarTurno') {
-      // [Frente 1 · sesión] cerrar sesión directo a wh.sesiones (gate WH_SESION_DIRECTO). *_OFF → GAS.
-      const out = await _sbRpcWH('cerrar_sesion', { p: { idSesion: params.idSesion, forzado: !!params.forzado } });
-      if (!out || (out.ok === false && /_OFF$/.test(String(out.error || '')))) return null;
-      return out;
-    }
+    // [cero-rastro] branch registrarMerma eliminado — alta de merma = API.mermaAltaManualV2 / mermaDesdeGuia (RPCs v2).
     if (params.action === 'setConfigValue') {
       // [Frente 4] guardar config directo a wh.config (gate WH_CONFIG_DIRECTO; rechaza secretos). *_OFF → GAS.
       const out = await _sbRpcWH('set_config', { clave: params.clave || '', valor: params.valor, descripcion: params.descripcion || '' });
@@ -2039,19 +1968,7 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;
     }
-    if (params.action === 'resolverMerma') {
-      // Resuelve una merma (rep no toca stock; des → línea en guía SALIDA_MERMA semanal ABIERTA, que descuenta stock al
-      // CERRARSE). NO mueve stock acá. Idempotente: guard de estado en la RPC (RESUELTA→yaResuelta) + dedup por local_id
-      // (inserta línea de guía). El front solo manda idMerma/rep/des/obs; la RPC resuelve cod/original desde la fila.
-      const out = await _sbRpcWH('resolver_merma', { p: {
-        id_merma: String(params.idMerma || ''),
-        cantidad_reparada: params.cantidadReparada, cantidad_desechada: params.cantidadDesechada,
-        observacion_resolucion: params.observacionResolucion || '', usuario: params.usuario || '',
-        id_detalle: 'MRMDET_' + lid, local_id: lid
-      } });
-      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
-      return out;
-    }
+    // [cero-rastro] branch resolverMerma eliminado — resolver = RPC procesar_merma (API.procesarMerma).
     if (params.action === 'corregirUnidadesEnvasado') {
       // Corrige unidades de un envasado → mueve stock derivado (+deltaUds) y base (-deltaBase). El cliente resuelve
       // base/factor del cache (la RPC no tiene catálogo). Mueve stock por DELTA → NO idempotente → dedup por local_id.
@@ -2351,7 +2268,6 @@ const API = (() => {
     'agregarDetalleGuia', 'actualizarCantidadDetalle', 'actualizarFechaVencimiento',
     'anularDetalle', 'cerrarGuia', 'reabrirGuia', 'crearGuia', 'crearDespachoRapido',
     'registrarEnvasado', 'corregirUnidadesEnvasado', 'anularEnvasadoConClave', 'anularEnvasadoManual',
-    'registrarMerma', 'resolverMerma',
     'registrarProductoNuevo',   // (aprobarProductoNuevo removido: la aprobación es de MOS, no de WH)
     'crearPreingreso', 'aprobarPreingreso', 'actualizarPreingreso',
     'subirFotoGuia', 'subirFotoPreingreso',   // [40x #1] localId estable → nombre de foto determinístico (idempotente)
@@ -2843,10 +2759,6 @@ const API = (() => {
       }
       return _sbRpcWH('merma_alta_manual', { p });
     },
-    registrarMerma:     (p)      => post({ action: 'registrarMerma', ...p }),
-    resolverMerma:      (p)      => post({ action: 'resolverMerma', ...p }),
-    getMermasEnProceso: (p={})   => call({ action: 'getMermasEnProceso', ...p }),
-    getMermasVencidas:  ()       => call({ action: 'getMermasVencidas' }),
 
     // Auditorias
     getAuditorias:      (p={})   => call({ action: 'getAuditorias', ...p }),

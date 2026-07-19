@@ -19432,17 +19432,38 @@ const MermasView = (() => {
   let _fotoBase64 = null;
   let _fotoMime   = '';
 
+  // [524] Estado CANÓNICO derivado de cantidades (fuente de verdad) — filas legacy de la
+  // Hoja traían PENDIENTE/PROCESADA y el filtro por string las hacía invisibles.
+  function _estadoCanon(m) {
+    if ((parseFloat(m.cantidadPendiente) || 0) > 0) return 'EN_PROCESO';
+    const e = String(m.estado || '').toUpperCase();
+    if (e === 'DESECHADA' || ((parseFloat(m.cantidadDesechada) || 0) > 0 && (parseFloat(m.cantidadReparada) || 0) === 0)) return 'DESECHADA';
+    return 'RESUELTA';
+  }
+
   async function cargar() {
     loading('listMermas', true);
     // [v2 · SQL 517] fuente directa wh.mermas_lista (trae culpa/pendiente/vencida/guía transformación);
     // fallback al camino legacy si la RPC no responde.
-    let res = null;
-    try { res = await API.mermasV2Lista(); } catch (_) {}
+    let res = null, v2err = null;
+    try { res = await API.mermasV2Lista(); } catch (e) { v2err = e; }
     if (res && res.ok && Array.isArray(res.data)) {
       _all = res.data.map(m => ({ ...m, codigoProducto: m.codProducto || m.codigoProducto }));
     } else {
+      console.warn('[MermasView] v2 no respondió', v2err || res);
       res = await API.getMermas({ limit: 200 }).catch(() => ({ ok: false }));
       _all = res.ok ? res.data : [];
+      if (!_all.length && (v2err || (res && res.ok === false))) {
+        // ambos caminos fallaron → estado de ERROR visible con reintento (no el 🎉)
+        loading('listMermas', false);
+        const cont = document.getElementById('listMermas');
+        if (cont) cont.innerHTML = `<div style="text-align:center;padding:26px 14px;color:#fca5a5">
+          <div style="font-size:26px;margin-bottom:8px">⚠️</div>
+          No se pudo cargar la cesta (${escHtml(String((v2err && v2err.message) || 'sin datos'))}).
+          <div style="margin-top:10px"><button class="btn btn-outline" onclick="MermasView.cargar()">↻ Reintentar</button></div></div>`;
+        _renderTabs();
+        return;
+      }
     }
     // Calcular días en proceso para flag vencidas (>3 días)
     const ahora = Date.now();
@@ -19452,7 +19473,7 @@ const MermasView = (() => {
       else {
         const ms = ahora - new Date(m.fechaIngreso).getTime();
         m.diasEnProceso = Math.floor(ms / (24 * 60 * 60 * 1000));
-        m.vencida = String(m.estado || '').toUpperCase() === 'EN_PROCESO' && ms > (3 * 24 * 60 * 60 * 1000);
+        m.vencida = _estadoCanon(m) === 'EN_PROCESO' && ms > (3 * 24 * 60 * 60 * 1000);
       }
     });
     try { MermasV2.badge(_all); } catch (_) {}
@@ -19470,7 +19491,7 @@ const MermasView = (() => {
   }
 
   function _renderTabs() {
-    const enProceso = _all.filter(m => String(m.estado || '').toUpperCase() === 'EN_PROCESO').length;
+    const enProceso = _all.filter(m => _estadoCanon(m) === 'EN_PROCESO').length;
     const el = document.getElementById('tabMermasNProceso');
     if (el) el.textContent = enProceso;
   }
@@ -19491,7 +19512,7 @@ const MermasView = (() => {
     if (!container) return;
     // Siempre refrescar el panel/banda resumen (deriva del set EN_PROCESO real)
     _renderResumen();
-    const filtradas = _all.filter(m => String(m.estado || '').toUpperCase() === _filtro);
+    const filtradas = _all.filter(m => _estadoCanon(m) === _filtro);
     if (!filtradas.length) {
       const vacio = _filtro === 'EN_PROCESO' ? 'Sin mermas pendientes 🎉'
                   : _filtro === 'RESUELTA'   ? 'Aún nada solucionado'
@@ -19509,7 +19530,7 @@ const MermasView = (() => {
       const fechaStr  = m.fechaIngreso ? new Date(m.fechaIngreso).toLocaleDateString('es-PE') : '';
       const safeId    = escAttr(m.idMerma);
       // Severidad por antigüedad: vencida (rojo pulsante) · >7d (ámbar) · normal
-      const enProceso = String(m.estado || '').toUpperCase() === 'EN_PROCESO';
+      const enProceso = _estadoCanon(m) === 'EN_PROCESO';
       const sevClass  = (enProceso && m.vencida) ? 'sev-venc'
                       : (enProceso && (m.diasEnProceso || 0) > 7) ? 'sev-aged'
                       : 'sev-norm';
@@ -19578,7 +19599,7 @@ const MermasView = (() => {
   // No hay monto S/ en el modelo de mermas → resumimos por UNIDADES e ítems
   // perdidos + desglose por motivo (conteo de unidades). NO inventa datos.
   function _renderResumen() {
-    const pend = _all.filter(m => String(m.estado || '').toUpperCase() === 'EN_PROCESO');
+    const pend = _all.filter(m => _estadoCanon(m) === 'EN_PROCESO');
     const totalItems = pend.length;
     let totalUnid = 0;
     let vencidas = 0;
@@ -19660,12 +19681,7 @@ const MermasView = (() => {
     document.getElementById('mermaMotivo').value     = '';
     document.getElementById('mermaFotoLbl').textContent = '📷 Tomar foto';
     document.getElementById('mermaFotoPrev').innerHTML = '';
-    // Inyectar zonas en el dropdown desde caché
-    const zonas = OfflineManager.getZonasCache();
-    sel.innerHTML = `
-      <option value="ALMACEN">ALMACÉN (interno)</option>
-      <option value="RECEPCION">RECEPCIÓN (proveedor)</option>
-      ${zonas.map(z => `<option value="${escAttr(z.idZona)}">${escHtml(z.nombre || z.idZona)}</option>`).join('')}`;
+    // [v2] culpa ALMACÉN fija — el select Responsable se eliminó del sheet
     abrirSheet('sheetMerma');
   }
 
@@ -19739,82 +19755,15 @@ const MermasView = (() => {
     finally { btn.disabled = false; btn.textContent = 'Registrar merma'; }
   }
 
-  function abrirResolver(idMerma) {
-    const m = _all.find(x => x.idMerma === idMerma);
-    if (!m) return;
-    _selMerma = m;
-    const prods = OfflineManager.getProductosCache();
-    const desc = prods.find(p => p.codigoBarra === m.codigoProducto || p.idProducto === m.codigoProducto)?.descripcion || m.codigoProducto;
-    document.getElementById('resolverMermaInfo').textContent =
-      `${desc} · ${fmt(m.cantidadOriginal, 1)} unidades · ${m.responsable || m.origen || ''}`;
-    document.getElementById('resolverMermaReparar').value  = m.cantidadOriginal;
-    document.getElementById('resolverMermaDesechar').value = 0;
-    document.getElementById('resolverMermaObs').value      = '';
-    document.getElementById('resolverMermaWarn').textContent = '';
-    abrirSheet('sheetResolverMerma');
-  }
-
-  function balancearResolucion(modificado) {
-    if (!_selMerma) return;
-    const total = parseFloat(_selMerma.cantidadOriginal) || 0;
-    const repInp = document.getElementById('resolverMermaReparar');
-    const desInp = document.getElementById('resolverMermaDesechar');
-    const warn   = document.getElementById('resolverMermaWarn');
-    let rep = parseFloat(repInp.value) || 0;
-    let des = parseFloat(desInp.value) || 0;
-    // Auto-balance: al editar uno, ajustar el otro al complemento
-    if (modificado === 'rep') des = Math.max(0, total - rep);
-    if (modificado === 'des') rep = Math.max(0, total - des);
-    repInp.value = rep;
-    desInp.value = des;
-    if (Math.abs((rep + des) - total) > 0.001) {
-      warn.textContent = `⚠ Reparar + desechar debe sumar ${fmt(total, 1)} (actual: ${fmt(rep + des, 1)})`;
-    } else { warn.textContent = ''; }
-  }
-
-  async function confirmarResolver() {
-    if (!_selMerma) return;
-    const rep = parseFloat(document.getElementById('resolverMermaReparar').value)  || 0;
-    const des = parseFloat(document.getElementById('resolverMermaDesechar').value) || 0;
-    const obs = document.getElementById('resolverMermaObs').value.trim();
-    const total = parseFloat(_selMerma.cantidadOriginal) || 0;
-    if (Math.abs((rep + des) - total) > 0.001) {
-      toast(`Reparar + desechar debe sumar ${fmt(total, 1)}`, 'warn'); return;
-    }
-    if (rep === 0 && des === 0) { toast('Indica al menos una cantidad', 'warn'); return; }
-
-    const btn = document.getElementById('btnConfirmarResolver');
-    btn.disabled = true; btn.textContent = 'Aplicando...';
-    try {
-      const res = await API.resolverMerma({
-        idMerma: _selMerma.idMerma,
-        cantidadReparada:  rep,
-        cantidadDesechada: des,
-        observacionResolucion: obs,
-        usuario: window.WH_CONFIG?.usuario || ''
-      });
-      if (res.ok) {
-        try { window.SoundFX && SoundFX.done(); } catch(_){}
-        if (navigator.vibrate) navigator.vibrate([12, 40, 12]);
-        const msgDesecho = des > 0 ? ` · ${fmt(des, 1)} a guía semanal` : '';
-        toast(`✓ Resuelto${msgDesecho}`, 'ok', 4000);
-        cerrarSheet('sheetResolverMerma');
-        _selMerma = null;
-        cargar();
-      } else {
-        toast('Error: ' + (res.error || 'desconocido'), 'danger', 5000);
-      }
-    } catch(e) { toast('Sin conexión', 'warn'); }
-    finally { btn.disabled = false; btn.textContent = 'Aplicar resolución'; }
-  }
-
+  // [cero-rastro 2026-07-19] abrirResolver/balancearResolucion/confirmarResolver eliminados:
+  // flujo legacy sin callers — resolver mermas es MermasV2.procesar (RPC procesar_merma).
   function verFoto(url) {
     if (!url) return;
     window.open(url, '_blank');
   }
 
   return { all: () => _all, cargar, crear, nueva, setFiltro, onFotoSeleccionada,
-           abrirResolver, balancearResolucion, confirmarResolver, verFoto,
+           verFoto,
            toggleResumenBanda };
 })();
 
