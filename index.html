@@ -5876,12 +5876,9 @@
   <div id="topBarRight" class="flex items-center gap-2">
 
 
-    <!-- F2.5 — Cesta de mermas (global, badge si hay pendientes) -->
-    <button id="topCestaBtn" class="top-cesta-btn" title="Cesta de mermas"
-            onclick="if(window.Mermas)Mermas.abrirCesta()">
-      <span>🗑</span>
-      <span id="topMermasBadge">0</span>
-    </button>
+    <!-- [Unificación mermas 2026-07-19] La cesta F2.5 del topbar se ELIMINÓ: sistema paralelo
+         sobre la Hoja (getMermasCesta/agregarAMermas GAS) que divergía de wh.mermas. La ÚNICA
+         cesta es la vista ♻️ Mermas (nav) → MermasView + RPCs v2. -->
 
     <!-- PrintNode status -->
     <div id="pnStatus" title="Estado impresora">
@@ -6040,7 +6037,7 @@
           <span class="dash-quick-lbl">Despacho</span>
         </button>
         <button class="dash-quick" onclick="App.qaMerma()">
-          <span class="dash-quick-ico">🗑</span>
+          <span class="dash-quick-ico">♻️</span>
           <span class="dash-quick-lbl">Merma</span>
         </button>
       </div>
@@ -6829,11 +6826,7 @@
     <div id="mermasMainCol">
       <div class="mermas-header">
         <div class="mermas-header-top">
-          <h2 class="mermas-title">🗑 Mermas</h2>
-          <button id="mermasBtnCesta" onclick="MermasView.abrirCesta()"
-                  class="mermas-cesta-btn" title="Cesta de triage rápido">
-            <span>🧺</span><span class="mermas-cesta-lbl">Cesta</span>
-          </button>
+          <h2 class="mermas-title">♻️ Mermas</h2>
         </div>
         <!-- Tabs filtro -->
         <div class="mermas-tabs">
@@ -9749,7 +9742,8 @@
 <div class="sheet-overlay" id="overlayMerma" onclick="cerrarSheet('sheetMerma')"></div>
 <div class="bottom-sheet" id="sheetMerma" style="max-height:92vh;overflow-y:auto">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-4">Registrar Merma</p>
+  <p class="font-bold text-base mb-1">♻️ Registrar merma</p>
+  <p class="text-xs text-slate-400 mb-3">Hallazgo dañado en el almacén (andamios). Lo devuelto por zonas va por su guía de devolución.</p>
   <div class="space-y-3">
     <div>
       <label class="text-xs text-slate-400">Producto</label>
@@ -9760,13 +9754,10 @@
         </button>
       </div>
     </div>
-    <div>
-      <label class="text-xs text-slate-400">Responsable</label>
-      <select id="mermaResponsable" class="input mt-1">
-        <option value="ALMACEN">ALMACÉN (interno)</option>
-        <option value="RECEPCION">RECEPCIÓN (proveedor)</option>
-        <!-- zonas inyectadas dinámicamente desde MOS -->
-      </select>
+    <div class="flex items-center gap-2 p-2.5 rounded-lg" style="background:rgba(251,191,36,.07);border:1px solid rgba(251,191,36,.3)">
+      <span style="font-size:16px">🏭</span>
+      <div><div class="text-xs font-bold" style="color:#fbd989">Culpa: ALMACÉN (fija)</div>
+      <div class="text-[10px] text-slate-500">sin guía previa nada entra "libre de zona" — la unidad sale del stock vendible a la cesta</div></div>
     </div>
     <div>
       <label class="text-xs text-slate-400">Cantidad</label>
@@ -10516,33 +10507,7 @@
   </div>
 </div>
 
-<!-- Sheet cesta de mermas ─────────────────────── -->
-<div class="sheet-overlay" id="overlayMermasCesta" onclick="Mermas.cerrarCesta()" style="display:none"></div>
-<div class="sheet-mermas-cesta" id="sheetMermasCesta">
-  <div class="mc-header">
-    <span class="mc-title">🗑 Cesta de mermas</span>
-    <button class="carg-close" onclick="Mermas.cerrarCesta()">✕</button>
-  </div>
-  <p style="font-size:12px;color:#94a3b8;margin-bottom:12px">
-    Total pendiente: <strong id="mermaCestaTotal" style="color:#f87171">0</strong>
-  </p>
-  <div class="mc-actions">
-    <button class="btn btn-outline" onclick="Mermas.abrirAgregar()">+ Agregar</button>
-    <button class="btn btn-primary" onclick="App.abrirProcesarMermas()">⚡ Procesar elim.</button>
-  </div>
-  <div class="mc-section mc-section-pend">
-    <p class="mc-section-title"><span>Pendientes · sin decisión</span></p>
-    <div id="mermaSecPendientes"></div>
-  </div>
-  <div class="mc-section mc-section-desc">
-    <p class="mc-section-title"><span>Descartado · esperando proceso</span></p>
-    <div id="mermaSecDescartado"></div>
-  </div>
-  <div class="mc-section mc-section-sol">
-    <p class="mc-section-title"><span>Solucionado (últimos 7 días)</span></p>
-    <div id="mermaSecSolucionado"></div>
-  </div>
-</div>
+<!-- [Unificación] sheets de la cesta F2.5 eliminados (ver nota en topbar) -->
 
 <!-- Sheet agregar a mermas ─────────────────────── -->
 <div class="sheet-overlay" id="overlayMermaAdd" onclick="Mermas.cerrarAgregar()" style="display:none"></div>
@@ -10642,18 +10607,7 @@
 </div>
 
 <!-- Modal procesar eliminación mermas (clave admin) ─────────────────────── -->
-<div class="sheet-overlay" id="overlayProcesarMermas" onclick="App.cerrarProcesarMermas()" style="display:none"></div>
-<div class="bottom-sheet" id="sheetProcesarMermas">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-2">⚡ Procesar eliminación</p>
-  <p class="text-xs text-slate-400 mb-4">Esto generará UNA guía SALIDA con todos los productos descartados. Requiere clave admin.</p>
-  <input id="procesarMermasInput" type="password" inputmode="numeric" maxlength="8"
-         class="clave-admin-input" placeholder="• • • • • • • •"/>
-  <div class="flex gap-2 mt-4">
-    <button class="btn btn-outline flex-1" onclick="App.cerrarProcesarMermas()">Cancelar</button>
-    <button class="btn btn-primary flex-1" onclick="App.confirmarProcesarMermas()">Procesar →</button>
-  </div>
-</div>
+<!-- [Unificación] sheet procesar-mermas (cesta F2.5) eliminado -->
 
 <!-- Sheet historial completo (admin/master) ────────────────── -->
 <div class="sheet-overlay" id="overlayHistorialGuia" onclick="App.cerrarHistorial()" style="display:none"></div>
@@ -10741,7 +10695,6 @@
 <script src="js/voice.js"></script>
 <script src="js/photos.js"></script>
 <script src="js/cargadores.js"></script>
-<script src="js/mermas.js"></script>
 <script src="js/clienteInbox.js"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js"></script>

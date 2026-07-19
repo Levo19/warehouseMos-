@@ -3949,7 +3949,6 @@ const App = (() => {
     const mainContent = document.getElementById('mainContent');
     PullToRefresh.init(mainContent, () => {
       if (window.OpLog && typeof OpLog.flush === 'function') OpLog.flush();
-      if (window.Mermas && typeof Mermas.refreshBadge === 'function') Mermas.refreshBadge();
       if (currentView === 'guias')        GuiasView.cargar();
       else if (currentView === 'productos')    ProductosView.cargar();
       else if (currentView === 'dashboard')    cargarDashboard();
@@ -3959,7 +3958,6 @@ const App = (() => {
     // F10: modo nocturno auto vía prefers-color-scheme (default ya dark)
     // y bonus: refrescar badge mermas al cargar la app
     setTimeout(() => {
-      if (window.Mermas && typeof Mermas.refreshBadge === 'function') Mermas.refreshBadge();
     }, 1500);
 
     // Vibración en navegación entre módulos
@@ -4510,7 +4508,7 @@ const App = (() => {
         { ico:'📥', tit:'Nuevo preingreso',   sub:'Recepción de proveedor',    act:() => { nav('preingresos'); setTimeout(() => { if (window.PreingresosView && PreingresosView.nuevo) PreingresosView.nuevo(); }, 200); } },
         { ico:'⚡', tit:'Modo Envasador',     sub:'Envasar productos a granel', act:() => { try { irAEnvasador(); } catch(_){} } },
         { ico:'🛺', tit:'Cargadores del día', sub:'Sumar al resumen',          act:() => { if (window.Cargadores) Cargadores.abrir(); } },
-        { ico:'🗑', tit:'Cesta de mermas',    sub:'Pendientes + procesar',     act:() => { if (window.Mermas) Mermas.abrirCesta(); } }
+        { ico:'♻️', tit:'Mermas',             sub:'Cesta · procesar',          act:() => nav('mermas') }
       ]
     },
     productos: {
@@ -4955,24 +4953,7 @@ const App = (() => {
   }
 
   // ── Procesar mermas (clave admin) ──
-  function abrirProcesarMermas() {
-    document.getElementById('procesarMermasInput').value = '';
-    document.getElementById('overlayProcesarMermas').style.display = 'block';
-    document.getElementById('sheetProcesarMermas').classList.add('open');
-    setTimeout(() => document.getElementById('procesarMermasInput').focus(), 200);
-  }
-  function cerrarProcesarMermas() {
-    document.getElementById('overlayProcesarMermas').style.display = 'none';
-    document.getElementById('sheetProcesarMermas').classList.remove('open');
-  }
-  async function confirmarProcesarMermas() {
-    const clave = document.getElementById('procesarMermasInput').value.trim();
-    if (clave.length !== 8) return (typeof toast === 'function' && toast('Clave de 8 dígitos', 'warn'));
-    if (window.Mermas) {
-      const res = await Mermas.procesarEliminacion(clave);
-      if (res) cerrarProcesarMermas();
-    }
-  }
+  // [Unificación] abrirProcesarMermas/cerrar/confirmar (cesta F2.5) eliminados.
 
   // ── Helpers públicos ──
   function getUsuario() {
@@ -4984,13 +4965,6 @@ const App = (() => {
       const n = await Cargadores.refreshCountDia();
       const el = document.getElementById('chipCargadoresDia');
       if (el) el.textContent = '🛺 ' + n;
-    }
-  }
-  async function actualizarBadgeMermas() {
-    if (typeof Mermas !== 'undefined') {
-      const n = await Mermas.refreshBadge();
-      const btn = document.getElementById('topCestaBtn');
-      if (btn) btn.classList.toggle('has-pending', n > 0);
     }
   }
 
@@ -5138,8 +5112,7 @@ const App = (() => {
            abrirEntidadPicker, cerrarEntidadPicker, filtrarEntidad, _pickEntidad,
            dictarEntidad, dictarCargador, dictarBuscarGuia, dictarBuscarPre,
            abrirReabrirAdmin, cerrarReabrirAdmin, confirmarReabrirAdmin,
-           abrirProcesarMermas, cerrarProcesarMermas, confirmarProcesarMermas,
-           actualizarChipDia, actualizarBadgeMermas,
+           actualizarChipDia,
            abrirHistorial, cerrarHistorial,
            copiarHistorialJSON, descargarHistorialJSON,
            cerrarLpMenu,
@@ -19565,8 +19538,10 @@ const MermasView = (() => {
       } else {
         const parts = [];
         if (m.cantidadReparada > 0) parts.push(`<span class="ok">✓ ${fmt(m.cantidadReparada, 1)} recuperadas</span>`);
-        if (m.cantidadDesechada > 0) parts.push(`<span class="bad">🗑 ${fmt(m.cantidadDesechada, 1)} descartadas</span>`);
-        if (m.idGuiaSalida) parts.push(`guía ${escHtml(m.idGuiaSalida)}`);
+        if (m.idGuiaTransformacion) parts.push(`<span style="color:#c4b5fd">🔄 transformada · ${escHtml(m.idGuiaTransformacion)}</span>`);
+        if (m.cantidadDesechada > 0) parts.push(`<span class="bad">🗑 ${fmt(m.cantidadDesechada, 1)} eliminadas</span>`);
+        if (m.idGuiaSalida) parts.push(`guía salida ${escHtml(m.idGuiaSalida)}`);
+        if (m.culpa) parts.push(`culpa ${escHtml(m.culpa)}`);
         bottom = `${parts.length ? `<p class="merma-foot">${parts.join(' · ')}</p>` : ''}
           ${m.observacionResolucion ? `<p class="merma-foot" style="font-style:italic">"${escHtml(m.observacionResolucion)}"</p>` : ''}`;
       }
@@ -19651,7 +19626,7 @@ const MermasView = (() => {
           <div class="mr-motivos-ttl">Por motivo</div>
           <div style="display:flex;flex-direction:column;gap:11px">${barras}</div>
         </div>
-        ${totalItems > 0 ? `<button class="mr-proc-btn" onclick="MermasView.procesar()">Procesar descartes</button>` : ''}
+
       </div>`;
 
     // PC: panel a la derecha
@@ -19676,22 +19651,7 @@ const MermasView = (() => {
     try { window.SoundFX && SoundFX.click(); } catch(_){}
   }
 
-  // Abre la cesta de triage rápido (módulo aparte window.Mermas)
-  function abrirCesta() {
-    try { window.SoundFX && SoundFX.click(); } catch(_){}
-    if (window.Mermas && typeof Mermas.abrirCesta === 'function') Mermas.abrirCesta();
-    else toast('Cesta no disponible', 'warn');
-  }
-
-  // Procesar descartes — delega al flujo existente de la cesta (pide clave admin allí)
-  function procesar() {
-    if (window.Mermas && typeof Mermas.abrirCesta === 'function') {
-      Mermas.abrirCesta();
-      toast('Revisa los descartes y confirma el proceso', 'info', 3500);
-    } else {
-      toast('Abre la cesta para procesar', 'warn');
-    }
-  }
+  // [Unificación] abrirCesta/procesar (delegaban a la cesta F2.5) eliminados — todo vive acá.
 
   function nueva() {
     _fotoBase64 = null; _fotoMime = '';
@@ -19702,7 +19662,6 @@ const MermasView = (() => {
     document.getElementById('mermaFotoPrev').innerHTML = '';
     // Inyectar zonas en el dropdown desde caché
     const zonas = OfflineManager.getZonasCache();
-    const sel = document.getElementById('mermaResponsable');
     sel.innerHTML = `
       <option value="ALMACEN">ALMACÉN (interno)</option>
       <option value="RECEPCION">RECEPCIÓN (proveedor)</option>
@@ -19745,7 +19704,7 @@ const MermasView = (() => {
 
   async function crear() {
     const codigoProducto = document.getElementById('mermaCodigoProd').value.trim();
-    const responsable    = document.getElementById('mermaResponsable').value;
+    const responsable = 'ALMACEN';  // [v2] culpa fija: hallazgo interno
     const cantidad       = parseFloat(document.getElementById('mermaCantidad').value);
     const motivo         = document.getElementById('mermaMotivo').value.trim();
     if (!codigoProducto || !cantidad || cantidad <= 0) {
@@ -19856,7 +19815,7 @@ const MermasView = (() => {
 
   return { all: () => _all, cargar, crear, nueva, setFiltro, onFotoSeleccionada,
            abrirResolver, balancearResolucion, confirmarResolver, verFoto,
-           abrirCesta, procesar, toggleResumenBanda };
+           toggleResumenBanda };
 })();
 
 
