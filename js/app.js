@@ -24396,16 +24396,25 @@ const MermasV2 = (() => {
   async function eliminarSel() {
     if (!_sel.size) return;
     const ses = Session.getSesion() || {};
-    toast('Procesando ' + _sel.size + '…', 'info');
-    for (const id of Array.from(_sel)) {
-      try {
-        await API.procesarMerma({ id_merma: id, local_id: 'PMB_' + id + '_' + Date.now().toString(36), accion: 'ELIMINAR', usuario: ses.nombre || '' });
-      } catch (_) {}
-      _sel.delete(id);
+    toast('Procesando lote de ' + _sel.size + '…', 'info');
+    // [SQL 518] UNA sola llamada → UNA sola guía SALIDA_MERMA con línea por merma (trazable).
+    let r = null;
+    try {
+      r = await API.mermasEliminarBatch({
+        ids: Array.from(_sel),
+        local_id: 'LOTE_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e4),
+        usuario: ses.nombre || ''
+      });
+    } catch (e) { r = { ok: false, error: String(e.message || e) }; }
+    if (r && r.ok) {
+      _sel.clear(); _pintarBarra();
+      try { vibrate(30); } catch (_) {}
+      toast('🗑 ' + (r.eliminadas || 0) + ' eliminada(s) → guía ' + (r.id_guia_salida || '') +
+            (r.omitidas ? ' · ' + r.omitidas + ' ya resuelta(s)' : ''), 'ok');
+      try { MermasView.cargar(); } catch (_) {}
+    } else {
+      toast('Error en el lote: ' + ((r && r.error) || '—'), 'error');
     }
-    _pintarBarra();
-    toast('🗑 Lote eliminado (guías de salida generadas)', 'ok');
-    try { MermasView.cargar(); } catch (_) {}
   }
 
   return { badge, cerrar, desdeGuia, culpa, foto, enviarDesdeGuia, procesar, modo, trans, confirmar, toggleSel, eliminarSel };

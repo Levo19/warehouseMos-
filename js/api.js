@@ -2828,6 +2828,7 @@ const API = (() => {
     registrarSorpresa:  (p)      => _sbRpcWH('registrar_sorpresa', { p }),
     mermasV2Lista:      ()       => _sbRpcWH('mermas_lista', { p: { alcance: 'wh' } }),
     procesarMerma:      (p)      => _sbRpcWH('procesar_merma', { p }),
+    mermasEliminarBatch:(p)      => _sbRpcWH('mermas_eliminar_batch', { p }),
     mermaDesdeGuia:     async (p) => {
       if (p && p.fotoBase64) {
         try { p = { ...p, foto: (await _subirFotoStorage('mermas', 'MRM_' + (p.id_merma || Date.now()), p.fotoBase64, p.mimeType || 'image/jpeg', p.id_merma || '')).url }; delete p.fotoBase64; }
