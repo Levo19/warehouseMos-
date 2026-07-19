@@ -3511,8 +3511,7 @@ window.BloqueoRemoto = BloqueoRemoto;
 // ════════════════════════════════════════════════
 const Dashboard = (() => {
   let panelActivo = null;
-  const panelMap = { venc: 'panelVenc', env: 'panelEnv', stock: 'panelStock', mermas: 'panelMermas' };
-
+  // [456] panelMap/toggle eliminados: los panels expandibles del dashboard ya no existen.
   function toggle(key) {
     const id = panelMap[key];
     if (!id) return;
@@ -3733,7 +3732,7 @@ const Dashboard = (() => {
   // detecten descuadre por producto y enlacen al flujo de aceptar-teórico/auditoría existente (NO se duplica nada).
   function getAlertasActivas() { return _alertasCache.slice(); }
 
-  return { toggle, cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada,
+  return { cargarAlertasStock, verTodasAlertas, marcarAlertaRevisada,
            setAlertaFiltro, buscarAlerta, auditarDesdeAlerta, aceptarTeorico, getAlertasActivas };
 })();
 
@@ -4027,6 +4026,7 @@ const App = (() => {
     const titles = {
       dashboard:   'Dashboard',
       envasador:   'Modo Envasador',
+      vencimientos: 'Por vencer',
       despacho:    'Despacho Rápido',
       guias:       'Guías',
       envasados:   'Envasados',
@@ -4049,6 +4049,7 @@ const App = (() => {
       case 'despacho':    DespachoView.cargar(); break;
       case 'preingresos': PreingresosView.cargar(); break;
       case 'mermas':      MermasView.cargar(); break;
+      case 'vencimientos': VencimientosView.cargar(); break;
       case 'productos':   ProductosView.cargar(); break;
       case 'tools':       _loadTools(); break;
       case 'logs':        LogsView.cargar(); break;
@@ -4076,6 +4077,7 @@ const App = (() => {
   }
   function qaDespacho() { nav('despacho'); }
   function qaMerma()    { nav('mermas'); setTimeout(() => { try { if (window.MermasView && MermasView.nueva) MermasView.nueva(); } catch(_){} }, 180); }
+  function qaVencimientos() { nav('vencimientos'); }
 
   function toggleModoEnvasador() {
     modoEnvasador = !modoEnvasador;
@@ -4244,22 +4246,20 @@ const App = (() => {
     // KPIs principales (reemplaza skeletons con valores reales).
     // Si el dato es un esqueleto derivado (sin KPIs reales), dejamos los
     // skeletons hasta que llegue el fetch fresco — evita un flash de "0".
+    // [456] La sección "🚨 Alertas" (kpiGrid) se ELIMINÓ: cada alerta vive SOBRE el acceso
+    // rápido de su módulo (pedido del dueño). Rojo pulsante = hay algo vencido/crítico.
     if (!d._derivado) {
-      document.getElementById('kpiCriticos').textContent   = contadores.criticos ?? criticos.length;
-      document.getElementById('kpiPendEnv').textContent    = pendEnv.length;
-      document.getElementById('kpiStockBajo').textContent  = stockBajo.length;
-      // [mermas v2] KPI = cuantas mermas hay POR PROCESAR; alerta pulsante si alguna paso los 3 dias
+      const setQB = (id, n, danger) => {
+        const el = document.getElementById(id); if (!el) return;
+        el.textContent = n > 99 ? '99+' : String(n);
+        el.dataset.hidden = n === 0 ? 'true' : 'false';
+        el.classList.toggle('dqb-danger', !!danger);
+      };
       const _mVenc = mermasPend.filter(m => m.fechaIngreso && (Date.now() - new Date(m.fechaIngreso).getTime()) > 3 * 864e5).length;
-      document.getElementById('kpiMermas').textContent = String(mermasPend.length);
-      const _kMer = document.getElementById('kpiMermas')?.closest('.kpi-card');
-      if (_kMer) {
-        _kMer.classList.toggle('kpi-mermas-venc', _mVenc > 0);
-        let ch = _kMer.querySelector('.kpi-venc-chip');
-        if (_mVenc > 0) {
-          if (!ch) { ch = document.createElement('span'); ch.className = 'kpi-venc-chip'; _kMer.appendChild(ch); }
-          ch.textContent = '\u26a0 ' + _mVenc + ' +3d';
-        } else if (ch) ch.remove();
-      }
+      setQB('dashQuickMermaBadge', mermasPend.length, _mVenc > 0);
+      // Por vencer: críticos en rojo; si no hay, alerta ≤30d en ámbar
+      const nCrit = criticos.length;
+      setQB('dashQuickVencBadge', nCrit > 0 ? nCrit : enAlerta.length, nCrit > 0);
     }
 
     // [v2.13.231] Badge "por envasar" en sidebar + acceso rápido del dashboard.
@@ -4321,62 +4321,7 @@ const App = (() => {
     // Productos nuevos aprobados (últimos 3 días) — carga en background
     if (!esCache) _cargarPNAprobados();
 
-    // Panel Vencimientos
-    document.getElementById('listVencCrit').innerHTML = criticos.map(v => `
-      <div class="card-sm flex items-center justify-between">
-        <div>
-          <p class="font-semibold text-sm">${v.descripcion}</p>
-          <p class="text-xs text-slate-400">Lote ${v.idLote} — ${fmt(v.cantidadActual)} uds</p>
-        </div>
-        <span class="${diasColor(v.diasRestantes)} font-bold">${v.diasRestantes}d</span>
-      </div>`).join('');
-    document.getElementById('listVencAlerta').innerHTML = enAlerta.map(v => `
-      <div class="card-sm flex items-center justify-between">
-        <div>
-          <p class="font-semibold text-sm">${v.descripcion}</p>
-          <p class="text-xs text-slate-400">Lote ${v.idLote} — ${fmt(v.cantidadActual)} uds</p>
-        </div>
-        <span class="${diasColor(v.diasRestantes)} font-bold">${v.diasRestantes}d</span>
-      </div>`).join('');
-    document.getElementById('vencVacio')?.classList.toggle('hidden', criticos.length + enAlerta.length > 0);
-
-    // Panel Pendientes envasado
-    document.getElementById('listPendEnvDash').innerHTML = pendEnv.map(p => `
-      <div class="card-sm flex items-center justify-between cursor-pointer" onclick="App.toggleModoEnvasador()">
-        <div>
-          <p class="font-semibold text-sm">${p.descripcion}</p>
-          <p class="text-xs text-slate-400">Stock: ${fmt(p.stockDerivado)} / Mín: ${fmt(p.stockMinimoDerivado)}</p>
-          <p class="text-xs text-emerald-400">Base disp: ${fmt(p.stockBase)} → max ${fmt(p.maxProducibles)} uds</p>
-        </div>
-        <span class="tag-${p.urgencia === 'CRITICA' ? 'danger' : 'warn'}">${p.urgencia}</span>
-      </div>`).join('');
-
-    // Panel Stock bajo
-    document.getElementById('listStockBajoDash').innerHTML = stockBajo.slice(0, 8).map(s => `
-      <div class="card-sm">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-sm font-semibold">${s.descripcion}</span>
-          <span class="text-xs ${s.stockActual === 0 ? 'tag-danger' : 'tag-warn'}">
-            ${s.stockActual === 0 ? 'SIN STOCK' : fmt(s.stockActual)}
-          </span>
-        </div>
-        <div class="bar-bg"><div class="bar-fill bg-amber-500"
-          style="width:${Math.min(100, (s.stockActual / s.stockMinimo * 100)).toFixed(0)}%"></div></div>
-        <p class="text-xs text-slate-500 mt-1">Mínimo: ${fmt(s.stockMinimo)} — Faltan: ${fmt(s.diferencia)}</p>
-      </div>`).join('');
-
-    // Panel Mermas pendientes
-    document.getElementById('listMermasDash').innerHTML = mermasPend.map(m => {
-      const dias = m.fechaIngreso ? Math.floor((Date.now() - new Date(m.fechaIngreso).getTime()) / 864e5) : 0;
-      const venc = dias > 3;
-      return `
-      <div class="card-sm flex items-center justify-between cursor-pointer ${venc ? 'dash-merma-venc' : ''}" onclick="nav('mermas')">
-        <div style="min-width:0">
-          <p class="font-semibold text-sm truncate">${m.codigoProducto || m.descripcion || '—'}</p>
-          <p class="text-xs text-slate-400">${fmtFecha(m.fechaIngreso)} · ${m.origen || ''} ${venc ? `· <span class="text-red-400 font-bold">⚠ ${dias}d</span>` : `· ${Math.max(0, 3 - dias)}d restantes`}</p>
-        </div>
-        <span class="${venc ? 'tag-danger' : 'tag-warn'} text-xs" style="flex-shrink:0">${fmt(m.cantidadPendiente ?? m.cantidadOriginal, 1)} pend</span>
-      </div>`; }).join('');
+    // [456] renders de los panels expandibles eliminados (los badges llevan a la vista real).
   }
 
   // [v2.13.231] Construye la banda "Estado del día" con datos REALES derivados
@@ -4417,6 +4362,10 @@ const App = (() => {
 
     // 3) Por envasar (dato real del dashboardData; omitir en esqueleto derivado).
     if (!derivado && pendEnv.length) {
+      if ((d && d.alertas && d.alertas.stockBajoMinimo || []).length) {
+        chips.push({ cls:'dc-red', ico:'📦', num: d.alertas.stockBajoMinimo.length, lbl:'stock bajo',
+          act: () => { nav('productos'); if (window.ProductosView && ProductosView.toggleFiltro) setTimeout(() => ProductosView.toggleFiltro('bajo'), 250); } });
+      }
       chips.push({ cls:'dc-amber', ico:'⚡', num: pendEnv.length, lbl:'por envasar',
                    onclick: "App.irAEnvasador()" });
     }
@@ -5109,7 +5058,7 @@ const App = (() => {
 
   return { init, nav, abrirMas, navMas,
            toggleModoEnvasador, irAEnvasador,
-           qaNuevaGuia, qaPreingreso, qaDespacho, qaMerma,
+           qaNuevaGuia, qaPreingreso, qaDespacho, qaMerma, qaVencimientos,
            toggleUserMenu, closeUserMenu,
            toggleSideUserMenu, closeSideUserMenu,
            syncForzado, checkUpdate,
@@ -24462,6 +24411,101 @@ const MermasV2 = (() => {
   }
 
   return { badge, cerrar, desdeGuia, culpa, foto, enviarDesdeGuia, procesar, modo, trans, confirmar, toggleSel, eliminarSel };
+})();
+
+// ════════════════════════════════════════════════
+// [456] VENCIMIENTOS VIEW — productos por vencer (moderna, pedida por el dueño)
+// Fuente: lotes ACTIVOS con stock (API.getLotes soloActivos) + nombres del cache.
+// Severidad: VENCIDO (<0d) · CRÍTICO (≤DIAS_ALERTA_VENC_CRITICO, def 7) ·
+// ALERTA (≤30d) · OK (resto). Carga optimista: warm start pinta cache y refresca.
+// ════════════════════════════════════════════════
+const VencimientosView = (() => {
+  let _all = [], _filtro = 'RIESGO';   // RIESGO = vencidos+críticos+alerta (default útil)
+
+  function _cfgDias() {
+    const cfg = (OfflineManager.getConfigCache && OfflineManager.getConfigCache()) || {};
+    return { crit: parseInt(cfg.DIAS_ALERTA_VENC_CRITICO) || 7, alerta: parseInt(cfg.DIAS_ALERTA_VENC) || 30 };
+  }
+  function _sev(l) {
+    const d = l.diasRestantes, c = _cfgDias();
+    if (d == null) return 'OK';
+    if (d < 0) return 'VENCIDO';
+    if (d <= c.crit) return 'CRITICO';
+    if (d <= c.alerta) return 'ALERTA';
+    return 'OK';
+  }
+
+  async function cargar() {
+    const warm = _all.length > 0;
+    if (warm) _render();
+    else loading('listVencimientos', true);
+    try {
+      const r = await API.getLotes({ soloActivos: 'true' });
+      _all = (r && r.ok ? r.data : []).filter(l => l.fechaVencimiento);
+    } catch (e) {
+      if (!warm) {
+        const cont = document.getElementById('listVencimientos');
+        if (cont) cont.innerHTML = `<div style="text-align:center;padding:26px;color:#fca5a5">⚠️ No se pudo cargar.<div style="margin-top:10px"><button class="btn btn-outline" onclick="VencimientosView.cargar()">↻ Reintentar</button></div></div>`;
+        return;
+      }
+    }
+    _render();
+  }
+
+  function setFiltro(f) { _filtro = f; _render(); }
+
+  function _render() {
+    const cont = document.getElementById('listVencimientos');
+    if (!cont) return;
+    const grupos = { VENCIDO: [], CRITICO: [], ALERTA: [], OK: [] };
+    _all.forEach(l => grupos[_sev(l)].push(l));
+    // KPIs resumen (tap = filtro)
+    const KP = [
+      ['VENCIDO', grupos.VENCIDO.length, '#fca5a5', 'Vencidos'],
+      ['CRITICO', grupos.CRITICO.length, '#fdba74', 'Críticos'],
+      ['ALERTA',  grupos.ALERTA.length,  '#fcd34d', '≤30 días'],
+      ['OK',      grupos.OK.length,      '#86efac', 'Sanos']
+    ];
+    const kEl = document.getElementById('vencResumen');
+    if (kEl) kEl.innerHTML = KP.map(([k, n, col, lbl]) =>
+      `<div class="venc-kpi ${_filtro === k ? 'vk-on' : ''}" onclick="VencimientosView.setFiltro('${k}')">
+        <div class="vk-num" style="color:${col}">${n}</div><div class="vk-lbl">${lbl}</div></div>`).join('');
+    const FIL = [['RIESGO', '⚠ En riesgo'], ['TODOS', 'Todos'], ['VENCIDO', 'Vencidos'], ['CRITICO', 'Críticos'], ['ALERTA', '≤30d'], ['OK', 'Sanos']];
+    const fEl = document.getElementById('vencFiltros');
+    if (fEl) fEl.innerHTML = FIL.map(([k, l]) =>
+      `<button class="merma-tab ${_filtro === k ? 'tab-active' : ''}" onclick="VencimientosView.setFiltro('${k}')">${l}</button>`).join('');
+    let vis;
+    if (_filtro === 'TODOS') vis = _all;
+    else if (_filtro === 'RIESGO') vis = [...grupos.VENCIDO, ...grupos.CRITICO, ...grupos.ALERTA];
+    else vis = grupos[_filtro] || [];
+    vis = vis.slice().sort((a, b) => (a.diasRestantes ?? 999) - (b.diasRestantes ?? 999));
+    if (!vis.length) {
+      cont.innerHTML = `<p class="mr-empty" style="grid-column:1/-1;padding:34px 0">${_filtro === 'RIESGO' ? 'Nada en riesgo 🎉' : 'Sin lotes en este filtro'}</p>`;
+      return;
+    }
+    const prods = OfflineManager.getProductosCache() || [];
+    const nom = {}; prods.forEach(p => { if (p.codigoBarra) nom[String(p.codigoBarra)] = p.descripcion; if (p.idProducto) nom[String(p.idProducto)] = p.descripcion; });
+    const SEVC = { VENCIDO: 'sv-venc', CRITICO: 'sv-crit', ALERTA: 'sv-alerta', OK: 'sv-ok' };
+    const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches;
+    cont.innerHTML = vis.slice(0, 300).map((l, i) => {
+      const sv = _sev(l), d = l.diasRestantes;
+      const tile = sv === 'VENCIDO'
+        ? `<div class="venc-dias"><span class="vd-num">${Math.abs(d)}</span><span class="vd-lbl">DÍAS VENCIDO</span></div>`
+        : `<div class="venc-dias"><span class="vd-num">${d}</span><span class="vd-lbl">DÍAS RESTAN</span></div>`;
+      const fv = l.fechaVencimiento ? new Date(l.fechaVencimiento).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+      const delay = reduce ? '' : `animation-delay:${Math.min(i * 24, 300)}ms`;
+      return `<div class="venc-card ${SEVC[sv]}" style="${delay}" onclick="abrirModalLotes('${escAttr(l.codigoProducto)}')">
+        ${tile}
+        <div style="flex:1;min-width:0">
+          <div class="venc-name">${escHtml(nom[String(l.codigoProducto)] || l.codigoProducto)}</div>
+          <div class="venc-sub">vence ${escHtml(fv)} · lote ${escHtml(l.idLote || '—')}</div>
+        </div>
+        <div class="venc-qty"><span class="vq-n">${fmt(l.cantidadActual, 1)}</span><span class="vq-u">uds</span></div>
+      </div>`;
+    }).join('');
+  }
+
+  return { cargar, setFiltro };
 })();
 
 document.addEventListener('DOMContentLoaded', () => App.init());
