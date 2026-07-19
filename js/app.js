@@ -4272,7 +4272,7 @@ const App = (() => {
 
     // [v2.13.231] Banda ESTADO DEL DÍA — chips con datos REALES del día (TZ Perú).
     // Solo se muestran chips con dato disponible; los ausentes se omiten (sin 0 falso).
-    _renderEstadoDia({ pendEnv, derivado: !!d._derivado });
+    _renderEstadoDia({ pendEnv, stockBajo, derivado: !!d._derivado });
 
     // Alertas de cuadre stock (en background, no bloquea render)
     // Solo en el render fresco para no disparar la consulta dos veces.
@@ -4322,7 +4322,7 @@ const App = (() => {
   // de los caches que el dashboard ya tiene en mano (guías + preingresos del día
   // en TZ Perú) más el conteo "por envasar" del dashboardData. Cada chip se omite
   // si su dato no está disponible — nunca se pinta un 0 falso.
-  function _renderEstadoDia({ pendEnv = [], derivado = false } = {}) {
+  function _renderEstadoDia({ pendEnv = [], stockBajo = [], derivado = false } = {}) {
     const cont = document.getElementById('dashEstadoDia');
     if (!cont) return;
     const hoyKey = _hoyPeru();
@@ -4355,11 +4355,12 @@ const App = (() => {
     } catch(_) {}
 
     // 3) Por envasar (dato real del dashboardData; omitir en esqueleto derivado).
+    // [460 FIX] 'd' no existe en este scope (crasheaba el dashboard) → stockBajo llega por parámetro
+    if (!derivado && stockBajo.length) {
+      chips.push({ cls:'dc-red', ico:'📦', num: stockBajo.length, lbl:'stock bajo',
+        act: () => { nav('productos'); if (window.ProductosView && ProductosView.toggleFiltro) setTimeout(() => ProductosView.toggleFiltro('bajo'), 250); } });
+    }
     if (!derivado && pendEnv.length) {
-      if ((d && d.alertas && d.alertas.stockBajoMinimo || []).length) {
-        chips.push({ cls:'dc-red', ico:'📦', num: d.alertas.stockBajoMinimo.length, lbl:'stock bajo',
-          act: () => { nav('productos'); if (window.ProductosView && ProductosView.toggleFiltro) setTimeout(() => ProductosView.toggleFiltro('bajo'), 250); } });
-      }
       chips.push({ cls:'dc-amber', ico:'⚡', num: pendEnv.length, lbl:'por envasar',
                    onclick: "App.irAEnvasador()" });
     }
