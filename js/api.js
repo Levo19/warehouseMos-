@@ -2654,6 +2654,26 @@ const API = (() => {
       });
       _RT.channel = channel;
       _RT.started = true;
+
+      // [PRESENCIA ecosistema] Canal presence compartido 'ecos-presencia' (mismo WS).
+      // WH se ANUNCIA {deviceId, nombre, rol, app:'WH'} → el panel MOS (Configuración)
+      // muestra este equipo/operador EN LÍNEA AL SEGUNDO (pisa el heartbeat de 10 min).
+      // Best-effort: si falla, nada cambia (el heartbeat sigue siendo la base).
+      try {
+        const devId = String(_whDeviceId() || '').trim();
+        if (devId) {
+          const usuario = String((window.WH_CONFIG && window.WH_CONFIG.usuario) || localStorage.getItem('wh_usuario') || '').trim();
+          const chP = client.channel('ecos-presencia', { config: { presence: { key: devId } } });
+          chP.subscribe((status) => {
+            try { console.log('[Realtime] canal ecos-presencia:', status); } catch (_) {}
+            if (status === 'SUBSCRIBED') {
+              try { chP.track({ deviceId: devId, nombre: usuario, rol: '', app: 'WH' }); } catch (_) {}
+            }
+          });
+          _RT.chPres = chP;
+        }
+      } catch (e) { try { console.warn('[Realtime] presencia no abrió (heartbeat sigue):', e); } catch (_) {} }
+
       _rtCablearListeners();
     } catch (err) {
       try { console.warn('[Realtime] arranque falló (poller sigue):', err); } catch (_) {}
@@ -2690,8 +2710,10 @@ const API = (() => {
   function _detenerRealtimeCatalogo() {
     _RT.gen++;   // [anti-orphan] invalida cualquier arranque en vuelo (post-await abortará en vez de abrir un canal huérfano)
     try { if (_RT.channel && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.channel); } catch (_) {}
+    try { if (_RT.chPres && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.chPres); } catch (_) {}
     try { if (_RT.client && _RT.client.disconnect) _RT.client.disconnect(); } catch (_) {}
     _RT.channel = null;
+    _RT.chPres  = null;
     _RT.client  = null;
     _RT.started = false;
     // [Review R1 fix] limpiar el debounce trailing de _rtNotificar (no dejar un fire-and-forget colgando tras
