@@ -19577,9 +19577,10 @@ const MermasView = (() => {
         qtyHtml = `<span class="merma-qty">🗑${fmt(des, 1)}<span class="mq-u">und</span><span class="mq-de">de ${fmt(orig, 1)}</span></span>`;
       }
       const fotoUrl   = m.foto ? _normalizeFotoMerma(m.foto) : '';
+      // placeholder elegante (cubo estilo MOS) — lo pinta el CSS de .placeholder (::after)
       const thumb     = fotoUrl
         ? `<div class="merma-thumb" onclick="MermasView.verFoto('${escAttr(m.foto)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.parentNode.classList.add('placeholder');this.remove()"></div>`
-        : `<div class="merma-thumb placeholder">🗑</div>`;
+        : `<div class="merma-thumb placeholder"></div>`;
 
       // Badges: motivo + antigüedad
       const badges = [];
