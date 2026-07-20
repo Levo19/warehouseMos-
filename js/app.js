@@ -3934,11 +3934,10 @@ const App = (() => {
       try { if (currentView === 'guias') GuiasView.cargar(); } catch(_){}
     });
 
-    // Pull-to-refresh en la vista principal — también dispara OpLog.flush()
+    // Pull-to-refresh en la vista principal 
     // para que el operador pueda forzar reconciliación de ops pendientes.
     const mainContent = document.getElementById('mainContent');
     PullToRefresh.init(mainContent, () => {
-      if (window.OpLog && typeof OpLog.flush === 'function') OpLog.flush();
       if (currentView === 'guias')        GuiasView.cargar();
       else if (currentView === 'productos')    ProductosView.cargar();
       else if (currentView === 'dashboard')    cargarDashboard();
@@ -5012,7 +5011,7 @@ const App = (() => {
            toggleUserMenu, closeUserMenu,
            toggleSideUserMenu, closeSideUserMenu,
            syncForzado, checkUpdate,
-           instalarPWA: () => window._installPWA?.(),
+           // [quirúrgico] re-export instalarPWA eliminado (el botón usa window._installPWA directo)
            cargarDashboard, showUsuarioDialog,
            cargarProductosMaestro, cargarProveedoresMaestro,
            getProductosMaestro, getProveedoresMaestro,

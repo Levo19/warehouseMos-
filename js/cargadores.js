@@ -128,7 +128,7 @@
     try {
       const res = await API.post('addCargadorDia', {
         idCargador, nombre, fecha: _fechaActual || _hoyStr(),
-        usuario, deviceId: (window.OpLog && OpLog.deviceId()) || ''
+        usuario, deviceId: (localStorage.getItem('wh_device_id') || '')   // [quirúrgico] OpLog retirado; misma clave LS
       });
       if (res && res.ok) {
         if (typeof SoundFX !== 'undefined' && SoundFX.click) SoundFX.click();
