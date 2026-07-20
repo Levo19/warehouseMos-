@@ -354,18 +354,8 @@ function actualizarBadges({ guiasAbiertas = 0 } = {}) {
 // ════════════════════════════════════════════════
 // PrintNode status indicator
 // ════════════════════════════════════════════════
-const PrintNodeStatus = (() => {
-  function set(estado) {
-    const dot = document.getElementById('pnDot');
-    if (!dot) return;
-    dot.className = 'pn-dot ' + (estado || '');
-  }
-  function busy()  { set('busy');  setTimeout(() => set('ok'), 4000); }
-  function ok()    { set('ok');    }
-  function error() { set('error'); }
-  function hide()  { set('');      }
-  return { ok, error, busy, hide };
-})();
+// [quirúrgico 2026-07-20] PrintNodeStatus ELIMINADO: módulo sin NINGUNA referencia externa
+// (el estado real de impresora vive en PrintHub/impresion-directa).
 
 // ════════════════════════════════════════════════
 // Global Search
@@ -4436,8 +4426,8 @@ const App = (() => {
   }
   function getProveedoresMaestro() { return todosProveedores; }
 
-  function abrirMas() { abrirSheet('sheetMas'); }
-  function navMas(viewName) { cerrarSheet('sheetMas'); nav(viewName); }
+  // [quirúrgico 2026-07-20] abrirMas eliminado: abría 'sheetMas' que no existe en el HTML.
+  function navMas(viewName) { nav(viewName); }   // [quirúrgico] cerrarSheet('sheetMas') era no-op (sheet inexistente)
 
   // ════════════════════════════════════════════════
   // Bottom nav v3 — Pill flotante + long-press menú + sonido
@@ -4832,59 +4822,9 @@ const App = (() => {
   }
 
   // ── Reabrir guía con clave admin ──
-  function abrirReabrirAdmin(idGuia) {
-    _reabrirCtx = { idGuia };
-    // Ventana de gracia 5 min: si la guía se cerró hace < 5 min, no pedir clave
-    if (_dentroGraciaCierre(idGuia)) {
-      if (typeof toast === 'function') toast('🕒 Reabriendo en gracia (sin clave)', 'info');
-      return _ejecutarReabrir(idGuia);
-    }
-    // Recordar 30 min
-    const remUntil = parseInt(localStorage.getItem(ADMIN_REMEMBER_KEY) || '0', 10);
-    if (remUntil && Date.now() < remUntil) {
-      return _ejecutarReabrir(idGuia);
-    }
-    document.getElementById('reabrirAdminInput').value = '';
-    document.getElementById('reabrirAdminRemember').checked = false;
-    document.getElementById('overlayReabrirAdmin').style.display = 'block';
-    document.getElementById('sheetReabrirAdmin').classList.add('open');
-    setTimeout(() => document.getElementById('reabrirAdminInput').focus(), 200);
-  }
-  function cerrarReabrirAdmin() {
-    document.getElementById('overlayReabrirAdmin').style.display = 'none';
-    document.getElementById('sheetReabrirAdmin').classList.remove('open');
-    _reabrirCtx = null;
-  }
-  async function confirmarReabrirAdmin() {
-    if (!_reabrirCtx) return;
-    const clave = document.getElementById('reabrirAdminInput').value.trim();
-    if (clave.length !== 8) return (typeof toast === 'function' && toast('Clave debe ser de 8 dígitos', 'warn'));
-    try {
-      // [v2.13.38] Auditoría enriquecida (tier + tiempo + deviceId)
-      const t0 = _reabrirCtx._t0 || Date.now();
-      const devId = (typeof window._getDeviceIdWH === 'function') ? window._getDeviceIdWH() : '';
-      const res = await API.verificarClaveAdmin({
-        clave,
-        accion: 'REABRIR_GUIA',
-        refDocumento: _reabrirCtx.idGuia,
-        appOrigen: 'warehouseMos',
-        tier: 1,
-        cache_hit: 0,
-        tiempo_verify_ms: Date.now() - t0,
-        deviceId: devId,
-        dispositivo: devId
-      });
-      if (!res || !res.ok) return (typeof toast === 'function' && toast('Clave incorrecta', 'warn'));
-      if (document.getElementById('reabrirAdminRemember').checked) {
-        localStorage.setItem(ADMIN_REMEMBER_KEY, String(Date.now() + 30 * 60 * 1000));
-      }
-      const idGuia = _reabrirCtx.idGuia;
-      cerrarReabrirAdmin();
-      await _ejecutarReabrir(idGuia, clave);
-    } catch(e) {
-      if (typeof toast === 'function') toast('Error de conexión', 'warn');
-    }
-  }
+  // [quirúrgico 2026-07-20] cluster ReabrirAdmin eliminado: duplicado muerto (0 openers); el reabrir vivo es el keypad PIN de GuiasView → API.reabrirGuia.
+  // [quirúrgico 2026-07-20] (cluster ReabrirAdmin)
+  // [quirúrgico 2026-07-20] (cluster ReabrirAdmin)
   async function _ejecutarReabrir(idGuia, claveAdmin) {
     try {
       const usuario = getUsuario();
@@ -5066,7 +5006,7 @@ const App = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return { init, nav, abrirMas, navMas,
+  return { init, nav, navMas,
            toggleModoEnvasador, irAEnvasador,
            qaNuevaGuia, qaPreingreso, qaDespacho, qaMerma, qaVencimientos,
            toggleUserMenu, closeUserMenu,
@@ -5084,7 +5024,6 @@ const App = (() => {
            abrirSubtypePicker, cerrarSubtypePicker,
            abrirEntidadPicker, cerrarEntidadPicker, filtrarEntidad, _pickEntidad,
            dictarEntidad, dictarCargador, dictarBuscarGuia, dictarBuscarPre,
-           abrirReabrirAdmin, cerrarReabrirAdmin, confirmarReabrirAdmin,
            actualizarChipDia,
            abrirHistorial, cerrarHistorial,
            copiarHistorialJSON, descargarHistorialJSON,
@@ -9136,7 +9075,6 @@ const GuiasView = (() => {
     inlinePickVenc, inlineVencChanged, inlineDelete,
     toggleFotoPanel, toggleNotasPanel, editarGuia, guardarCambiosGuia,
     eliminarFotoGuia,
-    filtrarChip,
     compartirWA,
     imprimirTicket,
     abrirModalPN, cerrarModalPN, _pnFotoSeleccionada, confirmarRegistrarPN,
@@ -9382,12 +9320,7 @@ const GuiasView = (() => {
   }
 
   // Método para chips de filtro (actualiza estado visual de chips + llama filtrar())
-  function filtrarChip(chipEl, filtro) {
-    document.querySelectorAll('#guiaChips .chip').forEach(c => c.classList.remove('active'));
-    chipEl.classList.add('active');
-    vibrate(8);
-    filtrar(filtro);
-  }
+  // [quirúrgico 2026-07-20] filtrarChip eliminado (0 referencias; los chips usan su propio onclick inline).
 })();
 
 // ════════════════════════════════════════════════
@@ -16092,49 +16025,7 @@ const DespachoView = (() => {
   // del catálogo corresponde a cada item de la sombra (igual que pickup pre-resolved).
   // Cuando el operador escanea físicamente ese código, el producto entra al cart
   // y por match exacto (no fuzzy) se marca el item de la sombra.
-  function jalarTodoPosible() {
-    if (!_listaSombra || !_listaSombra.items) { toast('No hay lista sombra activa', 'warn'); return; }
-    const pendientes = _listaSombra.items
-      .map((it, i) => ({ it, i }))
-      .filter(({ it }) => (it.cantidadEscaneada || 0) < it.cantidad && !it.codigoBarraSugerido);
-    if (!pendientes.length) {
-      toast('Todo identificado ✨ — escanea para confirmar cantidades', 'info');
-      return;
-    }
-    const productos = OfflineManager.getProductosCache() || [];
-    let identificados = 0, ambiguos = 0, sinMatch = 0;
-    pendientes.forEach(({ it, i }) => {
-      const scored = productos
-        .map(p => ({ p, s: _lsScore(it.nombre, p.descripcion || '') }))
-        .filter(x => x.s >= 0.7)
-        .sort((a, b) => b.s - a.s);
-      if (!scored.length) { sinMatch++; return; }
-      const ganador = scored[0];
-      const segundo = scored[1];
-      const esUnico = !segundo || (ganador.s - segundo.s) >= 0.15;
-      if (!esUnico) { ambiguos++; return; }
-      const cb = String(ganador.p.codigoBarra || ganador.p.idProducto || '');
-      if (!cb) { sinMatch++; return; }
-      // SOLO resolvemos SKU en la sombra — no tocamos el cart
-      it.codigoBarraSugerido = cb;
-      it.descripcionSugerida = ganador.p.descripcion || it.nombre;
-      identificados++;
-    });
-    if (identificados > 0) {
-      _lsSave();
-      _lsRender();
-      try { SoundFX.rocket(); } catch(_){}
-      vibrate([30, 25, 50]);
-    }
-    const partes = [];
-    if (identificados > 0) partes.push(`🔗 ${identificados} identificados`);
-    if (ambiguos > 0)      partes.push(`⚠ ${ambiguos} ambiguos`);
-    if (sinMatch > 0)      partes.push(`❌ ${sinMatch} sin match`);
-    const resumen = partes.join(' · ') || 'Sin cambios';
-    const cola = identificados > 0 ? ' — escanea para confirmar cantidades' : '';
-    toast(resumen + cola, identificados > 0 ? 'ok' : 'warn', 7000);
-  }
-
+  // [quirúrgico 2026-07-20] jalarTodoPosible eliminado (0 referencias).
   // [v2.13.9] Tap en item de sombra → abre buscador con el nombre pre-llenado
   // y dispara la búsqueda. El operador toca un resultado y se agrega al cart.
   function buscarItemSombra(idx) {
@@ -16760,7 +16651,6 @@ const DespachoView = (() => {
            // [v2.13.9] Tap-to-search en item de sombra
            buscarItemSombra,
            // [v2.13.10] Jalar todo posible con fuzzy match
-           jalarTodoPosible,
            // [v2.13.15] Listas compartidas
            tomarListaSombraDelPanel,
            _lsRefrescarPanel,
@@ -17263,66 +17153,10 @@ const PreingresosView = (() => {
   // ── Panel de preingresos (accesible desde Guías) ────────
   let _panelFiltro = '';
 
-  function abrirPanel() {
-    _panelFiltro = '';
-    ['preFiltAll','preFiltPend','preFiltProc'].forEach(id =>
-      document.getElementById(id)?.classList.remove('active-tab'));
-    document.getElementById('preFiltAll')?.classList.add('active-tab');
-    _renderPanel('');
-    abrirSheet('sheetPreingresosPanel');
-  }
-
-  function filtrarPanel(estado) {
-    _panelFiltro = estado;
-    ['preFiltAll','preFiltPend','preFiltProc'].forEach(id =>
-      document.getElementById(id)?.classList.remove('active-tab'));
-    const activeId = estado === 'PENDIENTE' ? 'preFiltPend' : estado === 'PROCESADO' ? 'preFiltProc' : 'preFiltAll';
-    document.getElementById(activeId)?.classList.add('active-tab');
-    _renderPanel(estado);
-  }
-
-  function _renderPanel(estado) {
-    const cached = OfflineManager.getPreingresosCache();
-    const list   = estado ? cached.filter(p => p.estado === estado) : cached;
-    const container = document.getElementById('listPreingresosPanel');
-    if (!container) return;
-    const html = (items) => {
-      if (!items.length) return '<p class="text-slate-500 text-sm text-center py-6">Sin preingresos</p>';
-      return items.map(p => `
-        <div class="card-sm">
-          <div class="flex items-center justify-between mb-1">
-            <span class="font-bold text-sm font-mono">${p.idPreingreso}</span>
-            <span class="tag-${p.estado === 'PENDIENTE' ? 'warn' : p.estado === 'PROCESADO' ? 'ok' : 'blue'} text-xs">${p.estado}</span>
-          </div>
-          <p class="text-xs text-slate-400">${fmtFecha(p.fecha)} · ${p.idProveedor || '—'}</p>
-          <p class="text-sm font-bold text-emerald-400 mt-1">S/. ${fmt(p.monto, 2)}</p>
-          ${p.estado === 'PENDIENTE'
-            ? `<button onclick="PreingresosView.aprobarDesdePanel('${p.idPreingreso}')"
-                       class="btn btn-primary w-full mt-2 py-2 text-xs font-bold tracking-wide">
-                 APROBAR → CREAR GUÍA
-               </button>` : ''}
-        </div>`).join('');
-    };
-    container.innerHTML = html(list);
-    // Datos actualizados llegan por precargarOperacional (60s timer) → sin llamada extra aquí
-  }
-
-  async function aprobarDesdePanel(id) {
-    // [FIX 500x B5] try/catch + optional-chaining: sin esto un rechazo por red = unhandled rejection + sin
-    // feedback al operador + `res.data.idGuia` lanzaba si res venía undefined.
-    let res;
-    try {
-      res = await API.aprobarPreingreso({ idPreingreso: id, usuario: window.WH_CONFIG.usuario });
-    } catch (e) { toast('Sin conexión: ' + (e && e.message || 'reintenta'), 'danger'); return; }
-    if (res && res.ok) {
-      toast(`Guía ${res.data && res.data.idGuia || ''} creada`, 'ok');
-      filtrarPanel(_panelFiltro);
-      GuiasView.cargar();
-    } else {
-      toast('Error: ' + (res && res.error || 'no se pudo aprobar'), 'danger');
-    }
-  }
-
+  // [quirúrgico 2026-07-20] Panel de aprobación de preingresos ELIMINADO (cluster completo): su botón de acceso en Guías ya no existe (0 openers); la aprobación viva está en el detalle del preingreso.
+  // [quirúrgico 2026-07-20] (cluster panel preingresos)
+  // [quirúrgico 2026-07-20] (cluster panel preingresos)
+  // [quirúrgico 2026-07-20] (cluster panel preingresos)
   // ── Etiquetas toggle (formulario nuevo) ──────────────────
   function toggleTag(grupo, valor) {
     _tags[grupo] = (_tags[grupo] === valor) ? null : valor;
@@ -17392,12 +17226,7 @@ const PreingresosView = (() => {
     });
   }
 
-  function verFotos(fotosStr, titulo) {
-    const fotos = (fotosStr || '').split(',').filter(Boolean);
-    if (!fotos.length) { toast('Sin fotos registradas', 'info'); return; }
-    abrirCarrusel(fotos, titulo || '');
-  }
-
+  // [quirúrgico 2026-07-20] verFotos eliminado (0 referencias; el carrusel se abre por sus flujos vivos).
   // ── Abrir detalle / edición ───────────────────────────────
   function abrirDetalle(idPreingreso) {
     // [v2.13.173 BUG FIX] Si había OTRO preingreso en edición, capturar sus
@@ -19235,9 +19064,8 @@ const PreingresosView = (() => {
   }
 
   return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, nuevo,
-           abrirPanel, filtrarPanel, aprobarDesdePanel,
            toggleTag, toggleTagModal,
-           onFotosSeleccionadas, quitarFoto, verFotos,
+           onFotosSeleccionadas, quitarFoto,
            onFotosEditSeleccionadas, quitarFotoEdit,
            abrirDetalle, guardarEdicion, crearGuiaDesde, crearGuiaRapido, reimprimirAviso,
            abrirCargadoresDia, compartirCargadoresDiaWA, imprimirCargadoresDia,

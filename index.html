@@ -9116,51 +9116,7 @@
   <div id="itemMatchList" class="max-h-80 overflow-y-auto"></div>
 </div>
 
-<!-- ════════════════════════════════════════════════
-     SHEET: PANEL PRE-INGRESOS (acceso desde Guías)
-═══════════════════════════════════════════════════ -->
-<div class="sheet-overlay" id="overlayPreingresosPanel" onclick="cerrarSheet('sheetPreingresosPanel')"></div>
-<div class="bottom-sheet" id="sheetPreingresosPanel">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-
-  <!-- Header del panel -->
-  <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-2">
-      <!-- Invoice icon -->
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="#60a5fa">
-        <path d="M5 4a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5M5 8a.5.5 0 0 0 0 1h6a.5.5 0 0 0 0-1H5zm0 2a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1H5z"/>
-        <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2zm10-1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1z"/>
-      </svg>
-      <span class="font-black text-base tracking-wide">PRE-INGRESOS</span>
-    </div>
-    <button onclick="PreingresosView.nuevo()"
-            class="flex items-center gap-2 bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-bold tracking-wide">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-        <path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/>
-      </svg>
-      NUEVO
-    </button>
-  </div>
-
-  <!-- Filtros -->
-  <div class="flex gap-2 mb-4">
-    <button onclick="PreingresosView.filtrarPanel('')"
-            id="preFiltAll" class="btn btn-outline text-xs py-1 px-3 font-bold tracking-wide active-tab">
-      TODOS
-    </button>
-    <button onclick="PreingresosView.filtrarPanel('PENDIENTE')"
-            id="preFiltPend" class="btn btn-outline text-xs py-1 px-3 font-bold tracking-wide">
-      PENDIENTES
-    </button>
-    <button onclick="PreingresosView.filtrarPanel('PROCESADO')"
-            id="preFiltProc" class="btn btn-outline text-xs py-1 px-3 font-bold tracking-wide">
-      PROCESADOS
-    </button>
-  </div>
-
-  <!-- Lista preingresos dentro del panel -->
-  <div id="listPreingresosPanel" class="space-y-2"></div>
-</div>
+<!-- [quirúrgico 2026-07-20] sheetPreingresosPanel eliminado (cluster muerto; aprobación viva = detalle del preingreso) -->
 
 <!-- ════════════════════════════════════════════════
      SHEET: DESPACHO PICKUP — checklist moderno
@@ -10623,37 +10579,7 @@
 </div>
 
 <!-- Modal reabrir guía con clave admin ─────────────────────── -->
-<div class="sheet-overlay" id="overlayReabrirAdmin" onclick="App.cerrarReabrirAdmin()" style="display:none"></div>
-<div class="bottom-sheet" id="sheetReabrirAdmin">
-  <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p class="font-bold text-base mb-2">🔒 Guía cerrada</p>
-  <p class="text-xs text-slate-400 mb-4">Reabrir requiere clave de administrador.</p>
-  <input id="reabrirAdminInput" type="password" inputmode="none" maxlength="8"
-         class="clave-admin-input" placeholder="• • • • • • • •" readonly/>
-  <!-- [v2.13.39] Keypad táctil para reabrir guía -->
-  <div class="wh-keypad" data-target="reabrirAdminInput">
-    <button class="wh-key" data-d="1">1</button>
-    <button class="wh-key" data-d="2">2</button>
-    <button class="wh-key" data-d="3">3</button>
-    <button class="wh-key" data-d="4">4</button>
-    <button class="wh-key" data-d="5">5</button>
-    <button class="wh-key" data-d="6">6</button>
-    <button class="wh-key" data-d="7">7</button>
-    <button class="wh-key" data-d="8">8</button>
-    <button class="wh-key" data-d="9">9</button>
-    <button class="wh-key wh-key-del" data-del>⌫</button>
-    <button class="wh-key" data-d="0">0</button>
-    <button class="wh-key wh-key-ok" data-ok-reabrir>✓</button>
-  </div>
-  <label class="flex items-center gap-2 mt-3 mb-4">
-    <input id="reabrirAdminRemember" type="checkbox"/>
-    <span class="text-xs text-slate-400">Recordar 30 min en este dispositivo</span>
-  </label>
-  <div class="flex gap-2">
-    <button class="btn btn-outline flex-1" onclick="App.cerrarReabrirAdmin()">Cancelar</button>
-    <button class="btn btn-primary flex-1" onclick="App.confirmarReabrirAdmin()">Reabrir →</button>
-  </div>
-</div>
+<!-- [quirúrgico 2026-07-20] sheetReabrirAdmin eliminado (cluster muerto; reabrir vivo = keypad GuiasView) -->
 
 <!-- Modal procesar eliminación mermas (clave admin) ─────────────────────── -->
 <!-- [Unificación] sheet procesar-mermas (cesta F2.5) eliminado -->
