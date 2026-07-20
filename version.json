@@ -1,1 +1,1 @@
-{"version": "2.13.472", "build": "2.13.472 repin seguridad (fix 401 polling extensión + buzón rediseñado)."}
+{"version": "2.13.473", "build": "2.13.473 fix lista IA: 'sin items' al subir al equipo — la RPC esperaba array y el frontend mandaba string (contrato GAS viejo); SQL 538 tolera ambos + frontend manda array real (crear/progreso/cerrar)."}

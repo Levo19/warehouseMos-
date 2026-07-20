@@ -13811,7 +13811,7 @@ const DespachoView = (() => {
           if (_listaSombra.idBackend) {
             API.cerrarListaSombra({
               idLista: _listaSombra.idBackend,
-              items: JSON.stringify(_listaSombra.items),
+              items: _listaSombra.items,   // [v2.13.473] array real (con string la RPC descartaba los items finales)
               localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
             }).catch(() => {});
           }
@@ -16011,7 +16011,7 @@ const DespachoView = (() => {
       if (_listaSombra && _listaSombra.idBackend) {
         API.actualizarProgresoListaSombra({
           idLista: _listaSombra.idBackend,
-          items: JSON.stringify(_listaSombra.items)
+          items: _listaSombra.items   // [v2.13.473] array real (con string la RPC rechazaba y el avance no se guardaba)
         }).catch(() => {});
       }
     }, 20000);
@@ -16589,7 +16589,7 @@ const DespachoView = (() => {
       API.crearListaSombra({
         idLista: idLista,
         usuario: usuario,
-        items: JSON.stringify(items),
+        items: items,   // [v2.13.473] array real — la RPC jsonb esperaba array; el string venía del contrato GAS viejo
         compartir: true,
         idZona: _lsZonaSel,   // [v2.13.370] zona destino
         localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
