@@ -4423,7 +4423,15 @@ const App = (() => {
     }
   }
 
-  function getProductosMaestro() { return todosProductos; }
+  function getProductosMaestro() {
+    // [463 FIX envasador-vacío] fallback vivo: si el loader aún no pobló todosProductos
+    // (boot frío / cleanup post-update), usar el caché directo — y adoptarlo.
+    if (!todosProductos.length) {
+      const c = (OfflineManager.getProductosCache && OfflineManager.getProductosCache()) || [];
+      if (c.length) todosProductos = c;
+    }
+    return todosProductos;
+  }
   function getProveedoresMaestro() { return todosProveedores; }
 
   function abrirMas() { abrirSheet('sheetMas'); }
@@ -10978,6 +10986,8 @@ const EnvasadorView = (() => {
     if (!list.length) {
       if (typeof _searchQuery !== 'undefined' && _searchQuery) {
         container.innerHTML = `<div class="card text-center py-8"><p class="text-2xl mb-2">🔍</p><p class="font-semibold">Sin resultados para "${escHtml(_searchQuery)}"</p><p class="text-xs text-slate-500 mt-1">Probá con menos palabras o el código de barras</p></div>`;
+      } else if (_reintentos > 0 && _reintentos < 10 && !_catalog.length) {
+        container.innerHTML = `<div class="flex flex-col items-center py-8 gap-3"><div class="spinner"></div><p class="text-xs text-slate-500 font-bold">Cargando catálogo…</p></div>`;
       } else {
         container.innerHTML = _filtroUrg
           ? '<div class="card text-center py-8"><p class="text-2xl mb-2">✅</p><p class="font-semibold">¡Sin urgentes!</p></div>'
@@ -11051,9 +11061,32 @@ const EnvasadorView = (() => {
     _render();
   }
 
+  // [463 FIX envasador-vacío] la vista pintaba UNA vez desde cachés que tras el cleanup
+  // post-update están vacíos → quedaba en blanco hasta el rebuild de 120s (o un F5).
+  // Ahora: (a) escucha wh:data-refresh y repinta al llegar los maestros; (b) si el catálogo
+  // salió vacío, reintenta corto (1.2s ×10) hasta que la precarga aterrice.
+  let _reintentos = 0;
+  window.addEventListener('wh:data-refresh', () => {
+    if (!_timer) return;   // vista no activa
+    _catalog = _buildCatalog();
+    _updateUrgBtn();
+    _render();
+  });
+  function _reintentarSiVacio() {
+    if (!_timer || _catalog.length || _reintentos >= 10) return;
+    _reintentos++;
+    setTimeout(() => {
+      if (!_timer || _catalog.length) return;
+      _catalog = _buildCatalog();
+      if (_catalog.length) { _updateUrgBtn(); _render(); }
+      else _reintentarSiVacio();
+    }, 1200);
+  }
+
   function cargar() {
     if (_timer) { clearInterval(_timer); _timer = null; }
     _filtroUrg = false;
+    _reintentos = 0;
     document.getElementById('envCatalogPanel').classList.remove('hidden');
     document.getElementById('envHistorialPanel').classList.add('hidden');
     document.getElementById('listEnvasadorCatalog').innerHTML =
@@ -11067,6 +11100,7 @@ const EnvasadorView = (() => {
     _filtroUrg = false;
     _updateUrgBtn();
     _render();
+    _reintentarSiVacio();   // [463] boot frío: insistir hasta que los maestros aterricen
 
     _timer = setInterval(() => {
       _catalog = _buildCatalog();
