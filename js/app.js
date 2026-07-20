@@ -3798,6 +3798,8 @@ const App = (() => {
           // [CERO-GAS] Hook de push por audiencia para seguridad-modal (desbloqueo temp / cierre extendido).
           pushAudiencia:  function(aud, titulo, cuerpo, data) { try { return API.pushEdge(aud, titulo, cuerpo, data); } catch(_) {} }
         });
+        // [ANTI-F5 2026-07-20] re-aplicar veredicto fuera-de-horario al instante (reloj local)
+        try { window.SeguridadSystem.enforceBoot && window.SeguridadSystem.enforceBoot(); } catch(_) {}
       }
     } catch(_) {}
 
