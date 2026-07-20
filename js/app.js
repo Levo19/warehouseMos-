@@ -6164,7 +6164,7 @@ const GuiasView = (() => {
           <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
         </svg>
         <input id="detCapturaInput" type="text" inputmode="text"
-               placeholder="escaneá / buscá / pegá código…"
+               placeholder="escanea / buscá / pegá código…"
                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                onkeydown="GuiasView.detCapturaKeydown(event)"
                oninput="GuiasView.detCapturaInput(this.value)"
@@ -7643,7 +7643,7 @@ const GuiasView = (() => {
     box.style.alignItems = 'stretch';
     box.innerHTML = `
       <p style="font-size:.72em;color:#a78bfa;font-weight:700;margin-bottom:8px">
-        Varias coincidencias · ${escHtml(codStr)} — elegí cuál:
+        Varias coincidencias · ${escHtml(codStr)} — elige cuál:
       </p>
       <div style="max-height:200px;overflow-y:auto">
       ${candidatos.map(p => {
@@ -8346,7 +8346,7 @@ const GuiasView = (() => {
             _guiaActual.detalle[i]._saveFailed = true;
             _mostrarDetalleSheet(_guiaActual, false);
           }
-          toast('⚠ La línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
+          toast('⚠ La línea del producto nuevo no se guardó. Reintenta antes de cerrar.', 'warn', 4000);
         }
       }).catch(() => {
         // Excepción/red al guardar la LÍNEA. Marcar _saveFailed para que el guard de
@@ -8360,7 +8360,7 @@ const GuiasView = (() => {
             _mostrarDetalleSheet(_guiaActual, false);
           }
         }
-        toast('⚠ Sin conexión — la línea del producto nuevo no se guardó. Reintentá antes de cerrar.', 'warn', 4000);
+        toast('⚠ Sin conexión — la línea del producto nuevo no se guardó. Reintenta antes de cerrar.', 'warn', 4000);
       });
     };
 
@@ -8507,9 +8507,9 @@ const GuiasView = (() => {
     if (enVuelo.length) {
       const fallidas = enVuelo.filter(d => d._saveFailed).length;
       if (fallidas) {
-        toast('⚠ ' + fallidas + ' ítem(s) no se guardaron. Reintentá esa(s) línea(s) antes de cerrar.', 'warn', 4000);
+        toast('⚠ ' + fallidas + ' ítem(s) no se guardaron. Reintenta esa(s) línea(s) antes de cerrar.', 'warn', 4000);
       } else {
-        toast('Esperá: ' + enVuelo.length + ' ítem(s) aún guardándose. Reintentá en unos segundos.', 'warn', 3500);
+        toast('Espera: ' + enVuelo.length + ' ítem(s) aún guardándose. Reintenta en unos segundos.', 'warn', 3500);
       }
       try { vibrate?.([60, 80, 60]); } catch(_) {}
       _cgFeedbackBloqueo();   // [v2.13.223] UX: shake + sonido de aviso en el botón
@@ -9092,7 +9092,7 @@ const GuiasView = (() => {
     // MISMO ticket dentro de 5s. Para otra copia legítima, esperar 5s.
     const _now = Date.now();
     if (_imprimiendoTicket[idGuia] && (_now - _imprimiendoTicket[idGuia]) < 5000) {
-      toast('🖨 Ese ticket ya se envió · esperá unos segundos para otra copia', 'info', 3000);
+      toast('🖨 Ese ticket ya se envió · espera unos segundos para otra copia', 'info', 3000);
       return;
     }
     _imprimiendoTicket[idGuia] = _now;
@@ -9423,7 +9423,7 @@ function _renderEnvasadosPorDia(list, container, opts) {
       const tagOpt = optimista
         ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded ml-1" style="background:rgba(99,102,241,.15);color:#a5b4fc" title="Pendiente confirmación del servidor">⏳ sync</span>`
         : '';
-      // Botones editar/anular: solo si NO está anulado y NO es optimista (esperá que confirme).
+      // Botones editar/anular: solo si NO está anulado y NO es optimista (espera que confirme).
       // Ambos requieren clave admin (8 dígitos de ESTACIONES.ALMACEN.adminPin en MOS).
       // [v2.13.150] Botón "🖨 Adhesivo" — reimprime adhesivos del envasado.
       // Aparece SIEMPRE que haya codigoProductoEnvasado (incluso si anulado, ya
@@ -10280,7 +10280,7 @@ const EnvasadosView = (() => {
             usuario:    window.WH_CONFIG?.usuario || 'manual',
             motivo:     'deshacer inmediato (envasado optimista)'
           }).then(() => OfflineManager.precargarOperacional(true).catch(() => {}))
-            .catch(() => toast('⚠ No se pudo deshacer en el servidor — revisá el historial', 'danger', 6000));
+            .catch(() => toast('⚠ No se pudo deshacer en el servidor — revisa el historial', 'danger', 6000));
         }
         return;
       }
@@ -10420,7 +10420,7 @@ const EnvasadosView = (() => {
       OfflineManager.guardarEnvasadosCache(cache);
       _renderDesdeCache();
       window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
-      toast('⚠ No se pudo anular: ' + (e.message || e) + ' — reintentá', 'danger', 6000);
+      toast('⚠ No se pudo anular: ' + (e.message || e) + ' — reintenta', 'danger', 6000);
     }
   }
 
@@ -10919,7 +10919,7 @@ const EnvasadorView = (() => {
 
     if (!list.length) {
       if (typeof _searchQuery !== 'undefined' && _searchQuery) {
-        container.innerHTML = `<div class="card text-center py-8"><p class="text-2xl mb-2">🔍</p><p class="font-semibold">Sin resultados para "${escHtml(_searchQuery)}"</p><p class="text-xs text-slate-500 mt-1">Probá con menos palabras o el código de barras</p></div>`;
+        container.innerHTML = `<div class="card text-center py-8"><p class="text-2xl mb-2">🔍</p><p class="font-semibold">Sin resultados para "${escHtml(_searchQuery)}"</p><p class="text-xs text-slate-500 mt-1">Prueba con menos palabras o el código de barras</p></div>`;
       } else if (_reintentos > 0 && _reintentos < 10 && !_catalog.length) {
         container.innerHTML = `<div class="flex flex-col items-center py-8 gap-3"><div class="spinner"></div><p class="text-xs text-slate-500 font-bold">Cargando catálogo…</p></div>`;
       } else {
@@ -11670,7 +11670,7 @@ const ConfigPanel = (() => {
     if (typeof toast === 'function') toast('Calibrando rollo… (gasta ~2-3 etiquetas)', 'info', 4000);
     try {
       const d = await API.printAdhesivoEdge({ mode: 'calibrate-roll' });
-      if (d && d.ok) { try { SoundFX.done(); } catch(_){} if (typeof toast === 'function') toast('✅ Rollo calibrado · ya podés imprimir', 'ok', 4000); }
+      if (d && d.ok) { try { SoundFX.done(); } catch(_){} if (typeof toast === 'function') toast('✅ Rollo calibrado · ya puedes imprimir', 'ok', 4000); }
       else if (typeof toast === 'function') toast('No se pudo calibrar: ' + ((d && d.error) || 'error'), 'error', 6000);
     } catch (e) { if (typeof toast === 'function') toast('Error al calibrar: ' + (e?.message || e), 'error', 6000); }
   }
@@ -12491,7 +12491,7 @@ const DespachoView = (() => {
   }
 
   // Muestra/oculta y re-renderiza el flotante. Visible SOLO si hay despacho
-  // activo Y NO estás en la vista despacho (ahí ya tenés el control completo).
+  // activo Y NO estás en la vista despacho (ahí ya tienes el control completo).
   function _renderDespFlotante() {
     const flot = document.getElementById('despFlotante');
     if (!flot) return;
@@ -15198,14 +15198,14 @@ const DespachoView = (() => {
       } else {
         try { SoundFX.error(); } catch(_){}
         vibrate([80, 40, 80]);
-        toast('No se pudo cerrar: ' + (res.error || 'sin respuesta del servidor') + ' · tu avance sigue guardado, reintentá', 'danger', 8000);
+        toast('No se pudo cerrar: ' + (res.error || 'sin respuesta del servidor') + ' · tu avance sigue guardado, reintenta', 'danger', 8000);
         // Revert — el avance NO se pierde, el operador puede reintentar
         _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
       }
     } catch (e) {
       try { SoundFX.error(); } catch(_){}
       vibrate([80, 40, 80]);
-      const msg = e?.timeout ? 'Tardó demasiado — revisá tu conexión e intentá de nuevo' : 'Sin conexión — tu avance está guardado, reintentá al volver online';
+      const msg = e?.timeout ? 'Tardó demasiado — revisa tu conexión e intentá de nuevo' : 'Sin conexión — tu avance está guardado, reintenta al volver online';
       toast('⚠ ' + msg, 'danger', 8000);
       _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
     } finally {
@@ -16162,7 +16162,7 @@ const DespachoView = (() => {
     const _esPdfF = (f) => /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
     const _pdfsSel = files.filter(_esPdfF), _imgsSel = files.filter(f => !_esPdfF(f));
     if (_pdfsSel.length > 1) { toast('Solo un PDF por lista — subí uno o usá fotos de las hojas', 'warn', 6000); return; }
-    if (_pdfsSel.length && _imgsSel.length) { toast('No mezcles PDF con fotos en la misma lista — elegí uno u otro', 'warn', 6000); return; }
+    if (_pdfsSel.length && _imgsSel.length) { toast('No mezcles PDF con fotos en la misma lista — elige uno u otro', 'warn', 6000); return; }
     files.forEach(f => {
       const esPdf = /pdf/i.test(f.type || '') || /\.pdf$/i.test(f.name || '');
       // Imagen: se reduce antes de mandar. PDF: va SIN reducir → tope bajo el límite de Claude (~32MB base64).
@@ -16182,7 +16182,7 @@ const DespachoView = (() => {
           try { d = await _lsPrepararImagen(b64); } catch(_){}
           if (d) { b64 = d; mime = 'image/jpeg'; }
           else if (!/^image\/(jpe?g|png|webp|gif)$/i.test(mime)) {
-            toast('No pude leer una foto (formato ' + (mime.split('/')[1] || '?') + '). Probá con JPG/PNG o una captura.', 'warn', 6000);
+            toast('No pude leer una foto (formato ' + (mime.split('/')[1] || '?') + '). Prueba con JPG/PNG o una captura.', 'warn', 6000);
             return;
           }
         }
@@ -16335,10 +16335,10 @@ const DespachoView = (() => {
         : (sinItems ? 'No detecté productos' : 'No pude analizar');
       document.getElementById('lsErrorMsg').textContent =
         err === 'KEY_NOT_SET' ? 'La API key de Claude no está configurada. Avisa al administrador.'
-        : esTimeout ? (esPdf ? 'El PDF es muy pesado o la conexión está lenta. Probá con un PDF más liviano, o sacá fotos de las hojas y súbelas.'
-                             : 'La conexión está lenta o hay muchas fotos. Probá con menos fotos o con mejor señal.')
-        : (sinItems ? 'La IA no encontró productos. Probá con fotos más nítidas y derechas, agregá más fotos si la lista sigue, o pegá la lista como texto.'
-                    : (msgRaw || 'Probá con fotos más claras o pegá la lista como texto.'));
+        : esTimeout ? (esPdf ? 'El PDF es muy pesado o la conexión está lenta. Prueba con un PDF más liviano, o sacá fotos de las hojas y súbelas.'
+                             : 'La conexión está lenta o hay muchas fotos. Prueba con menos fotos o con mejor señal.')
+        : (sinItems ? 'La IA no encontró productos. Prueba con fotos más nítidas y derechas, agregá más fotos si la lista sigue, o pegá la lista como texto.'
+                    : (msgRaw || 'Prueba con fotos más claras o pegá la lista como texto.'));
       _lsMostrarPaso(4);
       try { SoundFX.warn(); } catch(_){}
     }
@@ -18486,7 +18486,7 @@ const PreingresosView = (() => {
           // que sí imprimieron), así que el operador debe reimprimir manual a
           // las que fallaron.
           const cuales = errList.map(r => `${r.vendedor || '—'} (${r.zona || '—'})`).join(', ');
-          toast(`⚠ NO recibieron el aviso: ${cuales}. Usá "🖨 Reimprimir aviso a cajas".`, 'warn', 7000);
+          toast(`⚠ NO recibieron el aviso: ${cuales}. Usa "🖨 Reimprimir aviso a cajas".`, 'warn', 7000);
           try { if (typeof SoundFX !== 'undefined' && SoundFX.warn) SoundFX.warn(); } catch(_){}
         }
       } else if (res.error === 'NO_CHANGES') {
@@ -18596,7 +18596,7 @@ const PreingresosView = (() => {
     if (urls.length === fotos.length) {
       toast(`✓ ${urls.length} fotos guardadas`, 'ok', 3000);
     } else if (urls.length > 0) {
-      toast(`⚠ ${urls.length}/${fotos.length} fotos guardadas. ${fallidas.length} fallaron — reintentá desde editar`, 'warn', 7000);
+      toast(`⚠ ${urls.length}/${fotos.length} fotos guardadas. ${fallidas.length} fallaron — reintenta desde editar`, 'warn', 7000);
     } else {
       toast('✗ Ninguna foto se pudo subir — reintenta desde editar', 'danger', 7000);
     }
