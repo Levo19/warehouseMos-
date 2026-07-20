@@ -14131,8 +14131,8 @@ const DespachoView = (() => {
     _ultimosIdsPickups = idsActuales;
     _saveIdsSnapshot([...idsActuales]);
     badgeUpdate();
-    // Auto-impresión del lunes: ticket por zona del acumulado (dedup server-side).
-    try { _autoImprimirAcumuladosLunes(); } catch (_) {}
+    // [v2.13.474] Auto-impresión del lunes ELIMINADA (pedido del dueño: gasto de papel).
+    // El rezagado se imprime SOLO manual: MOS → zonas (zonaImprimirRezagado) o WH (imprimirAcumuladoManual).
     if (nuevos.length > 0) {
       // Snooze: si ya estoy despachando un pickup, no abrir overlay fullscreen.
       // Solo toast suave + sonido corto + voz breve + count actualizado en FAB.
@@ -15399,26 +15399,8 @@ const DespachoView = (() => {
   }
   function imprimirAcumuladoManual(id) { return _imprimirAcumuladoEdge(id, true); }
 
-  // Auto-impresión del LUNES: 1 ticket por zona del acumulado. Guard local por equipo
-  // (no spamear el Edge cada poll); el dedup REAL es server-side (1 vez por semana global).
-  async function _autoImprimirAcumuladosLunes() {
-    try {
-      const diaLima = new Date().toLocaleDateString('en-US', { timeZone: 'America/Lima', weekday: 'short' });
-      if (diaLima !== 'Mon') return;
-      // [v2.13.371 · FIX] El lunes se imprime lo NO DESPACHADO de la semana pasada = los
-      // buckets REZAGADO (lista de compra), NO el bucket PENDIENTE de esta semana (que recién
-      // empieza a acumular). Antes iteraba _pickupsPendientes (PENDIENTE) → imprimía la lista
-      // limpia nueva (ej. 42) en vez del rezagado real (ej. 156). Dedup por bucket (1× por device).
-      const res = await API.getPickups({ estado: 'REZAGADO' }).catch(() => null);
-      const rez = (res && res.ok) ? (res.data || []) : [];
-      rez.forEach(p => {
-        if (String(p.fuente || '').toUpperCase() !== 'ACUMULADO_SEMANAL') return;
-        const k = 'wh_acumimpr_' + p.idPickup;
-        try { if (localStorage.getItem(k) === '1') return; localStorage.setItem(k, '1'); } catch (_) {}
-        _imprimirAcumuladoEdge(p.idPickup, false);
-      });
-    } catch (_) {}
-  }
+  // [v2.13.474] _autoImprimirAcumuladosLunes ELIMINADA (pedido del dueño 2026-07-20:
+  // no gastar papel; imprimir rezagados SOLO a demanda desde MOS→zonas o el botón manual WH).
 
   // Sincronización al hidratar: si en backend ya está cerrado, limpiar local.
   async function _sincronizarPickupActivo() {
