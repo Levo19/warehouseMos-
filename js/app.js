@@ -16117,8 +16117,7 @@ const DespachoView = (() => {
 
   // [v2.13.20] toggleListaSombra ya no aplica — el banner nuevo no tiene
   // colapso/expansión, los items siempre se ven como cards abajo (igual pickup).
-  function toggleListaSombra() { /* no-op por compat */ }
-
+  // [quirúrgico 2026-07-20] toggleListaSombra eliminado: era un no-op "por compat" y ya no tenía ni un caller.
   async function cerrarListaSombra() {
     if (!_listaSombra) return;
     // [v2.13.15] 3 opciones: liberar (vuelve a DISPONIBLE) · cancelar · ocultar local
@@ -16646,7 +16645,7 @@ const DespachoView = (() => {
            // [v2.13.8] Lista sombra
            abrirModalLista, cerrarModalLista, analizarListaConIA, lsSetZona,
            lsArchivoElegido, lsQuitarArchivo, lsTextoInput,
-           volverPaso1, activarListaSombra, toggleListaSombra, cerrarListaSombra,
+           volverPaso1, activarListaSombra, cerrarListaSombra,
            _lsPrevSetCant, _lsPrevDel,
            // [v2.13.9] Tap-to-search en item de sombra
            buscarItemSombra,
@@ -17597,19 +17596,9 @@ const PreingresosView = (() => {
 
   // [v2.13.3] LEGACY compat — alias para HTML cacheado viejo
   // [v2.13.175] LEGACY compat — delta>0 agrega, delta<0 quita la última.
-  function cambiarCarretasEdit(idx, delta) {
-    if (!_cargadoresEdit[idx]) return;
-    if (delta > 0) { agregarCarretaEdit(idx); return; }
-    CarretaCiclo.quitarUltima(_cargadoresEdit, idx);
-    _renderCargadoresEdit();
-    _autoguardarCargadores();
-  }
-
+  // [quirúrgico 2026-07-20] cambiarCarretasEdit eliminado (0 invocaciones).
   // [v2.13.175] Ciclo de carretas (edición) — delega en el manejador único.
-  function toggleEstadoCarretaEdit(idx, carretaIdx) {
-    _toggleCarretaArray(_cargadoresEdit, idx, carretaIdx, _renderCargadoresEdit, _autoguardarCargadores, '#piCargadoresList');
-  }
-
+  // [quirúrgico 2026-07-20] toggleEstadoCarretaEdit eliminado (0 invocaciones; la edición de cargadores usa el picker).
   function agregarCarretaEdit(idx) {
     _agregarCarretaArray(_cargadoresEdit, idx, _renderCargadoresEdit, _autoguardarCargadores, '#piCargadoresList');
   }
@@ -18722,15 +18711,7 @@ const PreingresosView = (() => {
     renderTppList();
   }
 
-  function toggleTppFiltro() {
-    const menu = document.getElementById('tppFilterMenu');
-    if (!menu) return;
-    menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-    if (menu.style.display !== 'none') {
-      setTimeout(() => { document.addEventListener('click', _closeTppFiltroOutside, { once: true }); }, 0);
-    }
-  }
-
+  // [quirúrgico 2026-07-20] toggleTppFiltro eliminado (0 invocaciones).
   function _closeTppFiltroOutside(e) {
     if (!e.target.closest('#tppFilterMenu') && !e.target.closest('#tppFilterBtn')) {
       const menu = document.getElementById('tppFilterMenu');
@@ -19072,10 +19053,10 @@ const PreingresosView = (() => {
            toggleEstadoCarretaDia, agregarCarretaDia,
            filtrarProveedores, seleccionarProveedor, limpiarProveedor,
            abrirPickerCargador, agregarCargador, cambiarCarretas, quitarCargador, limpiarCargador,
-           toggleEstadoCarreta, agregarCarreta, toggleEstadoCarretaEdit, agregarCarretaEdit,
-           abrirPickerCargadorEdit, agregarCargadorEdit, cambiarCarretasEdit, quitarCargadorEdit,
+           toggleEstadoCarreta, agregarCarreta, agregarCarretaEdit,
+           abrirPickerCargadorEdit, agregarCargadorEdit, quitarCargadorEdit,
            renderTppList, buscarEnPanel, limpiarBuscarPanel,
-           toggleTppFiltro, filtrarTpp, _searchFocusTpp, compartirWA,
+           filtrarTpp, _searchFocusTpp, compartirWA,
            cerrarPreviewAviso: _cerrarPreviewAviso };
 })();
 
