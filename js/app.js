@@ -656,6 +656,14 @@ function _epochMsDeId(id) {
   const s = String(id || '');
   const MIN = 1640995200000;  // 2022-01-01
   const MAX = 2051222400000;  // 2035-01-01
+  // [v2.13.475] Ids del cierre de pickup (SQL 414): 'GPCK_<pickup>_YYYYMMDD_HHMMSS' (hora Lima).
+  // No llevan epoch-ms → sin esto la card salía SIN HORA y el orden caía al fallback (incidente
+  // guía acumulado zona01 2026-07-20). Lima = UTC-5 fijo → epoch = Date.UTC(fecha) + 5h.
+  const m414 = s.match(/_(20\d{2})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})(?:$|\D)/);
+  if (m414) {
+    const ep = Date.UTC(+m414[1], +m414[2] - 1, +m414[3], +m414[4] + 5, +m414[5], +m414[6]);
+    if (ep >= MIN && ep <= MAX) return ep;
+  }
   const runs = s.match(/\d{13,}/g);
   if (!runs) return 0;
   for (const run of runs) {
@@ -15089,6 +15097,47 @@ const DespachoView = (() => {
         }),
         new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 55000))
       ]);
+      await _resolverCierrePickup(res, pickupSnap, cartSnap);
+    } catch (e) {
+      // [v2.13.475 · reconciliación] El commit pudo ocurrir y perderse SOLO la respuesta (incidente
+      // 2026-07-20 16:12 zona01: guía emitida + toast "sin conexión" + ticket nunca impreso). La RPC
+      // es idempotente (candado 90 min, SQL 414) → antes de asumir offline se reintenta 1 vez: si el
+      // cierre YA ocurrió, devuelve {idempotente|yaCerrado} con idGuia → camino feliz (imprime ticket).
+      toast('🔄 Verificando con el servidor si la guía ya se emitió…', 'info', 10000);
+      let rec = null;
+      try {
+        await new Promise(r => setTimeout(r, 1800));
+        rec = await Promise.race([
+          API.cerrarPickupConDespacho({
+            idPickup:        pickupSnap.idPickup,
+            items:           pickupSnap.items,
+            despachoDetalle: despachoDetalle,
+            usuario:         window.WH_CONFIG?.usuario || '',
+            imprimir:        false
+          }),
+          new Promise((_, rej) => setTimeout(() => rej({ timeout: true }), 30000))
+        ]);
+      } catch (_) { rec = null; }
+      if (rec) {
+        await _resolverCierrePickup(rec, pickupSnap, cartSnap);
+      } else {
+        try { SoundFX.error(); } catch(_){}
+        vibrate([80, 40, 80]);
+        const msg = e?.timeout ? 'Tardó demasiado — revisa tu conexión e intentá de nuevo' : 'Sin conexión — tu avance está guardado, reintenta al volver online';
+        toast('⚠ ' + msg, 'danger', 8000);
+        _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
+      }
+    } finally {
+      _pickupClosing = false;
+      _setGenerarGuiaBusy(false);
+    }
+  }
+
+  // [v2.13.475] Manejo COMPLETO de la respuesta del cierre de pickup (éxito/offline/idempotente/error).
+  // Extraído del try de cerrarDespachoPickup para reutilizarlo en la RECONCILIACIÓN post-error:
+  // la RPC es idempotente → un reintento tras respuesta perdida cae aquí con {idempotente} y el
+  // ticket se imprime igual.
+  async function _resolverCierrePickup(res, pickupSnap, cartSnap) {
       // [FIX Rep#1 · paridad pickup] Mismo guard que DespachoView: si la op se ENCOLÓ por red lenta (post devolvió
       // {ok:true, offline:true, data:{idLocal}} SIN idGuia real), NO mostrar falso éxito/confetti, NO limpiar el
       // pickup activo (se perdería el checklist), NO guardar historial con idGuia '—'. La guía se crea + imprime SOLA
@@ -15107,7 +15156,7 @@ const DespachoView = (() => {
         // [fix Rep#3] d.idempotente = re-confirmación de un cierre que YA ocurrió (la respuesta original se
         // perdió en red frágil y el operador reintentó): imprimir el ticket, pero SIN confetti ni doble
         // historial. despachados=0 en ese caso → no mostrar "0 líneas".
-        if (!d.idempotente) _confettiCelebracion();
+        if (!d.idempotente) { try { _confettiCelebracion(); } catch(_){} }   // [v2.13.475] un fallo cosmético jamás debe tumbar el camino feliz (print/historial)
         toast(d.idempotente
           ? `✅ Guía ${d.idGuia || ''} ya generada · reimprimiendo ticket…`
           : `✅ Guía ${d.idGuia || ''} · ${d.estado || 'COMPLETADO'} · ${d.despachados || 0} líneas`, 'ok', 6000);
@@ -15202,16 +15251,6 @@ const DespachoView = (() => {
         // Revert — el avance NO se pierde, el operador puede reintentar
         _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
       }
-    } catch (e) {
-      try { SoundFX.error(); } catch(_){}
-      vibrate([80, 40, 80]);
-      const msg = e?.timeout ? 'Tardó demasiado — revisa tu conexión e intentá de nuevo' : 'Sin conexión — tu avance está guardado, reintenta al volver online';
-      toast('⚠ ' + msg, 'danger', 8000);
-      _cart = cartSnap; _saveCart(); _renderCart(); _updateFooter();
-    } finally {
-      _pickupClosing = false;
-      _setGenerarGuiaBusy(false);
-    }
   }
 
   // Pone/quita estado "ocupado" en el botón Generar Guía y CTAs del pickup.

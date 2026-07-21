@@ -1,1 +1,1 @@
-{"version": "2.13.474", "build": "2.13.474 rezagados: auto-impresión de los lunes ELIMINADA (ahorro de papel) — impresión solo manual desde MOS→zonas o botón WH."}
+{"version": "2.13.475", "build": "2.13.475 incidente guía 'sin conexión': reconciliación post-error en generar guía (reintento idempotente → imprime ticket solo), hora en cards GPCK_ (ids SQL 414), confetti blindado."}
