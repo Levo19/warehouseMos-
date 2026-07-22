@@ -15281,6 +15281,13 @@ const DespachoView = (() => {
   // Lock al backend en background. Render directo en view-despacho (sin sheet).
   // Efectos: sonido beepDouble + vibración patrón + voz + toast.
   async function abrirPickup(idPickup) {
+    // [v2.13.476 · 540] EXCLUSIVIDAD: espejo del candado de la sombra (ver
+    // tomarListaSombraDelPanel) — pickup y sombra nunca coexisten jalados.
+    if (_listaSombra) {
+      try { SoundFX.warn(); } catch(_){}
+      toast('🔒 Tienes una lista sombra activa. Despáchala (o quítala con ✕) antes de jalar un pickup.', 'warn', 5000);
+      return;
+    }
     const p = _pickupsPendientes.find(x => String(x.idPickup) === String(idPickup));
     if (!p) return;
     const usuario = window.WH_CONFIG?.usuario || '';
@@ -15940,6 +15947,14 @@ const DespachoView = (() => {
   }
 
   async function tomarListaSombraDelPanel(idLista) {
+    // [v2.13.476 · 540] EXCLUSIVIDAD: la sombra se despacha SOLA. Si además hubiera un
+    // pickup jalado, un mismo escaneo marcaría en AMBAS listas → al cerrar, los mismos
+    // productos pagarían la sombra Y matarían deuda del acumulado (doble crédito).
+    if (_pickupActivo) {
+      try { SoundFX.warn(); } catch(_){}
+      toast('🔒 Tienes un pickup jalado. Ciérralo o libéralo antes de tomar una lista sombra.', 'warn', 5000);
+      return;
+    }
     if (_listaSombra && _listaSombra.id !== idLista) {
       if (!await _whConfirm('Ya tienes una lista sombra activa.\n\n¿Reemplazarla por la que vas a tomar?', { warning: true, titulo: 'Reemplazar lista' })) return;
     }

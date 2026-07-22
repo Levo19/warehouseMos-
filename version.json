@@ -1,1 +1,1 @@
-{"version": "2.13.475", "build": "2.13.475 incidente guía 'sin conexión': reconciliación post-error en generar guía (reintento idempotente → imprime ticket solo), hora en cards GPCK_ (ids SQL 414), confetti blindado."}
+{"version": "2.13.476", "build": "2.13.476 listas sombra v2 (SQL 540): la demanda entra al acumulado AL CERRAR con fórmula deuda=max(0,deuda+pedido−despachado); exceso mata deuda; TTL 24h elimina no despachadas; candado exclusividad sombra↔pickup."}
