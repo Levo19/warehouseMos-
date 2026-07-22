@@ -1,1 +1,1 @@
-{"version": "2.13.476", "build": "2.13.476 listas sombra v2 (SQL 540): la demanda entra al acumulado AL CERRAR con fórmula deuda=max(0,deuda+pedido−despachado); exceso mata deuda; TTL 24h elimina no despachadas; candado exclusividad sombra↔pickup."}
+{"version": "2.13.477", "build": "2.13.477 cierre de sombra a prueba de apagones: write-ahead a la cola persistente (sobrevive cierre de pestaña) + SQL 541 el cierre tardío resucita una lista vencida por TTL (anulada manual sigue muerta)."}

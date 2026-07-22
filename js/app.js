@@ -13817,11 +13817,21 @@ const DespachoView = (() => {
         if (_listaSombra) {
           // [v2.13.15] Marcar como COMPLETADA en backend antes de limpiar local
           if (_listaSombra.idBackend) {
-            API.cerrarListaSombra({
-              idLista: _listaSombra.idBackend,
-              items: _listaSombra.items,   // [v2.13.473] array real (con string la RPC descartaba los items finales)
-              localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8)
-            }).catch(() => {});
+            // [v2.13.477 · 540] WRITE-AHEAD: el cierre (que contabiliza pedido−despachado al
+            // acumulado) se ENCOLA en localStorage ANTES de intentar la red — sobrevive cierre
+            // de pestaña/apagón con el fetch en vuelo. La cola lo envía en segundos si hay
+            // línea y lo reintenta al reconectar; la RPC es idempotente (guard COMPLETADA +
+            // PCK-LSC determinista) → jamás doble contabilidad. Si tarda >24h, el backend
+            // RESUCITA la lista vencida al llegar el cierre (SQL 541).
+            try {
+              OfflineManager.encolar('cerrarListaSombra', {
+                idLista: _listaSombra.idBackend,
+                items: _listaSombra.items,
+                localId: 'L' + Date.now() + Math.random().toString(36).slice(2, 8),
+                _viaDirecta: true
+              });
+              if (navigator.onLine) OfflineManager.sincronizar();
+            } catch (_) {}
           }
           _listaSombra = null;
           _lsSave();
