@@ -3934,6 +3934,11 @@
   .dash-chip.dc-green  .dash-chip-num { color:#6ee7b7; }
   .dash-chip.dc-amber  .dash-chip-num { color:#fcd34d; }
   .dash-chip.dc-violet .dash-chip-num { color:#c4b5fd; }
+  /* [v2.13.481] Cargadores día nuevo: 🛺 punteado con "+" (registrar el primero) */
+  .dash-chip.dc-carg-new { border:1.5px dashed rgba(252,211,77,.5); background:rgba(252,211,77,.05); }
+  .dash-chip.dc-carg-new .dash-chip-num { color:#fcd34d; font-size:20px; animation:cargPlusPulse 1.8s ease-in-out infinite; }
+  .dash-chip.dc-carg-new .dash-chip-lbl { color:#fbbf24; }
+  @keyframes cargPlusPulse { 0%,100%{opacity:.7} 50%{opacity:1} }
   /* Skeleton del estado del día */
   .dash-chip-skel {
     width:96px; height:38px; border:none;
@@ -10526,7 +10531,7 @@
   <div id="cargCoincidencias"></div>
   <div class="carg-resumen-box">
     <p class="carg-resumen-title">
-      <span>Resumen de hoy</span>
+      <span>Cargadores de hoy</span>
       <span>🛺 <span id="cargTotal">0</span></span>
     </p>
     <div id="cargResumen"></div>

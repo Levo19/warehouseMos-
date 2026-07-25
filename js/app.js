@@ -4415,13 +4415,18 @@ const App = (() => {
       }
     }
 
-    // 2) Cargadores distintos activos hoy (preingresos del día).
+    // 2) [v2.13.481] Cargadores del día — INDEPENDIENTES del preingreso (wh.cargadores_log). SIEMPRE visible y
+    //    clickeable: con cargadores muestra el conteo; en día nuevo muestra un "+" punteado para registrar el 1º.
     try {
-      const pres = _preingresosDeFecha(OfflineManager.getPreingresosCache() || [], hoyKey);
-      const nCarg = _contarCargadoresDistintos(pres);
-      if (nCarg > 0) {
-        chips.push({ cls:'dc-violet', ico:'🛺', num: nCarg,
-                     lbl: nCarg === 1 ? 'cargador' : 'cargadores' });
+      const nCarg = (window.Cargadores && Cargadores.getCountDia) ? (Cargadores.getCountDia(hoyKey) || 0) : 0;
+      chips.push({ id:'dashChipCarg', cls: nCarg > 0 ? 'dc-violet' : 'dc-carg-new', ico:'🛺',
+                   num: nCarg > 0 ? nCarg : '+',
+                   lbl: nCarg > 0 ? (nCarg === 1 ? 'cargador' : 'cargadores') : 'registrar',
+                   onclick: "if(window.Cargadores)Cargadores.abrir()" });
+      // refresco puntual del conteo real (1ª vez) → actualiza el chip cuando llega
+      if (!window._cargChipRefrescado && window.Cargadores && Cargadores.refreshCountDia) {
+        window._cargChipRefrescado = true;
+        Cargadores.refreshCountDia(hoyKey).then(() => { try { actualizarChipDia(); } catch(_){} }).catch(() => {});
       }
     } catch(_) {}
 
@@ -4446,7 +4451,7 @@ const App = (() => {
     }
 
     cont.innerHTML = chips.map(c => `
-      <div class="dash-chip ${c.cls}"${c.onclick ? ` role="button" tabindex="0" onclick="${c.onclick}"` : ''}>
+      <div class="dash-chip ${c.cls}"${c.id ? ` id="${c.id}"` : ''}${c.onclick ? ` role="button" tabindex="0" onclick="${c.onclick}"` : ''}>
         <span class="dash-chip-ico">${c.ico}</span>
         <span class="dash-chip-num">${c.num}</span>
         <span class="dash-chip-lbl">${escHtml(c.lbl)}</span>
@@ -4948,11 +4953,15 @@ const App = (() => {
   }
 
   async function actualizarChipDia() {
-    if (typeof Cargadores !== 'undefined') {
-      const n = await Cargadores.refreshCountDia();
-      const el = document.getElementById('chipCargadoresDia');
-      if (el) el.textContent = '🛺 ' + n;
-    }
+    if (typeof Cargadores === 'undefined' || !Cargadores.refreshCountDia) return;
+    let n = 0;
+    try { n = await Cargadores.refreshCountDia(); } catch(_) { return; }
+    const el = document.getElementById('dashChipCarg');
+    if (!el) return;
+    el.className = 'dash-chip ' + (n > 0 ? 'dc-violet' : 'dc-carg-new');
+    const num = el.querySelector('.dash-chip-num'), lbl = el.querySelector('.dash-chip-lbl');
+    if (num) num.textContent = n > 0 ? n : '+';
+    if (lbl) lbl.textContent = n > 0 ? (n === 1 ? 'cargador' : 'cargadores') : 'registrar';
   }
 
   // ════════════════════════════════════════════════

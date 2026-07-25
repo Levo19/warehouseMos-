@@ -2103,6 +2103,49 @@ const API = (() => {
       if (!out || out.ok === false) return null;
       return out;   // { ok, data:{ conteo, fecha } } como el GAS
     }
+    // [v2.13.481 · cargadores v2: termómetro + fotos] 1 fila por (fecha, cargador). id_log determinista → idempotente.
+    if (params.action === 'cargadorDiaUpsert') {
+      const out = await _sbRpcWH('cargador_dia_upsert', { p: {
+        idCargador: String(params.idCargador || ''), fecha: params.fecha || '', nombre: params.nombre || '',
+        usuario: params.usuario || '', deviceId: params.deviceId || '',
+        ...(params.nivel != null ? { nivel: parseInt(params.nivel) || 0 } : {})
+      } });
+      if (!out || out.ok === false) return null;
+      return out;   // { ok, data:{ idLog, idCargador, nombre, nivel, fotos, fecha } }
+    }
+    if (params.action === 'cargadorDiaSetNivel') {
+      const out = await _sbRpcWH('cargador_dia_set_nivel', { p: {
+        idCargador: String(params.idCargador || ''), fecha: params.fecha || '',
+        nivel: parseInt(params.nivel) || 0, nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
+      } });
+      if (!out || out.ok === false) return null;
+      return out;   // { ok, data:{ idCargador, nivel, fecha } }
+    }
+    if (params.action === 'cargadorDiaAddFoto') {
+      // sube el binario a Supabase Storage (bucket wh-fotos, path cargadores/<cargador>_<dia>/…) y persiste la URL.
+      let url = String(params.fotoUrl || '');
+      const b64 = String(params.fotoBase64 || '').trim();
+      if (!url && b64) {
+        const dia = String(params.fecha || '').slice(0, 10) || 'sf';
+        const seed = String(params.idCargador || 'c') + '_' + dia + '_' + lid;
+        try { url = (await _subirFotoStorage('cargadores', String(params.idCargador || 'c') + '_' + dia, b64, params.mimeType || 'image/jpeg', seed)).url; }
+        catch (e) { return { ok: false, error: 'No se pudo subir la foto: ' + (e.message || e) }; }
+      }
+      if (!url) return { ok: false, error: 'Falta la foto' };
+      const out = await _sbRpcWH('cargador_dia_add_foto', { p: {
+        idCargador: String(params.idCargador || ''), fecha: params.fecha || '', fotoUrl: url,
+        nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
+      } });
+      if (!out || out.ok === false) return { ok: false, error: (out && out.error) || 'No se guardó la foto' };
+      return out;   // { ok, data:{ idCargador, fotos, fecha } }
+    }
+    if (params.action === 'cargadorDiaQuitar') {
+      const out = await _sbRpcWH('cargador_dia_quitar', { p: {
+        idCargador: String(params.idCargador || ''), fecha: params.fecha || ''
+      } });
+      if (!out || out.ok === false) return null;
+      return out;   // { ok, data:{ idCargador, fecha } }
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 
@@ -2287,6 +2330,7 @@ const API = (() => {
     'asignarAuditoria', 'ejecutarAuditoria',
     'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
     'addCargadorDia', 'removeCargadorDia',   // [Tanda 3] dedup directo: id_log determinista (add) / -1 real (remove)
+    'cargadorDiaUpsert', 'cargadorDiaSetNivel', 'cargadorDiaAddFoto', 'cargadorDiaQuitar',   // [v2.13.481] cargadores v2 (termómetro + fotos)
     'actualizarGuia', 'actualizarPickup', 'guardarProgresoPickup',
     'cerrarPickupConDespacho', 'liberarPickup', 'cerrarTurno'
   ]);
