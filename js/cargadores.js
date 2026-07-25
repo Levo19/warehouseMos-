@@ -192,29 +192,30 @@
     }).join('');
   }
 
-  // ── agregar cargador (upsert nivel 0) ──
+  // ── agregar cargador (PROVISIONAL: no se persiste hasta llenar ≥10% o agregar foto) ──
+  //    Pedido del dueño: "empieza vacío pero si no se llena ≥10% no se guarda".
   async function agregar(idCargador, nombre) {
     if (_dia.some(c => String(c.idCargador) === String(idCargador))) {   // ya está hoy → scroll a su card
       const el = document.getElementById('cgvCard_' + _escAttr(idCargador));
       if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.style.boxShadow = '0 0 0 3px rgba(252,211,77,.4)'; setTimeout(() => el.style.boxShadow = '', 900); }
       return;
     }
-    // optimista
-    _dia.unshift({ idCargador, nombre, nivel: 0, fotos: [], count: 1 });
+    _dia.unshift({ idCargador, nombre, nivel: 0, fotos: [], count: 1, _prov: true });   // _prov = aún no guardado
     _render(); _filtrar(document.getElementById('cargBuscarInput')?.value || '');
     _tono(0);
-    try {
-      const res = await API.post('cargadorDiaUpsert', { idCargador, nombre, fecha: _fechaActual || _hoyStr(), usuario: _usuario(), deviceId: _deviceId() });
-      if (!res || res.ok === false) { if (typeof toast === 'function') toast('No se pudo agregar: ' + ((res && res.error) || 'error'), 'warn'); }
-    } catch(e) { if (typeof toast === 'function') toast('Sin conexión · reintenta', 'warn'); }
+    if (typeof toast === 'function') toast('Jala la barra a ≥' + MIN_GUARDAR + '% para registrarlo', 'info', 2600);
+    const el = document.getElementById('cgvCard_' + _escAttr(idCargador));
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   async function quitar(idCargador) {
-    const nombre = (_dia.find(c => String(c.idCargador) === String(idCargador)) || {}).nombre || 'cargador';
-    if (window.App && App.confirmar) { const ok = await App.confirmar('¿Quitar a ' + nombre + ' de hoy?'); if (!ok) return; }
-    _dia = _dia.filter(c => String(c.idCargador) !== String(idCargador));
+    const c = _dia.find(x => String(x.idCargador) === String(idCargador));
+    const nombre = (c || {}).nombre || 'cargador';
+    if (!(c && c._prov) && window.App && App.confirmar) { const ok = await App.confirmar('¿Quitar a ' + nombre + ' de hoy?'); if (!ok) return; }
+    _dia = _dia.filter(x => String(x.idCargador) !== String(idCargador));
     _render(); _filtrar(document.getElementById('cargBuscarInput')?.value || '');
     if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
+    if (c && c._prov) return;   // nunca se persistió (provisional) → nada que borrar en el servidor
     try { await API.post('cargadorDiaQuitar', { idCargador, fecha: _fechaActual || _hoyStr() }); }
     catch(e){ if (typeof toast === 'function') toast('No se pudo quitar — reintenta', 'warn'); }
   }
@@ -266,11 +267,14 @@
     const id = _drag.id, p = Math.max(0, Math.min(100, Math.round(parseInt(document.getElementById('cgvPct_' + id)?.textContent) || 0)));
     _drag = null;
     const c = _dia.find(x => String(x.idCargador) === String(id)); if (c) c.nivel = p;
-    // persistir (debounce por cargador)
+    // [provisional] mientras esté <10% y NO se haya guardado nunca (_prov), NO persistir → "no se guarda vacío".
+    if (c && c._prov && p < MIN_GUARDAR) return;
+    // persistir (debounce por cargador). setNivel hace upsert si falta la fila.
     clearTimeout(_saveTimers[id]);
     _saveTimers[id] = setTimeout(async () => {
       try { const res = await API.post('cargadorDiaSetNivel', { idCargador: id, nivel: p, fecha: _fechaActual || _hoyStr(), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
-        if (!res || res.ok === false) { if (typeof toast === 'function') toast('No se guardó el nivel — reintenta', 'warn'); }
+        if (res && res.ok) { if (c) c._prov = false; if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia(); }
+        else if (typeof toast === 'function') toast('No se guardó el nivel — reintenta', 'warn');
       } catch(e){ if (typeof toast === 'function') toast('Sin conexión · nivel no guardado', 'warn'); }
     }, 350);
   }
@@ -291,8 +295,9 @@
       const res = await API.post('cargadorDiaAddFoto', { idCargador, fecha: _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: file.type || 'image/jpeg', nombre: (_dia.find(c => String(c.idCargador) === String(idCargador)) || {}).nombre || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok && res.data) {
         const c = _dia.find(x => String(x.idCargador) === String(idCargador));
-        if (c) { c.fotos = res.data.fotos || c.fotos; _actualizarCardFotos(idCargador); }
+        if (c) { c.fotos = res.data.fotos || c.fotos; c._prov = false; _actualizarCardFotos(idCargador); }   // foto guardada → ya no provisional
         if (navigator.vibrate) navigator.vibrate(12);
+        if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
       } else { if (typeof toast === 'function') toast('No se subió la foto: ' + ((res && res.error) || '?'), 'warn'); }
     } catch(e){ if (typeof toast === 'function') toast('No se subió la foto — reintenta', 'warn'); }
     finally { if (add) add.classList.remove('busy'); }
