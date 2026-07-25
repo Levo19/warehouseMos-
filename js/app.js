@@ -987,11 +987,34 @@ async function _cargarPNAprobados() {
   const usuarioActual = (window.AppSession && AppSession.getNombre && AppSession.getNombre()) || '';
   const nombreLow = String(usuarioActual).toLowerCase().trim();
 
+  // [v2.13.480] Resolver nombre OFICIAL del catálogo por código de barra (no la descripción cruda
+  // del PN, que la tipeó el operador). Cubre: NUEVO/CORREGIR (código = codigo_barra del producto) y
+  // EQUIVALENTE (código en equivalencias → nombre del producto base).
+  const _catByCb = {};
+  try {
+    const skuDesc = {};
+    (OfflineManager.getProductosCache() || []).forEach(pr => {
+      const d = pr.descripcion || '';
+      if (!d) return;
+      if (pr.codigoBarra) _catByCb[normCb(pr.codigoBarra)] = d;
+      if (pr.skuBase && !skuDesc[normCb(pr.skuBase)]) skuDesc[normCb(pr.skuBase)] = d;
+    });
+    (OfflineManager.getEquivalenciasCache() || []).forEach(eq => {
+      const cb = normCb(eq.codigoBarra); if (!cb || _catByCb[cb]) return;
+      _catByCb[cb] = (eq.skuBase && skuDesc[normCb(eq.skuBase)]) || eq.descripcion || '';
+    });
+  } catch (_) {}
+  const _nombreCat = (cb, fallback) => (cb && _catByCb[normCb(cb)]) || fallback || '—';
+
   list.innerHTML = pns.map(p => {
     const tipo = String(p.tipoAprobacion || 'NUEVO').toUpperCase();
     const tipoCls = tipo === 'EQUIVALENTE' ? 'equiv' : 'nuevo';
     const tipoLabel = tipo === 'EQUIVALENTE' ? 'EQUIV' : 'NUEVO';
-    const isMine = String(p.usuario || '').toLowerCase().trim().indexOf(nombreLow) >= 0 && nombreLow;
+    const nombre = _nombreCat(p.codigoBarra, p.descripcion);
+    const regLow = String(p.usuario || '').toLowerCase().trim();
+    const aprLow = String(p.aprobadoPor || '').toLowerCase().trim();
+    const mineReg = nombreLow && regLow.indexOf(nombreLow) >= 0;
+    const mineApr = nombreLow && aprLow.indexOf(nombreLow) >= 0;
     const fechaApr = p.fechaAprobacion ? new Date(p.fechaAprobacion) : null;
     const dias = fechaApr ? Math.floor((Date.now() - fechaApr.getTime()) / 86400000) : 0;
     const whenTxt = dias === 0 ? 'Hoy' : dias === 1 ? 'Ayer' : `hace ${dias}d`;
@@ -999,14 +1022,16 @@ async function _cargarPNAprobados() {
     const fotoHtml = p.foto
       ? `<img src="${escHtml(p.foto)}" alt="">`
       : '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>';
+    const fotoClick = p.foto ? ` zoom" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(p.foto)}')` : '';
     return `
       <div class="pn-aprob-card${recientCls}">
-        <div class="pn-aprob-foto">${fotoHtml}</div>
+        <div class="pn-aprob-foto${fotoClick}">${fotoHtml}</div>
         <span class="pn-aprob-tipo ${tipoCls}">${tipoLabel}</span>
-        <div class="pn-aprob-desc">${escHtml(p.descripcion || '—')}</div>
+        <div class="pn-aprob-desc">${escHtml(nombre)}</div>
         <div class="pn-aprob-meta">▌${escHtml(p.codigoBarra || '—')}</div>
         <div class="pn-aprob-when">${whenTxt}</div>
-        <div class="pn-aprob-by${isMine ? ' tu' : ''}">${isMine ? '✓ Tú' : escHtml(p.usuario || '—')}</div>
+        <div class="pn-aprob-by${mineReg ? ' tu' : ''}" title="Quién registró el producto nuevo">✍ Registró: ${mineReg ? 'Tú' : escHtml(p.usuario || '—')}</div>
+        <div class="pn-aprob-by${mineApr ? ' tu' : ''}" title="Quién lo aprobó en el catálogo">✓ Aprobó: ${mineApr ? 'Tú' : escHtml(p.aprobadoPor || '—')}</div>
       </div>`;
   }).join('');
 
