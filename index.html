@@ -4140,6 +4140,25 @@
   .pn-aprob-meta { font-size: 10px; color: #94a3b8; font-family: monospace; }
   .pn-aprob-when { font-size: 10px; color: #c9a227; margin-top: 3px; font-weight: 600; }
   .pn-aprob-by   { font-size: 10px; color: #64748b; margin-top: 1px; }
+  /* [554] Banner celebratorio "listos para salir a venta" */
+  .pn-aprob-celebra {
+    display: flex; align-items: center; gap: 10px;
+    background: linear-gradient(135deg, rgba(16,185,129,.18), rgba(201,162,39,.14));
+    border: 1px solid rgba(52,211,153,.45); border-radius: 12px;
+    padding: 11px 13px; margin-bottom: 10px;
+    box-shadow: 0 8px 24px -12px rgba(16,185,129,.5);
+    animation: pnCelebraIn .5s cubic-bezier(.2,.9,.3,1.2), pnCelebraPulse 2s ease-in-out .6s infinite;
+  }
+  .pn-aprob-celebra .ic { font-size: 22px; animation: pnCelebraSpin 2.4s ease-in-out infinite; flex: none; }
+  .pn-aprob-celebra .tx { flex: 1; min-width: 0; }
+  .pn-aprob-celebra .t1 { font-size: 13px; font-weight: 800; color: #d1fae5; line-height: 1.25; }
+  .pn-aprob-celebra .t2 { font-size: 10.5px; color: #6ee7b7; margin-top: 1px; }
+  .pn-aprob-celebra .x  { flex: none; background: transparent; border: none; color: #6ee7b7; font-size: 18px; cursor: pointer; opacity: .7; line-height: 1; }
+  .pn-aprob-celebra .x:hover { opacity: 1; }
+  @keyframes pnCelebraIn { 0% { opacity: 0; transform: translateY(-10px) scale(.96); } 100% { opacity: 1; transform: none; } }
+  @keyframes pnCelebraPulse { 0%,100% { box-shadow: 0 8px 24px -12px rgba(16,185,129,.5); } 50% { box-shadow: 0 8px 30px -8px rgba(16,185,129,.7); } }
+  @keyframes pnCelebraSpin { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-12deg) scale(1.12); } 75% { transform: rotate(12deg) scale(1.12); } }
+  @media (prefers-reduced-motion: reduce) { .pn-aprob-celebra, .pn-aprob-celebra .ic { animation: none; } }
   .pn-aprob-by.tu { color: #ffd700; font-weight: 700; }
 
   /* ── Global search overlay ── */

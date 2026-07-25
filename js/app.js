@@ -978,9 +978,7 @@ async function _cargarPNAprobados() {
     const t = new Date(p.fechaAprobacion).getTime();
     return t > lastSeen;
   });
-  if (nuevosDesdeUltimaVez.length > 0 && lastSeen > 0 && typeof toast === 'function') {
-    toast(`✅ ${nuevosDesdeUltimaVez.length} producto${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''} nuevo${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''} aprobado${nuevosDesdeUltimaVez.length !== 1 ? 's' : ''}`, 'ok');
-  }
+  const _hayNuevosAprob = nuevosDesdeUltimaVez.length > 0 && lastSeen > 0;
   localStorage.setItem(lastSeenKey, String(ahora));
 
   cont.classList.remove('hidden');
@@ -1011,6 +1009,50 @@ async function _cargarPNAprobados() {
         <div class="pn-aprob-by${isMine ? ' tu' : ''}">${isMine ? '✓ Tú' : escHtml(p.usuario || '—')}</div>
       </div>`;
   }).join('');
+
+  // [554] Momento celebratorio: banner + confeti cuando hay aprobados nuevos desde la última visita.
+  if (_hayNuevosAprob) _pnCelebrarAprobados(nuevosDesdeUltimaVez.length);
+}
+
+// [554] Banner "listos para salir a venta" + confeti (autónomo, top-level).
+function _pnCelebrarAprobados(n) {
+  const cont = document.getElementById('dashPNAprob');
+  if (!cont) return;
+  cont.querySelector('.pn-aprob-celebra')?.remove();
+  const plural = n !== 1 ? 's' : '';
+  const b = document.createElement('div');
+  b.className = 'pn-aprob-celebra';
+  b.innerHTML = `<span class="ic">🎉</span>
+    <div class="tx">
+      <div class="t1">${n} producto${plural} nuevo${plural} listo${plural} para salir a venta</div>
+      <div class="t2">Ya están en el catálogo · puedes sacarlos a piso</div>
+    </div>
+    <button class="x" onclick="this.parentElement.remove()" aria-label="Cerrar">×</button>`;
+  const hdr = cont.querySelector('.pre-date-hdr');
+  if (hdr && hdr.nextSibling) cont.insertBefore(b, hdr.nextSibling); else cont.insertBefore(b, cont.firstChild);
+  // confeti (misma clase .pkck-confetti que usa el resto de la app)
+  try {
+    const colores = ['#10b981', '#34d399', '#6366f1', '#818cf8', '#f59e0b', '#fbbf24', '#ec4899'];
+    for (let i = 0; i < 32; i++) {
+      const c = document.createElement('div');
+      c.className = 'pkck-confetti';
+      c.style.left = (Math.random() * 100) + 'vw';
+      c.style.background = colores[i % colores.length];
+      c.style.setProperty('--tx', ((Math.random() - 0.5) * 200) + 'px');
+      c.style.setProperty('--rot', (Math.random() * 1080) + 'deg');
+      c.style.setProperty('--dur', (1.8 + Math.random() * 1.6) + 's');
+      c.style.animationDelay = (Math.random() * 0.3) + 's';
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), 4000);
+    }
+  } catch (_) {}
+  try { if (navigator.vibrate) navigator.vibrate([30, 40, 30]); } catch (_) {}
+  setTimeout(() => {
+    if (!b.isConnected) return;
+    b.style.transition = 'opacity .4s, transform .4s';
+    b.style.opacity = '0'; b.style.transform = 'translateY(-8px)';
+    setTimeout(() => b.remove(), 420);
+  }, 9000);
 }
 
 // Hora desde campo fecha de guía — solo si tiene componente de hora explícito
