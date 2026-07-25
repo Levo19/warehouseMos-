@@ -2105,21 +2105,20 @@ const API = (() => {
     }
     // [v2.13.481 · cargadores v2: termómetro + fotos] 1 fila por (fecha, cargador). id_log determinista → idempotente.
     if (params.action === 'cargadorDiaUpsert') {
+      // devolvemos el objeto SIEMPRE (incluso ok:false) → el caller ve el error; jamás cae a GAS (cero-GAS).
       const out = await _sbRpcWH('cargador_dia_upsert', { p: {
         idCargador: String(params.idCargador || ''), fecha: params.fecha || '', nombre: params.nombre || '',
         usuario: params.usuario || '', deviceId: params.deviceId || '',
         ...(params.nivel != null ? { nivel: parseInt(params.nivel) || 0 } : {})
       } });
-      if (!out || out.ok === false) return null;
-      return out;   // { ok, data:{ idLog, idCargador, nombre, nivel, fotos, fecha } }
+      return out || { ok: false, error: 'sin respuesta del servidor' };
     }
     if (params.action === 'cargadorDiaSetNivel') {
       const out = await _sbRpcWH('cargador_dia_set_nivel', { p: {
         idCargador: String(params.idCargador || ''), fecha: params.fecha || '',
         nivel: parseInt(params.nivel) || 0, nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
       } });
-      if (!out || out.ok === false) return null;
-      return out;   // { ok, data:{ idCargador, nivel, fecha } }
+      return out || { ok: false, error: 'sin respuesta del servidor' };
     }
     if (params.action === 'cargadorDiaAddFoto') {
       // sube el binario a Supabase Storage (bucket wh-fotos, path cargadores/<cargador>_<dia>/…) y persiste la URL.
@@ -2143,8 +2142,7 @@ const API = (() => {
       const out = await _sbRpcWH('cargador_dia_quitar', { p: {
         idCargador: String(params.idCargador || ''), fecha: params.fecha || ''
       } });
-      if (!out || out.ok === false) return null;
-      return out;   // { ok, data:{ idCargador, fecha } }
+      return out || { ok: false, error: 'sin respuesta del servidor' };
     }
     return null;  // acción de escritura no cableada aún → GAS
   }

@@ -62,7 +62,7 @@
       .cgv-pct{font-size:24px;font-weight:900;font-family:ui-monospace,monospace;line-height:1;letter-spacing:-.02em}
       .cgv-word{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
       .cgv-track{position:relative;height:30px;border-radius:999px;background:#0a0f18;border:1px solid #854d0e;cursor:ew-resize;touch-action:none;box-shadow:inset 0 2px 6px rgba(0,0,0,.5);user-select:none}
-      .cgv-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:linear-gradient(90deg,#ef4444,#f97316,#fbbf24,#10b981);background-size:600% 100%;transition:width .12s linear}
+      .cgv-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px;background:#ef4444;transition:width .12s linear,background .2s}
       .cgv-fill::after{content:'';position:absolute;inset:0;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.26),transparent 45%)}
       .cgv-ticks i{position:absolute;top:6px;bottom:6px;width:1.5px;background:rgba(255,255,255,.14);pointer-events:none}
       .cgv-min{position:absolute;top:-4px;bottom:-4px;left:10%;width:2px;pointer-events:none;background:repeating-linear-gradient(180deg,rgba(239,68,68,.7) 0 4px,transparent 4px 7px)}
@@ -147,7 +147,7 @@
       <div class="cgv-th">
         <div class="cgv-th-top"><span class="cgv-pct" id="cgvPct_${id}" style="color:${col}">${p}%</span><span class="cgv-word" id="cgvWord_${id}" style="color:${colT}">${_thWord(p)}</span></div>
         <div class="cgv-track" id="cgvTrack_${id}" data-id="${id}">
-          <div class="cgv-fill" id="cgvFill_${id}" style="width:${p}%;background-position:${p ? (100 - (100/Math.max(p,1))*100) : 0}% 0"></div>
+          <div class="cgv-fill" id="cgvFill_${id}" style="width:${p}%;background:${col}"></div>
           <div class="cgv-ticks"><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i></div>
           <div class="cgv-min"></div>
           <div class="cgv-handle" id="cgvHandle_${id}" style="left:${p}%"></div>
@@ -232,7 +232,7 @@
           pct = document.getElementById('cgvPct_' + id), word = document.getElementById('cgvWord_' + id),
           warn = document.getElementById('cgvWarn_' + id);
     const col = _thColor(p), colT = _thColorT(p);
-    if (fill) { fill.style.width = p + '%'; fill.style.backgroundPosition = (p ? (100 - (100 / Math.max(p, 1)) * 100) : 0) + '% 0'; if (p >= 75) fill.style.boxShadow = '0 0 14px -2px rgba(16,185,129,.55)'; else fill.style.boxShadow = ''; }
+    if (fill) { fill.style.width = p + '%'; fill.style.background = col; fill.style.boxShadow = p >= 75 ? '0 0 14px -2px rgba(16,185,129,.55)' : ''; }
     if (handle) handle.style.left = p + '%';
     if (pct) { pct.textContent = p + '%'; pct.style.color = col; }
     if (word) { word.textContent = _thWord(p); word.style.color = colT; }
