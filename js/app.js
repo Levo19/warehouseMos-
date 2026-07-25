@@ -7946,6 +7946,13 @@ const GuiasView = (() => {
   let _pnCodigo     = '';
   let _pnFotoBase64 = '';
   let _pnFotoMime   = 'image/jpeg';
+  // [v2.13.478] La foto se SUBE a Supabase Storage AL SELECCIONARLA (no al registrar).
+  // Antes el base64 (hasta 10MB) viajaba en params y, con mala señal, la cola offline
+  // (localStorage) lo perdía silenciosamente → 0 fotos de producto guardadas jamás.
+  // Ahora solo la URL corta llega al registro; si la subida falla, el operador lo VE.
+  let _pnFotoUrl      = '';       // URL de Storage ya subida
+  let _pnFotoSubiendo = false;    // in-flight (bloquea "Registrar" hasta terminar)
+  let _pnFotoSeed     = '';       // seed estable por apertura del modal (idempotencia)
 
   function _ofrecerPNEnScanner(cod) {
     _pnCodigo = cod;
@@ -7969,6 +7976,9 @@ const GuiasView = (() => {
     const guiaId  = idGuia !== undefined ? idGuia : (_guiaActual?.idGuia || null);
     _pnFotoBase64 = '';
     _pnFotoMime   = 'image/jpeg';
+    _pnFotoUrl      = '';                                          // [v2.13.478]
+    _pnFotoSubiendo = false;
+    _pnFotoSeed     = 'L' + Date.now() + Math.random().toString(36).slice(2, 7);
 
     // Barcode input + toggle
     const codInput    = document.getElementById('pnCodigoBarra');
@@ -8094,10 +8104,10 @@ const GuiasView = (() => {
           if (img) img.src = dataUrl;
           const prev = document.getElementById('pnFotoPreview');
           if (prev) prev.style.display = 'block';
-          const btnTxt = document.getElementById('pnFotoBtn');
-          if (btnTxt) btnTxt.textContent = '✓ Foto lista — toca para cambiar';
           try { vibrate?.(15); } catch(_){}
-          try { toast('📷 Foto cargada (' + sizeMB.toFixed(1) + 'MB)', 'ok', 2000); } catch(_){}
+          // [v2.13.478] SUBIR YA a Storage (no esperar al registro) — la URL corta es lo
+          // único que viajará al backend/cola. El operador ve el estado real de la subida.
+          _pnSubirFotoAhora();
         } catch(eIn) {
           console.error('[PN foto] onload handler error', eIn);
           try { toast('❌ Error procesando la foto', 'error', 4000); } catch(_){}
@@ -8108,6 +8118,27 @@ const GuiasView = (() => {
       console.error('[PN foto] handler outer error', e);
       try { toast('❌ Error al subir foto: ' + (e.message || e), 'error', 4000); } catch(_){}
     }
+  }
+
+  // [v2.13.478] Sube la foto del PN a Supabase Storage AL SELECCIONARLA. Guarda la URL
+  // en _pnFotoUrl (lo único que va al registro). Feedback visible en el botón; reintentable.
+  async function _pnSubirFotoAhora() {
+    if (!_pnFotoBase64) return;
+    _pnFotoSubiendo = true; _pnFotoUrl = '';
+    const btnTxt = document.getElementById('pnFotoBtn');
+    if (btnTxt) btnTxt.textContent = '⏳ Subiendo foto…';
+    try {
+      const r = await API.subirFotoStorage('producto_nuevo', 'PN_' + (_pnFotoSeed || Date.now()), _pnFotoBase64, _pnFotoMime);
+      const url = r && (r.url || (r.data && r.data.url));
+      if (!url) throw new Error((r && r.error) || 'sin URL');
+      _pnFotoUrl = url; _pnFotoBase64 = '';   // ya está en Storage → soltar el base64 pesado
+      if (btnTxt) btnTxt.textContent = '✓ Foto guardada — toca para cambiar';
+      try { toast('☁ Foto subida', 'ok', 1800); } catch(_){}
+    } catch (e) {
+      console.error('[PN foto] subida falló', e);
+      if (btnTxt) btnTxt.textContent = '⚠ No se subió — toca para reintentar';
+      try { toast('⚠ La foto NO se subió: ' + (e.message || e) + ' — vuelve a tomarla', 'error', 5000); } catch(_){}
+    } finally { _pnFotoSubiendo = false; }
   }
 
   let _pnSubmitting = false;
@@ -8146,6 +8177,17 @@ const GuiasView = (() => {
       return;  // NO enviar al backend
     }
 
+    // [v2.13.478] Si la foto todavía se está subiendo, esperar (máx ~8s) para no
+    // perderla. Si falló, avisar y dejar registrar SIN foto (no bloquea la operación).
+    if (_pnFotoSubiendo) {
+      try { toast('⏳ Terminando de subir la foto…', 'info', 2000); } catch(_){}
+      for (let i = 0; i < 40 && _pnFotoSubiendo; i++) { await new Promise(r => setTimeout(r, 200)); }
+    }
+    if (_pnFotoBase64 && !_pnFotoUrl && !_pnFotoSubiendo) {
+      // había foto pero la subida no dejó URL → un último intento síncrono
+      await _pnSubirFotoAhora();
+    }
+
     const params = {
       codigoBarra:     _pnCodigo || '',
       idGuia,
@@ -8156,15 +8198,14 @@ const GuiasView = (() => {
       usuario:         window.WH_CONFIG?.usuario || '',
       idSesion:        window.WH_CONFIG?.idSesion || ''
     };
-    if (_pnFotoBase64) {
-      params.fotoBase64 = _pnFotoBase64;
-      params.mimeType   = _pnFotoMime;
-    }
+    // [v2.13.478] Se pasa la URL de Storage (corta), NO el base64 → la cola offline ya
+    // no lo pierde. Si la subida falló, el PN se registra sin foto (el operador ya fue avisado).
+    if (_pnFotoUrl) params.foto = _pnFotoUrl;
 
     // Limpiar estado del modal ANTES de la llamada para evitar reuso del codigoBarra
     const cbAEnviar = _pnCodigo;
     _pnCodigo = '';
-    _pnFotoBase64 = null;
+    _pnFotoBase64 = ''; _pnFotoUrl = ''; _pnFotoSeed = '';
     _pnFotoMime   = '';
 
     cerrarModalPN();
