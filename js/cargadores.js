@@ -100,10 +100,17 @@
     document.head.appendChild(st);
   }
 
+  // [v2.13.484] 100% Supabase, CERO GAS: el master de cargadores = proveedores con prefijo "CARGADOR"
+  // tomados del CACHE local (OfflineManager), igual que el picker del preingreso. Antes usaba
+  // API.get('listarCargadoresMaster') que NO tiene handler cero-GAS → caía a GAS (muerto) → master vacío
+  // → el buscador no filtraba nada. Se re-lee el cache cada vez (barato) para reflejar cargadores nuevos.
   async function _cargarMaster() {
-    if (_master.length) return _master;
-    try { const res = await API.get('listarCargadoresMaster'); _master = (res && res.ok && res.data) ? res.data : []; }
-    catch(e){ _master = []; }
+    try {
+      const prov = (window.OfflineManager && OfflineManager.getProveedoresCache) ? (OfflineManager.getProveedoresCache() || []) : [];
+      _master = prov
+        .filter(p => String(p.nombre || '').trim().toUpperCase().indexOf('CARGADOR') === 0 && String(p.estado || '') === '1')
+        .map(p => ({ idCargador: p.idProveedor, nombre: (String(p.nombre || '').replace(/^CARGADOR\s*/i, '').trim() || p.nombre) }));
+    } catch(e) { _master = []; }
     return _master;
   }
   async function _cargarResumen(fecha) {
@@ -177,19 +184,31 @@
   }
 
   function _filtrar(query) {
-    query = String(query || '').trim().toLowerCase();
+    const q = String(query || '').trim();
+    const ql = q.toLowerCase();
     const listEl = document.getElementById('cargCoincidencias');
     if (!listEl) return;
-    let cand = _master;
-    if (query) cand = _master.filter(c => String(c.nombre||'').toLowerCase().includes(query) || String(c.idCargador||'').toLowerCase().includes(query));
+    if (!_master.length) _cargarMaster();   // por si el cache llegó tarde
     const yaHoy = new Set(_dia.map(c => String(c.idCargador)));
-    if (!cand.length) { listEl.innerHTML = '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Sin coincidencias.</p>'; return; }
-    listEl.innerHTML = cand.slice(0, 12).map(c => {
+    let cand = _master;
+    if (ql) cand = _master.filter(c => String(c.nombre || '').toLowerCase().includes(ql) || String(c.idCargador || '').toLowerCase().includes(ql));
+    const exacto = _master.some(c => String(c.nombre || '').trim().toLowerCase() === ql);
+    let html = cand.slice(0, 10).map(c => {
       const ya = yaHoy.has(String(c.idCargador));
       return `<button class="carg-match" ${ya ? 'style="opacity:.5"' : ''} onclick="Cargadores.agregar('${_escAttr(c.idCargador)}','${_escAttr(c.nombre)}')">
         <span class="carg-match-name">${_escHtml(c.nombre)}</span>
         <span class="carg-match-add">${ya ? '✓ hoy' : '+ agregar'}</span></button>`;
     }).join('');
+    // [v2.13.484] Crear cargador NUEVO al escribir un nombre que no existe (id determinista por nombre).
+    if (ql && !exacto) {
+      const slug = q.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+      const nid = 'CARGL_' + (slug || Date.now());
+      html += `<button class="carg-match" style="border:1px dashed #854d0e;background:rgba(252,211,77,.07)" onclick="Cargadores.agregar('${_escAttr(nid)}','${_escAttr(q)}')">
+        <span class="carg-match-name">➕ Crear cargador “${_escHtml(q)}”</span>
+        <span class="carg-match-add" style="color:#fcd34d">nuevo</span></button>`;
+    }
+    if (!html) html = '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Escribe el nombre del cargador para agregarlo o crearlo.</p>';
+    listEl.innerHTML = html;
   }
 
   // ── agregar cargador (PROVISIONAL: no se persiste hasta llenar ≥10% o agregar foto) ──
