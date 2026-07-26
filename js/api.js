@@ -894,6 +894,10 @@ const API = (() => {
     if (action === 'conteoCargasPorDia') {
       return await _sbRpcWH('conteo_cargas_por_dia', { p: {} }, 'wh');
     }
+    // [v2.13.498] datos del VOUCHER-imagen (guía/preingreso + anexos). wh.voucher_data (SQL 566).
+    if (action === 'voucherData') {
+      return await _sbRpcWH('voucher_data', { p: { tipo: params.tipo || '', id: params.id || '' } }, 'wh');
+    }
     // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
     // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;
     // esto saca el round-trip a GAS del navegador. Read-only.
