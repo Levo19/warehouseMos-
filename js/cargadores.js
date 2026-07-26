@@ -114,21 +114,23 @@
   }
   async function _cargarMaster() {
     try {
-      let prov = _leerCargProv();   // cache local (instantáneo)
-      if (!prov.length && !_masterLoading) {
+      let prov = _leerCargProv();          // cache local (instantáneo)
+      if (prov.length) _master = prov;     // muestra ya lo cacheado
+      // SIEMPRE refrescar del RPC directo (cero GAS) → aparece AL INSTANTE lo que el admin acaba de crear
+      // en MOS (los cargadores son proveedores CARGADOR; el operador solo los registra, no los crea).
+      if (!_masterLoading) {
         _masterLoading = true;
         try {
-          const res = await API.get('listarCargadoresMaster');   // RPC directo wh.listar_cargadores_master (cero GAS)
-          if (res && res.ok && Array.isArray(res.data)) prov = res.data;
+          const res = await API.get('listarCargadoresMaster');
+          if (res && res.ok && Array.isArray(res.data) && res.data.length) prov = res.data;
         } catch(_) {}
-        if (!prov.length && window.OfflineManager && OfflineManager.precargar) {
-          try { await OfflineManager.precargar('manual'); } catch(_){}
-          prov = _leerCargProv();
-        }
         _masterLoading = false;
       }
+      if (!prov.length && window.OfflineManager && OfflineManager.precargar) {
+        try { await OfflineManager.precargar('manual'); } catch(_){}
+        prov = _leerCargProv();
+      }
       _master = prov;
-      // si el modal sigue abierto, refresca la lista con lo cargado (respeta el texto escrito)
       const inp = document.getElementById('cargBuscarInput');
       const m = document.getElementById('modalCargadores');
       if (inp && m && m.classList.contains('open')) _filtrar(inp.value);
@@ -213,22 +215,18 @@
     const yaHoy = new Set(_dia.map(c => String(c.idCargador)));
     let cand = _master;
     if (ql) cand = _master.filter(c => String(c.nombre || '').toLowerCase().includes(ql) || String(c.idCargador || '').toLowerCase().includes(ql));
-    const exacto = _master.some(c => String(c.nombre || '').trim().toLowerCase() === ql);
-    let html = cand.slice(0, 10).map(c => {
+    let html = cand.slice(0, 12).map(c => {
       const ya = yaHoy.has(String(c.idCargador));
       return `<button class="carg-match" ${ya ? 'style="opacity:.5"' : ''} onclick="Cargadores.agregar('${_escAttr(c.idCargador)}','${_escAttr(c.nombre)}')">
         <span class="carg-match-name">${_escHtml(c.nombre)}</span>
         <span class="carg-match-add">${ya ? '✓ hoy' : '+ agregar'}</span></button>`;
     }).join('');
-    // [v2.13.484] Crear cargador NUEVO al escribir un nombre que no existe (id determinista por nombre).
-    if (ql && !exacto) {
-      const slug = q.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
-      const nid = 'CARGL_' + (slug || Date.now());
-      html += `<button class="carg-match" style="border:1px dashed #854d0e;background:rgba(252,211,77,.07)" onclick="Cargadores.agregar('${_escAttr(nid)}','${_escAttr(q)}')">
-        <span class="carg-match-name">➕ Crear cargador “${_escHtml(q)}”</span>
-        <span class="carg-match-add" style="color:#fcd34d">nuevo</span></button>`;
-    }
-    if (!html) html = '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Escribe el nombre del cargador para agregarlo o crearlo.</p>';
+    // [v2.13.489] Sin "+ Crear": los cargadores se CREAN solo en MOS (admin, 🚚 Cargadores → proveedor prefijo
+    // CARGADOR). El operador SOLO registra. Un cargador recién creado por el admin aparece al instante aquí
+    // (el master se refresca del RPC directo al abrir). Si no hay coincidencia, se guía al usuario.
+    if (!html) html = ql
+      ? `<p style="color:#64748b;font-size:12.5px;padding:14px 6px;text-align:center;line-height:1.5">No existe “${_escHtml(q)}”.<br>Los cargadores los crea el admin en <b style="color:#fcd34d">MOS → 🚚 Cargadores</b>; apenas lo cree aparecerá aquí.</p>`
+      : '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Escribe el nombre del cargador para buscarlo.</p>';
     listEl.innerHTML = html;
   }
 
@@ -383,11 +381,41 @@
       _cargarResumen(_hoyStr()).then(() => { if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia(); });
     }, 60000);
   }
+  // [v2.13.489] Compartir por WhatsApp: resumen profesional del modelo NUEVO + LINK a la página en vivo
+  // (cargadores.html, refresco 60s, con fotos). La jefa lo abre y ve el estado actualizado con fotos.
+  function compartir() {
+    const fecha = _fechaActual || _hoyStr();
+    if (!_dia.length) { if (typeof toast === 'function') toast('Sin cargadores para compartir', 'warn'); return; }
+    const total = _dia.length;
+    const prom = Math.round(_dia.reduce((s, c) => s + (parseInt(c.nivel) || 0), 0) / total);
+    const link = 'https://levo19.github.io/warehouseMos-/cargadores.html?fecha=' + fecha;
+    const L = ['*🛺 CARGADORES DEL DÍA*', fecha, '─────────────────────'];
+    _dia.slice().sort((a, b) => (parseInt(b.nivel) || 0) - (parseInt(a.nivel) || 0)).forEach(c => {
+      const p = parseInt(c.nivel) || 0;
+      const ico = p >= 75 ? '🟢' : p >= 50 ? '🟡' : p >= 25 ? '🟠' : '🔴';
+      const nf = (c.fotos || []).length;
+      L.push(`${ico} *${c.nombre}* — ${p}%${nf ? '  📷' + nf : ''}`);
+    });
+    L.push('', '━━━━━━━━━━━━━━━━━━', `*${total}* cargador(es) · carga promedio *${prom}%*`, '',
+           '📸 Reporte en vivo (fotos · se actualiza cada 60s):', link, '', '_InversionMos Warehouse_');
+    window.open('https://wa.me/?text=' + encodeURIComponent(L.join('\n')), '_blank');
+  }
+  async function imprimir() {
+    const fecha = _fechaActual || _hoyStr();
+    if (!_dia.length) { if (typeof toast === 'function') toast('Sin cargadores para imprimir', 'warn'); return; }
+    if (!window.PrintHub || !PrintHub.imprimir) { if (typeof toast === 'function') toast('Impresión no disponible aquí', 'warn'); return; }
+    try {
+      const res = await PrintHub.imprimir('imprimirCargadoresDia', { fecha }, 'Cargadores del día ' + fecha);
+      if (res && res.ok) { if (typeof toast === 'function') toast('Ticket impreso ✓', 'ok'); }
+      else if (typeof toast === 'function') toast('No se pudo imprimir: ' + ((res && res.error) || '?'), 'warn');
+    } catch(e) { if (typeof toast === 'function') toast('No se pudo imprimir', 'warn'); }
+  }
+
   function getCountDia(fecha) { fecha = fecha || _hoyStr(); return (_fechaActual === fecha) ? _dia.length : 0; }
   async function refreshCountDia(fecha) { const r = await _cargarResumen(fecha || _hoyStr()); return (r.cargadores || []).length; }
 
   window.Cargadores = {
-    abrir, cerrar, agregar, quitar,
+    abrir, cerrar, agregar, quitar, compartir, imprimir,
     startPolling, getCountDia, refreshCountDia,
     _filtrar, _hoyStr, _pickFoto, _carousel
   };

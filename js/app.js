@@ -19165,49 +19165,16 @@ const PreingresosView = (() => {
   }
 
   // [v2.13.4] WhatsApp consolidado — desglose explícito 🟢/🟡/🔴 por cargador y preingreso
+  // [v2.13.489] DEPRECADAS — el modelo de carretas 🟢🟡🔴 desde preingresos ya no es la fuente.
+  // Delegan al módulo nuevo (Cargadores.compartir / .imprimir), que arma el reporte desde
+  // cargadores_log (termómetro %) e incluye el link en vivo. Se mantienen por si algún caller viejo las invoca.
   function compartirCargadoresDiaWA() {
-    const d = _cargDiaState.data;
-    if (!d || !d.cargadores || !d.cargadores.length) {
-      toast('Sin datos para compartir', 'warn'); return;
-    }
-    // [v2.13.6] '🔴 N' siempre con texto 'casi vacía' explícito — el emoji solo
-    // confunde al cajero si no acompaña la palabra completa.
-    const fmtDets = (l, m, v) => {
-      const dets = [];
-      if (l > 0) dets.push(`🟢 ${l}`);
-      if (m > 0) dets.push(`🟡 ${m}`);
-      if (v > 0) dets.push(`🔴 ${v} casi vacía${v === 1 ? '' : 's'}`);
-      return dets.join(' · ');
-    };
-    const lineas = [
-      `*🛺 CARGADORES — ${_fmtFechaLabel(d.fecha)}*`,
-      `─────────────────────`,
-    ];
-    d.cargadores.forEach(cg => {
-      const det = fmtDets(cg.llenasTotal||0, cg.mediasTotal||0, cg.vaciasTotal||0);
-      lineas.push(`*${cg.nombre}*  —  ${cg.carretasTotal} carreta${cg.carretasTotal === 1 ? '' : 's'}   ${det}`);
-      cg.preingresos.forEach(pi => {
-        const detPi = fmtDets(pi.llenas||0, pi.medias||0, pi.vacias||0);
-        lineas.push(`   • ${pi.idPreingreso}  ${pi.proveedor || '—'}  —  ${pi.carretas} cart  (${detPi})`);
-      });
-    });
-    lineas.push(``, `━━━━━━━━━━━━━━━━━━━━━━━━`);
-    lineas.push(`*TOTAL:* ${d.totalCarretas} carreta${d.totalCarretas === 1 ? '' : 's'}`);
-    const dets = [];
-    if ((d.totalLlenas||0) > 0) dets.push((d.totalLlenas) + ' 🟢 llenas');
-    if ((d.totalMedias||0) > 0) dets.push((d.totalMedias) + ' 🟡 medias');
-    if ((d.totalVacias||0) > 0) dets.push((d.totalVacias) + ' 🔴 casi vacías');
-    if (dets.length) lineas.push(dets.join(' · '));
-    lineas.push(`_InversionMos Warehouse_`);
-    window.open('https://wa.me/?text=' + encodeURIComponent(lineas.join('\n')), '_blank');
+    if (window.Cargadores && Cargadores.compartir) { Cargadores.compartir(); return; }
+    toast('Abre primero cargadores del día', 'warn');
   }
-
   async function imprimirCargadoresDia() {
-    const fecha = _cargDiaState.fecha;
-    if (!fecha) { toast('Abre primero el resumen del día', 'warn'); return; }
-    const res = await PrintHub.imprimir('imprimirCargadoresDia', { fecha }, 'Cargadores del día ' + fecha).catch(() => null);
-    if (res && res.ok) toast('Ticket impreso', 'ok');
-    else if (res)      toast('Error: ' + (res?.error || 'No se pudo imprimir'), 'danger');
+    if (window.Cargadores && Cargadores.imprimir) { return Cargadores.imprimir(); }
+    toast('Abre primero cargadores del día', 'warn');
   }
 
   return { cargar, filtrar, toggleFiltro, _searchFocusPre, silentRefresh, buscar, buscarClear, crear, nuevo,

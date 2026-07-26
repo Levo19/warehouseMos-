@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>🛺 Cargadores del día</title>
+<style>
+  :root{
+    --bg:#070b12; --panel:#0e1626; --gold:#fcd34d; --gold2:#fbbf24; --goldbg:#1a1505; --goldbd:#854d0e;
+    --red:#ef4444; --orange:#f97316; --amber:#fbbf24; --green:#10b981; --greent:#6ee7b7;
+    --tx:#e7eef8; --tx2:#93a4c2; --tx3:#5f7192; --mono:ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(130% 90% at 50% -10%,#14110a,#050810 55%);color:var(--tx);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.5;padding:18px 14px 40px;min-height:100vh}
+  .wrap{max-width:640px;margin:0 auto}
+  .head{display:flex;align-items:center;gap:11px;margin-bottom:6px}
+  .head .ic{font-size:30px;filter:drop-shadow(0 2px 8px rgba(252,211,77,.45))}
+  .head h1{font-size:20px;font-weight:850;margin:0;letter-spacing:-.01em}
+  .head .fecha{font-size:12px;color:var(--tx2);margin-top:1px}
+  .kpis{display:flex;gap:9px;margin:12px 0 16px}
+  .kpi{flex:1;background:var(--panel);border:1px solid #243247;border-radius:13px;padding:11px 13px}
+  .kpi .k{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3)}
+  .kpi .v{font-size:24px;font-weight:900;font-family:var(--mono);margin-top:2px}
+  .kpi.prom .v{color:var(--gold)} .kpi.tot .v{color:var(--greent)}
+  .live{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--tx2);margin-bottom:14px}
+  .live .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(16,185,129,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}70%{box-shadow:0 0 0 7px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
+  .card{background:var(--goldbg);border:1px solid var(--goldbd);border-radius:15px;padding:13px 14px;margin-bottom:12px;animation:in .4s cubic-bezier(.34,1.4,.5,1)}
+  @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .card-h{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+  .card-h .n{font-size:15px;font-weight:800;color:var(--gold);flex:1;min-width:0}
+  .card-h .pct{font-size:22px;font-weight:900;font-family:var(--mono)}
+  .th{position:relative;height:26px;border-radius:999px;background:#0a0f18;border:1px solid var(--goldbd);overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.5)}
+  .th > i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1)}
+  .th > i::after{content:'';position:absolute;inset:0;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.26),transparent 45%)}
+  .word{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:6px}
+  .fotos{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
+  .fotos img{width:64px;height:64px;border-radius:11px;object-fit:cover;border:1px solid var(--goldbd);cursor:pointer;background:#0a0f18}
+  .fotos .none{font-size:10.5px;color:var(--tx3);font-style:italic}
+  .empty{text-align:center;color:var(--tx3);padding:40px 10px;font-size:14px}
+  .empty .e{font-size:40px;opacity:.5;margin-bottom:8px}
+  .foot{text-align:center;font-size:10px;color:var(--tx3);margin-top:18px}
+  /* lightbox */
+  .lb{position:fixed;inset:0;background:rgba(3,6,12,.94);display:none;align-items:center;justify-content:center;z-index:99;padding:16px}
+  .lb.on{display:flex} .lb img{max-width:100%;max-height:88vh;border-radius:14px}
+  .lb .x{position:absolute;top:14px;right:16px;width:38px;height:38px;border-radius:50%;background:#131d30;border:1px solid #243247;color:#fff;font-size:18px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <span class="ic">🛺</span>
+    <div style="flex:1"><h1>Cargadores del día</h1><div class="fecha" id="fecha">—</div></div>
+  </div>
+  <div class="kpis">
+    <div class="kpi tot"><div class="k">Cargadores</div><div class="v" id="kTot">—</div></div>
+    <div class="kpi prom"><div class="k">Carga promedio</div><div class="v" id="kProm">—</div></div>
+  </div>
+  <div class="live"><span class="dot"></span><span id="live">Actualiza cada 60s · <b id="hace">ahora</b></span></div>
+  <div id="lista"></div>
+  <div class="foot" id="foot"></div>
+</div>
+<div class="lb" id="lb" onclick="if(event.target.id==='lb'||event.target.className==='x')this.classList.remove('on')"><button class="x" onclick="document.getElementById('lb').classList.remove('on')">✕</button><img id="lbImg" src="" alt=""></div>
+
+<script>
+  var SB = 'https://rzbzdeipbtqkzjqdchqk.supabase.co';
+  var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6YnpkZWlwYnRxa3pqcWRjaHFrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4NzYwMDQsImV4cCI6MjA5NjQ1MjAwNH0.MAlSdz_ugGUZoaU5st6dA_gb_x_IiUL0TXxH176kY9k';
+  var FECHA = new URLSearchParams(location.search).get('fecha') || '';
+  var _lastTs = Date.now();
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function color(p){ return p>=75?'#10b981':p>=50?'#fbbf24':p>=25?'#f97316':'#ef4444'; }
+  function colorT(p){ return p>=75?'#6ee7b7':p>=50?'#fcd34d':p>=25?'#fdba74':'#fca5a5'; }
+  function word(p){ return p>=100?'🔥 Recontra lleno':p>=75?'Lleno':p>=50?'Media carga':p>=25?'Poca carga':'Casi vacío'; }
+  function lightbox(u){ document.getElementById('lbImg').src=u; document.getElementById('lb').classList.add('on'); }
+  window.lightbox = lightbox;
+
+  function render(d){
+    document.getElementById('fecha').textContent = fmtFecha(d.fecha);
+    document.getElementById('kTot').textContent = d.total;
+    document.getElementById('kProm').textContent = (d.promedio||0)+'%';
+    document.getElementById('foot').textContent = 'Generado '+(d.generado||'')+' · Almacén central';
+    var cs = d.cargadores || [];
+    var el = document.getElementById('lista');
+    if(!cs.length){ el.innerHTML = '<div class="empty"><div class="e">🛺</div>Sin cargadores registrados este día.</div>'; return; }
+    el.innerHTML = cs.map(function(c){
+      var p = Math.max(0, Math.min(100, parseInt(c.nivel)||0));
+      var fotos = (c.fotos||[]);
+      var thumbs = fotos.length
+        ? fotos.map(function(u){ return '<img src="'+esc(u)+'" loading="lazy" onclick="lightbox(\''+esc(u).replace(/'/g,"\\'")+'\')" onerror="this.style.display=\'none\'">'; }).join('')
+        : '<span class="none">Sin fotos</span>';
+      return '<div class="card">'
+        + '<div class="card-h"><span style="font-size:15px">🛺</span><span class="n">'+esc(c.nombre)+'</span><span class="pct" style="color:'+color(p)+'">'+p+'%</span></div>'
+        + '<div class="th"><i style="width:'+p+'%;background:'+color(p)+'"></i></div>'
+        + '<div class="word" style="color:'+colorT(p)+'">'+word(p)+'</div>'
+        + '<div class="fotos">'+thumbs+'</div>'
+        + '</div>';
+    }).join('');
+  }
+  function fmtFecha(iso){
+    if(!iso) return '';
+    var p=String(iso).slice(0,10).split('-'); if(p.length<3) return iso;
+    var dias=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    var d=new Date(p[0],p[1]-1,p[2],12);
+    return dias[d.getDay()]+' '+p[2]+'/'+p[1]+'/'+p[0];
+  }
+  function cargar(){
+    fetch(SB+'/rest/v1/rpc/reporte_cargadores_dia', {
+      method:'POST', headers:{'apikey':ANON,'Authorization':'Bearer '+ANON,'Content-Type':'application/json'},
+      body: JSON.stringify({ p_fecha: FECHA || null })
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if(d && d.ok){ render(d); _lastTs = Date.now(); }
+    }).catch(function(){});
+  }
+  function tick(){
+    var s = Math.round((Date.now()-_lastTs)/1000);
+    document.getElementById('hace').textContent = s<5?'ahora':('hace '+s+'s');
+  }
+  cargar(); setInterval(cargar, 60000); setInterval(tick, 1000);
+</script>
+</body>
+</html>

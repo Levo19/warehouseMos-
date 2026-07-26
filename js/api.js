@@ -153,26 +153,26 @@ const API = (() => {
     const ok = await _imprimirDirecto(printerId, _escposB64(escpos), title || 'warehouseMos');
     return ok ? { ok: true, data: { impreso: true } } : { ok: false, error: 'PrintNode rechazó' };
   }
-  // [CERO-GAS F2] Arma el ESC/POS del reporte de cargadores del día (port del layout GAS). Defensivo ante shape vacío.
+  // [v2.13.489] ESC/POS del reporte de cargadores — modelo NUEVO (cargadores_log, termómetro %).
+  // Shape: {fecha, total, promedio, cargadores:[{nombre, nivel, fotos(count)}]}. Defensivo ante shape vacío.
   function _armarCargadoresEscPos(d) {
     const SEP = '================================================', SEP2 = '------------------------------------------------';
     const pad = (a, b) => { a = String(a || ''); b = String(b || ''); const n = 48 - a.length - b.length; return a + (n > 0 ? ' '.repeat(n) : ' ') + b; };
+    const barra = (p) => { p = Math.max(0, Math.min(100, parseInt(p) || 0)); const full = Math.round(p / 5); return '[' + '#'.repeat(full) + '.'.repeat(20 - full) + ']'; };
+    const estado = (p) => { p = parseInt(p) || 0; return p >= 75 ? 'LLENO' : p >= 50 ? 'MEDIA CARGA' : p >= 25 ? 'POCA CARGA' : 'CASI VACIO'; };
     let t = '\x1b\x61\x01\x1b\x21\x38CARGADORES\n\x1b\x21\x00\x1b\x45\x01' + String(d.fecha || '').toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
-    t += pad('Preingresos del dia:', String(d.preingresos != null ? d.preingresos : (d.total || 0))) + '\n';
-    t += pad('Carretas totales:', String(d.totalCarretas != null ? d.totalCarretas : '')) + '\n' + SEP2 + '\n';
+    t += pad('Cargadores del dia:', String(d.total != null ? d.total : 0)) + '\n';
+    t += pad('Carga promedio:', String(d.promedio != null ? d.promedio : 0) + '%') + '\n' + SEP2 + '\n';
     const cargs = Array.isArray(d.cargadores) ? d.cargadores : [];
     if (!cargs.length) t += '  (sin cargadores registrados ese dia)\n';
     cargs.forEach(c => {
+      const niv = parseInt(c.nivel) || 0, nf = parseInt(c.fotos) || 0;
       t += '\x1b\x45\x01' + String(c.nombre || '').toUpperCase() + '\x1b\x45\x00\n';
-      t += pad('  ' + (c.carretasTotal != null ? c.carretasTotal : (c.carretas || 0)) + ' carretas',
-               'L' + (c.llenasTotal || 0) + ' M' + (c.mediasTotal || 0) + ' CV' + (c.vaciasTotal || 0)) + '\n';
-      (Array.isArray(c.preingresos) ? c.preingresos : []).forEach(pi => {
-        t += pad('  - ' + (pi.idPreingreso || '') + ' ' + String(pi.proveedor || '').substring(0, 20),
-                 (pi.carretas || 0) + 'c') + '\n';
-      });
+      t += pad('  ' + barra(niv) + ' ' + niv + '%', estado(niv)) + '\n';
+      if (nf) t += '  ' + nf + ' foto(s)\n';
       t += '\n';
     });
-    t += SEP + '\n\x1b\x61\x01\x1b\x45\x01TOTAL DEL DIA\x1b\x45\x00\n\x1b\x21\x38\x1b\x45\x01' + (d.totalCarretas || 0) + ' CARRETAS\x1b\x21\x00\x1b\x45\x00\n\x1b\x61\x00' + SEP;
+    t += SEP + '\n\x1b\x61\x01\x1b\x45\x01CARGA PROMEDIO\x1b\x45\x00\n\x1b\x21\x38\x1b\x45\x01' + (d.promedio || 0) + '%\x1b\x21\x00\x1b\x45\x00\n\x1b\x61\x00' + SEP;
     return t;
   }
 
@@ -2359,12 +2359,12 @@ const API = (() => {
       return await _imprimirTextoTicketWH(params.texto || '', 'Historial ' + (params.codigoProducto || ''), params.printerIdOverride);
     }
     if (params.action === 'imprimirCargadoresDia') {
-      // [FIX 500x] _armarCargadoresEscPos espera el shape RICO (carretasTotal/llenasTotal/mediasTotal/vaciasTotal +
-      // preingresos[]). `resumen_cargadores_dia` solo trae {fecha,total,cargadores:[{nombre,count}]} → el ticket
-      // salía en 0/blanco. La data rica la produce `getCargadoresDelDia` (lee wh.preingresos y consolida carretas).
-      const rd = await call({ action: 'getCargadoresDelDia', fecha: String(params.fecha || '') });
-      const d = (rd && rd.data) ? rd.data : null;
-      if (!d) return { ok: false, error: 'No se pudo leer cargadores del día' };
+      // [v2.13.489] RECABLEADO al modelo NUEVO (cargadores_log, termómetro %). Antes leía wh.preingresos
+      // (carretas 🟢🟡🔴) que ya no es la fuente. `cargadores_ticket_dia` devuelve {fecha,total,promedio,
+      // cargadores:[{nombre,nivel,fotos(count)}]}. 100% Supabase directo, sin GAS.
+      const rd = await _sbRpcWH('cargadores_ticket_dia', { p: { fecha: String(params.fecha || '') } });
+      const d = (rd && rd.ok && rd.data) ? rd.data : null;
+      if (!d) return { ok: false, error: (rd && rd.error) || 'No se pudo leer cargadores del día' };
       return await _imprimirTextoTicketWH(_armarCargadoresEscPos(d), 'Cargadores ' + (d.fecha || ''), params.printerIdOverride);
     }
 
