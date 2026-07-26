@@ -874,6 +874,10 @@ const API = (() => {
     if (action === 'listarCargadoresMaster') {
       return await _sbRpcWH('listar_cargadores_master', { p: {} }, 'wh');
     }
+    // [v2.13.491 · cargas evento] resumen del día agrupado por cargador con sus cargas (hora, nivel, fotos).
+    if (action === 'resumenCargasDia') {
+      return await _sbRpcWH('resumen_cargas_dia', { p: { fecha: params.fecha || '' } }, 'wh');
+    }
     // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
     // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;
     // esto saca el round-trip a GAS del navegador. Read-only.
@@ -2149,6 +2153,38 @@ const API = (() => {
       } });
       return out || { ok: false, error: 'sin respuesta del servidor' };
     }
+    // [v2.13.491 · cargas evento] varias cargas por cargador/día; cada carga = idCarga único (idempotente).
+    if (params.action === 'cargadorCargaSetNivel') {
+      const out = await _sbRpcWH('cargador_carga_set_nivel', { p: {
+        idCarga: String(params.idCarga || ''), idCargador: String(params.idCargador || ''),
+        fecha: params.fecha || '', nivel: parseInt(params.nivel) || 0,
+        nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
+      } });
+      return out || { ok: false, error: 'sin respuesta del servidor' };
+    }
+    if (params.action === 'cargadorCargaAddFoto') {
+      // sube el binario a Supabase Storage (bucket wh-fotos) y persiste la URL en esa carga puntual.
+      let url = String(params.fotoUrl || '');
+      const b64 = String(params.fotoBase64 || '').trim();
+      if (!url && b64) {
+        const dia = String(params.fecha || '').slice(0, 10) || 'sf';
+        const idc = String(params.idCargador || 'c');
+        const seed = String(params.idCarga || 'k') + '_' + lid;   // determinístico por carga → reintento no duplica
+        try { url = (await _subirFotoStorage('cargadores', idc + '_' + dia, b64, params.mimeType || 'image/jpeg', seed)).url; }
+        catch (e) { return { ok: false, error: 'No se pudo subir la foto: ' + (e.message || e) }; }
+      }
+      if (!url) return { ok: false, error: 'Falta la foto' };
+      const out = await _sbRpcWH('cargador_carga_add_foto', { p: {
+        idCarga: String(params.idCarga || ''), idCargador: String(params.idCargador || ''),
+        fecha: params.fecha || '', url, nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
+      } });
+      if (!out || out.ok === false) return { ok: false, error: (out && out.error) || 'No se guardó la foto' };
+      return out;   // { ok, data:{ idCarga, fotos, fecha } }
+    }
+    if (params.action === 'cargadorCargaQuitar') {
+      const out = await _sbRpcWH('cargador_carga_quitar', { p: { idCarga: String(params.idCarga || '') } });
+      return out || { ok: false, error: 'sin respuesta del servidor' };
+    }
     return null;  // acción de escritura no cableada aún → GAS
   }
 
@@ -2334,6 +2370,7 @@ const API = (() => {
     'marcarAlertaRevisada', 'aceptarTeoricoAlerta',
     'addCargadorDia', 'removeCargadorDia',   // [Tanda 3] dedup directo: id_log determinista (add) / -1 real (remove)
     'cargadorDiaUpsert', 'cargadorDiaSetNivel', 'cargadorDiaAddFoto', 'cargadorDiaQuitar',   // [v2.13.481] cargadores v2 (termómetro + fotos)
+    'cargadorCargaSetNivel', 'cargadorCargaAddFoto', 'cargadorCargaQuitar',   // [v2.13.491] cargas evento (varias por cargador/día)
     'actualizarGuia', 'actualizarPickup', 'guardarProgresoPickup',
     'cerrarPickupConDespacho', 'liberarPickup', 'cerrarTurno'
   ]);

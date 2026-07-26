@@ -4421,7 +4421,7 @@ const App = (() => {
       const nCarg = (window.Cargadores && Cargadores.getCountDia) ? (Cargadores.getCountDia(hoyKey) || 0) : 0;
       chips.push({ id:'dashChipCarg', cls: nCarg > 0 ? 'dc-violet' : 'dc-carg-new', ico:'🛺',
                    num: nCarg > 0 ? nCarg : '+',
-                   lbl: nCarg > 0 ? (nCarg === 1 ? 'cargador' : 'cargadores') : 'registrar',
+                   lbl: nCarg > 0 ? (nCarg === 1 ? 'carga' : 'cargas') : 'registrar',
                    onclick: "if(window.Cargadores)Cargadores.abrir()" });
       // refresco puntual del conteo real (1ª vez) → actualiza el chip cuando llega
       if (!window._cargChipRefrescado && window.Cargadores && Cargadores.refreshCountDia) {

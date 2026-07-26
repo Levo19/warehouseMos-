@@ -22,22 +22,32 @@
   .kpi{flex:1;background:var(--panel);border:1px solid #243247;border-radius:13px;padding:11px 13px}
   .kpi .k{font-size:9px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--tx3)}
   .kpi .v{font-size:24px;font-weight:900;font-family:var(--mono);margin-top:2px}
-  .kpi.prom .v{color:var(--gold)} .kpi.tot .v{color:var(--greent)}
+  .kpi.prom .v{color:var(--gold)} .kpi.tot .v{color:var(--greent)} .kpi.cg .v{color:#93c5fd}
   .live{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--tx2);margin-bottom:14px}
   .live .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 0 0 rgba(16,185,129,.6);animation:pulse 2s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(16,185,129,.5)}70%{box-shadow:0 0 0 7px rgba(16,185,129,0)}100%{box-shadow:0 0 0 0 rgba(16,185,129,0)}}
-  .card{background:var(--goldbg);border:1px solid var(--goldbd);border-radius:15px;padding:13px 14px;margin-bottom:12px;animation:in .4s cubic-bezier(.34,1.4,.5,1)}
+  .card{background:var(--goldbg);border:1px solid var(--goldbd);border-radius:16px;padding:13px 14px;margin-bottom:13px;animation:in .4s cubic-bezier(.34,1.4,.5,1)}
   @keyframes in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
-  .card-h{display:flex;align-items:center;gap:9px;margin-bottom:10px}
-  .card-h .n{font-size:15px;font-weight:800;color:var(--gold);flex:1;min-width:0}
-  .card-h .pct{font-size:22px;font-weight:900;font-family:var(--mono)}
-  .th{position:relative;height:26px;border-radius:999px;background:#0a0f18;border:1px solid var(--goldbd);overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.5)}
+  .card-h{display:flex;align-items:center;gap:9px;margin-bottom:11px}
+  .card-h .n{font-size:16px;font-weight:850;color:var(--gold);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card-h .cnt{font-size:11px;font-weight:800;color:var(--gold2);background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.3);border-radius:999px;padding:2px 10px;white-space:nowrap}
+  .carga{background:rgba(5,8,14,.5);border:1px solid rgba(133,77,14,.5);border-radius:13px;padding:11px 12px;margin-bottom:9px}
+  .carga:last-child{margin-bottom:0}
+  .carga-h{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+  .carga-h .hora{font-size:12px;font-weight:800;font-family:var(--mono);color:#e7eef8;background:#131d30;border:1px solid #2b3c5a;border-radius:7px;padding:2px 9px}
+  .carga-h .pct{font-size:21px;font-weight:900;font-family:var(--mono);margin-left:auto}
+  .th{position:relative;height:24px;border-radius:999px;background:#0a0f18;border:1px solid var(--goldbd);overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.5)}
   .th > i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1)}
   .th > i::after{content:'';position:absolute;inset:0;border-radius:999px;background:linear-gradient(180deg,rgba(255,255,255,.26),transparent 45%)}
-  .word{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:6px}
-  .fotos{display:flex;gap:8px;margin-top:11px;flex-wrap:wrap}
-  .fotos img{width:64px;height:64px;border-radius:11px;object-fit:cover;border:1px solid var(--goldbd);cursor:pointer;background:#0a0f18}
-  .fotos .none{font-size:10.5px;color:var(--tx3);font-style:italic}
+  .word{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
+  .fotos{display:flex;gap:9px;margin-top:11px;overflow-x:auto;padding-bottom:3px;-webkit-overflow-scrolling:touch}
+  .fotos::-webkit-scrollbar{height:5px}.fotos::-webkit-scrollbar-thumb{background:#3a4d6e;border-radius:9px}
+  .fotos .fh{position:relative;flex:0 0 auto;width:104px;height:104px;border-radius:13px;overflow:hidden;border:1px solid var(--goldbd);cursor:zoom-in;background:#0a0f18}
+  .fotos .fh img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s}
+  .fotos .fh:hover img{transform:scale(1.07)}
+  .fotos .fh .zoom{position:absolute;right:5px;bottom:5px;background:rgba(5,8,14,.72);border-radius:7px;font-size:11px;padding:1px 5px}
+  .fotos .none{font-size:11px;color:var(--tx3);font-style:italic;align-self:center}
+  @media(min-width:620px){ .fotos .fh{width:120px;height:120px} }
   .empty{text-align:center;color:var(--tx3);padding:40px 10px;font-size:14px}
   .empty .e{font-size:40px;opacity:.5;margin-bottom:8px}
   .foot{text-align:center;font-size:10px;color:var(--tx3);margin-top:18px}
@@ -54,8 +64,9 @@
     <div style="flex:1"><h1>Cargadores del día</h1><div class="fecha" id="fecha">—</div></div>
   </div>
   <div class="kpis">
-    <div class="kpi tot"><div class="k">Cargadores</div><div class="v" id="kTot">—</div></div>
-    <div class="kpi prom"><div class="k">Carga promedio</div><div class="v" id="kProm">—</div></div>
+    <div class="kpi tot"><div class="k">Cargas</div><div class="v" id="kCargas">—</div></div>
+    <div class="kpi cg"><div class="k">Cargadores</div><div class="v" id="kTot">—</div></div>
+    <div class="kpi prom"><div class="k">Promedio</div><div class="v" id="kProm">—</div></div>
   </div>
   <div class="live"><span class="dot"></span><span id="live">Actualiza cada 60s · <b id="hace">ahora</b></span></div>
   <div id="lista"></div>
@@ -75,25 +86,36 @@
   function lightbox(u){ document.getElementById('lbImg').src=u; document.getElementById('lb').classList.add('on'); }
   window.lightbox = lightbox;
 
+  function cargaHTML(k){
+    var p = Math.max(0, Math.min(100, parseInt(k.nivel)||0));
+    var fotos = (k.fotos||[]);
+    var thumbs = fotos.length
+      ? fotos.map(function(u){ return '<div class="fh"><img src="'+esc(u)+'" loading="lazy" onclick="lightbox(\''+esc(u).replace(/'/g,"\\'")+'\')" onerror="this.parentNode.style.display=\'none\'"><span class="zoom">🔍</span></div>'; }).join('')
+      : '<span class="none">Sin fotos</span>';
+    return '<div class="carga">'
+      + '<div class="carga-h"><span class="hora">⏱ '+esc(k.hora||'')+'</span>'
+      + '<span class="word" style="color:'+colorT(p)+'">'+word(p)+'</span>'
+      + '<span class="pct" style="color:'+color(p)+'">'+p+'%</span></div>'
+      + '<div class="th"><i style="width:'+p+'%;background:'+color(p)+'"></i></div>'
+      + '<div class="fotos">'+thumbs+'</div>'
+      + '</div>';
+  }
   function render(d){
     document.getElementById('fecha').textContent = fmtFecha(d.fecha);
-    document.getElementById('kTot').textContent = d.total;
+    document.getElementById('kCargas').textContent = (d.totalCargas!=null?d.totalCargas:0);
+    document.getElementById('kTot').textContent = (d.totalCargadores!=null?d.totalCargadores:(d.total||0));
     document.getElementById('kProm').textContent = (d.promedio||0)+'%';
     document.getElementById('foot').textContent = 'Generado '+(d.generado||'')+' · Almacén central';
     var cs = d.cargadores || [];
     var el = document.getElementById('lista');
-    if(!cs.length){ el.innerHTML = '<div class="empty"><div class="e">🛺</div>Sin cargadores registrados este día.</div>'; return; }
+    if(!cs.length){ el.innerHTML = '<div class="empty"><div class="e">🛺</div>Sin cargas registradas este día.</div>'; return; }
     el.innerHTML = cs.map(function(c){
-      var p = Math.max(0, Math.min(100, parseInt(c.nivel)||0));
-      var fotos = (c.fotos||[]);
-      var thumbs = fotos.length
-        ? fotos.map(function(u){ return '<img src="'+esc(u)+'" loading="lazy" onclick="lightbox(\''+esc(u).replace(/'/g,"\\'")+'\')" onerror="this.style.display=\'none\'">'; }).join('')
-        : '<span class="none">Sin fotos</span>';
+      var cargas = c.cargas || [];
+      var n = c.nCargas!=null ? c.nCargas : cargas.length;
       return '<div class="card">'
-        + '<div class="card-h"><span style="font-size:15px">🛺</span><span class="n">'+esc(c.nombre)+'</span><span class="pct" style="color:'+color(p)+'">'+p+'%</span></div>'
-        + '<div class="th"><i style="width:'+p+'%;background:'+color(p)+'"></i></div>'
-        + '<div class="word" style="color:'+colorT(p)+'">'+word(p)+'</div>'
-        + '<div class="fotos">'+thumbs+'</div>'
+        + '<div class="card-h"><span style="font-size:17px">🛺</span><span class="n">'+esc(c.nombre)+'</span>'
+        + '<span class="cnt">'+n+' carga'+(n===1?'':'s')+'</span></div>'
+        + cargas.map(cargaHTML).join('')
         + '</div>';
     }).join('');
   }

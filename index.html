@@ -10510,21 +10510,11 @@
     <button class="carg-hbtn" onclick="Cargadores.imprimir()" title="Imprimir ticket" style="background:#131d30;border:1px solid #334155;color:#93a4c2;border-radius:9px;padding:6px 10px;font-size:13px;cursor:pointer">🖨️</button>
     <button class="carg-close" onclick="Cargadores.cerrar()">✕</button>
   </div>
-  <div class="carg-search">
-    <span style="color:#64748b">🔎</span>
-    <input id="cargBuscarInput" type="text" placeholder="Buscar cargador…"
-           oninput="Cargadores._filtrar(this.value)"/>
-    <button class="carg-mic" id="cargMic" onclick="App.dictarCargador()" title="Dictado">🎤</button>
-  </div>
-  <p class="carg-section-title">Coincidencias</p>
-  <div id="cargCoincidencias"></div>
-  <div class="carg-resumen-box">
-    <p class="carg-resumen-title">
-      <span>Cargadores de hoy</span>
-      <span>🛺 <span id="cargTotal">0</span></span>
-    </p>
-    <div id="cargResumen"></div>
-  </div>
+  <!-- Protagonista: resumen del día agrupado por cargador (cada carga = termómetro + fotos) -->
+  <div id="cargResumen"></div>
+  <!-- Agregar (colapsado a "+ Carga nueva"; al abrir: top-3 + buscador) -->
+  <div id="cargAdd"></div>
+  <span id="cargTotal" style="display:none">0</span>
 </div>
 
 <!-- [Unificación] sheets de la cesta F2.5 eliminados (ver nota en topbar) -->
