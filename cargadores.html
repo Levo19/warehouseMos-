@@ -35,6 +35,7 @@
   .carga:last-child{margin-bottom:0}
   .carga-h{display:flex;align-items:center;gap:9px;margin-bottom:9px}
   .carga-h .hora{font-size:12px;font-weight:800;font-family:var(--mono);color:#e7eef8;background:#131d30;border:1px solid #2b3c5a;border-radius:7px;padding:2px 9px}
+  .carga-h .edit{font-size:10px;font-weight:700;font-family:var(--mono);color:#93a4c2;background:rgba(148,164,194,.12);border-radius:6px;padding:2px 7px}
   .carga-h .pct{font-size:21px;font-weight:900;font-family:var(--mono);margin-left:auto}
   .th{position:relative;height:24px;border-radius:999px;background:#0a0f18;border:1px solid var(--goldbd);overflow:hidden;box-shadow:inset 0 2px 6px rgba(0,0,0,.5)}
   .th > i{position:absolute;left:0;top:0;bottom:0;border-radius:999px;transition:width .6s cubic-bezier(.22,1,.36,1)}
@@ -92,8 +93,9 @@
     var thumbs = fotos.length
       ? fotos.map(function(u){ return '<div class="fh"><img src="'+esc(u)+'" loading="lazy" onclick="lightbox(\''+esc(u).replace(/'/g,"\\'")+'\')" onerror="this.parentNode.style.display=\'none\'"><span class="zoom">🔍</span></div>'; }).join('')
       : '<span class="none">Sin fotos</span>';
+    var ed = (k.edito && k.editado && k.editado!==k.hora) ? '<span class="edit">✎ '+esc(k.editado)+'</span>' : '';
     return '<div class="carga">'
-      + '<div class="carga-h"><span class="hora">⏱ '+esc(k.hora||'')+'</span>'
+      + '<div class="carga-h"><span class="hora">⏱ '+esc(k.hora||'')+'</span>'+ed
       + '<span class="word" style="color:'+colorT(p)+'">'+word(p)+'</span>'
       + '<span class="pct" style="color:'+color(p)+'">'+p+'%</span></div>'
       + '<div class="th"><i style="width:'+p+'%;background:'+color(p)+'"></i></div>'

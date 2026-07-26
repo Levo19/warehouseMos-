@@ -18,6 +18,7 @@
   let _audio = null;
   let _addOpen = false;  // panel "agregar" desplegado
   let _searchVal = '';
+  let _generado = '';    // hora de emisión del último resumen (server)
 
   const MIN_GUARDAR = 10;   // % mínimo para considerar la carga "registrada"
 
@@ -89,6 +90,7 @@
       .cgv-carga.prov{border-color:#7a5210;border-style:dashed;background:rgba(124,82,16,.08)}
       .cgv-ctop{display:flex;align-items:center;gap:8px;margin-bottom:9px}
       .cgv-hora{font-size:11px;font-weight:800;font-family:ui-monospace,monospace;color:#cbd5e1;background:#1a2740;border:1px solid #2b3c5a;border-radius:7px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px}
+      .cgv-edit{font-size:10px;font-weight:700;font-family:ui-monospace,monospace;color:#93a4c2;background:rgba(148,164,194,.1);border-radius:6px;padding:2px 6px}
       .cgv-pct{font-size:22px;font-weight:900;font-family:ui-monospace,monospace;line-height:1;letter-spacing:-.02em;margin-left:auto}
       .cgv-word{font-size:10.5px;font-weight:800;text-transform:uppercase;letter-spacing:.03em}
       .cgv-x{color:#5f7192;font-size:17px;background:transparent;border:none;cursor:pointer;width:24px;height:24px;line-height:1}
@@ -206,7 +208,7 @@
           (cg.cargas || []).forEach(k => flat.push({
             idCarga: k.idCarga, idCargador: cg.idCargador, nombre: cg.nombre,
             nivel: parseInt(k.nivel) || 0, fotos: Array.isArray(k.fotos) ? k.fotos : [],
-            hora: k.hora || '', ts: k.ts || '', _prov: false
+            hora: k.hora || '', editado: k.editado || '', edito: !!k.edito, ts: k.ts || '', _prov: false
           }));
         });
         if (_fechaActual === nuevaFecha) {
@@ -217,6 +219,7 @@
           _dia = flat;
         }
         _fechaActual = nuevaFecha;
+        _generado = res.data.generado || _generado;
         return res.data;
       }
     } catch(e){}
@@ -266,6 +269,7 @@
     return `<div class="cgv-carga ${c._prov ? 'prov' : ''}" id="cgvCarga_${id}" data-id="${id}">
       <div class="cgv-ctop">
         <span class="cgv-hora">⏱ ${_escHtml(c.hora || _horaAhora())}</span>
+        ${(c.edito && c.editado && c.editado !== c.hora) ? `<span class="cgv-edit" title="Última edición">✎ ${_escHtml(c.editado)}</span>` : ''}
         <span class="cgv-word" id="cgvWord_${id}" style="color:${colT}">${_thWord(p)}</span>
         <span class="cgv-pct" id="cgvPct_${id}" style="color:${col}">${p}%</span>
         <button class="cgv-x" onclick="Cargadores.quitar('${id}')" title="Quitar esta carga">✕</button>
@@ -504,29 +508,138 @@
   }
 
   // ── compartir por WhatsApp (con link en vivo) + imprimir ──
-  function compartir() {
-    const fecha = _fechaActual || _hoyStr();
+  // agrupa las cargas PERSISTIDAS por cargador (orden por actividad reciente); usado por compartir/imagen.
+  function _gruposPersistidos() {
     const persist = _dia.filter(c => c && !c._prov);
-    if (!persist.length) { if (typeof toast === 'function') toast('Sin cargas para compartir', 'warn'); return; }
-    const grupos = {};
-    const orden = [];
-    persist.forEach(c => { const k = String(c.idCargador); if (!grupos[k]) { grupos[k] = { nombre: c.nombre, cargas: [] }; orden.push(k); } grupos[k].cargas.push(c); });
-    const prom = Math.round(persist.reduce((s, c) => s + (parseInt(c.nivel) || 0), 0) / persist.length);
-    const link = 'https://levo19.github.io/warehouseMos-/cargadores.html?fecha=' + fecha;
+    const map = {}, orden = [];
+    persist.forEach(c => { const k = String(c.idCargador); if (!map[k]) { map[k] = { nombre: c.nombre, cargas: [] }; orden.push(k); } map[k].cargas.push(c); });
+    orden.forEach(k => map[k].cargas.sort((a, b) => String(a.hora).localeCompare(String(b.hora))));
+    return { persist, orden, map, prom: persist.length ? Math.round(persist.reduce((s, c) => s + (parseInt(c.nivel) || 0), 0) / persist.length) : 0 };
+  }
+  function _linkReporte(fecha) { return 'https://levo19.github.io/warehouseMos-/cargadores.html?fecha=' + fecha; }
+  function _textoWA(fecha) {
+    const g = _gruposPersistidos();
     const L = ['*🛺 CARGAS DEL DÍA*', fecha, '─────────────────────'];
-    orden.forEach(k => {
-      const g = grupos[k];
-      L.push(`*${g.nombre}* — ${g.cargas.length} carga${g.cargas.length === 1 ? '' : 's'}`);
-      g.cargas.slice().sort((a, b) => String(a.hora).localeCompare(String(b.hora))).forEach(c => {
+    g.orden.forEach(k => {
+      const gr = g.map[k];
+      L.push(`*${gr.nombre}* — ${gr.cargas.length} carga${gr.cargas.length === 1 ? '' : 's'}`);
+      gr.cargas.forEach((c, i) => {
         const p = parseInt(c.nivel) || 0;
         const ico = p >= 75 ? '🟢' : p >= 50 ? '🟡' : p >= 25 ? '🟠' : '🔴';
         const nf = (c.fotos || []).length;
-        L.push(`   ${ico} ⏱${c.hora || ''}  ${p}%${nf ? '  📷' + nf : ''}`);
+        const ed = (c.edito && c.editado && c.editado !== c.hora) ? ' ✎' + c.editado : '';
+        L.push(`   ${i + 1}) ⏱${c.hora || ''}  ${ico} ${p}%${nf ? ' 📷' + nf : ''}${ed}`);
       });
     });
-    L.push('', '━━━━━━━━━━━━━━━━━━', `*${persist.length}* carga(s) · *${orden.length}* cargador(es) · promedio *${prom}%*`, '',
-           '📸 Reporte en vivo (fotos · se actualiza cada 60s):', link, '', '_InversionMos Warehouse_');
-    window.open('https://wa.me/?text=' + encodeURIComponent(L.join('\n')), '_blank');
+    L.push('', '━━━━━━━━━━━━━━━━━━', `*${g.persist.length}* carga(s) · *${g.orden.length}* cargador(es) · promedio *${g.prom}%*`);
+    if (_generado) L.push(`Emitido: ${_generado}`);
+    L.push('', '📸 Reporte en vivo (fotos · se actualiza cada 60s):', _linkReporte(fecha), '', '_InversionMos Warehouse_');
+    return L.join('\n');
+  }
+  // Compartir TEXTO (fallback / opción rápida)
+  function compartir() {
+    const fecha = _fechaActual || _hoyStr();
+    if (!_dia.filter(c => !c._prov).length) { if (typeof toast === 'function') toast('Sin cargas para compartir', 'warn'); return; }
+    window.open('https://wa.me/?text=' + encodeURIComponent(_textoWA(fecha)), '_blank');
+  }
+  // Compartir IMAGEN: dibuja el reporte en canvas y lo comparte (Web Share con archivo en móvil;
+  // en PC descarga el PNG y abre WhatsApp con el link). El link al reporte en vivo va SIEMPRE en el texto.
+  async function compartirImagen() {
+    const fecha = _fechaActual || _hoyStr();
+    const g = _gruposPersistidos();
+    if (!g.persist.length) { if (typeof toast === 'function') toast('Sin cargas para compartir', 'warn'); return; }
+    let canvas;
+    try { canvas = _dibujarReporte(fecha, g); } catch(e) { compartir(); return; }
+    const texto = _textoWA(fecha);
+    canvas.toBlob(async (blob) => {
+      if (!blob) { compartir(); return; }
+      const file = new File([blob], 'cargas-' + fecha + '.png', { type: 'image/png' });
+      try {
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file], text: texto });
+          return;
+        }
+      } catch(_) { /* usuario canceló o no soportado → fallback */ }
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = 'cargas-' + fecha + '.png';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      } catch(_){}
+      window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
+      if (typeof toast === 'function') toast('Imagen descargada — adjúntala en WhatsApp (el link ya va en el texto)', 'info', 4200);
+    }, 'image/png');
+  }
+  // Dibuja el reporte del día en un canvas (tema oscuro dorado WH). Devuelve el canvas.
+  function _dibujarReporte(fecha, g) {
+    const W = 720, PAD = 30, dpr = Math.min(3, window.devicePixelRatio || 2);
+    // medir alto
+    let H = PAD + 52 + 26 + 22 + 74 + 16;   // título + fecha + gap + kpis + gap
+    g.orden.forEach(k => {
+      H += 40;                                  // header cargador
+      g.map[k].cargas.forEach(c => { H += 46; if (c.edito && c.editado && c.editado !== c.hora) H += 16; });
+      H += 12;
+    });
+    H += 20 + 46 + PAD;                         // footer
+    const cv = document.createElement('canvas');
+    cv.width = W * dpr; cv.height = H * dpr;
+    const x = cv.getContext('2d'); x.scale(dpr, dpr);
+    const col = (p) => p >= 75 ? '#10b981' : p >= 50 ? '#fbbf24' : p >= 25 ? '#f97316' : '#ef4444';
+    const rr = (px, py, w, h, r) => { x.beginPath(); x.moveTo(px + r, py); x.arcTo(px + w, py, px + w, py + h, r); x.arcTo(px + w, py + h, px, py + h, r); x.arcTo(px, py + h, px, py, r); x.arcTo(px, py, px + w, py, r); x.closePath(); };
+    // fondo
+    x.fillStyle = '#0b0f17'; x.fillRect(0, 0, W, H);
+    let y = PAD;
+    // título
+    x.textBaseline = 'alphabetic';
+    x.fillStyle = '#fcd34d'; x.font = '800 32px -apple-system,Segoe UI,Roboto,sans-serif';
+    x.fillText('🛺 Cargas del día', PAD, y + 30); y += 44;
+    x.fillStyle = '#93a4c2'; x.font = '600 15px ui-monospace,monospace';
+    x.fillText(fecha + (_generado ? '   ·   emitido ' + _generado : ''), PAD, y + 12); y += 34;
+    // KPIs
+    const kpis = [['Cargas', g.persist.length, '#6ee7b7'], ['Cargadores', g.orden.length, '#93c5fd'], ['Promedio', g.prom + '%', '#fcd34d']];
+    const kw = (W - 2 * PAD - 2 * 12) / 3;
+    kpis.forEach((k, i) => {
+      const kx = PAD + i * (kw + 12);
+      x.fillStyle = '#12100a'; rr(kx, y, kw, 66, 13); x.fill();
+      x.strokeStyle = 'rgba(245,158,11,.22)'; x.lineWidth = 1; rr(kx, y, kw, 66, 13); x.stroke();
+      x.fillStyle = '#7f8ba3'; x.font = '800 10px -apple-system,sans-serif';
+      x.fillText(String(k[0]).toUpperCase(), kx + 13, y + 22);
+      x.fillStyle = k[2]; x.font = '900 26px ui-monospace,monospace';
+      x.fillText(String(k[1]), kx + 13, y + 52);
+    });
+    y += 66 + 18;
+    // grupos
+    g.orden.forEach(k => {
+      const gr = g.map[k];
+      x.fillStyle = '#fcd34d'; x.font = '800 19px -apple-system,sans-serif';
+      x.fillText('🛺 ' + gr.nombre, PAD, y + 20);
+      x.fillStyle = '#fbbf24'; x.font = '800 12px ui-monospace,monospace'; x.textAlign = 'right';
+      x.fillText(gr.cargas.length + ' carga' + (gr.cargas.length === 1 ? '' : 's'), W - PAD, y + 19);
+      x.textAlign = 'left'; y += 34;
+      gr.cargas.forEach((c, i) => {
+        const p = Math.max(0, Math.min(100, parseInt(c.nivel) || 0));
+        x.fillStyle = '#cbd5e1'; x.font = '800 13px ui-monospace,monospace';
+        x.fillText((i + 1) + ')  ⏱ ' + (c.hora || ''), PAD, y + 15);
+        const nf = (c.fotos || []).length;
+        let extra = (nf ? '  📷' + nf : '') + ((c.edito && c.editado && c.editado !== c.hora) ? '   ✎ ' + c.editado : '');
+        if (extra) { x.fillStyle = '#7f8ba3'; x.font = '700 11px ui-monospace,monospace'; x.fillText(extra, PAD + 132, y + 15); }
+        // barra
+        const bx = PAD, bw = W - 2 * PAD - 62, by = y + 24, bh = 16;
+        x.fillStyle = '#060b13'; rr(bx, by, bw, bh, 8); x.fill();
+        x.fillStyle = col(p); rr(bx, by, Math.max(bh, bw * p / 100), bh, 8); x.fill();
+        x.fillStyle = col(p); x.font = '900 15px ui-monospace,monospace'; x.textAlign = 'right';
+        x.fillText(p + '%', W - PAD, by + 14); x.textAlign = 'left';
+        y += 46; if (c.edito && c.editado && c.editado !== c.hora) y += 16;
+      });
+      y += 12;
+    });
+    // footer
+    x.strokeStyle = 'rgba(148,164,194,.18)'; x.beginPath(); x.moveTo(PAD, y); x.lineTo(W - PAD, y); x.stroke(); y += 22;
+    x.fillStyle = '#93a4c2'; x.font = '700 12px -apple-system,sans-serif';
+    x.fillText('📸 Reporte en vivo (fotos, se actualiza cada 60s):', PAD, y + 4); y += 20;
+    x.fillStyle = '#fcd34d'; x.font = '700 12px ui-monospace,monospace';
+    x.fillText(_linkReporte(fecha), PAD, y + 4);
+    return cv;
   }
   async function imprimir() {
     const fecha = _fechaActual || _hoyStr();
@@ -556,7 +669,7 @@
   }
 
   window.Cargadores = {
-    abrir, cerrar, agregar, quitar, compartir, imprimir, toggleAdd,
+    abrir, cerrar, agregar, quitar, compartir, compartirImagen, imprimir, toggleAdd,
     startPolling, getCountDia, refreshCountDia,
     _filtrar, _hoyStr, _pickFoto, _carousel
   };

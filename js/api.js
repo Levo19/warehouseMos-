@@ -153,30 +153,38 @@ const API = (() => {
     const ok = await _imprimirDirecto(printerId, _escposB64(escpos), title || 'warehouseMos');
     return ok ? { ok: true, data: { impreso: true } } : { ok: false, error: 'PrintNode rechazó' };
   }
-  // [v2.13.491] ESC/POS del reporte — modelo de CARGAS (log de eventos). Shape de cargadores_ticket_dia:
-  // {fecha, totalCargas, totalCargadores, promedio, cargadores:[{nombre, nCargas, cargas:[{hora, nivel, fotos(count)}]}]}.
-  // Cada cargador lista sus cargas con hora, barra de nivel y conteo de fotos. Defensivo ante shape vacío.
+  // [v2.13.494] ESC/POS del reporte — modelo de CARGAS (log de eventos). Shape de cargadores_ticket_dia:
+  // {fecha, totalCargas, totalCargadores, promedio, generado, cargadores:[{nombre, nCargas,
+  //   cargas:[{hora, editado, edito, nivel, fotos(count)}]}]}. Enumera las cargas de cada cargador con su hora
+  // de registro, barra de nivel, fotos y (si aplica) hora de última edición. Emisión + link al reporte online.
   function _armarCargadoresEscPos(d) {
     const SEP = '================================================', SEP2 = '------------------------------------------------';
     const pad = (a, b) => { a = String(a || ''); b = String(b || ''); const n = 48 - a.length - b.length; return a + (n > 0 ? ' '.repeat(n) : ' ') + b; };
     const barra = (p) => { p = Math.max(0, Math.min(100, parseInt(p) || 0)); const full = Math.round(p / 5); return '[' + '#'.repeat(full) + '.'.repeat(20 - full) + ']'; };
-    const estado = (p) => { p = parseInt(p) || 0; return p >= 75 ? 'LLENO' : p >= 50 ? 'MEDIA' : p >= 25 ? 'POCA' : 'VACIO'; };
+    const estado = (p) => { p = parseInt(p) || 0; return p >= 75 ? 'LLENO' : p >= 50 ? 'MEDIA CARGA' : p >= 25 ? 'POCA CARGA' : 'CASI VACIO'; };
     const cargs = Array.isArray(d.cargadores) ? d.cargadores : [];
-    let t = '\x1b\x61\x01\x1b\x21\x38CARGAS\n\x1b\x21\x00\x1b\x45\x01' + String(d.fecha || '').toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
+    const fecha = String(d.fecha || '');
+    let t = '\x1b\x61\x01\x1b\x21\x38CARGAS\n\x1b\x21\x00\x1b\x45\x01' + fecha.toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
     t += pad('Cargas del dia:', String(d.totalCargas != null ? d.totalCargas : 0)) + '\n';
     t += pad('Cargadores:', String(d.totalCargadores != null ? d.totalCargadores : cargs.length)) + '\n';
-    t += pad('Carga promedio:', String(d.promedio != null ? d.promedio : 0) + '%') + '\n' + SEP2 + '\n';
+    t += pad('Carga promedio:', String(d.promedio != null ? d.promedio : 0) + '%') + '\n';
+    if (d.generado) t += pad('Emitido:', String(d.generado)) + '\n';
+    t += SEP2 + '\n';
     if (!cargs.length) t += '  (sin cargas registradas ese dia)\n';
     cargs.forEach(c => {
       const cargas = Array.isArray(c.cargas) ? c.cargas : [];
       t += '\x1b\x45\x01' + String(c.nombre || '').toUpperCase() + '\x1b\x45\x00' + '  (' + cargas.length + ' carga' + (cargas.length === 1 ? '' : 's') + ')\n';
-      cargas.forEach(k => {
+      cargas.forEach((k, i) => {
         const niv = parseInt(k.nivel) || 0, nf = parseInt(k.fotos) || 0;
-        t += pad('  ' + String(k.hora || '') + ' ' + barra(niv) + ' ' + niv + '%', estado(niv) + (nf ? ' ' + nf + 'f' : '')) + '\n';
+        t += pad('  ' + (i + 1) + ') ' + String(k.hora || '') + '  ' + niv + '%', estado(niv) + (nf ? '  ' + nf + 'f' : '')) + '\n';
+        t += '     ' + barra(niv) + '\n';
+        if (k.edito && k.editado && k.editado !== k.hora) t += '     (ult. edicion ' + k.editado + ')\n';
       });
       t += '\n';
     });
-    t += SEP + '\n\x1b\x61\x01\x1b\x45\x01CARGA PROMEDIO\x1b\x45\x00\n\x1b\x21\x38\x1b\x45\x01' + (d.promedio || 0) + '%\x1b\x21\x00\x1b\x45\x00\n\x1b\x61\x00' + SEP;
+    t += SEP + '\n\x1b\x61\x01\x1b\x21\x38\x1b\x45\x01' + (d.promedio || 0) + '%\x1b\x21\x00\x1b\x45\x00\n';
+    t += '\x1b\x45\x01PROMEDIO DEL DIA\x1b\x45\x00\n\x1b\x61\x00' + SEP2 + '\n';
+    t += '\x1b\x61\x01Reporte online (fotos, se actualiza):\nlevo19.github.io/warehouseMos-/\ncargadores.html?fecha=' + fecha + '\n\x1b\x61\x00' + SEP;
     return t;
   }
 
