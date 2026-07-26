@@ -383,7 +383,16 @@
   async function quitar(idCarga) {
     const c = _dia.find(x => String(x.idCarga) === String(idCarga));
     const nombre = (c || {}).nombre || 'cargador';
-    if (!(c && c._prov) && window.App && App.confirmar) { const ok = await App.confirmar('¿Quitar esta carga de ' + nombre + '?'); if (!ok) return; }
+    // Confirmación SIEMPRE (evita borrar una carga de casualidad). Modal moderno _whConfirm.
+    if (typeof window._whConfirm === 'function') {
+      const p = (c && parseInt(c.nivel)) || 0;
+      const nf = (c && Array.isArray(c.fotos)) ? c.fotos.length : 0;
+      const det = [p ? p + '%' : null, nf ? nf + (nf === 1 ? ' foto' : ' fotos') : null].filter(Boolean).join(' · ');
+      const ok = await window._whConfirm(
+        `¿Quitar esta carga de ${nombre}${c && c.hora ? ' (⏱ ' + c.hora + ')' : ''}?` + (det ? `\n\nSe elimina: ${det}.` : ''),
+        { danger: true, titulo: '🛺 Quitar carga', okText: 'Quitar' });
+      if (!ok) return;
+    }
     _dia = _dia.filter(x => String(x.idCarga) !== String(idCarga));
     _render();
     if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
