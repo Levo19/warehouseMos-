@@ -110,6 +110,12 @@
       .cgv-fotos-row::-webkit-scrollbar{height:5px}.cgv-fotos-row::-webkit-scrollbar-thumb{background:#334155;border-radius:9px}
       .cgv-th-img{width:88px;height:88px;flex:0 0 auto;border-radius:13px;overflow:hidden;border:1px solid #3a4d6e;cursor:zoom-in;background:#060b13;position:relative}
       .cgv-th-img img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s}
+      /* thumb en subida: preview local + spinner (certeza de que está guardando) */
+      .cgv-th-loading{cursor:default;border-color:#7a5210}
+      .cgv-th-loading img{opacity:.4;filter:blur(1px)}
+      .cgv-spin{position:absolute;inset:0;margin:auto;width:26px;height:26px;border:3px solid rgba(252,211,77,.28);border-top-color:#fcd34d;border-radius:50%;animation:cgvSpin .7s linear infinite}
+      .cgv-th-loading::after{content:'guardando…';position:absolute;left:0;right:0;bottom:0;font-size:8px;font-weight:800;text-align:center;color:#fcd34d;background:rgba(5,8,14,.72);padding:2px 0;letter-spacing:.02em}
+      @keyframes cgvSpin{to{transform:rotate(360deg)}}
       .cgv-th-img:active img{transform:scale(1.06)}
       .cgv-th-img .z{position:absolute;right:4px;bottom:4px;background:rgba(5,8,14,.72);border-radius:6px;font-size:10px;padding:1px 4px;color:#e7eef8}
       .cgv-foto-add{width:88px;height:88px;flex:0 0 auto;border-radius:13px;border:2px dashed #5c3908;background:rgba(252,211,77,.04);color:#fbbf24;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer}
@@ -468,20 +474,54 @@
     inp.onchange = (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) _subirFoto(idCarga, f); };
     inp.click();
   }
+  // Comprime la foto en el navegador (cámara de celular ~5MB → ~0.3-0.6MB) → sube MUCHO más rápido.
+  // Máx lado mayor 1600px, JPEG calidad .82. No toca gif/svg. Devuelve {blob, mime} o null (usar original).
+  async function _comprimirImagen(file, maxDim, q) {
+    try {
+      if (!/^image\//.test(file.type || '') || /gif|svg/.test(file.type || '')) return null;
+      const dataUrl = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(null); fr.readAsDataURL(file); });
+      if (!dataUrl) return null;
+      const img = await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = dataUrl; });
+      if (!img || !img.width) return null;
+      let w = img.width, h = img.height;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', q || 0.82));
+      return (blob && blob.size) ? { blob, mime: 'image/jpeg' } : null;
+    } catch(_) { return null; }
+  }
   async function _subirFoto(idCarga, file) {
-    if (file.size > 6 * 1024 * 1024) { if (typeof toast === 'function') toast('Foto muy pesada (máx 6MB)', 'warn'); return; }
+    if (file.size > 20 * 1024 * 1024) { if (typeof toast === 'function') toast('Foto muy pesada (máx 20MB)', 'warn'); return; }
     const c = _dia.find(x => String(x.idCarga) === String(idCarga));
     const add = document.getElementById('cgvAdd_' + _escAttr(idCarga)); if (add) add.classList.add('busy');
-    const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.readAsDataURL(file); });
+    // [v2.13.496] preview OPTIMISTA con spinner: aparece la miniatura al instante mientras sube → certeza.
+    const localUrl = (() => { try { return URL.createObjectURL(file); } catch(_) { return ''; } })();
+    let loadEl = null;
+    const row = document.getElementById('cgvFotos_' + _escAttr(idCarga));
+    if (row) {
+      loadEl = document.createElement('div'); loadEl.className = 'cgv-th-img cgv-th-loading';
+      loadEl.innerHTML = `<img src="${localUrl}" alt=""><span class="cgv-spin"></span>`;
+      const ab = row.querySelector('.cgv-foto-add'); if (ab) row.insertBefore(loadEl, ab); else row.appendChild(loadEl);
+    }
+    // comprimir antes de subir (acelera la subida y aligera el reporte en vivo)
+    let blob = file, mime = file.type || 'image/jpeg';
+    try { const rc = await _comprimirImagen(file, 1600, 0.82); if (rc && rc.blob) { blob = rc.blob; mime = rc.mime; } } catch(_){}
+    const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => res(''); r.readAsDataURL(blob); });
     try {
-      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: file.type || 'image/jpeg', nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
+      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: mime, nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok && res.data) {
-        if (c) { c.fotos = res.data.fotos || c.fotos; c._prov = false; _actualizarFotos(idCarga); }
+        if (c) { c.fotos = res.data.fotos || c.fotos; c._prov = false; }
         if (navigator.vibrate) navigator.vibrate(12);
+        _actualizarFotos(idCarga);   // re-render: quita el thumb de carga y pinta la foto real
         if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
-      } else { if (typeof toast === 'function') toast('No se subió la foto: ' + ((res && res.error) || '?'), 'warn'); }
-    } catch(e){ if (typeof toast === 'function') toast('No se subió la foto — reintenta', 'warn'); }
-    finally { if (add) add.classList.remove('busy'); }
+      } else {
+        if (loadEl) loadEl.remove();
+        if (typeof toast === 'function') toast('No se subió la foto: ' + ((res && res.error) || '?'), 'warn');
+      }
+    } catch(e){ if (loadEl) loadEl.remove(); if (typeof toast === 'function') toast('No se subió la foto — reintenta', 'warn'); }
+    finally { if (add) add.classList.remove('busy'); if (localUrl) { try { URL.revokeObjectURL(localUrl); } catch(_){} } }
   }
   function _actualizarFotos(idCarga) {
     const card = document.getElementById('cgvCarga_' + _escAttr(idCarga)); if (!card) return;

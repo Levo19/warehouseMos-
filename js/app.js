@@ -877,23 +877,34 @@ async function precargarConteoCargas(reRender) {
           if (hk) { const vivo = Cargadores.getCountDia(hk) || 0; if (vivo > (window._cargasPorDia[hk] || 0)) window._cargasPorDia[hk] = vivo; }
         }
       } catch(_){}
-      if (reRender !== false) {
-        try { if (window.GuiasView && GuiasView.silentRefresh) GuiasView.silentRefresh(); } catch(_){}
-        try { if (window.PreingresosView && PreingresosView.silentRefresh) PreingresosView.silentRefresh(); } catch(_){}
-      }
+      if (reRender !== false) { try { actualizarCargaPills(); } catch(_){} }
     }
   } catch(_){}
 }
 // Chip 🛺 por día: SIEMPRE visible y clickeable (abre el modal de cargas de ese día). Moto punteada cuando 0.
 function _cargaPillHTML(key) {
-  // dispara la precarga del mapa la 1ª vez que se pinta un pill EN CUALQUIER vista (no solo dashboard),
-  // luego silentRefresh re-renderiza con los conteos reales. Guard evita bucle/recarga doble.
+  // dispara la precarga del mapa la 1ª vez que se pinta un pill EN CUALQUIER vista (no solo dashboard).
   if (!window._conteoCargasPrecargado) { window._conteoCargasPrecargado = true; try { precargarConteoCargas(); } catch(_){} }
-  const n = (window._cargasPorDia && window._cargasPorDia[key]) || 0;
+  let n = (window._cargasPorDia && window._cargasPorDia[key]) || 0;
+  // [v2.13.496] OPTIMISTA para HOY: usar el conteo VIVO en memoria del módulo (instantáneo, igual que el chip
+  // del dashboard) → apenas registras una carga el pill de guías/preingresos la refleja sin esperar al servidor.
+  try { if (window.Cargadores && Cargadores.getCountDia) { const v = Cargadores.getCountDia(key) || 0; if (v > n) n = v; } } catch(_){}
   const vacia = n <= 0;
   const cls = 'carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold' + (vacia ? ' carg-pill-empty' : '');
   const txt = vacia ? '+ carga' : (n + ' carga' + (n === 1 ? '' : 's'));
-  return `<button onclick="PreingresosView.abrirCargadoresDia('${key}')" class="${cls}"><span>🛺</span><span>${txt}</span></button>`;
+  return `<button id="cargPill_${key}" onclick="PreingresosView.abrirCargadoresDia('${key}')" class="${cls}"><span>🛺</span><span>${txt}</span></button>`;
+}
+// Actualiza EN SITIO todos los pills 🛺 de día visibles (sin re-renderizar la lista → sin saltos de scroll).
+// Se llama al registrar/quitar una carga y al cerrar el modal → los pills reflejan el cambio al instante.
+function actualizarCargaPills() {
+  try {
+    document.querySelectorAll('[id^="cargPill_"]').forEach(btn => {
+      const key = btn.id.slice(9);   // 'cargPill_'.length === 9
+      const tmp = document.createElement('div'); tmp.innerHTML = _cargaPillHTML(key);
+      const fresh = tmp.firstElementChild;
+      if (fresh) btn.replaceWith(fresh);
+    });
+  } catch(_){}
 }
 
 // Construye el detalle agrupado por cargador (mismo shape que devolvía
@@ -4991,6 +5002,9 @@ const App = (() => {
 
   async function actualizarChipDia() {
     if (typeof Cargadores === 'undefined' || !Cargadores.refreshCountDia) return;
+    // [v2.13.496] refresco EN VIVO de los pills 🛺 de guías/preingresos junto con el chip del dashboard
+    // (usa el conteo vivo en memoria → optimista, sin esperar al servidor).
+    try { actualizarCargaPills(); } catch(_){}
     let n = 0;
     try { n = await Cargadores.refreshCountDia(); } catch(_) { return; }
     const el = document.getElementById('dashChipCarg');
@@ -4998,7 +5012,7 @@ const App = (() => {
     el.className = 'dash-chip ' + (n > 0 ? 'dc-violet' : 'dc-carg-new');
     const num = el.querySelector('.dash-chip-num'), lbl = el.querySelector('.dash-chip-lbl');
     if (num) num.textContent = n > 0 ? n : '+';
-    if (lbl) lbl.textContent = n > 0 ? (n === 1 ? 'cargador' : 'cargadores') : 'registrar';
+    if (lbl) lbl.textContent = n > 0 ? (n === 1 ? 'carga' : 'cargas') : 'registrar';
   }
 
   // ════════════════════════════════════════════════
