@@ -18962,6 +18962,10 @@ const PreingresosView = (() => {
   }
 
   function abrirCargadoresDia(fechaKey) {
+    // [v2.13.487] UNIFICADO: abre el modal NUEVO (termómetro + fotos, cargadores_log independiente).
+    // El modal viejo (sheetCargadoresDia · semáforos desde preingresos) queda DEPRECADO — un solo sistema.
+    if (window.Cargadores && Cargadores.abrir) { Cargadores.abrir(fechaKey); return; }
+    // fallback legacy (por si Cargadores aún no cargó)
     _cargDiaState.fecha = fechaKey;
     document.getElementById('cargDiaFechaLbl').textContent = _fmtFechaLabel(fechaKey);
     _cargDiaState.data = _calcularCargadoresDelDia(fechaKey);
