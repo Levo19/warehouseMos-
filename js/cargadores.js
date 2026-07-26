@@ -118,15 +118,20 @@
       if (prov.length) _master = prov;     // muestra ya lo cacheado
       // SIEMPRE refrescar del RPC directo (cero GAS) → aparece AL INSTANTE lo que el admin acaba de crear
       // en MOS (los cargadores son proveedores CARGADOR; el operador solo los registra, no los crea).
+      let rpcDefinitivo = false;
       if (!_masterLoading) {
         _masterLoading = true;
         try {
           const res = await API.get('listarCargadoresMaster');
-          if (res && res.ok && Array.isArray(res.data) && res.data.length) prov = res.data;
+          // [FIX 500x #3] Confiar en la lista AUTORITATIVA del servidor, incluso vacía: si el admin dio
+          // de baja al último cargador, [] debe reflejarse (antes exigía .length → la baja quedaba pegada).
+          if (res && res.ok && Array.isArray(res.data)) { prov = res.data; rpcDefinitivo = true; }
         } catch(_) {}
         _masterLoading = false;
       }
-      if (!prov.length && window.OfflineManager && OfflineManager.precargar) {
+      // Solo precargar maestros si el RPC NO dio respuesta definitiva y no hay nada en cache (evita
+      // que el cache STALE pise una lista vacía autoritativa del servidor).
+      if (!rpcDefinitivo && !prov.length && window.OfflineManager && OfflineManager.precargar) {
         try { await OfflineManager.precargar('manual'); } catch(_){}
         prov = _leerCargProv();
       }
@@ -141,10 +146,29 @@
     fecha = fecha || _hoyStr();
     try {
       const res = await API.get('getResumenCargadoresDia', { fecha });
-      if (res && res.ok && res.data) { _dia = res.data.cargadores || []; _fechaActual = res.data.fecha || fecha; return res.data; }
+      if (res && res.ok && res.data) {
+        const server = res.data.cargadores || [];
+        const nuevaFecha = res.data.fecha || fecha;
+        // [FIX 500x #1/#2] refreshCountDia (chip del dashboard) llama aquí CON EL MODAL ABIERTO.
+        // Si reemplazábamos _dia a secas, las tarjetas PROVISIONALES (agregadas pero aún no
+        // persistidas) desaparecían del array → el siguiente _endDrag no las encontraba, se saltaba
+        // el guard de ≥10% y persistía nivel bajo/nombre vacío. Ahora FUSIONAMOS: el servidor manda
+        // para lo persistido, pero conservamos las provisionales locales del MISMO día que aún no
+        // están en el servidor. Si cambió el día, reemplazo total (contexto nuevo).
+        if (_fechaActual === nuevaFecha) {
+          const provLocales = _dia.filter(c => c && c._prov && !server.some(s => String(s.idCargador) === String(c.idCargador)));
+          _dia = server.concat(provLocales);
+        } else {
+          _dia = server;
+        }
+        _fechaActual = nuevaFecha;
+        return res.data;
+      }
     } catch(e){}
-    _dia = []; _fechaActual = fecha;
-    return { fecha, total: 0, cargadores: [] };
+    // [FIX 500x #2] Respuesta no-ok / error transitorio (token en rotación, offline): NO borrar el
+    // working set del modal abierto — conservar _dia y la fecha actuales.
+    _fechaActual = _fechaActual || fecha;
+    return { fecha: _fechaActual, total: _dia.length, cargadores: _dia };
   }
 
   function abrir(fecha) {
@@ -154,6 +178,10 @@
     document.getElementById('modalCargadores').classList.add('open');
     const inp = document.getElementById('cargBuscarInput');
     if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 100); }
+    // [FIX 500x #1] Descartar provisionales abandonadas de una apertura previa (agregadas pero nunca
+    // registradas ≥10%); conservar las persistidas para el render instantáneo. El _cargarResumen de
+    // abajo recarga lo real del servidor. Así la fusión de _cargarResumen no arrastra fantasmas.
+    _dia = _dia.filter(c => c && !c._prov);
     if (_master.length || _dia.length) { _render(); _filtrar(''); }
     else { const l = document.getElementById('cargCoincidencias'); if (l) l.innerHTML = '<p style="color:#64748b;font-size:13px;padding:14px 0;text-align:center">Cargando…</p>'; }
     Promise.all([_cargarMaster(), _cargarResumen(fecha)]).then(() => { _render(); _filtrar(inp ? inp.value : ''); }).catch(()=>{});
@@ -385,12 +413,15 @@
   // (cargadores.html, refresco 60s, con fotos). La jefa lo abre y ve el estado actualizado con fotos.
   function compartir() {
     const fecha = _fechaActual || _hoyStr();
-    if (!_dia.length) { if (typeof toast === 'function') toast('Sin cargadores para compartir', 'warn'); return; }
-    const total = _dia.length;
-    const prom = Math.round(_dia.reduce((s, c) => s + (parseInt(c.nivel) || 0), 0) / total);
+    // [FIX 500x] Compartir SOLO lo persistido (excluye provisionales aún no registradas) para que el
+    // texto de WhatsApp coincida con el link en vivo (que lee del servidor).
+    const persistidos = _dia.filter(c => c && !c._prov);
+    if (!persistidos.length) { if (typeof toast === 'function') toast('Sin cargadores para compartir', 'warn'); return; }
+    const total = persistidos.length;
+    const prom = Math.round(persistidos.reduce((s, c) => s + (parseInt(c.nivel) || 0), 0) / total);
     const link = 'https://levo19.github.io/warehouseMos-/cargadores.html?fecha=' + fecha;
     const L = ['*🛺 CARGADORES DEL DÍA*', fecha, '─────────────────────'];
-    _dia.slice().sort((a, b) => (parseInt(b.nivel) || 0) - (parseInt(a.nivel) || 0)).forEach(c => {
+    persistidos.slice().sort((a, b) => (parseInt(b.nivel) || 0) - (parseInt(a.nivel) || 0)).forEach(c => {
       const p = parseInt(c.nivel) || 0;
       const ico = p >= 75 ? '🟢' : p >= 50 ? '🟡' : p >= 25 ? '🟠' : '🔴';
       const nf = (c.fotos || []).length;
@@ -412,7 +443,15 @@
   }
 
   function getCountDia(fecha) { fecha = fecha || _hoyStr(); return (_fechaActual === fecha) ? _dia.length : 0; }
-  async function refreshCountDia(fecha) { const r = await _cargarResumen(fecha || _hoyStr()); return (r.cargadores || []).length; }
+  async function refreshCountDia(fecha) {
+    fecha = fecha || _hoyStr();
+    // [FIX 500x #1] Con el modal ABIERTO y en el mismo día, _dia es la fuente VIVA (el operador está
+    // registrando ahora mismo). No la recargues desde el servidor — devuelve el conteo local para el chip.
+    const m = document.getElementById('modalCargadores');
+    if (m && m.classList.contains('open') && _fechaActual === fecha) return _dia.length;
+    const r = await _cargarResumen(fecha);
+    return (r.cargadores || []).length;
+  }
 
   window.Cargadores = {
     abrir, cerrar, agregar, quitar, compartir, imprimir,
