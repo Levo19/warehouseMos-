@@ -869,6 +869,11 @@ const API = (() => {
     if (action === 'getResumenCargadoresDia') {
       return await _sbRpcWH('resumen_cargadores_dia', { p: { fecha: params.fecha || '' } }, 'wh');
     }
+    // [v2.13.485] catálogo de cargadores (proveedores prefijo CARGADOR) DIRECTO de Supabase (cero GAS).
+    // Antes no tenía handler → caía a GAS → el buscador del modal no filtraba nada.
+    if (action === 'listarCargadoresMaster') {
+      return await _sbRpcWH('listar_cargadores_master', { p: {} }, 'wh');
+    }
     // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
     // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;
     // esto saca el round-trip a GAS del navegador. Read-only.

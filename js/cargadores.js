@@ -114,12 +114,18 @@
   }
   async function _cargarMaster() {
     try {
-      let prov = _leerCargProv();
-      if (!prov.length && !_masterLoading && window.OfflineManager && OfflineManager.precargar) {
+      let prov = _leerCargProv();   // cache local (instantáneo)
+      if (!prov.length && !_masterLoading) {
         _masterLoading = true;
-        try { await OfflineManager.precargar('manual'); } catch(_){}
+        try {
+          const res = await API.get('listarCargadoresMaster');   // RPC directo wh.listar_cargadores_master (cero GAS)
+          if (res && res.ok && Array.isArray(res.data)) prov = res.data;
+        } catch(_) {}
+        if (!prov.length && window.OfflineManager && OfflineManager.precargar) {
+          try { await OfflineManager.precargar('manual'); } catch(_){}
+          prov = _leerCargProv();
+        }
         _masterLoading = false;
-        prov = _leerCargProv();
       }
       _master = prov;
       // si el modal sigue abierto, refresca la lista con lo cargado (respeta el texto escrito)
