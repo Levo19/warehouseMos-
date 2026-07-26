@@ -100,17 +100,33 @@
     document.head.appendChild(st);
   }
 
-  // [v2.13.484] 100% Supabase, CERO GAS: el master de cargadores = proveedores con prefijo "CARGADOR"
-  // tomados del CACHE local (OfflineManager), igual que el picker del preingreso. Antes usaba
-  // API.get('listarCargadoresMaster') que NO tiene handler cero-GAS → caía a GAS (muerto) → master vacío
-  // → el buscador no filtraba nada. Se re-lee el cache cada vez (barato) para reflejar cargadores nuevos.
+  // [v2.13.485] 100% Supabase, CERO GAS: el master de cargadores = proveedores con prefijo "CARGADOR"
+  // tomados del CACHE local (OfflineManager), igual que el picker del preingreso. Si el cache aún no está
+  // cargado (ej. abriste el modal desde el dashboard sin haber entrado a un preingreso), se dispara la
+  // precarga de maestros (misma que usa el picker) y se re-lee. Antes usaba API.get('listarCargadoresMaster')
+  // que NO tiene handler cero-GAS → caía a GAS (muerto) → master vacío → el buscador no filtraba nada.
+  let _masterLoading = false;
+  function _leerCargProv() {
+    const all = (window.OfflineManager && OfflineManager.getProveedoresCache) ? (OfflineManager.getProveedoresCache() || []) : [];
+    return all
+      .filter(p => String(p.nombre || '').trim().toUpperCase().indexOf('CARGADOR') === 0 && String(p.estado || '') === '1')
+      .map(p => ({ idCargador: p.idProveedor, nombre: (String(p.nombre || '').replace(/^CARGADOR\s*/i, '').trim() || p.nombre) }));
+  }
   async function _cargarMaster() {
     try {
-      const prov = (window.OfflineManager && OfflineManager.getProveedoresCache) ? (OfflineManager.getProveedoresCache() || []) : [];
-      _master = prov
-        .filter(p => String(p.nombre || '').trim().toUpperCase().indexOf('CARGADOR') === 0 && String(p.estado || '') === '1')
-        .map(p => ({ idCargador: p.idProveedor, nombre: (String(p.nombre || '').replace(/^CARGADOR\s*/i, '').trim() || p.nombre) }));
-    } catch(e) { _master = []; }
+      let prov = _leerCargProv();
+      if (!prov.length && !_masterLoading && window.OfflineManager && OfflineManager.precargar) {
+        _masterLoading = true;
+        try { await OfflineManager.precargar('manual'); } catch(_){}
+        _masterLoading = false;
+        prov = _leerCargProv();
+      }
+      _master = prov;
+      // si el modal sigue abierto, refresca la lista con lo cargado (respeta el texto escrito)
+      const inp = document.getElementById('cargBuscarInput');
+      const m = document.getElementById('modalCargadores');
+      if (inp && m && m.classList.contains('open')) _filtrar(inp.value);
+    } catch(e) { _masterLoading = false; _master = []; }
     return _master;
   }
   async function _cargarResumen(fecha) {
@@ -188,7 +204,6 @@
     const ql = q.toLowerCase();
     const listEl = document.getElementById('cargCoincidencias');
     if (!listEl) return;
-    if (!_master.length) _cargarMaster();   // por si el cache llegó tarde
     const yaHoy = new Set(_dia.map(c => String(c.idCargador)));
     let cand = _master;
     if (ql) cand = _master.filter(c => String(c.nombre || '').toLowerCase().includes(ql) || String(c.idCargador || '').toLowerCase().includes(ql));
