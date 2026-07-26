@@ -886,6 +886,9 @@ async function precargarConteoCargas(reRender) {
 }
 // Chip 🛺 por día: SIEMPRE visible y clickeable (abre el modal de cargas de ese día). Moto punteada cuando 0.
 function _cargaPillHTML(key) {
+  // dispara la precarga del mapa la 1ª vez que se pinta un pill EN CUALQUIER vista (no solo dashboard),
+  // luego silentRefresh re-renderiza con los conteos reales. Guard evita bucle/recarga doble.
+  if (!window._conteoCargasPrecargado) { window._conteoCargasPrecargado = true; try { precargarConteoCargas(); } catch(_){} }
   const n = (window._cargasPorDia && window._cargasPorDia[key]) || 0;
   const vacia = n <= 0;
   const cls = 'carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold' + (vacia ? ' carg-pill-empty' : '');
