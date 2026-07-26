@@ -48,34 +48,58 @@
   }
 
   // ── layout de un ticket (mide si draw=false, dibuja si draw=true). Devuelve el nuevo y. ──
-  function _ticket(x, t, y0, W, PAD, draw, rr, wrap, trunc) {
+  //    qr (opcional): objeto qrcode-generator → se dibuja GRANDE a la derecha de la cabecera con chip "Escanéame".
+  function _ticket(x, t, y0, W, PAD, draw, rr, wrap, trunc, qr) {
     let y = y0;
     const isG = t.kind === 'guia';
     const ac = _accent(t);
-    const headerH = isG ? 98 : 82;
+    const hasQR = !!qr;
+    let qrSize = 0;
+    if (hasQR) { const cnt = qr.getModuleCount(), tot = cnt + 4, cell = Math.max(1, Math.floor(84 / tot)); qrSize = cell * tot; }
+    const baseH = isG ? 98 : 82;
+    const headerH = hasQR ? Math.max(baseH, qrSize + 36) : baseH;
     if (draw) {
       x.fillStyle = ac.bg; x.fillRect(PAD, y, W - 2*PAD, headerH);
       x.fillStyle = 'rgba(0,0,0,.06)'; x.fillRect(PAD, y+headerH-1, W-2*PAD, 1);
-      // brand + ribbon
+      let leftRight = W-PAD-16;   // límite derecho del contenido de la izquierda
+      if (hasQR) {
+        const cnt = qr.getModuleCount(), quiet = 2, total = cnt + quiet*2, cell = Math.max(1, Math.floor(84/total)), size = cell*total;
+        const qx = W-PAD-16-size, qy = y+12;
+        x.fillStyle = '#fff'; rr(qx-5, qy-5, size+10, size+10, 8); x.fill();
+        x.strokeStyle = 'rgba(0,0,0,.12)'; x.lineWidth = 1; rr(qx-5, qy-5, size+10, size+10, 8); x.stroke();
+        x.fillStyle = '#14151b';
+        for (let r=0;r<cnt;r++) for (let c=0;c<cnt;c++) if (qr.isDark(r,c)) x.fillRect(qx+(c+quiet)*cell, qy+(r+quiet)*cell, cell, cell);
+        const chip = '📲 Escanéame'; x.font = '800 10px -apple-system,Segoe UI,sans-serif';
+        const cw = x.measureText(chip).width + 16, chx = qx+size/2-cw/2, chy = qy+size+7;
+        x.fillStyle = ac.main; rr(chx, chy, cw, 17, 8); x.fill();
+        x.fillStyle = '#fff'; x.textAlign = 'center'; x.fillText(chip, qx+size/2, chy+12); x.textAlign = 'left';
+        leftRight = qx-14;
+      }
+      // brand (+ ribbon solo si no hay QR a la derecha)
       x.fillStyle = '#8b93a1'; x.font = '800 10px -apple-system,Segoe UI,sans-serif';
       x.fillText(isG ? 'InversionMos · Almacén' : 'Preingreso', PAD+16, y+18);
-      const rw = x.measureText(ac.ribbon).width + 18;
-      x.fillStyle = ac.rb; rr(W-PAD-16-rw, y+9, rw, 16, 8); x.fill();
-      x.fillStyle = '#fff'; x.font = '800 9.5px ui-monospace,monospace'; x.textAlign='center';
-      x.fillText(ac.ribbon, W-PAD-16-rw/2, y+20); x.textAlign='left';
+      if (!hasQR) {
+        const rw = x.measureText(ac.ribbon).width + 18;
+        x.fillStyle = ac.rb; rr(W-PAD-16-rw, y+9, rw, 16, 8); x.fill();
+        x.fillStyle = '#fff'; x.font = '800 9.5px ui-monospace,monospace'; x.textAlign='center';
+        x.fillText(ac.ribbon, W-PAD-16-rw/2, y+20); x.textAlign='left';
+      }
       // proveedor (principal)
       x.fillStyle = '#1b1e26'; x.font = '900 20px -apple-system,Segoe UI,sans-serif';
-      x.fillText(trunc(t.proveedor || '—', W-2*PAD-32, '900 20px -apple-system,Segoe UI,sans-serif'), PAD+16, y+43);
-      // subtítulo (tipo guía) / nada en preingreso
-      let subY = y+62;
-      if (isG) { x.fillStyle = '#565d6b'; x.font = '700 13px -apple-system,Segoe UI,sans-serif'; x.fillText(_tipoLabel(t.tipoGuia), PAD+16, y+62); subY = y+62; }
+      x.fillText(trunc(t.proveedor || '—', leftRight-(PAD+16), '900 20px -apple-system,Segoe UI,sans-serif'), PAD+16, y+43);
+      // subtítulo (tipo guía)
+      if (isG) { x.fillStyle = '#565d6b'; x.font = '700 13px -apple-system,Segoe UI,sans-serif'; x.fillText(_tipoLabel(t.tipoGuia), PAD+16, y+62); }
       // id + estado pill
       const id = isG ? t.idGuia : t.idPreingreso;
-      x.fillStyle = '#1b1e26'; x.font = '700 13px ui-monospace,monospace'; x.fillText(id, PAD+16, y+ (isG?86:70));
+      const idY = isG ? y+88 : y+70;
+      x.fillStyle = '#1b1e26'; x.font = '700 13px ui-monospace,monospace'; x.fillText(id, PAD+16, idY);
+      const idW = x.measureText(id).width;
       const pi = _estadoPill(t.estado); x.font = '800 11px -apple-system,sans-serif';
-      const pw = x.measureText(pi.txt).width + 22, py = y + (isG?74:58);
-      x.fillStyle = pi.bg; rr(W-PAD-16-pw, py, pw, 22, 11); x.fill();
-      x.fillStyle = pi.fg; x.textAlign='center'; x.fillText(pi.txt, W-PAD-16-pw/2, py+15); x.textAlign='left';
+      const pw = x.measureText(pi.txt).width + 22;
+      const ppx = hasQR ? (PAD+16+idW+12) : (W-PAD-16-pw);
+      const ppy = hasQR ? (idY-16) : (y + (isG?74:58));
+      x.fillStyle = pi.bg; rr(ppx, ppy, pw, 22, 11); x.fill();
+      x.fillStyle = pi.fg; x.textAlign='center'; x.fillText(pi.txt, ppx+pw/2, ppy+15); x.textAlign='left';
     }
     y += headerH;
 
@@ -160,14 +184,14 @@
     const W = 720, PAD = 14, dpr = Math.min(3, window.devicePixelRatio || 2);
     const tickets = data.tickets || [];
     const link = _link(data.tipo, data.idPrincipal);
+    // QR grande para la cabecera del ticket PRINCIPAL (link y condiciones van en el TEXTO)
+    let qr = null; try { if (typeof qrcode === 'function') { qr = qrcode(0,'M'); qr.addData(link); qr.make(); } } catch(_) { qr = null; }
     // ctx de medición
     const mc = document.createElement('canvas'), mx = mc.getContext('2d');
     const rrNo = () => {}, truncM = (s,w,f) => _trunc(mx, s, w, f), wrapM = (s,w,f) => _wrap(mx, s, w, f);
     let H = PAD;
-    tickets.forEach((t, i) => { H = _ticket(mx, t, H, W, PAD, false, rrNo, wrapM, truncM); if (i < tickets.length-1) H += 26; });
-    // footer: solo un QR pequeño + una línea corta (el link y las condiciones van en el TEXTO, no en la imagen)
-    const footH = 16 + 100 + 22 + 8;
-    H += footH + PAD;
+    tickets.forEach((t, i) => { H = _ticket(mx, t, H, W, PAD, false, rrNo, wrapM, truncM, i===0?qr:null); if (i < tickets.length-1) H += 26; });
+    H += PAD;   // sin footer: el QR ya está en la cabecera
 
     const cv = document.createElement('canvas'); cv.width = W*dpr; cv.height = H*dpr;
     const x = cv.getContext('2d'); x.scale(dpr, dpr); x.textBaseline = 'alphabetic';
@@ -180,7 +204,7 @@
 
     let y = PAD;
     tickets.forEach((t, i) => {
-      y = _ticket(x, t, y, W, PAD, true, rr, wrap, trunc);
+      y = _ticket(x, t, y, W, PAD, true, rr, wrap, trunc, i===0?qr:null);
       if (i < tickets.length-1) {
         // corte de ticket
         const cy = y + 13;
@@ -192,27 +216,6 @@
         y += 26;
       }
     });
-
-    // footer: QR PEQUEÑO centrado + una línea corta. Nada más (link/condiciones van en el texto).
-    y += 6;
-    x.strokeStyle = '#e7e2d6'; x.beginPath(); x.moveTo(PAD+16,y); x.lineTo(W-PAD-16,y); x.stroke(); y += 16;
-    let qrOk = false;
-    try {
-      if (typeof qrcode === 'function') {
-        const qr = qrcode(0,'M'); qr.addData(link); qr.make();
-        const count = qr.getModuleCount(), quiet = 3, total = count + quiet*2;
-        const cell = Math.max(2, Math.floor(90/total)), size = cell*total, bx = (W-size)/2, by = y;
-        x.fillStyle = '#fff'; rr(bx-6, by-6, size+12, size+12, 9); x.fill();
-        x.strokeStyle = '#e7e2d6'; rr(bx-6, by-6, size+12, size+12, 9); x.stroke();
-        x.fillStyle = '#14151b';
-        for (let r=0;r<count;r++) for (let c=0;c<count;c++) if (qr.isDark(r,c)) x.fillRect(bx+(c+quiet)*cell, by+(r+quiet)*cell, cell, cell);
-        y += size + 10;
-        x.fillStyle = '#565d6b'; x.font = '700 12.5px -apple-system,Segoe UI,sans-serif'; x.textAlign = 'center';
-        x.fillText('📲 Escanéame — reporte en vivo con fotos', W/2, y+4); x.textAlign = 'left';
-        y += 18; qrOk = true;
-      }
-    } catch(_) {}
-    if (!qrOk) { x.fillStyle = '#1d4ed8'; x.font = '700 12px ui-monospace,monospace'; x.textAlign='center'; x.fillText(link.replace('https://',''), W/2, y+14); x.textAlign='left'; y += 24; }
     return cv;
   }
 

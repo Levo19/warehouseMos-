@@ -625,45 +625,62 @@
       if (typeof toast === 'function') toast('Imagen descargada — adjúntala en WhatsApp (el link ya va en el texto)', 'info', 4200);
     }, 'image/png');
   }
-  // Dibuja el reporte del día en un canvas (tema oscuro dorado WH). Devuelve el canvas.
+  // Dibuja el reporte del día en un canvas (tema oscuro dorado WH). QR grande en la cabecera (derecha),
+  // mini-dashboard a la izquierda. El link y las condiciones van en el TEXTO de WhatsApp. Devuelve el canvas.
   function _dibujarReporte(fecha, g) {
     const W = 720, PAD = 30, dpr = Math.min(3, window.devicePixelRatio || 2);
+    const link = _linkReporte(fecha);
+    let qr = null; try { if (typeof qrcode === 'function') { qr = qrcode(0, 'M'); qr.addData(link); qr.make(); } } catch(_) { qr = null; }
+    let qrSize = 0;
+    if (qr) { const cnt = qr.getModuleCount(), tot = cnt + 6, cell = Math.max(2, Math.floor(104 / tot)); qrSize = cell * tot; }
+    const kpiY = PAD + 62;
+    const headerBottom = Math.max(kpiY + 66, qr ? (PAD + qrSize + 26) : 0) + 16;
     // medir alto
-    let H = PAD + 52 + 26 + 22 + 74 + 16;   // título + fecha + gap + kpis + gap
+    let H = headerBottom;
     g.orden.forEach(k => {
-      H += 40;                                  // header cargador
+      H += 40;
       g.map[k].cargas.forEach(c => { H += 46; if (c.edito && c.editado && c.editado !== c.hora) H += 16; });
       H += 12;
     });
-    const QRBOX = 220;
-    H += 26 + QRBOX + 14 + 24 + 66 + PAD;       // footer: separador + QR + caption + disclaimer
+    H += PAD;   // sin footer: el QR ya está en la cabecera
     const cv = document.createElement('canvas');
     cv.width = W * dpr; cv.height = H * dpr;
-    const x = cv.getContext('2d'); x.scale(dpr, dpr);
+    const x = cv.getContext('2d'); x.scale(dpr, dpr); x.textBaseline = 'alphabetic';
     const col = (p) => p >= 75 ? '#10b981' : p >= 50 ? '#fbbf24' : p >= 25 ? '#f97316' : '#ef4444';
     const rr = (px, py, w, h, r) => { x.beginPath(); x.moveTo(px + r, py); x.arcTo(px + w, py, px + w, py + h, r); x.arcTo(px + w, py + h, px, py + h, r); x.arcTo(px, py + h, px, py, r); x.arcTo(px, py, px + w, py, r); x.closePath(); };
-    // fondo
     x.fillStyle = '#0b0f17'; x.fillRect(0, 0, W, H);
-    let y = PAD;
-    // título
-    x.textBaseline = 'alphabetic';
-    x.fillStyle = '#fcd34d'; x.font = '800 32px -apple-system,Segoe UI,Roboto,sans-serif';
-    x.fillText('🛺 Cargas del día', PAD, y + 30); y += 44;
-    x.fillStyle = '#93a4c2'; x.font = '600 15px ui-monospace,monospace';
-    x.fillText(fecha + (_generado ? '   ·   emitido ' + _generado : ''), PAD, y + 12); y += 34;
-    // KPIs
+    // QR en la cabecera (derecha) + chip "Escanéame"
+    let leftRight = W - PAD;
+    if (qr) {
+      const cnt = qr.getModuleCount(), quiet = 3, total = cnt + quiet * 2, cell = Math.max(2, Math.floor(104 / total)), size = cell * total;
+      const bx = W - PAD - size, by = PAD;
+      x.fillStyle = '#fff'; rr(bx-4, by-4, size+8, size+8, 9); x.fill();
+      x.fillStyle = '#000';
+      for (let r=0;r<cnt;r++) for (let c=0;c<cnt;c++) if (qr.isDark(r,c)) x.fillRect(bx+(c+quiet)*cell, by+(r+quiet)*cell, cell, cell);
+      const chip = '📲 Escanéame'; x.font = '800 11px -apple-system,Segoe UI,sans-serif';
+      const cw = x.measureText(chip).width + 16, chy = by + size + 7;
+      x.fillStyle = '#fcd34d'; rr(bx + size/2 - cw/2, chy, cw, 18, 9); x.fill();
+      x.fillStyle = '#3a2606'; x.textAlign = 'center'; x.fillText(chip, bx + size/2, chy + 13); x.textAlign = 'left';
+      leftRight = bx - 16;
+    }
+    // título + fecha (izquierda)
+    x.fillStyle = '#fcd34d'; x.font = '800 30px -apple-system,Segoe UI,Roboto,sans-serif';
+    x.fillText('🛺 Cargas del día', PAD, PAD + 30);
+    x.fillStyle = '#93a4c2'; x.font = '600 14px ui-monospace,monospace';
+    x.fillText(fecha + (_generado ? '   ·   emitido ' + _generado : ''), PAD, PAD + 52);
+    // mini-dashboard (KPIs) a la izquierda, sin invadir el QR
     const kpis = [['Cargas', g.persist.length, '#6ee7b7'], ['Cargadores', g.orden.length, '#93c5fd'], ['Promedio', g.prom + '%', '#fcd34d']];
-    const kw = (W - 2 * PAD - 2 * 12) / 3;
+    const gap = 10, kw = (leftRight - PAD - 2 * gap) / 3;
     kpis.forEach((k, i) => {
-      const kx = PAD + i * (kw + 12);
-      x.fillStyle = '#12100a'; rr(kx, y, kw, 66, 13); x.fill();
-      x.strokeStyle = 'rgba(245,158,11,.22)'; x.lineWidth = 1; rr(kx, y, kw, 66, 13); x.stroke();
+      const kx = PAD + i * (kw + gap);
+      x.fillStyle = '#12100a'; rr(kx, kpiY, kw, 66, 12); x.fill();
+      x.strokeStyle = 'rgba(245,158,11,.22)'; x.lineWidth = 1; rr(kx, kpiY, kw, 66, 12); x.stroke();
       x.fillStyle = '#7f8ba3'; x.font = '800 10px -apple-system,sans-serif';
-      x.fillText(String(k[0]).toUpperCase(), kx + 13, y + 22);
-      x.fillStyle = k[2]; x.font = '900 26px ui-monospace,monospace';
-      x.fillText(String(k[1]), kx + 13, y + 52);
+      x.fillText(String(k[0]).toUpperCase(), kx + 12, kpiY + 22);
+      x.fillStyle = k[2]; x.font = '900 25px ui-monospace,monospace';
+      x.fillText(String(k[1]), kx + 12, kpiY + 52);
     });
-    y += 66 + 18;
+    let y = headerBottom;
     // grupos
     g.orden.forEach(k => {
       const gr = g.map[k];
@@ -689,33 +706,6 @@
       });
       y += 12;
     });
-    // ── footer: separador + QR (link ABIERTO, cualquiera escanea) + texto aclaratorio ──
-    x.strokeStyle = 'rgba(148,164,194,.18)'; x.beginPath(); x.moveTo(PAD, y); x.lineTo(W - PAD, y); x.stroke(); y += 26;
-    const link = _linkReporte(fecha);
-    let qrDibujado = false;
-    try {
-      if (typeof qrcode === 'function') {
-        const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
-        const count = qr.getModuleCount(), quiet = 4, total = count + quiet * 2;
-        const cell = Math.max(2, Math.floor(QRBOX / total)), size = cell * total;
-        const bx = (W - size) / 2, by = y;
-        x.fillStyle = '#ffffff'; rr(bx, by, size, size, 10); x.fill();   // fondo blanco (contraste)
-        x.fillStyle = '#000000';
-        for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) x.fillRect(bx + (c + quiet) * cell, by + (r + quiet) * cell, cell, cell);
-        y += size + 14; qrDibujado = true;
-      }
-    } catch(_) { qrDibujado = false; }
-    // caption
-    x.fillStyle = '#fcd34d'; x.font = '800 15px -apple-system,Segoe UI,sans-serif'; x.textAlign = 'center';
-    x.fillText('📸 Escanéame — reporte EN VIVO con fotos', W / 2, y + 6); y += 24;
-    // si no se pudo dibujar el QR (lib ausente), poner el link como texto de respaldo
-    if (!qrDibujado) { x.fillStyle = '#93c5fd'; x.font = '700 12px ui-monospace,monospace'; x.fillText(link, W / 2, y + 4); y += 20; }
-    // disclaimer (corte al momento; puede cambiar durante el día)
-    x.fillStyle = '#93a4c2'; x.font = '600 12.5px -apple-system,Segoe UI,sans-serif';
-    const dis = 'Resumen de cargas al momento' + (_generado ? ' (emitido ' + _generado + ')' : '') +
-      '. Durante el día pueden registrarse más cargas o editarse fotos y niveles — escanea el QR o abre el link para ver el estado actualizado en vivo.';
-    _wrapText(x, dis, W - 2 * PAD).forEach((ln, i) => x.fillText(ln, W / 2, y + 4 + i * 18));
-    x.textAlign = 'left';
     return cv;
   }
   // parte un texto en líneas que caben en maxW (para el disclaimer del reporte imagen). Usa la fuente ya seteada.
