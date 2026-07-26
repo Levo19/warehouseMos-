@@ -220,31 +220,41 @@ const API = (() => {
     // POST sin x-upsert = 200; POST con x-upsert = 400 RLS. El INSERT puro SÍ pasa (policy wh_fotos_insert).
     // La idempotencia se conserva SIN upsert: el nombre es DETERMINÍSTICO por localId → un reintento al mismo
     // path devuelve {"statusCode":"409","error":"Duplicate"} → lo tratamos como ÉXITO (la foto ya está ahí).
-    const res = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/wh-fotos/${path}`, {
-      method: 'POST',
-      headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': mime || 'image/jpeg' },
-      body: bin
-    }, 30000);   // 30s — fotos de alta resolución pesan
-    if (!res.ok) {
+    const _urlObj = () => ({
+      ok: true, path,
+      url:     `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`,                          // original (ver detalle/zoom)
+      preview: `${_SB_URL}/storage/v1/render/image/public/wh-fotos/${path}?width=800&quality=72` // liviano (listas)
+    });
+    // [v2.13.503] Sube con VERIFICACIÓN. Bug real: un "409 Duplicate" se tomaba como éxito SIN comprobar que el
+    // objeto exista → si el 409 era espurio (o el objeto nunca llegó a persistir) se guardaba una URL ROTA
+    // (foto que sale negra/rota; la 1ª foto del preingreso era la típica víctima). Ahora: en 409 se hace HEAD;
+    // si el objeto existe → éxito; si NO existe → se reintenta la subida una vez y, si vuelve a fallar, se LANZA
+    // error transitorio (el caller devuelve null → NO se guarda URL fantasma; mejor sin foto que rota).
+    for (let intento = 1; intento <= 2; intento++) {
+      const res = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/wh-fotos/${path}`, {
+        method: 'POST',
+        headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': mime || 'image/jpeg' },
+        body: bin
+      }, 30000);   // 30s — fotos de alta resolución pesan
+      if (res.ok) return _urlObj();
       // El "status" REAL viene en el CUERPO JSON (Storage envuelve casi todo como HTTP 400). Leerlo para decidir.
       const body = await res.json().catch(() => null);
       const bodyCode = parseInt((body && body.statusCode), 10) || res.status;
-      // 409 Duplicate = el objeto YA existe en este path determinístico (reintento idempotente) → ÉXITO, no error.
       if (bodyCode === 409 || (body && /duplicate/i.test(String(body.error || '')))) {
-        return { ok: true, path, url: `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`, preview: `${_SB_URL}/storage/v1/render/image/public/wh-fotos/${path}?width=800&quality=72` };
+        // ¿el objeto REALMENTE existe? HEAD al público (bucket público, sin auth). Solo así damos por buena la URL.
+        let existe = false;
+        try { const h = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`, { method: 'HEAD' }, 8000); existe = h.ok; } catch(_) { existe = false; }
+        if (existe) return _urlObj();
+        if (intento === 1) continue;   // 409 espurio (objeto ausente) → reintentar la subida una vez
+        throw new Error('storage 409 sin objeto tras reintento');   // transitorio → el caller no guarda URL rota
       }
-      // [400-loop fix] 4xx (≠429) = rechazo DEFINITIVO de Storage (RLS, mime no permitido, path inválido, payload).
-      // Reintentarlo eternamente solo spamea. Marcamos `.permanente` → post()/cola lo DESCARTAN (no loop infinito).
-      // 429 y 5xx/red = transitorio → error normal (la cola reintenta).
+      // [400-loop fix] 4xx (≠429) = rechazo DEFINITIVO (RLS, mime no permitido, path inválido, payload).
+      // Marcamos `.permanente` → post()/cola lo DESCARTAN (no loop infinito). 429 y 5xx/red = transitorio.
       const err = new Error('storage upload ' + bodyCode + (body && body.message ? ': ' + body.message : ''));
       if (bodyCode >= 400 && bodyCode < 500 && bodyCode !== 429) err.permanente = true;
       throw err;
     }
-    return {
-      ok: true, path,
-      url:     `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`,                          // original (ver detalle/zoom)
-      preview: `${_SB_URL}/storage/v1/render/image/public/wh-fotos/${path}?width=800&quality=72` // liviano (listas)
-    };
+    throw new Error('storage upload sin resultado');
   }
 
   // [PASO 5 · B5] Llama la Edge `ia` (proxy a Claude). body = {messages, system?, model?, max_tokens?}. Devuelve el JSON de Claude.

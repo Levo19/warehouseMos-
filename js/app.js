@@ -8919,33 +8919,8 @@ const GuiasView = (() => {
     });
   }
 
-  function _prepararFotoGuia(file) {
-    return new Promise((resolve, reject) => {
-      const MAX = 1280;
-      const reader = new FileReader();
-      reader.onerror = reject;
-      reader.onload = ev => {
-        const img = new Image();
-        img.onerror = reject;
-        img.onload = () => {
-          let w = img.width, h = img.height;
-          if (w > MAX || h > MAX) {
-            if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
-            else        { w = Math.round(w * MAX / h); h = MAX; }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          // [perf foto] q 0.82→0.72: ~30-40% menos bytes a subir (la foto de comprobante
-          // sigue legible para humano y OCR). Subida mucho más rápida en 3G/celular.
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-          resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
-        };
-        img.src = ev.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  }
+  // [v2.13.503] Mismo pipeline robusto que _prepararFoto (decode completo → evita canvas negro).
+  function _prepararFotoGuia(file) { return _prepararFoto(file); }
 
   // ── Comentario + tags guía ────────────────────────────────
   function toggleTagGuia(grupo, valor) {
@@ -18339,32 +18314,35 @@ const PreingresosView = (() => {
   }
 
   // Comprime imagen a max 1280px y quality 0.82 — devuelve {b64, mime}
-  function _prepararFoto(file) {
-    return new Promise((resolve, reject) => {
-      const MAX = 1280;
-      const reader = new FileReader();
-      reader.onerror = reject;
-      reader.onload = ev => {
-        const img = new Image();
-        img.onerror = reject;
-        img.onload = () => {
-          let w = img.width, h = img.height;
-          if (w > MAX || h > MAX) {
-            if (w >= h) { h = Math.round(h * MAX / w); w = MAX; }
-            else        { w = Math.round(w * MAX / h); h = MAX; }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          // [perf foto] q 0.82→0.72: ~30-40% menos bytes a subir, foto de preingreso
-          // sigue legible (humano + OCR). Cada foto sube mucho más rápido.
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
-          resolve({ b64: dataUrl.split(',')[1], mime: 'image/jpeg' });
-        };
-        img.src = ev.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
+  // [v2.13.503] Decodifica la imagen COMPLETA antes de dibujar (evita el canvas NEGRO: en varios navegadores
+  // img.onload dispara antes de que el bitmap esté decodificado → drawImage pinta negro). Prioriza
+  // createImageBitmap (decodifica de verdad); fallback a Image + img.decode(). Verifica el resultado.
+  async function _prepararFoto(file) {
+    const MAX = 1280;
+    let src = null, sw = 0, sh = 0, bmp = null;
+    if (window.createImageBitmap) {
+      try { bmp = await createImageBitmap(file); src = bmp; sw = bmp.width; sh = bmp.height; } catch(_) { bmp = null; }
+    }
+    if (!src) {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = e => res(e.target.result); r.readAsDataURL(file); });
+      const img = new Image();
+      img.src = dataUrl;
+      try { if (img.decode) await img.decode(); else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; }); }
+      catch(e) { throw (e instanceof Error ? e : new Error('no se pudo decodificar la imagen')); }
+      src = img; sw = img.naturalWidth || img.width; sh = img.naturalHeight || img.height;
+    }
+    if (!sw || !sh) { if (bmp && bmp.close) try { bmp.close(); } catch(_){} throw new Error('imagen sin dimensiones'); }
+    let w = sw, h = sh;
+    if (w > MAX || h > MAX) { if (w >= h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (bmp && bmp.close) try { bmp.close(); } catch(_){}
+    // [perf foto] q 0.72: ~30-40% menos bytes, foto de preingreso sigue legible (humano + OCR).
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const b64 = (dataUrl.split(',')[1] || '');
+    if (b64.length < 500) throw new Error('foto vacía/corrupta tras comprimir');   // salvaguarda anti-negra/0-bytes
+    return { b64, mime: 'image/jpeg' };
   }
 
   // ── Helpers tarjeta optimista ─────────────────────────────
