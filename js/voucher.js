@@ -181,7 +181,7 @@
 
   // ── dibuja toda la pila y devuelve el canvas ──
   function _dibujar(data) {
-    const W = 720, PAD = 14, dpr = Math.min(3, window.devicePixelRatio || 2);
+    const W = 720, PAD = 14, dpr = Math.min(2, window.devicePixelRatio || 2);   // dpr 2: imagen más liviana (share más confiable)
     const tickets = data.tickets || [];
     const link = _link(data.tipo, data.idPrincipal);
     // QR grande para la cabecera del ticket PRINCIPAL (link y condiciones van en el TEXTO)
@@ -273,14 +273,11 @@
     let canvas;
     try { canvas = _dibujar(data); } catch(e) { window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank'); return; }
     const fname = (data.idPrincipal || 'voucher') + '.png';
-    canvas.toBlob(async (blob) => {
+    canvas.toBlob((blob) => {
       if (!blob) { window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank'); return; }
-      const file = new File([blob], fname, { type: 'image/png' });
-      try { if (navigator.canShare && navigator.canShare({ files:[file] })) { await navigator.share({ files:[file], text: texto }); return; } }
-      catch(_) {}
-      try { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=u; a.download=fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),5000); } catch(_){}
+      // Vista previa + botón Enviar (activación FRESCA → share del archivo confiable en móvil; en PC copia+descarga)
+      if (window.ShareSheet) { window.ShareSheet(blob, fname, texto); return; }
       window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
-      if (typeof toast === 'function') toast('Imagen descargada — adjúntala en WhatsApp (el link ya va en el texto)', 'info', 4200);
     }, 'image/png');
   }
 

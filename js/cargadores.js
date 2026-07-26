@@ -606,29 +606,17 @@
     let canvas;
     try { canvas = _dibujarReporte(fecha, g); } catch(e) { compartir(); return; }
     const texto = _textoWA(fecha);
-    canvas.toBlob(async (blob) => {
+    canvas.toBlob((blob) => {
       if (!blob) { compartir(); return; }
-      const file = new File([blob], 'cargas-' + fecha + '.png', { type: 'image/png' });
-      try {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], text: texto });
-          return;
-        }
-      } catch(_) { /* usuario canceló o no soportado → fallback */ }
-      try {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'cargas-' + fecha + '.png';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
-      } catch(_){}
-      window.open('https://wa.me/?text=' + encodeURIComponent(texto), '_blank');
-      if (typeof toast === 'function') toast('Imagen descargada — adjúntala en WhatsApp (el link ya va en el texto)', 'info', 4200);
+      // Vista previa + botón Enviar (activación FRESCA → share confiable en móvil; en PC copia+descarga)
+      if (window.ShareSheet) { window.ShareSheet(blob, 'cargas-' + fecha + '.png', texto); return; }
+      compartir();
     }, 'image/png');
   }
   // Dibuja el reporte del día en un canvas (tema oscuro dorado WH). QR grande en la cabecera (derecha),
   // mini-dashboard a la izquierda. El link y las condiciones van en el TEXTO de WhatsApp. Devuelve el canvas.
   function _dibujarReporte(fecha, g) {
-    const W = 720, PAD = 30, dpr = Math.min(3, window.devicePixelRatio || 2);
+    const W = 720, PAD = 30, dpr = Math.min(2, window.devicePixelRatio || 2);   // dpr 2: imagen más liviana
     const link = _linkReporte(fecha);
     let qr = null; try { if (typeof qrcode === 'function') { qr = qrcode(0, 'M'); qr.addData(link); qr.make(); } } catch(_) { qr = null; }
     let qrSize = 0;
