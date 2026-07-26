@@ -2833,8 +2833,11 @@
     .pre-date-hdr::after { content:''; flex:1; height:1px; background:#1e293b; }
     .pre-date-hdr.pre-date-hdr-row::after { display:none; }
     .pre-hdr-line { flex:1; height:1px; background:#1e293b; }
-    .pre-date-hdr-row .carg-pill-btn { background:#1a1505;border:1px solid #854d0e;color:#fbbf24; }
+    .pre-date-hdr-row .carg-pill-btn { background:#1a1505;border:1px solid #854d0e;color:#fbbf24;cursor:pointer; }
     .pre-date-hdr-row .carg-pill-btn:active { background:#2a2510; }
+    /* [v2.13.492] moto vacía (punteada) cuando el día no tiene cargas — igual que el chip del dashboard */
+    .pre-date-hdr-row .carg-pill-btn.carg-pill-empty { background:rgba(252,211,77,.05);border:1.5px dashed rgba(252,211,77,.5);color:#fcd34d; }
+    .pre-date-hdr-row .carg-pill-btn.carg-pill-empty:active { background:rgba(252,211,77,.1); }
     .pre-date-group { display:flex; flex-direction:column; gap:8px; }
     /* Quick micro-tags */
     .pre-qtag { font-size:9px; font-weight:700; padding:2px 6px;

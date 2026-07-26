@@ -861,6 +861,38 @@ function _resumenCargadoresDiaPorFecha(key) {
   } catch { return { carretas: 0, llenas: 0, medias: 0, vacias: 0 }; }
 }
 
+// [v2.13.492] Modelo NUEVO de cargas (wh.cargadores_log). Mapa {fecha → nº cargas} precargado para pintar
+// la moto 🛺 en CADA día de guías/preingresos (antes usaba las carretas del preingreso, que ya no es la fuente).
+window._cargasPorDia = window._cargasPorDia || {};
+async function precargarConteoCargas(reRender) {
+  try {
+    const r = await API.get('conteoCargasPorDia');
+    if (r && r.ok && r.data && typeof r.data === 'object') {
+      window._cargasPorDia = r.data;
+      // el día en curso puede tener cargas recién registradas aún no reflejadas en el mapa (que se calculó
+      // en el servidor hace instantes): fusiona el conteo vivo del módulo si es mayor.
+      try {
+        if (window.Cargadores && Cargadores.getCountDia) {
+          const hk = Cargadores._hoyStr ? Cargadores._hoyStr() : null;
+          if (hk) { const vivo = Cargadores.getCountDia(hk) || 0; if (vivo > (window._cargasPorDia[hk] || 0)) window._cargasPorDia[hk] = vivo; }
+        }
+      } catch(_){}
+      if (reRender !== false) {
+        try { if (window.GuiasView && GuiasView.silentRefresh) GuiasView.silentRefresh(); } catch(_){}
+        try { if (window.PreingresosView && PreingresosView.silentRefresh) PreingresosView.silentRefresh(); } catch(_){}
+      }
+    }
+  } catch(_){}
+}
+// Chip 🛺 por día: SIEMPRE visible y clickeable (abre el modal de cargas de ese día). Moto punteada cuando 0.
+function _cargaPillHTML(key) {
+  const n = (window._cargasPorDia && window._cargasPorDia[key]) || 0;
+  const vacia = n <= 0;
+  const cls = 'carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold' + (vacia ? ' carg-pill-empty' : '');
+  const txt = vacia ? '+ carga' : (n + ' carga' + (n === 1 ? '' : 's'));
+  return `<button onclick="PreingresosView.abrirCargadoresDia('${key}')" class="${cls}"><span>🛺</span><span>${txt}</span></button>`;
+}
+
 // Construye el detalle agrupado por cargador (mismo shape que devolvía
 // el endpoint server-side getCargadoresDelDia, pero 100% client-side
 // usando la cache de preingresos. Garantiza consistencia con el pill
@@ -4428,6 +4460,8 @@ const App = (() => {
         window._cargChipRefrescado = true;
         Cargadores.refreshCountDia(hoyKey).then(() => { try { actualizarChipDia(); } catch(_){} }).catch(() => {});
       }
+      // [v2.13.492] precargar el mapa {fecha→nº cargas} (1ª vez) → pinta la moto 🛺 en cada día de guías/preingresos.
+      if (!window._conteoCargasPrecargado) { window._conteoCargasPrecargado = true; precargarConteoCargas(); }
     } catch(_) {}
 
     // 3) Por envasar (dato real del dashboardData; omitir en esqueleto derivado).
@@ -5107,7 +5141,7 @@ const App = (() => {
            abrirSubtypePicker, cerrarSubtypePicker,
            abrirEntidadPicker, cerrarEntidadPicker, filtrarEntidad, _pickEntidad,
            dictarEntidad, dictarCargador, dictarBuscarGuia, dictarBuscarPre,
-           actualizarChipDia,
+           actualizarChipDia, precargarConteoCargas,
            abrirHistorial, cerrarHistorial,
            copiarHistorialJSON, descargarHistorialJSON,
            cerrarLpMenu,
@@ -5660,20 +5694,12 @@ const GuiasView = (() => {
     const grupos = Object.entries(groupMap).sort((a, b) => b[0].localeCompare(a[0]));
 
     function _grupoHtml([key, items]) {
-      // [v2.13.3] Pill de cargadores: carretas + advertencia si alguna no llena
-      const r = _resumenCargadoresDiaPorFecha(key);
-      const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
-      const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
-      const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
-      const pill = r.carretas > 0
-        ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
-                   class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-              <span>🛺</span><span>${r.carretas} cart</span>${alerta}
-            </button>`
-        : '';
+      // [v2.13.492] Pill de cargadores → modelo de CARGAS (wh.cargadores_log). SIEMPRE visible y clickeable
+      // (moto punteada cuando 0). Reemplaza el conteo de carretas del preingreso, que ya no es la fuente.
+      const pill = _cargaPillHTML(key);
       const addBtn = `<button class="day-header-add" onclick="App.abrirActionDia()" title="Crear (guía/preingreso/cargador)">+</button>`;
       const countChip = `<span class="day-chip" title="${items.length} guías del día">📋 ${items.length}</span>`;
-      return `<div class="${hdrCls}"><span>${_gLabel(key)}</span>${mid}${countChip}${pill}${addBtn}</div>
+      return `<div class="pre-date-hdr pre-date-hdr-row"><span>${_gLabel(key)}</span><span class="pre-hdr-line"></span>${countChip}${pill}${addBtn}</div>
               <div class="pre-date-group">${items.map(_renderGuiaCard).join('')}</div>`;
     }
 
@@ -17197,17 +17223,9 @@ const PreingresosView = (() => {
     container.innerHTML = Object.entries(groupMap)
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([key, items]) => {
-        const r = _resumenCargadoresDia(items);
-        const hdrCls = r.carretas > 0 ? 'pre-date-hdr pre-date-hdr-row' : 'pre-date-hdr';
-        const mid    = r.carretas > 0 ? '<span class="pre-hdr-line"></span>' : '';
-        const alerta = ((r.medias || 0) + (r.vacias || 0)) > 0 ? '<span>·</span><span>⚠</span>' : '';
-        const pill = r.carretas > 0
-          ? `<button onclick="PreingresosView.abrirCargadoresDia('${key}')"
-                     class="carg-pill-btn inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold">
-                <span>🛺</span><span>${r.carretas} cart</span>${alerta}
-              </button>`
-          : '';
-        return `<div class="${hdrCls}"><span>${_dateLabel(key)}</span>${mid}${pill}</div>
+        // [v2.13.492] Pill de cargas SIEMPRE visible y clickeable (moto punteada cuando 0).
+        const pill = _cargaPillHTML(key);
+        return `<div class="pre-date-hdr pre-date-hdr-row"><span>${_dateLabel(key)}</span><span class="pre-hdr-line"></span>${pill}</div>
                 <div class="pre-date-group">${items.map(_renderCard).join('')}</div>`;
       }).join('');
 

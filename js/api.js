@@ -153,23 +153,27 @@ const API = (() => {
     const ok = await _imprimirDirecto(printerId, _escposB64(escpos), title || 'warehouseMos');
     return ok ? { ok: true, data: { impreso: true } } : { ok: false, error: 'PrintNode rechazó' };
   }
-  // [v2.13.489] ESC/POS del reporte de cargadores — modelo NUEVO (cargadores_log, termómetro %).
-  // Shape: {fecha, total, promedio, cargadores:[{nombre, nivel, fotos(count)}]}. Defensivo ante shape vacío.
+  // [v2.13.491] ESC/POS del reporte — modelo de CARGAS (log de eventos). Shape de cargadores_ticket_dia:
+  // {fecha, totalCargas, totalCargadores, promedio, cargadores:[{nombre, nCargas, cargas:[{hora, nivel, fotos(count)}]}]}.
+  // Cada cargador lista sus cargas con hora, barra de nivel y conteo de fotos. Defensivo ante shape vacío.
   function _armarCargadoresEscPos(d) {
     const SEP = '================================================', SEP2 = '------------------------------------------------';
     const pad = (a, b) => { a = String(a || ''); b = String(b || ''); const n = 48 - a.length - b.length; return a + (n > 0 ? ' '.repeat(n) : ' ') + b; };
     const barra = (p) => { p = Math.max(0, Math.min(100, parseInt(p) || 0)); const full = Math.round(p / 5); return '[' + '#'.repeat(full) + '.'.repeat(20 - full) + ']'; };
-    const estado = (p) => { p = parseInt(p) || 0; return p >= 75 ? 'LLENO' : p >= 50 ? 'MEDIA CARGA' : p >= 25 ? 'POCA CARGA' : 'CASI VACIO'; };
-    let t = '\x1b\x61\x01\x1b\x21\x38CARGADORES\n\x1b\x21\x00\x1b\x45\x01' + String(d.fecha || '').toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
-    t += pad('Cargadores del dia:', String(d.total != null ? d.total : 0)) + '\n';
-    t += pad('Carga promedio:', String(d.promedio != null ? d.promedio : 0) + '%') + '\n' + SEP2 + '\n';
+    const estado = (p) => { p = parseInt(p) || 0; return p >= 75 ? 'LLENO' : p >= 50 ? 'MEDIA' : p >= 25 ? 'POCA' : 'VACIO'; };
     const cargs = Array.isArray(d.cargadores) ? d.cargadores : [];
-    if (!cargs.length) t += '  (sin cargadores registrados ese dia)\n';
+    let t = '\x1b\x61\x01\x1b\x21\x38CARGAS\n\x1b\x21\x00\x1b\x45\x01' + String(d.fecha || '').toUpperCase() + '\x1b\x45\x00\n\x1b\x61\x00' + SEP + '\n';
+    t += pad('Cargas del dia:', String(d.totalCargas != null ? d.totalCargas : 0)) + '\n';
+    t += pad('Cargadores:', String(d.totalCargadores != null ? d.totalCargadores : cargs.length)) + '\n';
+    t += pad('Carga promedio:', String(d.promedio != null ? d.promedio : 0) + '%') + '\n' + SEP2 + '\n';
+    if (!cargs.length) t += '  (sin cargas registradas ese dia)\n';
     cargs.forEach(c => {
-      const niv = parseInt(c.nivel) || 0, nf = parseInt(c.fotos) || 0;
-      t += '\x1b\x45\x01' + String(c.nombre || '').toUpperCase() + '\x1b\x45\x00\n';
-      t += pad('  ' + barra(niv) + ' ' + niv + '%', estado(niv)) + '\n';
-      if (nf) t += '  ' + nf + ' foto(s)\n';
+      const cargas = Array.isArray(c.cargas) ? c.cargas : [];
+      t += '\x1b\x45\x01' + String(c.nombre || '').toUpperCase() + '\x1b\x45\x00' + '  (' + cargas.length + ' carga' + (cargas.length === 1 ? '' : 's') + ')\n';
+      cargas.forEach(k => {
+        const niv = parseInt(k.nivel) || 0, nf = parseInt(k.fotos) || 0;
+        t += pad('  ' + String(k.hora || '') + ' ' + barra(niv) + ' ' + niv + '%', estado(niv) + (nf ? ' ' + nf + 'f' : '')) + '\n';
+      });
       t += '\n';
     });
     t += SEP + '\n\x1b\x61\x01\x1b\x45\x01CARGA PROMEDIO\x1b\x45\x00\n\x1b\x21\x38\x1b\x45\x01' + (d.promedio || 0) + '%\x1b\x21\x00\x1b\x45\x00\n\x1b\x61\x00' + SEP;
@@ -877,6 +881,10 @@ const API = (() => {
     // [v2.13.491 · cargas evento] resumen del día agrupado por cargador con sus cargas (hora, nivel, fotos).
     if (action === 'resumenCargasDia') {
       return await _sbRpcWH('resumen_cargas_dia', { p: { fecha: params.fecha || '' } }, 'wh');
+    }
+    // [v2.13.492] mapa {fecha → nº cargas} para pintar la moto 🛺 en cada día de guías/preingresos.
+    if (action === 'conteoCargasPorDia') {
+      return await _sbRpcWH('conteo_cargas_por_dia', { p: {} }, 'wh');
     }
     // [Frente 4 · cesta] getMermasCesta 100% directo: lee wh.mermas y agrupa (pendientes/descartado/
     // solucionado) — réplica fiel de getMermas.gs:getMermasCesta. El GAS ya leía la sombra Supabase;

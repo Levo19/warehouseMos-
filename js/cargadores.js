@@ -32,6 +32,10 @@
   function _nuevaIdCarga() { return 'CRG_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
   function _escHtml(s) { return String(s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]); }
   function _escAttr(s) { return String(s||'').replace(/'/g, '&#39;').replace(/"/g, '&quot;'); }
+  // Argumento seguro para un string JS de comilla simple DENTRO de onclick="...". Escapa backslash y comilla
+  // para JS, y &/" como entidad para el atributo (el parser las decodifica antes de que JS lea el string).
+  // Sin esto, un nombre con apóstrofo (D'Angelo) rompe el handler o abre XSS.
+  function _escJs(s) { return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/&/g,'&amp;').replace(/"/g,'&quot;'); }
   function _usuario(){ return (window.App && App.getUsuario && App.getUsuario()) || ''; }
   function _deviceId(){ return localStorage.getItem('wh_device_id') || ''; }
 
@@ -234,7 +238,10 @@
   function cerrar() {
     document.getElementById('overlayCargadores').style.display = 'none';
     document.getElementById('modalCargadores').classList.remove('open');
+    _dia = _dia.filter(c => c && !c._prov);   // provisionales abandonadas (<10%, sin foto) no cuentan
     if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
+    // refrescar el mapa {fecha→nº cargas} → la moto de cada día de guías/preingresos refleja lo recién registrado
+    if (typeof App !== 'undefined' && App.precargarConteoCargas) App.precargarConteoCargas();
   }
 
   // ── agrupar cargas por cargador (orden de primera aparición en _dia) ──
@@ -281,7 +288,7 @@
   }
 
   function _grupoHTML(g) {
-    const gid = _escAttr(g.idCargador), gnom = _escAttr(g.nombre || g.idCargador);
+    const gid = _escJs(g.idCargador), gnom = _escJs(g.nombre || g.idCargador);
     return `<div class="cgv-group">
       <div class="cgv-ghead">
         <span class="ico">🛺</span>
@@ -324,7 +331,7 @@
     }
     const top3 = _master.slice(0, 3);
     const quick = top3.length ? `<div class="cgv-qlbl">Los que más traen · toca para registrar</div>
-      <div class="cgv-quick">${top3.map(c => `<div class="cgv-qcard" onclick="Cargadores.agregar('${_escAttr(c.idCargador)}','${_escAttr(c.nombre)}')">
+      <div class="cgv-quick">${top3.map(c => `<div class="cgv-qcard" onclick="Cargadores.agregar('${_escJs(c.idCargador)}','${_escJs(c.nombre)}')">
         <div class="qi">🛺</div><div class="qn">${_escHtml(c.nombre)}</div><div class="qv">${c.veces ? c.veces + ' días' : 'nuevo'}</div></div>`).join('')}</div>` : '';
     box.innerHTML = `<div class="cgv-add">
       <div class="cgv-add-hd"><span class="t">Agregar carga</span><button class="x" onclick="Cargadores.toggleAdd(false)">✕</button></div>
@@ -352,7 +359,7 @@
         : `<p class="cgv-nores">Escribe el nombre del cargador o toca uno de arriba.</p>`;
       return;
     }
-    drop.innerHTML = cand.slice(0, 20).map(c => `<button class="cgv-match" onclick="Cargadores.agregar('${_escAttr(c.idCargador)}','${_escAttr(c.nombre)}')">
+    drop.innerHTML = cand.slice(0, 20).map(c => `<button class="cgv-match" onclick="Cargadores.agregar('${_escJs(c.idCargador)}','${_escJs(c.nombre)}')">
       <span><span class="mn">${_escHtml(c.nombre)}</span> ${c.veces ? '<span class="mv">· ' + c.veces + ' días</span>' : ''}</span>
       <span class="ma">+ carga</span></button>`).join('');
   }
