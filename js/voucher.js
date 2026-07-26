@@ -17,9 +17,13 @@
     SALIDA_ENVASADO:'📤 Envasado', SALIDA_MERMA:'📤 Merma', TRANSFORMACION:'♻️ Transformación'
   };
 
-  function _tags(c){ const s = String(c||''); return {
-    comp:  /comprobante:\s*s[ií]\b/i.test(s) ? 'si' : /comprobante:\s*no\b/i.test(s) ? 'no' : null,
-    compl: /completo:\s*s[ií]\b/i.test(s)    ? 'si' : /completo:\s*no\b/i.test(s)    ? 'no' : null }; }
+  // [fix] no usar \b tras "Sí": la í es no-ASCII y \b de JS no la reconoce como límite → el tag no parseaba.
+  // Se ancla con lookahead a espacio / pipe / fin.
+  function _tags(c){ const s = String(c||''); const B = '(?=\\s|\\||$)';
+    const has = (k,v) => new RegExp(k + ':\\s*' + v + B, 'i').test(s);
+    return {
+      comp:  has('comprobante','s[ií]') ? 'si' : has('comprobante','no') ? 'no' : null,
+      compl: has('completo','s[ií]')    ? 'si' : has('completo','no')    ? 'no' : null }; }
   function _libre(c){ return String(c||'')
     .replace(/Comprobante:\s*(?:S[ií]|No)\s*\|?\s*/gi,'').replace(/Completo:\s*(?:S[ií]|No)\s*\|?\s*/gi,'')
     .replace(/^\s*\|\s*/,'').replace(/\s*\|\s*$/,'').trim(); }
@@ -161,9 +165,8 @@
     const rrNo = () => {}, truncM = (s,w,f) => _trunc(mx, s, w, f), wrapM = (s,w,f) => _wrap(mx, s, w, f);
     let H = PAD;
     tickets.forEach((t, i) => { H = _ticket(mx, t, H, W, PAD, false, rrNo, wrapM, truncM); if (i < tickets.length-1) H += 26; });
-    // footer
-    const disLines = _wrap(mx, '🕒 Emitido ' + (data.generado||'') + '. Es un resumen al momento; durante el día puede cambiar. Escanea el QR o abre el link para ver el estado actualizado en vivo.', W-2*PAD-32, '600 12px -apple-system,sans-serif');
-    const footH = 20 + 120 + disLines.length*17 + 18;
+    // footer: solo un QR pequeño + una línea corta (el link y las condiciones van en el TEXTO, no en la imagen)
+    const footH = 16 + 100 + 22 + 8;
     H += footH + PAD;
 
     const cv = document.createElement('canvas'); cv.width = W*dpr; cv.height = H*dpr;
@@ -190,7 +193,7 @@
       }
     });
 
-    // footer: QR + caption + link + disclaimer
+    // footer: QR PEQUEÑO centrado + una línea corta. Nada más (link/condiciones van en el texto).
     y += 6;
     x.strokeStyle = '#e7e2d6'; x.beginPath(); x.moveTo(PAD+16,y); x.lineTo(W-PAD-16,y); x.stroke(); y += 16;
     let qrOk = false;
@@ -198,25 +201,18 @@
       if (typeof qrcode === 'function') {
         const qr = qrcode(0,'M'); qr.addData(link); qr.make();
         const count = qr.getModuleCount(), quiet = 3, total = count + quiet*2;
-        const cell = Math.max(2, Math.floor(108/total)), size = cell*total, bx = PAD+16, by = y;
-        x.fillStyle = '#fff'; rr(bx-6, by-6, size+12, size+12, 10); x.fill();
-        x.strokeStyle = '#e7e2d6'; rr(bx-6, by-6, size+12, size+12, 10); x.stroke();
+        const cell = Math.max(2, Math.floor(90/total)), size = cell*total, bx = (W-size)/2, by = y;
+        x.fillStyle = '#fff'; rr(bx-6, by-6, size+12, size+12, 9); x.fill();
+        x.strokeStyle = '#e7e2d6'; rr(bx-6, by-6, size+12, size+12, 9); x.stroke();
         x.fillStyle = '#14151b';
         for (let r=0;r<count;r++) for (let c=0;c<count;c++) if (qr.isDark(r,c)) x.fillRect(bx+(c+quiet)*cell, by+(r+quiet)*cell, cell, cell);
-        // caption al lado
-        const tx = bx + size + 20;
-        x.fillStyle = '#1b1e26'; x.font = '800 15px -apple-system,Segoe UI,sans-serif'; x.fillText('📲 Escanéame', tx, by+18);
-        x.fillStyle = '#565d6b'; x.font = '600 12px -apple-system,sans-serif';
-        _wrap(x, 'Reporte EN VIVO, con fotos — se actualiza solo', W-PAD-16-tx, '600 12px -apple-system,sans-serif').forEach((ln,i)=>x.fillText(ln, tx, by+38+i*16));
-        x.fillStyle = '#1d4ed8'; x.font = '700 10.5px ui-monospace,monospace';
-        _wrap(x, link.replace('https://',''), W-PAD-16-tx, '700 10.5px ui-monospace,monospace').forEach((ln,i)=>x.fillText(ln, tx, by+78+i*14));
-        y += size + 12; qrOk = true;
+        y += size + 10;
+        x.fillStyle = '#565d6b'; x.font = '700 12.5px -apple-system,Segoe UI,sans-serif'; x.textAlign = 'center';
+        x.fillText('📲 Escanéame — reporte en vivo con fotos', W/2, y+4); x.textAlign = 'left';
+        y += 18; qrOk = true;
       }
     } catch(_) {}
-    if (!qrOk) { x.fillStyle = '#1d4ed8'; x.font = '700 12px ui-monospace,monospace'; x.fillText(link.replace('https://',''), PAD+16, y+14); y += 26; }
-    // disclaimer
-    x.fillStyle = '#8b93a1'; x.font = '600 12px -apple-system,sans-serif';
-    disLines.forEach((ln,i) => x.fillText(ln, PAD+16, y+6 + i*17));
+    if (!qrOk) { x.fillStyle = '#1d4ed8'; x.font = '700 12px ui-monospace,monospace'; x.textAlign='center'; x.fillText(link.replace('https://',''), W/2, y+14); x.textAlign='left'; y += 24; }
     return cv;
   }
 
@@ -248,8 +244,20 @@
     // anexos (conteo)
     const anexos = (data.tickets||[]).slice(1);
     if (anexos.length) { L.push('', '*Anexado:*'); anexos.forEach(a => L.push('🔗 ' + (a.kind==='guia'?a.idGuia:a.idPreingreso) + (a.kind==='preingreso'&&_money(a.monto)?(' · '+_money(a.monto)):''))); }
-    L.push('', '━━━━━━━━━━━━━━━━━━', '👇 Ver reporte EN VIVO (con fotos):', _link(data.tipo, data.idPrincipal), '', '_InversionMos Warehouse_');
-    return L.join('\n');
+    // bloque profesional: leer el QR / abrir el link + condiciones (texto plano, acompaña a la imagen)
+    L.push('',
+      '━━━━━━━━━━━━━━━━━━',
+      '📲 *Escanea el código QR* de la imagen, o abre este enlace para ver el reporte:',
+      _link(data.tipo, data.idPrincipal),
+      '',
+      'ℹ️ *Importante:*',
+      '• Es un reporte *en tiempo real*: se actualiza solo.',
+      '• La información es *un resumen al momento* y puede *cambiar durante el día* (más productos, correcciones o fotos).',
+      '• Abre el enlace para ver el estado *actualizado* y todas las *fotos*.',
+      (data.generado ? '🕒 Emitido: ' + data.generado : ''),
+      '',
+      '_InversionMos · warehouseMos_');
+    return L.filter(function(l){ return l !== null && l !== undefined; }).join('\n');
   }
 
   async function compartir(tipo, id) {
