@@ -580,9 +580,15 @@
         L.push(`   ${i + 1}) ⏱${c.hora || ''}  ${ico} ${p}%${nf ? ' 📷' + nf : ''}${ed}`);
       });
     });
-    L.push('', '━━━━━━━━━━━━━━━━━━', `*${g.persist.length}* carga(s) · *${g.orden.length}* cargador(es) · promedio *${g.prom}%*`);
-    if (_generado) L.push(`Emitido: ${_generado}`);
-    L.push('', '📸 Reporte en vivo (fotos · se actualiza cada 60s):', _linkReporte(fecha), '', '_InversionMos Warehouse_');
+    L.push('', '━━━━━━━━━━━━━━━━━━', `*${g.persist.length}* carga(s) · *${g.orden.length}* cargador(es) · promedio *${g.prom}%*`, '',
+      '📲 *Escanea el código QR* de la imagen, o abre este enlace para ver el reporte:',
+      _linkReporte(fecha), '',
+      'ℹ️ *Importante:*',
+      '• Es un reporte *en tiempo real*: se actualiza solo cada 60s.',
+      '• La información es *un resumen al momento* y puede *cambiar durante el día* (más cargas o fotos).',
+      '• Abre el enlace para ver el estado *actualizado* y las *fotos*.');
+    if (_generado) L.push('🕒 Emitido: ' + _generado);
+    L.push('', '_InversionMos · warehouseMos_');
     return L.join('\n');
   }
   // Compartir TEXTO (fallback / opción rápida)
