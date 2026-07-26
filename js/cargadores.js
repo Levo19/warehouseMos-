@@ -629,7 +629,8 @@
       g.map[k].cargas.forEach(c => { H += 46; if (c.edito && c.editado && c.editado !== c.hora) H += 16; });
       H += 12;
     });
-    H += 20 + 46 + PAD;                         // footer
+    const QRBOX = 220;
+    H += 26 + QRBOX + 14 + 24 + 66 + PAD;       // footer: separador + QR + caption + disclaimer
     const cv = document.createElement('canvas');
     cv.width = W * dpr; cv.height = H * dpr;
     const x = cv.getContext('2d'); x.scale(dpr, dpr);
@@ -682,13 +683,41 @@
       });
       y += 12;
     });
-    // footer
-    x.strokeStyle = 'rgba(148,164,194,.18)'; x.beginPath(); x.moveTo(PAD, y); x.lineTo(W - PAD, y); x.stroke(); y += 22;
-    x.fillStyle = '#93a4c2'; x.font = '700 12px -apple-system,sans-serif';
-    x.fillText('📸 Reporte en vivo (fotos, se actualiza cada 60s):', PAD, y + 4); y += 20;
-    x.fillStyle = '#fcd34d'; x.font = '700 12px ui-monospace,monospace';
-    x.fillText(_linkReporte(fecha), PAD, y + 4);
+    // ── footer: separador + QR (link ABIERTO, cualquiera escanea) + texto aclaratorio ──
+    x.strokeStyle = 'rgba(148,164,194,.18)'; x.beginPath(); x.moveTo(PAD, y); x.lineTo(W - PAD, y); x.stroke(); y += 26;
+    const link = _linkReporte(fecha);
+    let qrDibujado = false;
+    try {
+      if (typeof qrcode === 'function') {
+        const qr = qrcode(0, 'M'); qr.addData(link); qr.make();
+        const count = qr.getModuleCount(), quiet = 4, total = count + quiet * 2;
+        const cell = Math.max(2, Math.floor(QRBOX / total)), size = cell * total;
+        const bx = (W - size) / 2, by = y;
+        x.fillStyle = '#ffffff'; rr(bx, by, size, size, 10); x.fill();   // fondo blanco (contraste)
+        x.fillStyle = '#000000';
+        for (let r = 0; r < count; r++) for (let c = 0; c < count; c++) if (qr.isDark(r, c)) x.fillRect(bx + (c + quiet) * cell, by + (r + quiet) * cell, cell, cell);
+        y += size + 14; qrDibujado = true;
+      }
+    } catch(_) { qrDibujado = false; }
+    // caption
+    x.fillStyle = '#fcd34d'; x.font = '800 15px -apple-system,Segoe UI,sans-serif'; x.textAlign = 'center';
+    x.fillText('📸 Escanéame — reporte EN VIVO con fotos', W / 2, y + 6); y += 24;
+    // si no se pudo dibujar el QR (lib ausente), poner el link como texto de respaldo
+    if (!qrDibujado) { x.fillStyle = '#93c5fd'; x.font = '700 12px ui-monospace,monospace'; x.fillText(link, W / 2, y + 4); y += 20; }
+    // disclaimer (corte al momento; puede cambiar durante el día)
+    x.fillStyle = '#93a4c2'; x.font = '600 12.5px -apple-system,Segoe UI,sans-serif';
+    const dis = 'Resumen de cargas al momento' + (_generado ? ' (emitido ' + _generado + ')' : '') +
+      '. Durante el día pueden registrarse más cargas o editarse fotos y niveles — escanea el QR o abre el link para ver el estado actualizado en vivo.';
+    _wrapText(x, dis, W - 2 * PAD).forEach((ln, i) => x.fillText(ln, W / 2, y + 4 + i * 18));
+    x.textAlign = 'left';
     return cv;
+  }
+  // parte un texto en líneas que caben en maxW (para el disclaimer del reporte imagen). Usa la fuente ya seteada.
+  function _wrapText(ctx, text, maxW) {
+    const words = String(text).split(' '), lines = []; let line = '';
+    words.forEach(w => { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; });
+    if (line) lines.push(line);
+    return lines;
   }
   async function imprimir() {
     const fecha = _fechaActual || _hoyStr();
