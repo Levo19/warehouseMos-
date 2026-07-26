@@ -17,16 +17,19 @@
     SALIDA_ENVASADO:'📤 Envasado', SALIDA_MERMA:'📤 Merma', TRANSFORMACION:'♻️ Transformación'
   };
 
-  // [fix] no usar \b tras "Sí": la í es no-ASCII y \b de JS no la reconoce como límite → el tag no parseaba.
-  // Se ancla con lookahead a espacio / pipe / fin.
+  // [fix] Anclado en AMBOS extremos: (a) inicio con (^|[\s|]) → "incompleto:" NO matchea "completo:";
+  // (b) fin con lookahead (espacio/pipe/fin) → resuelve el \b tras "Sí" (la í es no-ASCII y \b de JS la ignora).
   function _tags(c){ const s = String(c||''); const B = '(?=\\s|\\||$)';
-    const has = (k,v) => new RegExp(k + ':\\s*' + v + B, 'i').test(s);
+    const has = (k,v) => new RegExp('(?:^|[\\s|])' + k + ':\\s*' + v + B, 'i').test(s);
     return {
       comp:  has('comprobante','s[ií]') ? 'si' : has('comprobante','no') ? 'no' : null,
       compl: has('completo','s[ií]')    ? 'si' : has('completo','no')    ? 'no' : null }; }
+  // Texto libre = quitar SOLO los tags estructurados del INICIO (formato "Comprobante: X | Completo: Y | libre").
+  // Anclado al inicio → no corrompe un "completo:"/"incompleto:" que aparezca dentro del comentario libre.
   function _libre(c){ return String(c||'')
-    .replace(/Comprobante:\s*(?:S[ií]|No)\s*\|?\s*/gi,'').replace(/Completo:\s*(?:S[ií]|No)\s*\|?\s*/gi,'')
-    .replace(/^\s*\|\s*/,'').replace(/\s*\|\s*$/,'').trim(); }
+    .replace(/^\s*(?:comprobante:\s*(?:s[ií]|no)\s*\|?\s*)?/i, '')
+    .replace(/^\s*(?:completo:\s*(?:s[ií]|no)\s*\|?\s*)?/i, '')
+    .replace(/^\s*\|\s*/, '').trim(); }
   function _money(m){ const v = parseFloat(m); return isNaN(v) ? null : 'S/ ' + v.toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function _tipoLabel(t){ return TIPO[t] || (t ? String(t).replace(/_/g,' ').toLowerCase() : '—'); }
   function _link(tipo, id){ return BASE + '?tipo=' + tipo + '&id=' + encodeURIComponent(id); }
@@ -151,12 +154,26 @@
       y += 34;
       const tags = [];
       const carg = t.cargadores || [];
-      if (carg.length) tags.push('🛺 ' + carg.length + ' cargador' + (carg.length===1?'':'es') + (carg.length? ' · ' + carg.slice(0,3).join(', ') : ''));
+      if (carg.length) tags.push('🛺 ' + carg.length + ' cargador' + (carg.length===1?'':'es') + ' · ' + carg.slice(0,3).join(', ') + (carg.length>3?'…':''));
       const nf = (t.fotos||[]).length; if (nf) tags.push('📷 ' + nf + ' foto' + (nf===1?'':'s'));
       if (t.fecha) tags.push('📅 ' + _fmtFecha(t.fecha));
-      if (draw && tags.length) { let mx=PAD+16; x.font='700 12px -apple-system,sans-serif';
-        tags.forEach(tg => { const w=x.measureText(tg).width+20; x.fillStyle='#f4f1e8'; rr(mx,y,w,26,9); x.fill(); x.fillStyle='#565d6b'; x.fillText(tg,mx+10,y+17); mx+=w+7; if(mx>W-2*PAD-80){/*wrap*/} }); }
-      if (tags.length) y += 34;
+      // fila de tags con WRAP a 2ª línea si no caben (antes desbordaba la tarjeta). El cálculo de filas es
+      // idéntico en medición y dibujo (ambos usan x.measureText) → el alto reservado coincide con lo dibujado.
+      if (tags.length) {
+        const maxX = W - PAD - 16, tagFont = '700 12px -apple-system,sans-serif';
+        x.font = tagFont;
+        let mx = PAD+16, ty = y, rows = 1;
+        tags.forEach(tg => {
+          const w = x.measureText(tg).width + 20;
+          if (mx + w > maxX && mx > PAD+16) { mx = PAD+16; ty += 30; rows++; }
+          if (draw) {
+            x.fillStyle = '#f4f1e8'; rr(mx, ty, Math.min(w, maxX-(PAD+16)), 26, 9); x.fill();
+            x.fillStyle = '#565d6b'; x.fillText(trunc(tg, maxX-(PAD+16)-16, tagFont), mx+10, ty+17);
+          }
+          mx += w + 7;
+        });
+        y += (rows - 1) * 30 + 34;
+      }
       const libre = _libre(t.comentario);
       if (libre) y = _postit(x, y, W, PAD, '✍️ Nota del preingreso', libre, draw, rr, wrap);
       y += 8;

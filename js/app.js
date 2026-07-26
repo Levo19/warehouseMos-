@@ -808,25 +808,9 @@ const CarretaCiclo = {
   }
 };
 
-// [v2.13.3] Resumen agregado de cargadores: solo conteo de carretas por estado.
-function _resumenCargadoresDia(items) {
-  let carretas = 0, llenas = 0, medias = 0, vacias = 0;
-  (items || []).forEach(p => {
-    let arr = [];
-    try { arr = JSON.parse(p.cargadores || '[]'); } catch {}
-    if (!Array.isArray(arr)) return;
-    arr.forEach(c => {
-      if (!c || typeof c !== 'object') return;
-      const cn = _normalizarCargador(c);
-      const r = _resumenEstadosCarretas(cn.estados);
-      carretas += r.total;
-      llenas   += r.llenas;
-      medias   += r.medias;
-      vacias   += r.vacias;
-    });
-  });
-  return { carretas, llenas, medias, vacias };
-}
+// [rev senior 2026-07-26] _resumenCargadoresDia ELIMINADO: código muerto tras el recableado del pill 🛺
+// al modelo de cargas (cargadores_log / _cargaPillHTML). Su único caller era _resumenCargadoresDiaPorFecha,
+// también eliminado abajo.
 
 // [v2.13.231] Cuenta cargadores DISTINTOS activos en un set de preingresos
 // (por id/nombre). Para el chip "cargadores" de la banda Estado del Día.
@@ -852,14 +836,6 @@ function _preingresosDeFecha(all, key) {
   return (all || []).filter(p => p.fecha && _diaPeru(p.fecha) === key);
 }
 
-// Para vistas que NO tienen los preingresos en mano (como Guías): mira
-// la cache local y filtra preingresos cuya fecha cae en `key` (YYYY-MM-DD).
-function _resumenCargadoresDiaPorFecha(key) {
-  try {
-    const all = OfflineManager.getPreingresosCache() || [];
-    return _resumenCargadoresDia(_preingresosDeFecha(all, key));
-  } catch { return { carretas: 0, llenas: 0, medias: 0, vacias: 0 }; }
-}
 
 // [v2.13.492] Modelo NUEVO de cargas (wh.cargadores_log). Mapa {fecha → nº cargas} precargado para pintar
 // la moto 🛺 en CADA día de guías/preingresos (antes usaba las carretas del preingreso, que ya no es la fuente).
@@ -8919,8 +8895,34 @@ const GuiasView = (() => {
     });
   }
 
-  // [v2.13.503] Mismo pipeline robusto que _prepararFoto (decode completo → evita canvas negro).
-  function _prepararFotoGuia(file) { return _prepararFoto(file); }
+  // [v2.13.504] Pipeline robusto propio (NO delegar a _prepararFoto: vive en otro IIFE → ReferenceError).
+  // Decodifica COMPLETO antes de dibujar (createImageBitmap; fallback Image+decode) → evita canvas negro.
+  async function _prepararFotoGuia(file) {
+    const MAX = 1280;
+    let src = null, sw = 0, sh = 0, bmp = null;
+    if (window.createImageBitmap) {
+      try { bmp = await createImageBitmap(file); src = bmp; sw = bmp.width; sh = bmp.height; } catch(_) { bmp = null; }
+    }
+    if (!src) {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onerror = rej; r.onload = e => res(e.target.result); r.readAsDataURL(file); });
+      const img = new Image();
+      img.src = dataUrl;
+      try { if (img.decode) await img.decode(); else await new Promise((res, rej) => { img.onload = res; img.onerror = rej; }); }
+      catch(e) { throw (e instanceof Error ? e : new Error('no se pudo decodificar la imagen')); }
+      src = img; sw = img.naturalWidth || img.width; sh = img.naturalHeight || img.height;
+    }
+    if (!sw || !sh) { if (bmp && bmp.close) try { bmp.close(); } catch(_){} throw new Error('imagen sin dimensiones'); }
+    let w = sw, h = sh;
+    if (w > MAX || h > MAX) { if (w >= h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (bmp && bmp.close) try { bmp.close(); } catch(_){}
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.72);
+    const b64 = (dataUrl.split(',')[1] || '');
+    if (b64.length < 500) throw new Error('foto vacía/corrupta tras comprimir');
+    return { b64, mime: 'image/jpeg' };
+  }
 
   // ── Comentario + tags guía ────────────────────────────────
   function toggleTagGuia(grupo, valor) {

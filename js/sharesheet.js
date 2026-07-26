@@ -54,7 +54,10 @@
         try { await navigator.share({ files: [file], text: texto }); close(); return; }
         catch(e) { if (e && e.name === 'AbortError') return; /* canceló → seguir en la vista previa */ }
       }
-      // PC / WhatsApp Web: copiar la imagen al portapapeles (para pegar con Ctrl+V) + descargar + abrir WA
+      // PC / WhatsApp Web: abrir WA y descargar ANTES de cualquier await (si no, el await de clipboard
+      // consume la activación de usuario y el navegador bloquea el window.open como popup). Luego copiar.
+      window.open('https://wa.me/?text=' + encodeURIComponent(texto || ''), '_blank');
+      _descargar(url, filename);
       let copiado = false;
       try {
         if (navigator.clipboard && window.ClipboardItem) {
@@ -62,8 +65,6 @@
           copiado = true;
         }
       } catch(_) { copiado = false; }
-      _descargar(url, filename);
-      window.open('https://wa.me/?text=' + encodeURIComponent(texto || ''), '_blank');
       close();
       _toast(copiado
         ? '✅ Imagen copiada — pégala con Ctrl+V en el chat de WhatsApp (también se descargó)'

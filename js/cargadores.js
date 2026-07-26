@@ -389,6 +389,9 @@
   async function quitar(idCarga) {
     const c = _dia.find(x => String(x.idCarga) === String(idCarga));
     const nombre = (c || {}).nombre || 'cargador';
+    // [rev senior] cancelar cualquier setNivel pendiente de ESTA carga: si el operador jala la barra y
+    // dentro de 350ms toca ✕, el upsert diferido podía RESUCITAR la carga borrada. Cancelarlo primero.
+    if (_saveTimers[idCarga]) { clearTimeout(_saveTimers[idCarga]); delete _saveTimers[idCarga]; }
     // Confirmación SIEMPRE (evita borrar una carga de casualidad). Modal moderno _whConfirm.
     if (typeof window._whConfirm === 'function') {
       const p = (c && parseInt(c.nivel)) || 0;
@@ -696,13 +699,6 @@
     });
     return cv;
   }
-  // parte un texto en líneas que caben en maxW (para el disclaimer del reporte imagen). Usa la fuente ya seteada.
-  function _wrapText(ctx, text, maxW) {
-    const words = String(text).split(' '), lines = []; let line = '';
-    words.forEach(w => { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t; });
-    if (line) lines.push(line);
-    return lines;
-  }
   async function imprimir() {
     const fecha = _fechaActual || _hoyStr();
     if (!_dia.filter(c => !c._prov).length) { if (typeof toast === 'function') toast('Sin cargas para imprimir', 'warn'); return; }
@@ -721,11 +717,12 @@
       _cargarResumen(_hoyStr()).then(() => { if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia(); });
     }, 60000);
   }
-  function getCountDia(fecha) { fecha = fecha || _hoyStr(); return (_fechaActual === fecha) ? _dia.length : 0; }
+  // [rev senior] contar solo cargas PERSISTIDAS (no provisionales 0% sin registrar) → el chip no infla.
+  function getCountDia(fecha) { fecha = fecha || _hoyStr(); return (_fechaActual === fecha) ? _dia.filter(c => c && !c._prov).length : 0; }
   async function refreshCountDia(fecha) {
     fecha = fecha || _hoyStr();
     const m = document.getElementById('modalCargadores');
-    if (m && m.classList.contains('open') && _fechaActual === fecha) return _dia.length;   // fuente viva = operador editando
+    if (m && m.classList.contains('open') && _fechaActual === fecha) return _dia.filter(c => c && !c._prov).length;   // fuente viva (solo persistidas)
     const r = await _cargarResumen(fecha);
     return (r.totalCargas != null) ? r.totalCargas : _dia.length;
   }
