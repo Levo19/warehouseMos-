@@ -925,7 +925,7 @@ function _calcularCargadoresDelDia(key) {
   };
 }
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
-function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').trim().toUpperCase(); }
+function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/['’‘]/g, '-').trim().toUpperCase(); }  // [fix layout ES-LatAm] apóstrofo (recto/curvo) = "-" mal leído por lector HID con teclado Español → red de seguridad universal para la búsqueda en catálogo
 
 // ── Productos nuevos aprobados — últimos 3 días ─────────────
 async function _cargarPNAprobados() {
@@ -7252,6 +7252,11 @@ const GuiasView = (() => {
     // Solo aceptar caracteres imprimibles
     if (e.key.length !== 1) { e.preventDefault(); return; }
 
+    // [fix layout ES-LatAm] e.key depende del layout: la tecla del "-" (e.code='Minus')
+    // en teclado Español-LatAm escribe "'". Usar e.code (tecla física, layout-independiente)
+    // para emitir SIEMPRE "-". Sin esto, WH-9S7XBPX se lee WH'9S7XBPX → "no está en catálogo".
+    const ch = (e.code === 'Minus' || e.code === 'NumpadSubtract') ? '-' : e.key;
+
     // Detección de velocidad: si el buffer no está vacío y el intervalo
     // es > 80 ms → probable escritura humana → rechazar y limpiar
     if (_hidBuffer.length > 0 && (now - _hidBufTs) > 80) {
@@ -7261,7 +7266,7 @@ const GuiasView = (() => {
     }
 
     _hidBufTs = now;
-    _hidBuffer += e.key;
+    _hidBuffer += ch;
     _updateHidDisplay(_hidBuffer);
     e.preventDefault(); // no alterar input.value
 
@@ -13058,8 +13063,12 @@ const DespachoView = (() => {
         return;
       }
 
+      // [fix layout ES-LatAm] e.code='Minus' (tecla física del "-") en teclado Español-LatAm
+      // escribe "'". Usar e.code para emitir SIEMPRE "-" (layout-independiente). Sin esto, este
+      // camino DESCARTABA el "'" → el guion se perdía (WH-9S7XBPX → WH9S7XBPX, tampoco matchea).
+      const ch = (e.code === 'Minus' || e.code === 'NumpadSubtract') ? '-' : e.key;
       // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
-      if (!/^[a-zA-Z0-9\-_.]$/.test(e.key)) return;
+      if (!/^[a-zA-Z0-9\-_.]$/.test(ch)) return;
 
       // El discriminador por TIMING (gap>80ms = tipeo humano → reiniciar) SOLO tiene sentido SOBRE el peso
       // granel, donde el humano tipea dígitos lentamente. En el modal de scan puro (foco readonly/body) NO hay
@@ -13070,7 +13079,7 @@ const DespachoView = (() => {
       if (_scanHidBuffer.length > 0 && dt > SCAN_HID_GAP_MS && _ambiguoPeso) { _scanHidBuffer = ''; _scanPreGranelTgt = null; _scanPreGranelVal = ''; }
       // Al arrancar un buffer nuevo sobre el peso granel, recordar su valor previo por si resulta ser un scan.
       if (_scanHidBuffer.length === 0 && esGranelInp) { _scanPreGranelTgt = tgt; _scanPreGranelVal = String(tgt.value || ''); }
-      _scanHidBuffer += e.key;
+      _scanHidBuffer += ch;
       // NO bloqueamos los chars sobre el peso: los dejamos fluir (el <input type=number> rechaza letras y no tiene
       // oninput, así que no procesa basura) para no perder dígitos del TIPEO HUMANO rápido. Si al final resultó
       // ser un scan (Enter en ráfaga), arriba restauramos el valor previo del peso. Peso manual = intacto siempre.
@@ -16878,10 +16887,12 @@ const DespachoView = (() => {
       return;
     }
     if (e.key.length !== 1) return; // ignorar teclas de control
+    // [fix layout ES-LatAm] e.code (tecla física) para que el "-" no se lea "'" en teclado Español.
+    const ch = (e.code === 'Minus' || e.code === 'NumpadSubtract') ? '-' : e.key;
     // Velocidad: si pasó >80ms entre teclas, es tecleo humano → reiniciar
     if (buf.length > 0 && (now - lastTs) > 80) buf = '';
     lastTs = now;
-    buf += e.key;
+    buf += ch;
     clearTimeout(timer);
     timer = setTimeout(_procesar, 120); // fallback si el scanner no manda Enter
   });
