@@ -6,7 +6,7 @@
   <title id="pageTitle">Reporte — InversionMos</title>
   <style>
     :root{
-      --paper:#fdfcf8; --paper2:#f4f1e8; --card:#fff; --ink:#1b1e26; --ink2:#565d6b; --ink3:#8b93a1;
+      --paper:#fdfcf8; --paper2:#f4f1e8; --card:#fff; --ink:#1b1e26; --ink2:#565d6b; --ink3:#6b7280;
       --line:#e7e2d6; --line2:#efe9dd;
       --green:#15803d; --greenbg:#e7f4ec; --blue:#1d4ed8; --bluebg:#e7edfb;
       --amber:#b45309; --amberbg:#fbf0dd; --indigo:#5b3fb8; --indigobg:#efe9fb; --red:#b91c1c; --redbg:#fbe4e4;
@@ -14,7 +14,7 @@
       --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     }
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:var(--sans);background:var(--paper2);color:var(--ink);min-height:100vh;padding:16px 14px 84px;-webkit-font-smoothing:antialiased}
+    body{font-family:var(--sans);background:var(--paper2);color:var(--ink);min-height:100vh;padding:16px 14px calc(88px + env(safe-area-inset-bottom));-webkit-font-smoothing:antialiased}
     .wrap{max-width:560px;margin:0 auto}
 
     /* header */
@@ -30,8 +30,8 @@
     .rpt-idrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:11px;flex-wrap:wrap}
     .rpt-id{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ink2)}
     .badge{font-size:12px;font-weight:800;padding:4px 12px;border-radius:99px;white-space:nowrap}
-    .badge-pendiente,.badge-abierta{background:var(--amberbg);color:var(--amber)}
-    .badge-procesado,.badge-cerrada{background:var(--greenbg);color:var(--green)}
+    .badge-abierta{background:var(--amberbg);color:var(--amber)}
+    .badge-cerrada{background:var(--greenbg);color:var(--green)}
     .badge-anulada{background:var(--redbg);color:var(--red)}
     /* live strip */
     .rpt-live{display:flex;align-items:center;gap:7px;padding:8px 18px;background:var(--paper2);font-size:11px;color:var(--ink2);font-weight:600}
@@ -55,7 +55,6 @@
     .sec-t{font-size:11px;font-weight:800;color:var(--ink3);letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px}
     .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .f{padding:10px 11px;background:var(--paper);border:1px solid var(--line2);border-radius:11px;transition:background .4s,border-color .4s,box-shadow .4s}
-    .f.full{grid-column:1/-1}
     .f .k{font-size:9.5px;color:var(--ink3);font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
     .f .v{font-size:14.5px;font-weight:700;color:var(--ink);word-break:break-word}
     .money{font-size:26px;font-weight:900;color:var(--green);letter-spacing:-.02em}
@@ -99,7 +98,7 @@
     .lb-close{position:fixed;top:16px;right:16px;background:rgba(255,255,255,.12);border:none;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px;cursor:pointer;display:grid;place-items:center}
 
     /* footer */
-    .rpt-footer{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:9px 16px}
+    .rpt-footer{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:9px 16px calc(9px + env(safe-area-inset-bottom))}
     .rpt-progress{width:100%;max-width:560px;margin:0 auto 6px;height:3px;background:var(--line2);border-radius:2px;overflow:hidden}
     .rpt-progress-bar{height:100%;background:#22c55e;border-radius:2px;transition:width 1s linear}
     .rpt-footer-text{font-size:10.5px;color:var(--ink3);text-align:center}
@@ -219,6 +218,8 @@ function libre(c){ return String(c||'').replace(/^\s*(?:comprobante:\s*(?:s[ií]
 function buildUrl(tipo,id){ return location.origin+location.pathname+'?tipo='+tipo+'&id='+encodeURIComponent(id); }
 function openLb(u){ document.getElementById('lbImg').src=u; document.getElementById('lightbox').classList.add('open'); }
 function closeLightbox(){ document.getElementById('lightbox').classList.remove('open'); }
+// delegación: abrir lightbox al tocar cualquier <img data-lb> (sin onclick con datos → sin XSS)
+document.addEventListener('click', function(e){ const im = e.target && e.target.closest && e.target.closest('img[data-lb]'); if (im) openLb(im.getAttribute('data-lb')); });
 function postit(label,txt){ return '<div class="postit"><div class="pl">✍️ '+esc(label)+'</div><div class="pt">'+esc(txt)+'</div></div>'; }
 function header(acc, prov, kindHtml, id, estado){
   return '<div class="rpt-header">'
@@ -234,8 +235,9 @@ function header(acc, prov, kindHtml, id, estado){
 }
 function fotosSec(fotos){
   if(!fotos||!fotos.length) return '';
+  // data-lb (esc para atributo) + delegación → sin JS en onclick (evita XSS por URL con comilla).
   return '<div class="sec" data-key="fotos"><div class="sec-t">📷 Fotos ('+fotos.length+')</div><div class="fotos">'
-    + fotos.map(u=>'<img src="'+esc(u)+'" loading="lazy" onclick="openLb(\''+escAttr(u).replace(/'/g,"\\'")+'\')" onerror="this.style.display=\'none\'">').join('')
+    + fotos.map(u=>'<img src="'+esc(u)+'" data-lb="'+esc(u)+'" loading="lazy" onerror="this.style.display=\'none\'">').join('')
     + '</div></div>';
 }
 
@@ -277,7 +279,7 @@ function renderGuia(d){
       + '<span class="lt"><span class="a">'+esc(d.idPreingreso)+'</span><span class="b">'+esc(sub)+'</span></span><span class="go">→</span></a></div>';
   }
 
-  const fotoHtml = d.foto ? '<div class="sec"><div class="sec-t">📷 Foto</div><img class="foto-guia" src="'+esc(d.foto)+'" onclick="openLb(\''+escAttr(d.foto).replace(/'/g,"\\'")+'\')"></div>' : '';
+  const fotoHtml = d.foto ? '<div class="sec"><div class="sec-t">📷 Foto</div><img class="foto-guia" src="'+esc(d.foto)+'" data-lb="'+esc(d.foto)+'"></div>' : '';
 
   return header(acc, d.proveedor||d.usuario, tipoLbl(d.tipoGuia), d.idGuia, d.estado)
     + marksHtml
@@ -300,8 +302,10 @@ function renderPreingreso(d){
   const marksHtml = marks.length ? '<div class="marks">'+marks.map(m=>'<span class="mk '+m[1]+'">'+m[0]+'</span>').join('')+'</div>' : '';
   const lib = libre(d.comentario);
   const notaHtml = lib ? postit('Nota del preingreso', lib) : '';
-  // cargadores: nombres (modelo simple)
-  const cargs = (d.cargadores||[]).map(function(c){ return (c&&(c.nombre||c.id))?String(c.nombre||c.id):String(c); }).filter(Boolean);
+  // cargadores: nombres (modelo simple). GUARD Array.isArray: si el jsonb no es un array (dato legado/editado
+  // a mano), .map lanzaría y el reporte entero caería a "No se pudo cargar".
+  const cargRaw = Array.isArray(d.cargadores) ? d.cargadores : [];
+  const cargs = cargRaw.map(function(c){ return (c&&(c.nombre||c.id))?String(c.nombre||c.id):''; }).filter(Boolean);
   const chips = [];
   if (cargs.length) chips.push('🛺 '+cargs.length+' cargador'+(cargs.length===1?'':'es')+' · '+cargs.slice(0,4).join(', ')+(cargs.length>4?'…':''));
   if (d.fotos && d.fotos.length) chips.push('📷 '+d.fotos.length+' foto'+(d.fotos.length===1?'':'s'));
@@ -312,7 +316,7 @@ function renderPreingreso(d){
   let guiaHtml='';
   if (d.idGuia) {
     const g=d.guia;
-    const sub=g?((tipoLbl(g.tipo).replace(/^.. /,''))+' · '+(g.estado||'')+' · '+(g.items||0)+' ítems'):'Ver guía';
+    const sub=g?(tipoLbl(g.tipo)+' · '+(g.estado||'')+' · '+(g.items||0)+' ítems'):'Ver guía';
     guiaHtml='<div class="sec"><div class="sec-t">🔗 Guía vinculada</div>'
       + '<a class="linkcard" href="'+esc(buildUrl('guia',d.idGuia))+'"><span class="lic">📋</span>'
       + '<span class="lt"><span class="a">'+esc(d.idGuia)+'</span><span class="b">'+esc(sub)+'</span></span><span class="go">→</span></a></div>';
