@@ -15988,8 +15988,8 @@ const DespachoView = (() => {
     if (libres.length) {
       html += `
         <div class="lsck-libres-titulo">
-          <span class="lsck-libres-ico">📝</span>
-          <span>Libres · ${libres.length} sin identificar (solo guía)</span>
+          <span class="lsck-libres-ico">❓</span>
+          <span>No se entiende · ${libres.length} sin identificar · a tu criterio (queda constancia del pedido)</span>
         </div>` +
         libres.map(({ it, idx }) => `
           <div class="pkck-card lsck-card lsck-libre" data-idx="${idx}"
