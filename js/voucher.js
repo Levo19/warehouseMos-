@@ -282,7 +282,6 @@
   }
 
   async function compartir(tipo, id) {
-    if (typeof toast === 'function') toast('Generando voucher…', 'info', 1500);
     let data;
     try { const r = await API.get('voucherData', { tipo, id }); data = (r && r.ok && r.data) ? r.data : null; }
     catch(_) { data = null; }

@@ -237,10 +237,18 @@
     fecha = fecha || _hoyStr();
     document.getElementById('overlayCargadores').style.display = 'block';
     document.getElementById('modalCargadores').classList.add('open');
-    // descartar cargas provisionales abandonadas de una apertura previa
-    _dia = _dia.filter(c => c && !c._prov);
     _addOpen = false; _searchVal = '';
-    _render();
+    // [rev] Si abro un día DISTINTO al que ya tengo en memoria, NO mostrar los datos del día anterior
+    // (era el "primero muestra hoy y al rato el día que clickié"). Vaciar + mostrar "Cargando…".
+    if (_fechaActual === fecha) {
+      _dia = _dia.filter(c => c && !c._prov);   // mismo día → cache instantáneo (descarta provisionales)
+      _render();
+    } else {
+      _dia = []; _fechaActual = fecha;
+      const res = document.getElementById('cargResumen');
+      if (res) res.innerHTML = '<div style="text-align:center;padding:30px 14px;color:#64748b;font-size:13px"><div class="cgv-spin" style="position:static;margin:0 auto 12px"></div>Cargando cargas del día…</div>';
+      const add = document.getElementById('cargAdd'); if (add) add.innerHTML = '';
+    }
     Promise.all([_cargarMaster(), _cargarResumen(fecha)]).then(() => _render()).catch(()=>{});
   }
   function cerrar() {
