@@ -30,7 +30,8 @@
     .replace(/^\s*(?:comprobante:\s*(?:s[ií]|no)\s*\|?\s*)?/i, '')
     .replace(/^\s*(?:completo:\s*(?:s[ií]|no)\s*\|?\s*)?/i, '')
     .replace(/^\s*\|\s*/, '').trim(); }
-  function _money(m){ const v = parseFloat(m); return isNaN(v) ? null : 'S/ ' + v.toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  // devuelve null si no hay monto declarado (0 o inválido) → no pintar "S/ 0.00 monto declarado" ni "💵 S/ 0.00".
+  function _money(m){ const v = parseFloat(m); return (!isFinite(v) || v <= 0) ? null : 'S/ ' + v.toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2}); }
   function _tipoLabel(t){ return TIPO[t] || (t ? String(t).replace(/_/g,' ').toLowerCase() : '—'); }
   function _link(tipo, id){ return BASE + '?tipo=' + tipo + '&id=' + encodeURIComponent(id); }
   function _fmtFecha(f){ const raw = String(f||'').slice(0,10); if(!raw) return ''; const p=raw.split('-'); if(p.length<3) return raw;
@@ -255,7 +256,7 @@
       if (m.length) L.push(m.join('  ·  '));
       const libre = _libre(t.comentario); if (libre) L.push('📝 ' + libre);
       const det = t.detalle || []; if (det.length) { L.push('', '*Productos (' + det.length + '):*');
-        det.forEach(d => L.push('• ' + (d.descripcion || d.codigoProducto) + ' — ' + (d.cantidad!=null?d.cantidad:'') + (d.esProductoNuevo?' 🆕':d.esSinIdentificar?' ⚠️':''))); }
+        det.forEach(d => L.push('• ' + (d.descripcion || d.codigoProducto || '—') + ' — ' + (d.cantidad!=null?d.cantidad:'') + (d.esProductoNuevo?' 🆕':d.esSinIdentificar?' ⚠️':''))); }
     } else {
       const mon = _money(t.monto); if (mon) L.push('💵 ' + mon);
       const carg = t.cargadores||[]; if (carg.length) L.push('🛺 ' + carg.join(', '));

@@ -812,22 +812,8 @@ const CarretaCiclo = {
 // al modelo de cargas (cargadores_log / _cargaPillHTML). Su único caller era _resumenCargadoresDiaPorFecha,
 // también eliminado abajo.
 
-// [v2.13.231] Cuenta cargadores DISTINTOS activos en un set de preingresos
-// (por id/nombre). Para el chip "cargadores" de la banda Estado del Día.
-function _contarCargadoresDistintos(items) {
-  const ids = new Set();
-  (items || []).forEach(p => {
-    let arr = [];
-    try { arr = JSON.parse(p.cargadores || '[]'); } catch {}
-    if (!Array.isArray(arr)) return;
-    arr.forEach(c => {
-      if (!c || typeof c !== 'object') return;
-      const k = c.idCargador || c.id || c.nombre;
-      if (k) ids.add(String(k));
-    });
-  });
-  return ids.size;
-}
+// [rev senior 2026-07-26] _contarCargadoresDistintos ELIMINADO: código muerto (0 callers) —
+// contaba desde preingreso.cargadores para un chip que ya no existe tras el modelo de cargas.
 
 // Filtra preingresos de un día (key=YYYY-MM-DD) usando la fecha LOCAL del
 // cliente, igual que el pill del header. Centralizado para garantizar que

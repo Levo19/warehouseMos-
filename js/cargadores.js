@@ -13,7 +13,6 @@
   let _master = [];      // catálogo [{idCargador, nombre, veces}]
   let _dia = [];         // cargas: [{idCarga, idCargador, nombre, nivel, fotos:[], hora, ts, _prov}]
   let _fechaActual = '';
-  let _polling = null;
   let _cssDone = false;
   let _audio = null;
   let _addOpen = false;  // panel "agregar" desplegado
@@ -460,6 +459,7 @@
     if (c && c._prov && p < MIN_GUARDAR) return;   // provisional <10% → no persistir
     clearTimeout(_saveTimers[id]);
     _saveTimers[id] = setTimeout(async () => {
+      delete _saveTimers[id];   // el timer ya disparó: no dejar handles rancios acumulados en el mapa
       try { const res = await API.post('cargadorCargaSetNivel', { idCarga: id, idCargador: c && c.idCargador, nivel: p, fecha: _fechaActual || _hoyStr(), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
         if (res && res.ok) {
           if (c) { c._prov = false; const card = document.getElementById('cgvCarga_' + _escAttr(id)); if (card) card.classList.remove('prov'); }
@@ -710,13 +710,6 @@
     } catch(e) { if (typeof toast === 'function') toast('No se pudo imprimir', 'warn'); }
   }
 
-  function startPolling() {
-    if (_polling) return;
-    _polling = setInterval(() => {
-      if (document.hidden) return;
-      _cargarResumen(_hoyStr()).then(() => { if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia(); });
-    }, 60000);
-  }
   // [rev senior] contar solo cargas PERSISTIDAS (no provisionales 0% sin registrar) → el chip no infla.
   function getCountDia(fecha) { fecha = fecha || _hoyStr(); return (_fechaActual === fecha) ? _dia.filter(c => c && !c._prov).length : 0; }
   async function refreshCountDia(fecha) {
@@ -724,12 +717,12 @@
     const m = document.getElementById('modalCargadores');
     if (m && m.classList.contains('open') && _fechaActual === fecha) return _dia.filter(c => c && !c._prov).length;   // fuente viva (solo persistidas)
     const r = await _cargarResumen(fecha);
-    return (r.totalCargas != null) ? r.totalCargas : _dia.length;
+    return (r.totalCargas != null) ? r.totalCargas : _dia.filter(c => c && !c._prov).length;
   }
 
   window.Cargadores = {
     abrir, cerrar, agregar, quitar, compartir, compartirImagen, imprimir, toggleAdd,
-    startPolling, getCountDia, refreshCountDia,
+    getCountDia, refreshCountDia,
     _filtrar, _hoyStr, _pickFoto, _carousel
   };
 })();

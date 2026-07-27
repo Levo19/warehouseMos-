@@ -44,7 +44,8 @@
         '</div>' +
       '</div>';
 
-    const close = () => { try { URL.revokeObjectURL(url); } catch(_) {} ov.remove(); };
+    // difiere el revoke del objectURL: revocarlo en el mismo tick que a.click() puede ABORTAR la descarga.
+    const close = () => { const u = url; ov.remove(); setTimeout(() => { try { URL.revokeObjectURL(u); } catch(_) {} }, 1800); };
     ov.addEventListener('click', e => { if (e.target === ov) close(); });
     ov.querySelector('[data-x]').onclick = close;
     ov.querySelector('[data-dl]').onclick = () => { _descargar(url, filename); _toast('Imagen descargada', 'ok', 2500); };
@@ -54,17 +55,15 @@
         try { await navigator.share({ files: [file], text: texto }); close(); return; }
         catch(e) { if (e && e.name === 'AbortError') return; /* canceló → seguir en la vista previa */ }
       }
-      // PC / WhatsApp Web: abrir WA y descargar ANTES de cualquier await (si no, el await de clipboard
-      // consume la activación de usuario y el navegador bloquea el window.open como popup). Luego copiar.
+      // PC / WhatsApp Web: la imagen no se adjunta por web. Copiar al portapapeles (pegar con Ctrl+V) + descargar
+      // + abrir WhatsApp. ORDEN CLAVE: INICIAR clipboard.write (necesita FOCO + activación) ANTES de window.open
+      // (que roba el foco); luego abrir/descargar y recién AWAIT la copia. Así ni la copia ni el open se bloquean.
+      let clipP = null;
+      try { if (navigator.clipboard && window.ClipboardItem) clipP = navigator.clipboard.write([ new ClipboardItem({ [blob.type || 'image/png']: blob }) ]); } catch(_) { clipP = null; }
       window.open('https://wa.me/?text=' + encodeURIComponent(texto || ''), '_blank');
       _descargar(url, filename);
       let copiado = false;
-      try {
-        if (navigator.clipboard && window.ClipboardItem) {
-          await navigator.clipboard.write([ new ClipboardItem({ [blob.type || 'image/png']: blob }) ]);
-          copiado = true;
-        }
-      } catch(_) { copiado = false; }
+      if (clipP) { try { await clipP; copiado = true; } catch(_) { copiado = false; } }
       close();
       _toast(copiado
         ? '✅ Imagen copiada — pégala con Ctrl+V en el chat de WhatsApp (también se descargó)'
