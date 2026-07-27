@@ -1630,7 +1630,7 @@ const API = (() => {
       if (!esArchivo && texto.length > 50000) return { ok: false, error: 'TEXTO_MUY_LARGO', mensaje: 'Chunk demasiado grande' };
       // System prompt COLUMNA-CONSCIENTE: la IA nunca confunde "solicitado" con mín/máx/stock/precio.
       const system = [
-        'Eres un asistente experto en leer listas/tablas de PEDIDOS de almacén y extraer SOLO los productos con la cantidad SOLICITADA (lo que hay que despachar).',
+        'Eres un asistente experto en leer listas/tablas de PEDIDOS de almacén y extraer CADA producto con su cantidad SOLICITADA (lo que hay que despachar).',
         'La lista puede venir como texto pegado, foto(s), captura de Excel, tabla o PDF (WhatsApp, email, ticket impreso).',
         'Si recibes VARIAS imágenes, son PARTES DE LA MISMA lista (varias fotos o varias hojas): combínalas en UN SOLO resultado, sin duplicar productos ni sumar cantidades repetidas. Lee con cuidado incluso fotos inclinadas, con sombra o de baja calidad; si un renglón es ilegible, omítelo antes que inventar.', '',
         'REGLA DE ORO — COLUMNAS DE CANTIDAD:',
@@ -1643,10 +1643,11 @@ const API = (() => {
         '- "stock/saldo/existencia" y "precio/costo/P.U./importe" (suelen llevar decimales o S/) NO son el pedido: IGNÓRALOS.',
         '- Si NO hay encabezados claros y hay varios números, elige el que representa lo pedido; ante duda, el más plausible como pedido, NUNCA el precio ni el stock.',
         '- Si solo hay UNA cantidad por producto, úsala.', '',
+        'CANTIDAD CERO = VÁLIDA (regla crítica): si la cantidad solicitada de un producto es 0, 0.00 o "cero", INCLÚYELO igual con cantidad 0.0. Cero NO es lo mismo que vacío: significa que el producto SÍ está en la lista y el operador de almacén decidirá cuánto despachar según su criterio. NUNCA descartes ni omitas un producto por tener cantidad 0. Una tabla donde TODOS los productos están en 0.00 debe devolver TODOS los productos con cantidad 0.0 (no una lista vacía).', '',
         'IGNORA: cabeceras de tabla, totales/subtotales, separadores (---, ===), notas y columnas de código/stock/precio/mín/máx.', '',
         'POR CADA PRODUCTO devuelve:',
         '- nombre: descripción del producto en MAYÚSCULAS, limpia, sin códigos pegados',
-        '- cantidad: número decimal con 1 decimal (ej: 15.0, 80.0, 0.5)',
+        '- cantidad: número decimal con 1 decimal (ej: 15.0, 80.0, 0.5, y también 0.0 si la lista pide 0). Si la lista dice 0/0.00 para ese producto, pon 0.0 — NO lo omitas.',
         '- codigoVisto: opcional — si trae un código/sku al lado, ponlo (string), si no, omite el campo', '',
         'RESPONDE EXCLUSIVAMENTE con JSON válido en este formato (sin markdown, sin comentarios):',
         '{"items":[{"nombre":"...","cantidad":N.N,"codigoVisto":"..."}]}'
@@ -1668,7 +1669,7 @@ const API = (() => {
         const nImg = bloques.length;
         bloques.push({ type: 'text', text: (nImg > 1
           ? 'Estas ' + nImg + ' imágenes son partes de la MISMA lista: combínalas en un solo resultado, sin duplicar. '
-          : '') + 'Extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio). Devuelve solo el JSON indicado.' });
+          : '') + 'Extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio), INCLUYENDO los que estén en 0/0.00 (ponles cantidad 0.0, NO los omitas). Devuelve solo el JSON indicado.' });
         // [fix 500x S5] thinking desactivado: baja latencia y evita el bloque `thinking` que arriesgaba el timeout de visión.
         body = { model: 'claude-sonnet-5', max_tokens: 8192, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: bloques }] };
       } else {
@@ -1693,7 +1694,7 @@ const API = (() => {
         nombre: String(it.nombre || '').toUpperCase().trim(),
         cantidad: Math.round((parseFloat(it.cantidad) || 0) * 10) / 10,
         codigoVisto: it.codigoVisto ? String(it.codigoVisto) : ''
-      })).filter(it => it.nombre && it.cantidad > 0);
+      })).filter(it => it.nombre);   // [cero-es-cero] mantener productos con cantidad 0 (el operador decide cuánto despachar). Vacío es vacío (sin nombre → fuera); cero es cero (0 válido → dentro).
       return { ok: true, data: { items: limpios, total: limpios.length } };
     }
     if (params.action === 'subirFotoPreingreso') {

@@ -16705,11 +16705,13 @@ const DespachoView = (() => {
         const v = parseFloat(inp.value);
         if (!isNaN(v)) _lsPreviewBuffer[i].cantidad = Math.round(v * 10) / 10;
       });
-      const validos = _lsPreviewBuffer.filter(i => i && i.nombre && i.cantidad > 0);
+      // [cero-es-cero] La cantidad 0 es VÁLIDA (el operador decide cuánto despachar). Solo se exige NOMBRE.
+      // Vacío es vacío (renglón sin nombre → fuera); cero es cero (0 solicitado → dentro).
+      const validos = _lsPreviewBuffer.filter(i => i && i.nombre);
       if (!validos.length) {
-        document.getElementById('lsErrorTitulo').textContent = 'Cantidades inválidas';
+        document.getElementById('lsErrorTitulo').textContent = 'Lista vacía';
         document.getElementById('lsErrorMsg').textContent =
-          'Todas las cantidades son 0 o no válidas. Ajusta los valores y vuelve a intentar.';
+          'Ningún renglón tiene nombre de producto. Vuelve atrás y revisa la lista.';
         _lsMostrarPaso(4);
         try { SoundFX.warn(); } catch(_){}
         return;
