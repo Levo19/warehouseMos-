@@ -52,6 +52,9 @@
   .empty{text-align:center;color:var(--tx3);padding:40px 10px;font-size:14px}
   .empty .e{font-size:40px;opacity:.5;margin-bottom:8px}
   .foot{text-align:center;font-size:10px;color:var(--tx3);margin-top:18px}
+  /* barra volver (solo dentro de la PWA instalada) */
+  .backbar{display:flex;align-items:center;gap:7px;padding:11px 15px;margin-bottom:14px;background:var(--panel);border:1px solid #243247;border-radius:13px;color:var(--gold);font-weight:800;font-size:13.5px;text-decoration:none}
+  .backbar:active{background:#131d30}
   /* lightbox */
   .lb{position:fixed;inset:0;background:rgba(3,6,12,.94);display:none;align-items:center;justify-content:center;z-index:99;padding:16px}
   .lb.on{display:flex} .lb img{max-width:100%;max-height:88vh;border-radius:14px}
@@ -60,6 +63,8 @@
 </head>
 <body>
 <div class="wrap">
+  <!-- "Volver" SOLO dentro de la PWA instalada (usuario del sistema); en navegador (usuario normal) no aparece -->
+  <a id="backBar" class="backbar" href="./" style="display:none">← Volver a warehouseMos</a>
   <div class="head">
     <span class="ic">🛺</span>
     <div style="flex:1"><h1>Cargadores del día</h1><div class="fecha" id="fecha">—</div></div>
@@ -140,6 +145,9 @@
     var s = Math.round((Date.now()-_lastTs)/1000);
     document.getElementById('hace').textContent = s<5?'ahora':('hace '+s+'s');
   }
+  // "Volver a warehouseMos" solo si corre dentro de la PWA instalada (standalone) → el usuario del sistema
+  // puede salir del reporte sin cerrar la app; el usuario normal (navegador) no lo ve.
+  try { if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) { var bb=document.getElementById('backBar'); if(bb) bb.style.display='flex'; } } catch(_){}
   cargar(); setInterval(cargar, 60000); setInterval(tick, 1000);
 </script>
 </body>
