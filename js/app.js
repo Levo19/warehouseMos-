@@ -925,7 +925,7 @@ function _calcularCargadoresDelDia(key) {
   };
 }
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
-function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/['’‘]/g, '-').trim().toUpperCase(); }  // [fix layout ES-LatAm] apóstrofo (recto/curvo) = "-" mal leído por lector HID con teclado Español → red de seguridad universal para la búsqueda en catálogo
+function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/['’‘´]/g, '-').trim().toUpperCase(); }  // [fix layout ES-LatAm] apóstrofo (recto/curvo) = "-" mal leído por lector HID con teclado Español → red de seguridad universal para la búsqueda en catálogo
 
 // ── Productos nuevos aprobados — últimos 3 días ─────────────
 async function _cargarPNAprobados() {
@@ -12647,7 +12647,7 @@ const DespachoView = (() => {
     if (!activo) {
       // Sin producto activo pero hay lista sombra → mostrar resumen de sombra
       if (_listaSombra && _listaSombra.items && _listaSombra.items.length) {
-        const total = _listaSombra.items.length;
+        const total = _listaSombra.items.filter(i => i.cantidad > 0).length;   // [1000x] solo líneas con meta
         const completos = _listaSombra.items.filter(i => i.cantidad > 0 && (i.cantidadEscaneada || 0) >= i.cantidad).length;
         const nom   = document.getElementById('despflotNombre');
         const meta  = document.getElementById('despflotMeta');
@@ -15915,7 +15915,7 @@ const DespachoView = (() => {
         banner.style.display = 'none';
       } else {
         banner.style.display = 'block';
-        const total      = _listaSombra.items.length;
+        const total      = _listaSombra.items.filter(i => i.cantidad > 0).length;   // [1000x] solo líneas con meta (para que llegue a 100% junto al 🎉)
         const completos  = _listaSombra.items.filter(i => i.cantidad > 0 && (i.cantidadEscaneada || 0) >= i.cantidad).length;
         const titulo = document.getElementById('sombraActivaTitulo');
         const lbl    = document.getElementById('sombraActivaProgresoLbl');
@@ -15923,7 +15923,7 @@ const DespachoView = (() => {
         const creador = _listaSombra.creador ? `Lista de ${_listaSombra.creador}` : 'Sombra activa';
         if (titulo) titulo.textContent = creador;
         if (lbl)    lbl.textContent    = `${completos}/${total}`;
-        if (bar)    bar.style.width    = (completos / total * 100).toFixed(1) + '%';
+        if (bar)    bar.style.width    = (total > 0 ? completos / total * 100 : 0).toFixed(1) + '%';
       }
     }
     // Render checklist morado abajo (cards estilo pickup)
