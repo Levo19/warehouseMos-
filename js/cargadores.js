@@ -478,9 +478,45 @@
   }
 
   // ── fotos (por carga) ──
+  // [fix móvil] Antes el input tenía capture='environment' → en el celular abría DIRECTO la cámara,
+  // sin dejar subir fotos ya existentes. Ahora, en táctil, mostramos un selector Cámara/Galería;
+  // en escritorio (sin cámara relevante) abre directo el diálogo de archivos.
+  let _fotoChooserId = null;
   function _pickFoto(idCarga) {
+    _fotoChooserId = idCarga;
+    const esTactil = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (!esTactil) { _fotoDesde(false); return; }   // desktop → galería/archivos directo
+    let ov = document.getElementById('cgvFotoChooser'); if (ov) ov.remove();
+    if (!document.getElementById('cgvChooserKf')) {
+      const st = document.createElement('style'); st.id = 'cgvChooserKf';
+      st.textContent = '@keyframes cgvChIn{from{opacity:0}to{opacity:1}}@keyframes cgvChUp{from{transform:translateY(14px)}to{transform:translateY(0)}}';
+      document.head.appendChild(st);
+    }
+    ov = document.createElement('div');
+    ov.id = 'cgvFotoChooser';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(2,6,23,.72);backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));animation:cgvChIn .18s ease';
+    ov.onclick = (e) => { if (e.target === ov) _cerrarFotoChooser(); };
+    ov.innerHTML = `
+      <div style="width:100%;max-width:420px;background:#0f172a;border:1px solid #1e293b;border-radius:18px;padding:14px;box-shadow:0 -12px 44px rgba(0,0,0,.55);animation:cgvChUp .22s cubic-bezier(.34,1.56,.64,1)">
+        <div style="text-align:center;font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:.6px;text-transform:uppercase;margin-bottom:12px">Agregar foto del cargador</div>
+        <div style="display:flex;gap:10px">
+          <button onclick="Cargadores._fotoDesde(true)" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(99,102,241,.05));border:1px solid rgba(99,102,241,.4);color:#c7d2fe;border-radius:14px;padding:18px 12px;font-size:13px;font-weight:700;cursor:pointer">
+            <span style="font-size:30px;line-height:1">📷</span>Cámara</button>
+          <button onclick="Cargadores._fotoDesde(false)" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;background:linear-gradient(135deg,rgba(16,185,129,.16),rgba(16,185,129,.05));border:1px solid rgba(16,185,129,.4);color:#a7f3d0;border-radius:14px;padding:18px 12px;font-size:13px;font-weight:700;cursor:pointer">
+            <span style="font-size:30px;line-height:1">🖼</span>Galería</button>
+        </div>
+        <button onclick="Cargadores._cerrarFotoChooser()" style="width:100%;margin-top:10px;background:transparent;border:0;color:#64748b;font-size:13px;font-weight:600;padding:10px;cursor:pointer">Cancelar</button>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  function _cerrarFotoChooser() { const ov = document.getElementById('cgvFotoChooser'); if (ov) ov.remove(); }
+  function _fotoDesde(usarCamara) {
+    _cerrarFotoChooser();
+    const idCarga = _fotoChooserId; if (!idCarga) return;
     let inp = document.getElementById('cgvFileInput');
-    if (!inp) { inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.capture = 'environment'; inp.id = 'cgvFileInput'; inp.style.display = 'none'; document.body.appendChild(inp); }
+    if (!inp) { inp = document.createElement('input'); inp.type = 'file'; inp.id = 'cgvFileInput'; inp.style.display = 'none'; document.body.appendChild(inp); }
+    inp.accept = 'image/*';
+    if (usarCamara) inp.setAttribute('capture', 'environment'); else inp.removeAttribute('capture');
     inp.value = '';
     inp.onchange = (ev) => { const f = ev.target.files && ev.target.files[0]; if (f) _subirFoto(idCarga, f); };
     inp.click();
@@ -731,6 +767,6 @@
   window.Cargadores = {
     abrir, cerrar, agregar, quitar, compartir, compartirImagen, imprimir, toggleAdd,
     getCountDia, refreshCountDia,
-    _filtrar, _hoyStr, _pickFoto, _carousel
+    _filtrar, _hoyStr, _pickFoto, _fotoDesde, _cerrarFotoChooser, _carousel
   };
 })();
