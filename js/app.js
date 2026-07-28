@@ -1532,7 +1532,9 @@ const Session = (() => {
   }
 
   function _aplicarSesion() {
-    window.WH_CONFIG.usuario   = sesionActual.nombre + ' ' + sesionActual.apellido;
+    // [586] normalizar en el ORIGEN: sin apellido, `nombre + ' ' + apellido` dejaba "Jesus " (con
+    // espacio) → el mismo operador se fragmentaba en las estadísticas. trim + colapsar espacios.
+    window.WH_CONFIG.usuario   = (String(sesionActual.nombre || '') + ' ' + String(sesionActual.apellido || '')).replace(/\s+/g, ' ').trim();
     window.WH_CONFIG.idSesion  = sesionActual.idSesion;
     window.WH_CONFIG.idPersonal= sesionActual.idPersonal;
     window.WH_CONFIG.rol       = String(sesionActual.rol || '').toUpperCase();
@@ -10225,6 +10227,20 @@ const EnvasadosView = (() => {
     if (colabOn && !colaborador) {
       toast('🤝 Elegiste colaborativo: toca al compañero con quien envasaste', 'warn');
       return;
+    }
+
+    // [586] Guard "operador fantasma": sin login personal WH_CONFIG.usuario queda en 'operador' (o
+    // vacío) → el envasado no le paga a nadie y se ve aparte en MOS. Pedir el nombre real ANTES de
+    // registrar (reusa _whPrompt). El server lo rechaza igual (OPERADOR_REQUERIDO) como respaldo.
+    let _op = String(window.WH_CONFIG?.usuario || '').replace(/\s+/g, ' ').trim();
+    if (!_op || _op.toLowerCase() === 'operador') {
+      const n = await _whPrompt('¿Quién está envasando? (tu nombre)', '', { titulo: 'Identifícate para envasar', maxlength: 60 });
+      _op = String(n || '').replace(/\s+/g, ' ').trim();
+      if (!_op || _op.toLowerCase() === 'operador') {
+        toast('Necesitas identificarte con tu nombre para registrar el envasado', 'warn', 5000);
+        return;
+      }
+      window.WH_CONFIG.usuario = _op;
     }
 
     const prod     = derivados.find(p => p.idProducto === idDerivado);
