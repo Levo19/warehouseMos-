@@ -12648,7 +12648,7 @@ const DespachoView = (() => {
       // Sin producto activo pero hay lista sombra → mostrar resumen de sombra
       if (_listaSombra && _listaSombra.items && _listaSombra.items.length) {
         const total = _listaSombra.items.length;
-        const completos = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
+        const completos = _listaSombra.items.filter(i => i.cantidad > 0 && (i.cantidadEscaneada || 0) >= i.cantidad).length;
         const nom   = document.getElementById('despflotNombre');
         const meta  = document.getElementById('despflotMeta');
         const ctrls = document.getElementById('despflotCtrls');
@@ -15916,7 +15916,7 @@ const DespachoView = (() => {
       } else {
         banner.style.display = 'block';
         const total      = _listaSombra.items.length;
-        const completos  = _listaSombra.items.filter(i => (i.cantidadEscaneada || 0) >= i.cantidad).length;
+        const completos  = _listaSombra.items.filter(i => i.cantidad > 0 && (i.cantidadEscaneada || 0) >= i.cantidad).length;
         const titulo = document.getElementById('sombraActivaTitulo');
         const lbl    = document.getElementById('sombraActivaProgresoLbl');
         const bar    = document.getElementById('sombraActivaBar');
@@ -16231,7 +16231,9 @@ const DespachoView = (() => {
     // snapshot del estado antes (para detectar transiciones)
     const antes = _listaSombra.items.map(i => ({
       esc: i.cantidadEscaneada || 0,
-      completo: (i.cantidadEscaneada || 0) >= i.cantidad
+      // [cero-es-cero] una línea de solicitado 0 nunca es "completo" (no hay meta; el operador
+      // decide). Así, al escanearla, entra al ramo PARCIAL y sí da feedback (flash/sfx).
+      completo: i.cantidad > 0 && (i.cantidadEscaneada || 0) >= i.cantidad
     }));
     _lsRecalcular();
     let nuevosCompletos = 0;
@@ -16241,7 +16243,7 @@ const DespachoView = (() => {
     _listaSombra.items.forEach((it, i) => {
       const escAhora = it.cantidadEscaneada || 0;
       const escAntes = antes[i].esc;
-      const completoAhora = escAhora >= it.cantidad;
+      const completoAhora = it.cantidad > 0 && escAhora >= it.cantidad;
       if (completoAhora && !antes[i].completo) {
         it._flash = true;
         nuevosCompletos++;
