@@ -12339,7 +12339,7 @@ const DespachoView = (() => {
       const equivCount= Array.isArray(it.codigosOriginales) ? it.codigosOriginales.length : 0;
       const equivTxt  = equivCount > 1 ? ` · ${equivCount} códigos` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
-      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
+      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase) || String(p.skuBase) === String(it.skuBase));
       const esKg = _esProductoPeso(prod);
       const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
       const pendiente = sol - desp;
@@ -12356,8 +12356,46 @@ const DespachoView = (() => {
       const kgBadge = esKg
         ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800">⚖ ${unidadLbl}</span>`
         : '';
+      // ── Controles del item ACTIVO (último código escaneado) ──────────
+      // Al escanear Cocinero (código canónico O equivalente) ese código queda
+      // ACTIVO y aquí aparece el control fácil de cantidad PARA ESE código:
+      //   · NIU/unidades → botones +/− (intuitivo, suma/resta 1).
+      //   · Granel/KGM   → input decimal (pesas y escribes) + aviso de que al
+      //                    emitir la guía se imprime su adhesivo granel.
+      // Operan sobre item._ultimoCb → cada código respeta su propio stock/kardex
+      // (no se mezcla) y el peso se guarda por-código (despachadoPorCodigo[cb]).
+      const esActivo = _pickupItemActivo && String(_pickupItemActivo) === String(it.skuBase);
+      const skuAttr  = escAttr(it.skuBase);
+      let ctrlsHtml = '';
+      if (esActivo) {
+        if (esKg) {
+          const _cbAct = it._ultimoCb || (it.despachadoPorCodigo && Object.keys(it.despachadoPorCodigo)[0]) || '';
+          const despCod = (_cbAct && it.despachadoPorCodigo && it.despachadoPorCodigo[_cbAct] != null)
+            ? (parseFloat(it.despachadoPorCodigo[_cbAct]) || 0) : (parseFloat(it.despachado) || 0);
+          const _multi = it.despachadoPorCodigo && Object.keys(it.despachadoPorCodigo).length > 1;
+          ctrlsHtml = `
+          <div class="pkck-ctrls">
+            <span class="pkck-ctrl-lbl">⚖ Peso ${_multi ? '(este código)' : 'despachado'}:</span>
+            <input type="number" inputmode="decimal" step="0.001" min="0"
+                   class="pkck-ctrl-granel" value="${fmt(despCod,3)}"
+                   onchange="DespachoView.pkckSetGranel('${skuAttr}', this.value)"
+                   onkeydown="if(event.key==='Enter'){this.blur();}">
+            <span class="pkck-ctrl-unit">${unidadLbl}</span>${_multi ? `<span class="pkck-ctrl-unit" style="color:#fbbf24" title="Suma de todos los códigos">· total ${fmt(parseFloat(it.despachado)||0,3)}</span>` : ''}
+            <span class="pkck-ctrl-adh" title="Al emitir la guía se imprime el adhesivo granel para pegar en el producto" style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:2px 6px;border-radius:6px;font-weight:800;letter-spacing:.03em;white-space:nowrap">🏷 adhesivo</span>
+          </div>`;
+        } else {
+          ctrlsHtml = `
+          <div class="pkck-ctrls">
+            <button class="pkck-ctrl-btn pkck-ctrl-menos" ${hechoHoy <= 0 ? 'disabled' : ''}
+                    onclick="DespachoView.pkckMenos('${skuAttr}')">−</button>
+            <span class="pkck-ctrl-val">${hechoHoy}</span>
+            <button class="pkck-ctrl-btn pkck-ctrl-mas"
+                    onclick="DespachoView.pkckMas('${skuAttr}')">+</button>
+          </div>`;
+        }
+      }
       return `
-        <div class="pkck-card ${cls}" data-sku="${escAttr(it.skuBase)}">
+        <div class="pkck-card ${cls} ${esActivo ? 'is-activo' : ''}" data-sku="${skuAttr}">
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
@@ -12373,6 +12411,7 @@ const DespachoView = (() => {
             <div class="pkck-bar-fill" style="width:${pct}%"></div>
             ${enProg ? '<div class="pkck-bar-shimmer"></div>' : ''}
           </div>
+          ${ctrlsHtml}
           <div class="pkck-check-overlay">✓</div>
         </div>`;
     }).join('');
@@ -14506,10 +14545,16 @@ const DespachoView = (() => {
       badgeUpdate();
       try { SoundFX.beep(); } catch(_){}
       vibrate(10);
-      // Foco al input granel de la card activa
+      // Foco al input granel de la card activa. Ambas superficies (inline
+      // embebido + hoja) tienen ahora el input → enfocar el de la superficie
+      // VISIBLE: la hoja si está abierta, si no el checklist inline.
       setTimeout(() => {
         try {
-          const inp = document.querySelector('.pkck-card[data-sku="' + (window.CSS && CSS.escape ? CSS.escape(String(item.skuBase)) : String(item.skuBase)) + '"] .pkck-ctrl-granel');
+          const skuEsc = (window.CSS && CSS.escape ? CSS.escape(String(item.skuBase)) : String(item.skuBase));
+          const sel = '.pkck-card[data-sku="' + skuEsc + '"] .pkck-ctrl-granel';
+          const sheetOpen = (typeof _openSheets !== 'undefined') && _openSheets.has && _openSheets.has('sheetDespPickup');
+          const cont = document.getElementById(sheetOpen ? 'despPickChecklist' : 'despPickupChecklistInline');
+          const inp = (cont && cont.querySelector(sel)) || document.querySelector(sel);
           if (inp) { inp.focus(); inp.select(); }
         } catch(_){}
       }, 70);
@@ -14927,7 +14972,7 @@ const DespachoView = (() => {
       const equivTxt  = equivCount > 1 ? ` · ${equivCount} códigos` : '';
       const icon      = completo ? '✓' : (enProg ? '⏳' : '📦');
       // Producto maestro para detectar si es a granel (despacho decimal)
-      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase));
+      const prod = productos.find(p => String(p.idProducto) === String(it.skuBase) || String(p.skuBase) === String(it.skuBase));
       const esKg = _esProductoPeso(prod);
       const unidadLbl = esKg ? String(prod.unidad || 'kg').toLowerCase() : '';
       // Stock badge — rojo si stockDisp < solicitado pendiente
