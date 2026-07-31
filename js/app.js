@@ -9479,6 +9479,25 @@ function _renderEnvasadosPorDia(list, container, opts) {
   const hoy           = new Date().toISOString().split('T')[0];
   const desde14       = (typeof _fechaDesde14Dias === 'function') ? _fechaDesde14Dias() : hoy;
 
+  // [FIX card fantasma] Dedup optimista↔real. Durante la reconciliación puede coexistir un
+  // instante la card OPTIMISTA (idEnvasado 'ENV_OPT_…', sin editar/anular) y su GEMELA REAL
+  // ('ENV_L…', con editar/anular) por una carrera entre getEnvasados y el sellado del cache
+  // → el operador veía DOS cards iguales (confuso). Si existe una card REAL con la MISMA clave
+  // natural (producto+unidades+día+usuario), descartamos la optimista. NUNCA afecta la BD (hay
+  // 1 solo registro real → el pago/liquidación no se duplica); es solo anti-confusión visual.
+  // Dos reales con la misma clave (se envasó lo mismo 2 veces) se conservan ambas.
+  if (Array.isArray(list) && list.length >= 2) {
+    const _kEnv = e => [
+      String(e.codigoProductoEnvasado || e.cod_producto_envasado || ''),
+      String(e.unidadesProducidas != null ? e.unidadesProducidas : (e.unidades_producidas != null ? e.unidades_producidas : '')),
+      String(e.fecha || '').substring(0, 10),
+      String(e.usuario || '').trim().toLowerCase()
+    ].join('|');
+    const _esOptEnv = e => String(e.idEnvasado || '').indexOf('ENV_OPT_') === 0;
+    const _realKeysEnv = new Set(list.filter(e => e.idEnvasado && !_esOptEnv(e)).map(_kEnv));
+    list = list.filter(e => !(_esOptEnv(e) && _realKeysEnv.has(_kEnv(e))));
+  }
+
   // Mapa codigoBarra → descripcion del maestro (para legibilidad).
   // Fallback en cascada: App.getProductosMaestro (memoria) → OfflineManager
   // (cache local) → idProducto. Asegura que aunque la app esté arrancando
