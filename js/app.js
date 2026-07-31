@@ -4771,7 +4771,11 @@ const App = (() => {
         return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER';   // [fix 500x S3] 'ADMINISTRADOR' (rol real) faltaba
       });
     } else if (tipo === 'zona') {
-      lista = OfflineManager.getZonasCache?.() || [];
+      // [FIX] Excluir ALMACEN como destino: es el origen del despacho, no una zona a la que se envía.
+      lista = (OfflineManager.getZonasCache?.() || []).filter(z => {
+        const id = String(z.idZona || '').toUpperCase(), nm = String(z.nombre || '').toUpperCase();
+        return id !== 'ALMACEN' && !nm.startsWith('ALMAC');
+      });
     }
     _entidadPickerState.lista = lista;
     _renderEntidadPicker(lista);
@@ -4800,7 +4804,10 @@ const App = (() => {
             return rol === 'ADMIN' || rol === 'ADMINISTRADOR' || rol === 'MASTER';   // [fix 500x S3] 'ADMINISTRADOR' faltaba
           });
         } else if (tipo === 'zona') {
-          nueva = OfflineManager.getZonasCache?.() || [];
+          nueva = (OfflineManager.getZonasCache?.() || []).filter(z => {
+            const id = String(z.idZona || '').toUpperCase(), nm = String(z.nombre || '').toUpperCase();
+            return id !== 'ALMACEN' && !nm.startsWith('ALMAC');
+          });
         }
         // Solo repintar si REALMENTE cambió (evita flash inútil si nada nuevo llegó).
         if (JSON.stringify(nueva) === JSON.stringify(_entidadPickerState.lista)) return;
@@ -8712,6 +8719,10 @@ const GuiasView = (() => {
     // [v2.13.185] Validar ANTES de optimista/cerrar sheet (si falla, el form sigue abierto)
     if (!tipo) { toast('Selecciona el tipo de guía', 'warn'); return; }
     if (tipo === 'INGRESO_PROVEEDOR' && !idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
+    // [FIX zona vacía] Un despacho/devolución de zona SIN zona quedaba huérfano (no se atribuía a
+    // ninguna zona ni descontaba su pickup). Bloquear antes de crear.
+    const _esGuiaZona = (tipo === 'SALIDA_ZONA' || tipo === 'INGRESO_DEVOLUCION_ZONA');
+    if (_esGuiaZona && !document.getElementById('guiaZona').value) { toast('Selecciona la zona destino', 'warn'); return; }
 
     _creandoGuia = true;
     try {
@@ -8802,6 +8813,9 @@ const GuiasView = (() => {
       // Reconstruir siempre para reflejar cambios en Sheets
       zonaEl.innerHTML = '<option value="">— Seleccionar —</option>';
       zonas.forEach(z => {
+        // [FIX] No listar ALMACEN como destino de guía (es el origen, no una zona a la que se envía).
+        const _id = String(z.idZona || '').toUpperCase();
+        if (_id === 'ALMACEN' || String(z.nombre || '').toUpperCase().startsWith('ALMAC')) return;
         const opt = document.createElement('option');
         opt.value = z.idZona;
         opt.textContent = z.nombre || z.idZona;
@@ -9167,6 +9181,13 @@ const GuiasView = (() => {
       sel.value = subtipo;
       // Disparar el change handler para sincronizar UI (mostrar/ocultar zona/proveedor)
       sel.dispatchEvent(new Event('change'));
+      // [FIX modal móvil] NO depender solo del evento change: en móvil el toggle sintético a veces
+      // no aplicaba y el modal quedaba en modo "Proveedor" (así se perdía la zona → guías huérfanas).
+      // Forzamos la visibilidad de las filas según el tipo elegido.
+      const _esZona = (subtipo === 'SALIDA_ZONA' || subtipo === 'INGRESO_DEVOLUCION_ZONA');
+      const _esProv = (subtipo === 'INGRESO_PROVEEDOR');
+      document.getElementById('guiaZonaRow')?.classList.toggle('hidden', !_esZona);
+      document.getElementById('guiaProvRow')?.classList.toggle('hidden', !_esProv);
     }
     if (entidad) {
       if (entidad.idProveedor) {
