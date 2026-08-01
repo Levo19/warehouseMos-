@@ -3918,12 +3918,12 @@ const App = (() => {
     document.querySelector('main').style.display = 'none';
     document.querySelector('nav').style.display = 'none';
 
-    // Tipo guía → mostrar/ocultar zona
+    // Tipo guía → mostrar/ocultar zona (form de EDICIÓN; la creación va por el wizard [520])
     document.getElementById('guiaTipo')?.addEventListener('change', e => {
       const v = e.target.value;
       const isZona = v === 'SALIDA_ZONA' || v === 'INGRESO_DEVOLUCION_ZONA';
       document.getElementById('guiaZonaRow').classList.toggle('hidden', !isZona);
-      const isIngProv = v === 'INGRESO_PROVEEDOR';
+      const isIngProv = v === 'INGRESO_PROVEEDOR' || v === 'SALIDA_DEVOLUCION';   // [520] devolución lleva proveedor
       document.getElementById('guiaProvRow').classList.toggle('hidden', !isIngProv);
     });
 
@@ -4729,12 +4729,13 @@ const App = (() => {
     _tpState.subtipo = subtipo;
     cerrarSubtypePicker();
 
-    // Tipos que requieren entidad
-    if (/PROVEEDOR/.test(subtipo)) {
+    // Tipos que requieren entidad — mapeo EXPLÍCITO por tipo (el viejo regex /ZONA|DEVOLUCION/
+    // mandaba SALIDA_DEVOLUCION —devolución a PROVEEDOR— al picker de ZONAS).
+    if (subtipo === 'INGRESO_PROVEEDOR' || subtipo === 'SALIDA_DEVOLUCION') {
       abrirEntidadPicker('proveedor', (ent) => _completarNuevaGuia(subtipo, ent));
-    } else if (/JEFATURA/.test(subtipo)) {
+    } else if (subtipo === 'INGRESO_JEFATURA' || subtipo === 'SALIDA_JEFATURA') {
       abrirEntidadPicker('jefatura', (ent) => _completarNuevaGuia(subtipo, ent));
-    } else if (/ZONA|DEVOLUCION/.test(subtipo)) {
+    } else if (subtipo === 'SALIDA_ZONA' || subtipo === 'INGRESO_DEVOLUCION_ZONA') {
       abrirEntidadPicker('zona', (ent) => _completarNuevaGuia(subtipo, ent));
     } else {
       _completarNuevaGuia(subtipo, null);
@@ -4742,14 +4743,10 @@ const App = (() => {
   }
 
   function _completarNuevaGuia(subtipo, entidad) {
-    if (window.GuiasView && GuiasView.crearConTipo) {
-      GuiasView.crearConTipo(subtipo, entidad);
-    } else {
-      // Fallback: abrir el sheetGuia legacy con tipo pre-seleccionado
-      const sel = document.getElementById('guiaTipo');
-      if (sel) sel.value = subtipo;
-      abrirSheet('sheetGuia');
-    }
+    // [520] El wizard CREA la guía directo (tipo + destino es todo lo obligatorio).
+    // El viejo remate — abrir el sheet "Nueva guía" prellenado — se eliminó: era el
+    // paso tosco/redundante que causaba guías sin destino cuando el prellenado fallaba.
+    GuiasView.crearDesdeWizard(subtipo, entidad);
   }
 
   function abrirEntidadPicker(tipo, onPick) {
@@ -8712,28 +8709,33 @@ const GuiasView = (() => {
   }
 
   let _creandoGuia = false;
-  async function crearGuia() {
-    if (_creandoGuia) return;   // [v2.13.185] guard de doble-click (evita 2 cards/2 guías)
-    const tipo        = document.getElementById('guiaTipo').value;
-    const idProveedor = document.getElementById('guiaProveedor').value;
-    // [v2.13.185] Validar ANTES de optimista/cerrar sheet (si falla, el form sigue abierto)
+  // [520] Creación DIRECTA desde el wizard (¿Qué quieres crear? → subtipo → entidad).
+  // El sheet "Nueva guía" YA NO participa en la creación (quedó SOLO como formulario de
+  // edición ✏️): el wizard entrega tipo + destino —lo único obligatorio— y la guía nace
+  // al toque; comentario/tags/nro doc se agregan después en el detalle o con Editar.
+  // Así es IMPOSIBLE una guía de zona sin zona: sin entidad no hay creación.
+  async function crearDesdeWizard(subtipo, entidad) {
+    if (_creandoGuia) return;   // [v2.13.185] guard de doble-tap (evita 2 cards/2 guías)
+    const tipo        = String(subtipo || '');
+    const idProveedor = (entidad && entidad.idProveedor) || '';
+    const idZona      = (entidad && entidad.idZona) || '';
     if (!tipo) { toast('Selecciona el tipo de guía', 'warn'); return; }
-    if (tipo === 'INGRESO_PROVEEDOR' && !idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
-    // [FIX zona vacía] Un despacho/devolución de zona SIN zona quedaba huérfano (no se atribuía a
-    // ninguna zona ni descontaba su pickup). Bloquear antes de crear.
-    const _esGuiaZona = (tipo === 'SALIDA_ZONA' || tipo === 'INGRESO_DEVOLUCION_ZONA');
-    if (_esGuiaZona && !document.getElementById('guiaZona').value) { toast('Selecciona la zona destino', 'warn'); return; }
+    // [FIX zona vacía] guard duro: despacho/devolución de zona SIN zona = guía huérfana. Jamás.
+    if ((tipo === 'SALIDA_ZONA' || tipo === 'INGRESO_DEVOLUCION_ZONA') && !idZona) { toast('Selecciona la zona destino', 'warn'); return; }
+    if ((tipo === 'INGRESO_PROVEEDOR' || tipo === 'SALIDA_DEVOLUCION') && !idProveedor) { toast('Selecciona un proveedor', 'warn'); return; }
 
     _creandoGuia = true;
     try {
-      const textoExtra  = (document.getElementById('guiaComentario').value || '').trim();
-      const comentario  = _buildComentario(_tagsNueva, textoExtra);
+      // jefatura viaja en el comentario (mismo formato que usaba el prellenado del sheet)
+      const comentario = (entidad && entidad.idPersonal)
+        ? ('Jefatura: ' + ((entidad.nombre || '') + ' ' + (entidad.apellido || '')).trim())
+        : '';
       const params = {
         tipo,
         usuario:         window.WH_CONFIG.usuario,
         idProveedor,
-        idZona:          document.getElementById('guiaZona').value,
-        numeroDocumento: document.getElementById('guiaNumDoc').value,
+        idZona,
+        numeroDocumento: '',
         comentario
       };
 
@@ -8741,7 +8743,6 @@ const GuiasView = (() => {
       const tempId     = 'G_opt_' + Date.now();
       const provNombre = _getProvNombre(idProveedor);
       injectOptimisticGuia({ tempId, idProveedor, provNombre });
-      cerrarSheet('sheetGuia');
 
       const res = await API.crearGuia(params);
       if (res.ok && !res.offline && res.data?.idGuia) {
@@ -8776,62 +8777,9 @@ const GuiasView = (() => {
     }
   }
 
-  function nueva() {
-    _guiaModoEdicion = false;
-    _resetSheetGuiaZIndex();
-    // Reset título y botón a modo creación
-    const titleEl = document.getElementById('guiaFormTitle');
-    if (titleEl) titleEl.textContent = '📋 Nueva Guía';
-    const btnEl = document.getElementById('btnGuiaSubmit');
-    if (btnEl) { btnEl.textContent = 'Crear guía'; btnEl.onclick = () => GuiasView.crearGuia(); }
-    // Reset tags de creación
-    _tagsNueva = { comp: null, compl: null };
-    ['nTagComp1','nTagComp0','nTagCompl1','nTagCompl0'].forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.className = 'flex-1 py-2 rounded-lg text-xs font-bold border transition-all border-slate-700 text-slate-500';
-    });
-    const comInput = document.getElementById('guiaComentario');
-    if (comInput) comInput.value = '';
-    // Poblar proveedor select (solo la primera vez)
-    const provSel = document.getElementById('guiaProveedor');
-    if (provSel) {
-      if (provSel.options.length <= 1) {
-        const provs = OfflineManager.getProveedoresCache();
-        provs.forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.idProveedor;
-          opt.textContent = p.nombre || p.idProveedor;
-          provSel.appendChild(opt);
-        });
-      }
-      provSel.value = ''; // siempre limpiar selección
-    }
-    // Poblar zonas select (dinámico desde caché)
-    const zonaEl = document.getElementById('guiaZona');
-    if (zonaEl) {
-      const zonas = OfflineManager.getZonasCache();
-      // Reconstruir siempre para reflejar cambios en Sheets
-      zonaEl.innerHTML = '<option value="">— Seleccionar —</option>';
-      zonas.forEach(z => {
-        // [FIX] No listar ALMACEN como destino de guía (es el origen, no una zona a la que se envía).
-        const _id = String(z.idZona || '').toUpperCase();
-        if (_id === 'ALMACEN' || String(z.nombre || '').toUpperCase().startsWith('ALMAC')) return;
-        const opt = document.createElement('option');
-        opt.value = z.idZona;
-        opt.textContent = z.nombre || z.idZona;
-        zonaEl.appendChild(opt);
-      });
-      zonaEl.value = '';
-    }
-    // Reset tipo/prov/zona rows
-    const tipoEl = document.getElementById('guiaTipo');
-    if (tipoEl) {
-      tipoEl.value = 'INGRESO_PROVEEDOR';
-      document.getElementById('guiaZonaRow')?.classList.add('hidden');
-      document.getElementById('guiaProvRow')?.classList.remove('hidden');
-    }
-    abrirSheet('sheetGuia');
-  }
+  // [520] nueva() ELIMINADA: la creación por formulario ("Nueva Guía" tosca) murió.
+  // Toda creación entra por el wizard (App.abrirTypePicker → crearDesdeWizard).
+  // El sheetGuia vive SOLO para edición (editarGuia lo puebla y setea su botón).
 
   // ── Foto guía (sube foto + actualiza columna en GAS) ─────
   function onFotoGuiaSeleccionada(event) {
@@ -9026,8 +8974,10 @@ const GuiasView = (() => {
     if (tipoEl) {
       tipoEl.value = g.tipo || 'INGRESO_PROVEEDOR';
       // Disparar cambio visual de filas proveedor/zona
-      const isZona   = tipoEl.value === 'SALIDA_ZONA';
-      const isIngProv = tipoEl.value === 'INGRESO_PROVEEDOR';
+      // [520] INGRESO_DEVOLUCION_ZONA también es guía de zona (antes al editarla se ocultaba la fila
+      // → no se podía corregir su zona) · SALIDA_DEVOLUCION también lleva proveedor.
+      const isZona   = (tipoEl.value === 'SALIDA_ZONA' || tipoEl.value === 'INGRESO_DEVOLUCION_ZONA');
+      const isIngProv = (tipoEl.value === 'INGRESO_PROVEEDOR' || tipoEl.value === 'SALIDA_DEVOLUCION');
       document.getElementById('guiaZonaRow')?.classList.toggle('hidden', !isZona);
       document.getElementById('guiaProvRow')?.classList.toggle('hidden', !isIngProv);
     }
@@ -9165,44 +9115,8 @@ const GuiasView = (() => {
     abrirCarrusel([_normalizeDriveUrl(_guiaActual.foto)], _guiaActual.idGuia);
   }
 
-  // ── F2-F7 — Crear guía desde type picker + entidad ──
-  function crearConTipo(subtipo, entidad) {
-    nueva();
-    const sel = document.getElementById('guiaTipo');
-    if (sel) {
-      // [fix] Guardia: si el <option> no existe, `sel.value = X` falla en silencio
-      // y el select se queda en el primer valor (INGRESO_PROVEEDOR) → la guía se
-      // creaba con el tipo equivocado. Verificamos que el tipo elegido exista.
-      const existe = Array.prototype.some.call(sel.options, o => o.value === subtipo);
-      if (!existe) {
-        if (typeof toast === 'function') toast('Tipo de guía no disponible: ' + subtipo, 'danger');
-        return;
-      }
-      sel.value = subtipo;
-      // Disparar el change handler para sincronizar UI (mostrar/ocultar zona/proveedor)
-      sel.dispatchEvent(new Event('change'));
-      // [FIX modal móvil] NO depender solo del evento change: en móvil el toggle sintético a veces
-      // no aplicaba y el modal quedaba en modo "Proveedor" (así se perdía la zona → guías huérfanas).
-      // Forzamos la visibilidad de las filas según el tipo elegido.
-      const _esZona = (subtipo === 'SALIDA_ZONA' || subtipo === 'INGRESO_DEVOLUCION_ZONA');
-      const _esProv = (subtipo === 'INGRESO_PROVEEDOR');
-      document.getElementById('guiaZonaRow')?.classList.toggle('hidden', !_esZona);
-      document.getElementById('guiaProvRow')?.classList.toggle('hidden', !_esProv);
-    }
-    if (entidad) {
-      if (entidad.idProveedor) {
-        const ps = document.getElementById('guiaProveedor');
-        if (ps) ps.value = entidad.idProveedor;
-      } else if (entidad.idZona) {
-        const zs = document.getElementById('guiaZona');
-        if (zs) zs.value = entidad.idZona;
-      } else if (entidad.idPersonal) {
-        const com = document.getElementById('guiaComentario');
-        if (com) com.value = `Jefatura: ${entidad.nombre || ''} ${entidad.apellido || ''}`.trim();
-      }
-    }
-    abrirSheet('sheetGuia');
-  }
+  // [520] crearConTipo ELIMINADA: era el remate del wizard que ABRÍA el sheet "Nueva Guía"
+  // prellenado (el paso tosco). Reemplazo: crearDesdeWizard (crea directo, sin formulario).
 
   // [FIX TDZ] Declarado ANTES del return: estaba después (código muerto, nunca inicializado) →
   // `Cannot access '_imprimiendoTicket' before initialization` al tocar imprimir. idGuia→ts (anti triple-tap).
@@ -9211,7 +9125,7 @@ const GuiasView = (() => {
   return {
     cargar, cargarMas, filtrar, toggleFiltro, _searchFocus, silentRefresh, verDetalle,
     marcarGuiaAbierta,   // [v2.13.186] reabrir desde App → refleja ABIERTA en módulo
-    crearConTipo,
+    crearDesdeWizard,    // [520] creación directa (única puerta de creación de guías)
     filtrarTablet, _searchFocusGuiaTablet,
     buscar, buscarClear,
     abrirAgregarItem, abrirCamaraItem, abrirScannerItem,
@@ -9223,8 +9137,8 @@ const GuiasView = (() => {
     _procesarCodigoEscaneado: _buscarCandidatos, _rescanear,
     toggleEstadoGuia, adminPinTecla, adminPinAtras,
     cerrarHoldStart, cerrarHoldEnd, cerrarHoldCancel,
-    confirmarCerrarGuia, crearGuia, nueva,
-    toggleTagNueva,
+    confirmarCerrarGuia,
+    toggleTagNueva,   // tags Comprobante/Completo — los usa el modo EDICIÓN del sheetGuia
     onFotoGuiaSeleccionada, copiarFotoDePreingreso, verFotoGuia,
     toggleTagGuia, cerrarGuiaDetalle, irAPreingreso,
     injectOptimisticGuia, finalizeOptimisticGuia, removeOptimisticGuia,

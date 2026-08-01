@@ -6618,7 +6618,7 @@
     <div id="guiasSearchRow">
       <div class="tpp-hdr">
         <span>GUÍAS</span>
-        <button id="tabletNuevaGuia" onclick="GuiasView.nueva()" class="tpp-fab-btn" title="Nueva guía">
+        <button id="tabletNuevaGuia" onclick="App.abrirTypePicker()" class="tpp-fab-btn" title="Nueva guía">
           <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
         </button>
       </div>
@@ -8681,7 +8681,8 @@
 <div class="sheet-overlay" id="overlayGuia" onclick="cerrarSheet('sheetGuia')"></div>
 <div class="bottom-sheet" id="sheetGuia">
   <div class="w-10 h-1 bg-slate-600 rounded-full mx-auto mb-4"></div>
-  <p id="guiaFormTitle" class="font-bold text-base mb-4">Nueva Guía</p>
+  <!-- [520] Este sheet es SOLO edición: la creación vive en el wizard (App.abrirTypePicker) -->
+  <p id="guiaFormTitle" class="font-bold text-base mb-4">✏️ Editar Guía</p>
   <div class="space-y-3">
     <div>
       <label class="text-xs text-slate-400">Tipo de guía</label>
@@ -8736,7 +8737,7 @@
       <label class="text-xs text-slate-400">Notas adicionales</label>
       <input id="guiaComentario" class="input mt-1" type="text" placeholder="Opcional…"/>
     </div>
-    <button id="btnGuiaSubmit" onclick="GuiasView.crearGuia()" class="btn btn-primary btn-lg w-full">Crear guía</button>
+    <button id="btnGuiaSubmit" onclick="GuiasView.guardarCambiosGuia()" class="btn btn-primary btn-lg w-full">GUARDAR CAMBIOS</button>
   </div>
 </div>
 
