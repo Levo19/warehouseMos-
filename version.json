@@ -1,1 +1,1 @@
-{"version":"2.13.527","build":"2.13.527 Tablet/PC guias: toolbar unificada (buscador + Nuevo), sin chips de filtro, +Nuevo abre el mismo wizard que movil, pickers centrados en PC"}
+{"version":"2.13.528","build":"2.13.528 fix PC: sheets cerradas asomaban 28px por el borde inferior (translate calc 100%+80px)"}

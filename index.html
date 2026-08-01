@@ -3744,7 +3744,9 @@
         bottom:28px; border-radius:20px;
         border:1px solid rgba(148,163,184,.16);
         box-shadow:0 30px 80px -18px rgba(0,0,0,.75);
-        transform:translate(-50%,120%);
+        /* calc: 100% de su propia altura + el bottom:28px + margen — si no, las
+           sheets altas asoman por el borde inferior estando cerradas */
+        transform:translate(-50%,calc(100% + 80px));
       }
       #sheetActionDia.open, #sheetTypePicker.open, #sheetSubtypePicker.open,
       #sheetEntidadPicker.open, #sheetNavLp.open {
