@@ -6005,6 +6005,12 @@ const GuiasView = (() => {
          </div>`;
 
     const provNombreHdr = (() => {
+      // [608] Guía de ZONA: el titular es LA ZONA (antes decía "Sin proveedor" y hacía dudar
+      // si la zona quedó bien asignada — la zona vive en g.idZona, no en proveedor).
+      if (g.idZona && String(g.idZona).trim()) {
+        const z = OfflineManager.getZonasCache().find(zz => String(zz.idZona) === String(g.idZona));
+        return '📍 ' + (z ? (z.nombre || g.idZona) : g.idZona);
+      }
       if (!g.idProveedor) return 'Sin proveedor';
       const pv = OfflineManager.getProveedoresCache().find(p => p.idProveedor === g.idProveedor);
       return pv ? (pv.nombre || g.idProveedor) : g.idProveedor;
@@ -12970,7 +12976,7 @@ const DespachoView = (() => {
       _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) + 1;
       SoundFX.beepDouble(); vibrate(12);
     } else {
-      _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD, _extraPickup: !!_pickupActivo });
+      _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD, _extraPickup: !!_pickupActivo, ts: new Date().toISOString() });   // [608] hora del escaneo
       // Si hay pickup activo y entró como extra → flash naranja + toast suave
       if (_pickupActivo) {
         SoundFX.warn(); vibrate([20, 30]);
@@ -13913,7 +13919,7 @@ const DespachoView = (() => {
       tipo:    _tipoSalida,
       nota,
       usuario: window.WH_CONFIG?.usuario || '',
-      items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad })),
+      items:   _cart.map(c => ({ codigoBarra: c.codigoBarra, cantidad: c.cantidad, ts: c.ts })),   // [608] hora del escaneo por línea
       imprimir: false,  // GAS no imprime — frontend dispara impresión separada para no bloquear
       idempotencyKey
     };
@@ -14876,7 +14882,8 @@ const DespachoView = (() => {
         _cart.push({
           codigoBarra: cb, descripcion: prod.descripcion || cb,
           unidad: prod.unidad || '', cantidad: qty, stockDisp: stockD,
-          _extraPickup: !!_pickupActivo, _granel: true
+          _extraPickup: !!_pickupActivo, _granel: true,
+          ts: new Date().toISOString()   // [608] hora del escaneo
         });
       }
       _saveCart();
@@ -15306,12 +15313,12 @@ const DespachoView = (() => {
       const factor    = (baseline > 0 && dpcSum > neto + 1e-9 && dpcSum > 0) ? (neto / dpcSum) : 1;
       cods.forEach(cod => {
         const qty = Math.round((parseFloat(dpc[cod]) || 0) * factor * 1000) / 1000; // 3 dec (peso); enteros intactos
-        if (qty > 0) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty });
+        if (qty > 0) despachoDetalle.push({ codigoBarra: String(cod), cantidad: qty, ts: it.tsDespacho });   // [608] hora de la marca
       });
     });
     // Sumar también extras del carrito (escaneos fuera de pickup)
     _cart.filter(c => c._extraPickup).forEach(c => {
-      despachoDetalle.push({ codigoBarra: c.codigoBarra, cantidad: parseFloat(c.cantidad) || 0 });
+      despachoDetalle.push({ codigoBarra: c.codigoBarra, cantidad: parseFloat(c.cantidad) || 0, ts: c.ts });   // [608]
     });
 
     if (!despachoDetalle.length) {
@@ -15877,7 +15884,7 @@ const DespachoView = (() => {
       const cod  = prod.idProducto;
       const st   = parseFloat((stockMap[cod] || {}).cantidadDisponible || 0);
       const idx  = _cart.findIndex(c => c.codigoBarra === cod);
-      const item = { codigoBarra: cod, descripcion: prod.descripcion, unidad: prod.unidad || '', cantidad: r.qty, stockDisp: st };
+      const item = { codigoBarra: cod, descripcion: prod.descripcion, unidad: prod.unidad || '', cantidad: r.qty, stockDisp: st, ts: new Date().toISOString() };   // [608]
       if (idx >= 0) _cart[idx] = item; else _cart.push(item);
     });
 
