@@ -788,15 +788,26 @@
     .bolt-btn { animation:bolt-pulse 2.4s ease-in-out infinite; }
     /* Mobile: keep old search row hidden */
     #guiasSearchRow { display:none; }
-    .tpp-hdr { display:flex;align-items:center;justify-content:space-between;
-               padding:0 0 10px;border-bottom:1px solid #1e293b;margin-bottom:10px; }
-    .tpp-hdr span { font-size:11px;font-weight:700;color:#64748b;letter-spacing:.1em; }
-    .tpp-fab-btn { width:26px;height:26px;border-radius:8px;background:#1d4ed8;color:#fff;
-                   display:flex;align-items:center;justify-content:center;border:none;cursor:pointer;
-                   flex-shrink:0; }
-    .tpp-fab-btn:active { opacity:.7; }
+    /* Etiqueta de columna (GUÍAS / PRE-INGRESOS) — colapsa al enfocar el buscador */
+    .tpp-lbl { display:flex;align-items:center;gap:6px;flex-shrink:0;
+               font-size:11px;font-weight:800;color:#64748b;letter-spacing:.12em;
+               white-space:nowrap;max-width:220px;overflow:hidden;opacity:1;
+               transition:max-width .22s ease,opacity .18s ease,margin .22s ease; }
+    #tppToolbar.srch-focused .tpp-lbl,
+    #guiaTabletToolbar.srch-focused .tpp-lbl { max-width:0;opacity:0;margin-right:-8px;pointer-events:none; }
+    /* Botón + Nuevo al costado del buscador */
+    .tpp-new-btn { display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 14px;
+                   border-radius:10px;border:1px solid rgba(59,130,246,.45);
+                   background:linear-gradient(135deg,#1d4ed8,#2563eb);color:#fff;
+                   font-size:12px;font-weight:800;letter-spacing:.02em;cursor:pointer;flex-shrink:0;
+                   box-shadow:0 2px 12px rgba(37,99,235,.28);
+                   transition:filter .15s,transform .12s; }
+    .tpp-new-btn:hover { filter:brightness(1.12); }
+    .tpp-new-btn:active { transform:scale(.96); }
     /* Toolbars de los paneles tablet */
-    #tppToolbar, #guiaTabletToolbar { display:flex;align-items:center;gap:8px;flex-shrink:0; }
+    #tppToolbar, #guiaTabletToolbar { display:flex;align-items:center;gap:8px;flex-shrink:0;
+                                      padding-bottom:10px;margin-bottom:10px;
+                                      border-bottom:1px solid rgba(30,41,59,.8); }
     /* Chips de filtro rápido (reemplazan el embudo) */
     .chip-side { display:flex;align-items:center;gap:5px;flex-shrink:0;max-width:300px;
                  overflow:hidden;opacity:1;
@@ -3691,16 +3702,16 @@
         min-width:0;
         display:flex; flex-direction:column;
         height:100%; overflow:hidden;
-        background:#0d1626;
+        background:linear-gradient(180deg,#0e1830,#0c1424);
         border:1px solid #1e293b;
-        border-radius:14px;
-        padding:14px 14px;
+        border-radius:16px;
+        padding:16px 16px 12px;
       }
 
-      /* Panel guías: header + toolbar propios (tablet-only) */
+      /* Panel guías: toolbar única (tablet-only) */
       #guiasSearchRow {
         display:flex !important; flex-direction:column;
-        flex-shrink:0; margin-bottom:8px; gap:8px;
+        flex-shrink:0;
       }
       /* Ocultar toolbar mobile en tablet (reemplazado por #guiaTabletToolbar) */
       #guiasToolbar { display:none !important; }
@@ -3724,6 +3735,21 @@
       /* ── Productos: 2 columnas ── */
       #listProductos { display:grid !important; grid-template-columns:repeat(2,1fr); gap:12px; }
       #listProductos > * { margin-top:0 !important; }
+
+      /* ── Pickers de creación: en PC son tarjetas centradas, no sábanas
+         de borde a borde. Mismo flujo que móvil (¿Qué quieres crear? →
+         dirección → subtipo → entidad), solo cambia la presentación. ── */
+      #sheetActionDia, #sheetTypePicker, #sheetSubtypePicker, #sheetEntidadPicker, #sheetNavLp {
+        left:50%; right:auto; width:min(460px,94vw);
+        bottom:28px; border-radius:20px;
+        border:1px solid rgba(148,163,184,.16);
+        box-shadow:0 30px 80px -18px rgba(0,0,0,.75);
+        transform:translate(-50%,120%);
+      }
+      #sheetActionDia.open, #sheetTypePicker.open, #sheetSubtypePicker.open,
+      #sheetEntidadPicker.open, #sheetNavLp.open {
+        transform:translate(-50%,0);
+      }
     }
   </style>
   <style id="wh-design-v2">
@@ -6614,24 +6640,10 @@
 
     </div>
 
-    <!-- Header panel — solo visible en tablet landscape -->
+    <!-- Header panel — solo visible en tablet landscape: etiqueta + buscador + Nuevo -->
     <div id="guiasSearchRow">
-      <div class="tpp-hdr">
-        <span>GUÍAS</span>
-        <button id="tabletNuevaGuia" onclick="App.abrirTypePicker()" class="tpp-fab-btn" title="Nueva guía">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
-        </button>
-      </div>
-      <!-- Toolbar chips+búsqueda — tablet landscape -->
       <div id="guiaTabletToolbar">
-        <div class="chip-side">
-          <button class="filter-chip" data-gtfiltro="ABIERTA"
-                  onclick="GuiasView.filtrarTablet('ABIERTA')">◌ ABIERTAS</button>
-          <button class="filter-chip" data-gtfiltro="INGRESO"
-                  onclick="GuiasView.filtrarTablet('INGRESO')">↓ INGRESOS</button>
-          <button class="filter-chip" data-gtfiltro="SALIDA"
-                  onclick="GuiasView.filtrarTablet('SALIDA')">↑ SALIDAS</button>
-        </div>
+        <span class="tpp-lbl">📋 GUÍAS</span>
         <div class="smart-srch" style="flex:1;min-width:0;margin-bottom:0">
           <span class="smart-srch-ico">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
@@ -6647,6 +6659,11 @@
                     onclick="GuiasView.buscarClear()" style="display:none">✕</button>
           </div>
         </div>
+        <button id="tabletNuevaGuia" class="tpp-new-btn" onclick="App.abrirActionDia()"
+                title="Crear guía, preingreso o cargador">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+          Nuevo
+        </button>
       </div>
     </div>
 
@@ -6663,20 +6680,9 @@
 
     <!-- Tablet: panel lateral de pre-ingresos (solo visible en landscape 768px+) -->
     <div id="tabletPrePanel">
-      <div class="tpp-hdr">
-        <span>PRE-INGRESOS</span>
-        <button onclick="PreingresosView.nuevo()" class="tpp-fab-btn" title="Nuevo preingreso">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
-        </button>
-      </div>
-      <!-- Toolbar chips+búsqueda — tablet landscape -->
+      <!-- Toolbar única: etiqueta + buscador + Nuevo -->
       <div id="tppToolbar">
-        <div class="chip-side">
-          <button class="filter-chip" data-tppfiltro="PENDIENTE"
-                  onclick="PreingresosView.filtrarTpp('PENDIENTE')">⏳ PENDIENTES</button>
-          <button class="filter-chip" data-tppfiltro="PROCESADO"
-                  onclick="PreingresosView.filtrarTpp('PROCESADO')">✓ PROCESADOS</button>
-        </div>
+        <span class="tpp-lbl">📥 PRE-INGRESOS</span>
         <div class="smart-srch" style="flex:1;min-width:0;margin-bottom:0">
           <span class="smart-srch-ico">
             <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
@@ -6691,6 +6697,10 @@
                     onclick="PreingresosView.limpiarBuscarPanel()">✕</button>
           </div>
         </div>
+        <button class="tpp-new-btn" onclick="PreingresosView.nuevo()" title="Nuevo preingreso">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+          Nuevo
+        </button>
       </div>
       <div id="tppList" class="pre-date-group" style="gap:6px"></div>
     </div>
