@@ -568,6 +568,17 @@ function fmt(n, dec = 0) {
   return (parseFloat(n) || 0).toFixed(dec).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// [522] Cantidades de STOCK con decimales reales — los insumos van por MILLAR (0.040 = 40 bolsas)
+// y fmt() con dec=0 los aplastaba a "0". Hasta 3 decimales, SOLO si existen:
+// 3 → "3" · 3.16 → "3.16" · −0.04 → "−0.04" · 1234.5 → "1,234.5"
+function fmtQty(n) {
+  const v = Math.round((parseFloat(n) || 0) * 1000) / 1000;
+  const s = v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
+  const parts = s.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return parts.join('.');
+}
+
 // Convierte string de fecha del sheet (yyyy-MM-dd) a Date local sin drift UTC.
 // [v2.13.209] Tolerante a 3 formatos de `fecha` que conviven tras el cutover a Supabase:
 //   - 'yyyy-MM-dd'                 (guías VIEJAS: sync de Sheet con celda Date → _sheetToObjects yyyy-MM-dd)
@@ -3724,8 +3735,8 @@ const Dashboard = (() => {
           <span class="font-black text-base ${a.diferencia > 0 ? 'text-amber-400' : 'text-red-400'} flex-shrink-0">${a.diferencia > 0 ? '+' : ''}${fmt(a.diferencia,1)}</span>
         </div>
         <div class="grid grid-cols-2 gap-1 text-[11px] mb-2">
-          <div><span class="text-slate-500">Stock real:</span> <b class="text-slate-200">${fmt(a.stockReal,1)}</b></div>
-          <div><span class="text-slate-500">Teórico:</span> <b class="text-slate-200">${fmt(a.stockTeorico,1)}</b></div>
+          <div><span class="text-slate-500">Stock real:</span> <b class="text-slate-200">${fmtQty(a.stockReal)}</b></div>
+          <div><span class="text-slate-500">Teórico:</span> <b class="text-slate-200">${fmtQty(a.stockTeorico)}</b></div>
         </div>
         <p class="text-[11px] text-slate-400 leading-tight mb-2">${explica}</p>
         <div class="flex gap-1.5 flex-wrap">
@@ -6234,7 +6245,7 @@ const GuiasView = (() => {
               </p>
               ${venc}
             </div>
-            <span class="det-qty-val text-lg font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : '×' + fmt(d.cantidadRecibida, Number.isInteger(parseFloat(d.cantidadRecibida)) ? 0 : 2)}</span>
+            <span class="det-qty-val text-lg font-black flex-shrink-0" style="color:${qtyColor}">${qtyZero ? '⚠ 0' : '×' + fmtQty(d.cantidadRecibida)}</span>
           </div>`;
         }).join('')
       : '<p class="text-slate-500 text-sm text-center py-4">Sin ítems registrados</p>';
@@ -9559,7 +9570,7 @@ function _renderEnvasadosPorDia(list, container, opts) {
             <p class="text-[11px] text-slate-400 mt-0.5">
               <span class="text-slate-500">desde</span> ${escHtml(descBase)}
               <span class="font-mono text-slate-600" style="letter-spacing:-.05em">▌${escHtml(cbBase)}</span>
-              <span class="text-slate-500"> · ${fmt(e.cantidadBase, 1)} ${escHtml(e.unidadBase || '')}</span>
+              <span class="text-slate-500"> · ${fmtQty(e.cantidadBase)} ${escHtml(e.unidadBase || '')}</span>
             </p>
           </div>
           <span class="${efColor} font-bold text-sm shrink-0">${efPct}%</span>
@@ -10039,7 +10050,7 @@ const EnvasadosView = (() => {
     wrap.classList.remove('hidden');
 
     document.getElementById('envConsumoCalc').textContent  = uds > 0 && factorBase > 0 ? `${uds} × ${fmt(factorBase, 3)}` : '';
-    document.getElementById('envConsumoTotal').textContent = `${fmt(consumo, 2)} ${unidadBase}`;
+    document.getElementById('envConsumoTotal').textContent = `${fmtQty(consumo)} ${unidadBase}`;
 
     const quedaEl = document.getElementById('envQuedaVal');
     const bar     = document.getElementById('envConsumoBar');
@@ -10047,7 +10058,7 @@ const EnvasadosView = (() => {
     const alcanza = (factorBase > 0 && queda > 0) ? Math.floor(queda / factorBase) : 0;
 
     if (queda >= 0 && stockBase > 0) {
-      quedaEl.textContent = `${fmt(queda, 2)} ${unidadBase} · alcanza ${alcanza} uds más`;
+      quedaEl.textContent = `${fmtQty(queda)} ${unidadBase} · alcanza ${alcanza} uds más`;
       quedaEl.style.color = '#e2e8f0';
       const pct = Math.min(100, stockBase > 0 ? (consumo / stockBase) * 100 : 0);
       bar.style.width = pct + '%';
@@ -10055,13 +10066,13 @@ const EnvasadosView = (() => {
       alerta.classList.add('hidden');
     } else {
       // stock insuficiente O granel ya en 0/negativo → ROJO, sin bloquear
-      quedaEl.textContent = `${fmt(queda, 2)} ${unidadBase}`;
+      quedaEl.textContent = `${fmtQty(queda)} ${unidadBase}`;
       quedaEl.style.color = '#fca5a5';
       bar.style.width = '100%';
       bar.style.background = 'linear-gradient(90deg,#f87171,#dc2626)';
       alerta.textContent = stockBase <= 0
-        ? `⚠ El granel figura con ${fmt(stockBase, 2)} ${unidadBase} en sistema — puedes registrar igual y ajustar el stock después`
-        : `⚠ El stock quedará NEGATIVO (${fmt(queda, 2)} ${unidadBase}) — puedes registrar igual y ajustar después`;
+        ? `⚠ El granel figura con ${fmtQty(stockBase)} ${unidadBase} en sistema — puedes registrar igual y ajustar el stock después`
+        : `⚠ El stock quedará NEGATIVO (${fmtQty(queda)} ${unidadBase}) — puedes registrar igual y ajustar después`;
       alerta.classList.remove('hidden');
     }
 
@@ -10239,7 +10250,7 @@ const EnvasadosView = (() => {
     const maxProd    = factorBase > 0 ? Math.floor(stockBase / factorBase) : 0;
     const avisos = [];
     if (stockBase <= 0)        avisos.push('⚠ Sin stock base registrado');
-    else if (cantBase > stockBase) avisos.push(`⚠ Faltan ${fmt(cantBase - stockBase, 1)} ${prodBase?.unidad || 'kg'} — stock quedará negativo`);
+    else if (cantBase > stockBase) avisos.push(`⚠ Faltan ${fmtQty(cantBase - stockBase)} ${prodBase?.unidad || 'kg'} — stock quedará negativo`);
     if (maxProd > 0 && producidas > maxProd) avisos.push(`⚠ Excedes el máximo (${maxProd} uds calculados)`);
     if (producidas >= 500)     avisos.push(`⚠ Cantidad alta: ${producidas} uds`);
 
@@ -11080,7 +11091,7 @@ const EnvasadorView = (() => {
           const urg     = d.urgencia ? _urgIcon(d.urgencia) + ' ' : '';
           const label   = _sufijo(baseNom, String(d.descripcion || d.idProducto));
           const stockEl = d.stockD > 0
-            ? `<span class="font-bold text-slate-200" style="font-size:13px">${fmt(d.stockD,1)} ${escHtml(d.unidad||'')}</span>`
+            ? `<span class="font-bold text-slate-200" style="font-size:13px">${fmtQty(d.stockD)} ${escHtml(d.unidad||'')}</span>`
             : `<span class="font-bold text-red-400" style="font-size:13px">0 ${escHtml(d.unidad||'')}</span>`;
           const posiblesHtml = d.posibles > 0
             ? `<span class="text-emerald-400 text-xs">~${fmt(d.posibles)} posibles</span>`
@@ -11116,7 +11127,7 @@ const EnvasadorView = (() => {
              onclick="this.closest('.env-base-card').classList.toggle('env-collapsed')">
           <div class="flex-1 min-w-0">
             <p class="font-bold text-base leading-snug">${urgHdr}${escHtml(base.descripcion)}</p>
-            <p class="text-xs text-slate-400 mt-0.5">${fmt(base.stockBase,1)} ${escHtml(base.unidad)} disponible</p>
+            <p class="text-xs text-slate-400 mt-0.5">${fmtQty(base.stockBase)} ${escHtml(base.unidad)} disponible</p>
           </div>
           <svg class="env-chevron w-4 h-4 text-slate-400 flex-shrink-0 mt-1" viewBox="0 0 16 16" fill="currentColor">
             <path d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z"/>
@@ -12192,7 +12203,7 @@ const DespachoView = (() => {
     subEl.textContent = _fmtHistTs(h.ts) + (h.ok ? '' : ' · Error') + (h.idGuia && h.idGuia !== '—' ? '' : '');
     if (Array.isArray(h.items) && h.items.length) {
       lstEl.innerHTML = h.items.map(it => {
-        const qtyFmt = fmt(it.cantidad, Number.isInteger(parseFloat(it.cantidad)) ? 0 : 2);
+        const qtyFmt = fmtQty(it.cantidad);
         return `<div style="display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid #1e293b">
           <div style="flex:1;min-width:0">
             <p style="font-size:.82em;font-weight:700;color:#f1f5f9;
@@ -12344,9 +12355,9 @@ const DespachoView = (() => {
       } else if (stockD <= 0) {
         stockBadge = '<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock 0</span>';
       } else if (stockD < pendiente) {
-        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)}</span>`;
+        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmtQty(stockD)}</span>`;
       } else {
-        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmt(stockD,1)}</span>`;
+        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmtQty(stockD)}</span>`;
       }
       const kgBadge = esKg
         ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800">⚖ ${unidadLbl}</span>`
@@ -12725,7 +12736,7 @@ const DespachoView = (() => {
     if (nom) nom.textContent = activo.nombre;
     if (meta) {
       meta.textContent = activo.tipo === 'pickup'
-        ? 'Pickup · ' + fmt(activo.cantidad, activo.esGranel ? 3 : 0) + '/' +
+        ? 'Pickup · ' + fmtQty(activo.cantidad) + '/' +
           fmt(activo.solicitado, activo.esGranel ? 3 : 0) + (activo.esGranel ? ' ' + activo.unidad : '')
         : 'Despacho rápido' + (activo.esGranel ? ' · ' + activo.unidad : '');
     }
@@ -12741,7 +12752,7 @@ const DespachoView = (() => {
         ctrls.innerHTML =
           '<button class="despflot-btn despflot-btn-menos" onclick="DespachoView.flotMenos()"' +
           (activo.cantidad <= 0 ? ' disabled' : '') + '>−</button>' +
-          '<span class="despflot-val">' + fmt(activo.cantidad, 0) + '</span>' +
+          '<span class="despflot-val">' + fmtQty(activo.cantidad) + '</span>' +
           '<button class="despflot-btn despflot-btn-mas" onclick="DespachoView.flotMas()">+</button>';
       }
     }
@@ -12808,7 +12819,7 @@ const DespachoView = (() => {
       const item = _cart.find(c => c.codigoBarra === cb);
       const stockD = item?.stockDisp || 0;
       if (!item || stockD === 0 || item.cantidad <= stockD) {
-        const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+        const stockTxt = stockD > 0 ? ` · Stock: ${fmtQty(stockD)}` : '';
         _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
         SoundFX.beep(); vibrate(15);
       }
@@ -12970,7 +12981,7 @@ const DespachoView = (() => {
     // Mostrar stock en barra de estado
     const item = _cart.find(c => c.codigoBarra === cb);
     const qty  = item ? parseFloat(item.cantidad) : 1;
-    const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD, 1)}` : '';
+    const stockTxt = stockD > 0 ? ` · Stock: ${fmtQty(stockD)}` : '';
     if (stockD > 0 && qty > stockD) {
       _setDespStatus('sobrestock', desc + stockTxt + ` — pides ${fmt(qty,1)}`);
       SoundFX.warn(); vibrate([40, 20, 40]);
@@ -13031,7 +13042,7 @@ const DespachoView = (() => {
     const item   = _cart.find(c => c.codigoBarra === cb);
     const stockD = item?.stockDisp || 0;
     if (!item || stockD === 0 || item.cantidad <= stockD) {
-      const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+      const stockTxt = stockD > 0 ? ` · Stock: ${fmtQty(stockD)}` : '';
       _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
       SoundFX.beep(); vibrate(15);
     }
@@ -13430,7 +13441,7 @@ const DespachoView = (() => {
     const item   = _cart.find(c => c.codigoBarra === codigoBarra);
     const stockD = item?.stockDisp || 0;
     if (!item || stockD === 0 || item.cantidad <= stockD) {
-      const stockTxt = stockD > 0 ? ` · Stock: ${fmt(stockD,1)}` : '';
+      const stockTxt = stockD > 0 ? ` · Stock: ${fmtQty(stockD)}` : '';
       _setDespStatus('ok', (prod.descripcion || codigoBarra) + stockTxt);
       SoundFX.beep(); vibrate(15);
     }
@@ -13487,8 +13498,8 @@ const DespachoView = (() => {
     list.innerHTML = _cart.map(item => {
       const cb    = escAttr(item.codigoBarra);
       const over  = item.stockDisp > 0 && item.cantidad > item.stockDisp;
-      const overW = over ? `<span style="font-size:.63em;color:#f87171;margin-left:4px">⚠ stock:${fmt(item.stockDisp,1)}</span>` : '';
-      const qtyFmt = fmt(item.cantidad, Number.isInteger(parseFloat(item.cantidad)) ? 0 : 2);
+      const overW = over ? `<span style="font-size:.63em;color:#f87171;margin-left:4px">⚠ stock:${fmtQty(item.stockDisp)}</span>` : '';
+      const qtyFmt = fmtQty(item.cantidad);
       const qtyCol = over ? '#f87171' : '#38bdf8';
       return `<div data-desp-cb="${cb}" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
                 border-radius:11px;background:#1e293b;border:1px solid ${over?'#7f1d1d':'#334155'};
@@ -13696,7 +13707,7 @@ const DespachoView = (() => {
     el.innerHTML = itemsBase.map((item, i) => {
       const over     = item.stockDisp > 0 && item.cantidad > item.stockDisp;
       const safeId   = escAttr(item.codigoBarra);
-      const overWarn = over ? `<span class="text-xs text-red-400">⚠ stock: ${fmt(item.stockDisp,1)}</span>` : '';
+      const overWarn = over ? `<span class="text-xs text-red-400">⚠ stock: ${fmtQty(item.stockDisp)}</span>` : '';
       const esUltimo = false;
       return `
       <div class="card-sm desp-cart-item flex items-center gap-3${esUltimo ? ' desp-cart-recien' : ''}"
@@ -13796,7 +13807,7 @@ const DespachoView = (() => {
     if (conflPanel && conflList) {
       if (conflictos.length) {
         conflList.innerHTML = conflictos.map(c =>
-          `<div>• ${escHtml(c.descripcion)}: pides <b>${fmt(c.cantidad,2)}</b>, stock <b>${fmt(c.stockDisp,1)}</b></div>`
+          `<div>• ${escHtml(c.descripcion)}: pides <b>${fmtQty(c.cantidad)}</b>, stock <b>${fmtQty(c.stockDisp)}</b></div>`
         ).join('');
         conflPanel.style.display = 'block';
       } else {
@@ -14978,9 +14989,9 @@ const DespachoView = (() => {
       } else if (stockD <= 0) {
         stockBadge = '<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock 0</span>';
       } else if (stockD < pendiente) {
-        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmt(stockD,1)} · faltarán ${fmt(pendiente - stockD,1)}</span>`;
+        stockBadge = `<span style="font-size:.62em;color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4);padding:1px 6px;border-radius:6px;font-weight:800">⚠ stock ${fmtQty(stockD)} · faltarán ${fmtQty(pendiente - stockD)}</span>`;
       } else {
-        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmt(stockD,1)}</span>`;
+        stockBadge = `<span style="font-size:.62em;color:#86efac;background:rgba(16,185,129,.15);padding:1px 6px;border-radius:6px;font-weight:700">stock ${fmtQty(stockD)}</span>`;
       }
       const kgBadge = esKg
         ? `<span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);padding:1px 5px;border-radius:6px;margin-left:4px;font-weight:800;letter-spacing:.04em" title="Producto a granel · despacho por peso">⚖ GRANEL · ${unidadLbl}</span>`
@@ -19433,9 +19444,9 @@ const MermasView = (() => {
           </div>`;
       } else {
         const parts = [];
-        if (m.cantidadReparada > 0) parts.push(`<span class="ok">✓ ${fmt(m.cantidadReparada, 1)} recuperadas</span>`);
+        if (m.cantidadReparada > 0) parts.push(`<span class="ok">✓ ${fmtQty(m.cantidadReparada)} recuperadas</span>`);
         if (m.idGuiaTransformacion) parts.push(`<span style="color:#c4b5fd">🔄 transformada · ${escHtml(m.idGuiaTransformacion)}</span>`);
-        if (m.cantidadDesechada > 0) parts.push(`<span class="bad">🗑 ${fmt(m.cantidadDesechada, 1)} eliminadas</span>`);
+        if (m.cantidadDesechada > 0) parts.push(`<span class="bad">🗑 ${fmtQty(m.cantidadDesechada)} eliminadas</span>`);
         if (m.idGuiaSalida) parts.push(`guía salida ${escHtml(m.idGuiaSalida)}`);
         if (m.culpa) parts.push(`culpa ${escHtml(m.culpa)}`);
         bottom = `${parts.length ? `<p class="merma-foot">${parts.join(' · ')}</p>` : ''}
@@ -20076,7 +20087,7 @@ const ProductosView = (() => {
             : `<p class="text-xs text-slate-500 font-mono mt-0.5">${g.children[0]?.codigoBarra || g.skuBase}</p>`
           }
         </div>
-        <span class="font-black text-base flex-shrink-0 pt-0.5 ${g.bajoMin ? 'text-red-400' : g.stockTotal === 0 ? 'text-slate-500' : 'text-emerald-400'}">${fmt(g.stockTotal)}</span>
+        <span class="font-black text-base flex-shrink-0 pt-0.5 ${g.bajoMin ? 'text-red-400' : g.stockTotal === 0 ? 'text-slate-500' : 'text-emerald-400'}">${fmtQty(g.stockTotal)}</span>
       </div>
 
       <!-- Barra de nivel de stock -->
@@ -20411,8 +20422,8 @@ const ProductosView = (() => {
       const el = document.getElementById(id);
       if (el) el.textContent = v;
     };
-    setKpi('histStockActual', fmt(stockTotal));
-    setKpi('histStockMin',    fmt(stockMin));
+    setKpi('histStockActual', fmtQty(stockTotal));
+    setKpi('histStockMin',    fmtQty(stockMin));
     setKpi('histKpiMovs',     movs30);
 
     // [stock teórico] Resumen proyectado en el hero. Overlay del cache (mismas guías ABIERTAS), real intacto.
@@ -20421,13 +20432,13 @@ const ProductosView = (() => {
     const _proyEl = document.getElementById('histProyeccion');
     if (_proyEl) {
       if (_proyH.tiene) {
-        const inH  = _proyH.porRecibir > 0 ? `<span class="proy-in">+${fmt(_proyH.porRecibir)} por recibir</span>` : '';
-        const outH = _proyH.porSalir   > 0 ? `<span class="proy-out">−${fmt(_proyH.porSalir)} por salir</span>` : '';
+        const inH  = _proyH.porRecibir > 0 ? `<span class="proy-in">+${fmtQty(_proyH.porRecibir)} por recibir</span>` : '';
+        const outH = _proyH.porSalir   > 0 ? `<span class="proy-out">−${fmtQty(_proyH.porSalir)} por salir</span>` : '';
         _proyEl.innerHTML = `
           <span class="hist-proy-lbl">Proyectado (guías abiertas)</span>
           <span class="hist-proy-row">
-            <span class="proy-real">Real ${fmt(stockTotal)}</span>${inH}${outH}
-            <span class="proy-proj">≈ ${fmt(_proyH.proyectado)}</span>
+            <span class="proy-real">Real ${fmtQty(stockTotal)}</span>${inH}${outH}
+            <span class="proy-proj">≈ ${fmtQty(_proyH.proyectado)}</span>
           </span>`;
         _proyEl.style.display = '';
       } else {
@@ -20593,7 +20604,7 @@ const ProductosView = (() => {
       else if (dias <= 7) badge = `⚠ ${dias}d`;
       else if (dias <= 30) badge = `⏳ ${dias}d`;
       else                 badge = `✓ ${dias}d`;
-      const cantTxt = (cantidadConsumida != null) ? ` <b style="color:#fbbf24">−${fmt(cantidadConsumida)}u</b>` : '';
+      const cantTxt = (cantidadConsumida != null) ? ` <b style="color:#fbbf24">−${fmtQty(cantidadConsumida)}u</b>` : '';
       return `
         <div class="hist-lote-chip ${cls}">
           <span class="hist-lote-id">🏷 ${escHtml(lote.idLote)}</span>${cantTxt}
@@ -20627,7 +20638,7 @@ const ProductosView = (() => {
         <div class="hist-timeline-row is-${colorCat}">
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline justify-between gap-2">
-              <span class="hist-mov-amount is-${colorCat}">${sign}${fmt(m.cantidad)}</span>
+              <span class="hist-mov-amount is-${colorCat}">${sign}${fmtQty(m.cantidad)}</span>
               <span class="hist-mov-fecha">${fmtFechaHora(m.fecha)}</span>
             </div>
             <p class="hist-mov-meta">
@@ -20639,7 +20650,7 @@ const ProductosView = (() => {
             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
               ${esPend
                 ? `<span class="hist-mov-saldo" style="color:#fb923c">Sin aplicar al stock</span>`
-                : `<span class="hist-mov-saldo">Saldo <strong>${m.bal == null ? '—' : fmt(m.bal)}</strong></span>`}
+                : `<span class="hist-mov-saldo">Saldo <strong>${m.bal == null ? '—' : fmtQty(m.bal)}</strong></span>`}
               ${m.usuario ? `<span class="text-[10px] text-slate-500">por ${escHtml(m.usuario)}</span>` : ''}
             </div>
           </div>
@@ -20724,7 +20735,7 @@ const ProductosView = (() => {
       ? movs.slice(0, 50).map(m => {
           const fecha  = _ddmm(m.fecha).padEnd(7);
           const tipo   = _tipoLegible(m).padEnd(COL_TIPO);
-          const monto  = ((m.esIngreso ? '+' : '-') + fmt(m.cantidad, 0)).padStart(COL_MON);
+          const monto  = ((m.esIngreso ? '+' : '-') + fmtQty(m.cantidad)).padStart(COL_MON);
           return fecha + tipo + monto;
         })
       : ['  Sin movimientos registrados.'];
@@ -20746,8 +20757,8 @@ const ProductosView = (() => {
       SEP2,
       ...movLines,
       SEP2,
-      `${'Stock actual'.padEnd(W - 10)}:${fmt(stock,    0).padStart(9)}`,
-      `${'Minimo requerido'.padEnd(W - 10)}:${fmt(stockMin, 0).padStart(9)}`,
+      `${'Stock actual'.padEnd(W - 10)}:${fmtQty(stock).padStart(9)}`,
+      `${'Minimo requerido'.padEnd(W - 10)}:${fmtQty(stockMin).padStart(9)}`,
       `${'Estado'.padEnd(W - 10)}:${(stock > stockMin ? 'OK' : '! BAJO MINIMO').padStart(9)}`,
       SEP,
       ''
@@ -21089,7 +21100,7 @@ const ProductosView = (() => {
     _auditTarget = { codigoBarra: cod, nombre, skuBase, idAlerta: opts.idAlerta || null };
     document.getElementById('auditNombre').textContent   = nombre;
     document.getElementById('auditCodigo').textContent   = cod;
-    document.getElementById('auditStockSis').textContent = fmt(s.cantidadDisponible || 0);
+    document.getElementById('auditStockSis').textContent = fmtQty(s.cantidadDisponible || 0);
     // Pre-llenar conteo con teórico (si viene de una alerta) — el usuario puede editarlo
     document.getElementById('auditConteo').value =
       (opts.prefillFisico !== undefined && opts.prefillFisico !== null)
@@ -21165,7 +21176,7 @@ const ProductosView = (() => {
     document.getElementById('ajusteNombre').textContent   = nombre;
     document.getElementById('ajusteCodigo').textContent   = String(codigoBarra);
     const s = _s(String(codigoBarra));
-    document.getElementById('ajusteStockSis').textContent = fmt(s.cantidadDisponible || 0);
+    document.getElementById('ajusteStockSis').textContent = fmtQty(s.cantidadDisponible || 0);
     document.getElementById('ajusteCant').value           = '';
     document.getElementById('ajusteMotivo').value         = '';
     document.getElementById('ajustePreview').textContent  = '';
@@ -21217,7 +21228,7 @@ const ProductosView = (() => {
     };
     cerrarSheet('sheetAjuste');
     _ajusteTarget = null;
-    toast(`${diff > 0 ? '▲' : '▼'} Ajuste ${diff > 0 ? '+' : ''}${fmt(diff, 2)} — stock: ${fmt(stockReal)}`, 'ok', 3000);
+    toast(`${diff > 0 ? '▲' : '▼'} Ajuste ${diff > 0 ? '+' : ''}${fmtQty(diff)} — stock: ${fmtQty(stockReal)}`, 'ok', 3000);
     _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
     _aplicarQuery();
 
@@ -21504,7 +21515,7 @@ const ProductosView = (() => {
       const el = document.getElementById(id);
       if (el) el.textContent = val;
     };
-    setKpi('prodDetKpiStock', fmt(grupo.stockTotal));
+    setKpi('prodDetKpiStock', fmtQty(grupo.stockTotal));
     setKpi('prodDetKpiRot',   movs30);
     setKpi('prodDetKpiCodes', codigos.length);
     // Tabs
@@ -21545,10 +21556,10 @@ const ProductosView = (() => {
               <p class="text-xs font-mono truncate">${escHtml(c.codigoBarra)}</p>
               <p class="text-[10px] text-slate-500 truncate">${escHtml(c.descripcion || '')}</p>
             </div>
-            <span class="font-black text-sm ${cant > 0 ? 'text-emerald-400' : 'text-slate-500'}">${fmt(cant)}</span>
+            <span class="font-black text-sm ${cant > 0 ? 'text-emerald-400' : 'text-slate-500'}">${fmtQty(cant)}</span>
           </div>`;
       }).join('') +
-      `<p class="text-[10px] text-slate-500 mt-3 text-center">Total grupo: <span class="text-emerald-400 font-bold">${fmt(grupo.stockTotal)}</span> unidades · stock se descuenta por código real al despachar</p>`;
+      `<p class="text-[10px] text-slate-500 mt-3 text-center">Total grupo: <span class="text-emerald-400 font-bold">${fmtQty(grupo.stockTotal)}</span> unidades · stock se descuenta por código real al despachar</p>`;
     } else if (tab === 'movs') {
       // Timeline últimos 30 movimientos
       const codSet = new Set(grupo.children.map(c => c.codigoBarra));
@@ -22463,8 +22474,8 @@ const LogsView = (() => {
           <span class="text-slate-500">${escHtml(fechaStr)}</span>
         </div>
         <div class="text-[10px] text-slate-500 mt-1 flex gap-3">
-          <span>antes: <b class="text-slate-300">${fmt(m.stockAntes, 1)}</b></span>
-          <span>después: <b class="text-slate-300">${fmt(m.stockDespues, 1)}</b></span>
+          <span>antes: <b class="text-slate-300">${fmtQty(m.stockAntes)}</b></span>
+          <span>después: <b class="text-slate-300">${fmtQty(m.stockDespues)}</b></span>
           ${m.usuario ? `<span class="ml-auto">${escHtml(m.usuario)}</span>` : ''}
         </div>
         ${m.origen ? `<p class="text-[10px] text-slate-600 font-mono mt-0.5">origen: ${escHtml(m.origen)}</p>` : ''}
@@ -24085,7 +24096,7 @@ const VencimientosView = (() => {
           <div class="venc-name">${escHtml(nom[String(l.codigoProducto)] || l.codigoProducto)}</div>
           <div class="venc-sub">vence ${escHtml(fv)} · lote ${escHtml(l.idLote || '—')}</div>
         </div>
-        <div class="venc-qty"><span class="vq-n">${fmt(l.cantidadActual, 1)}</span><span class="vq-u">uds</span></div>
+        <div class="venc-qty"><span class="vq-n">${fmtQty(l.cantidadActual)}</span><span class="vq-u">uds</span></div>
       </div>`;
     }).join('');
   }
