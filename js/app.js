@@ -14936,9 +14936,14 @@ const DespachoView = (() => {
       return count > 0 ? { cantidadDisponible: total, codigosEncontrados: count } : null;
     }
 
+    // [606] Separar CONSTANCIAS "no se entiende" (sinSku / sin skuBase): no son despachables,
+    // no suman deuda (solicitado=0 desde el backend) — van en su propia sección al final.
+    const constancias  = items.filter(it => it.sinSku === true || !String(it.skuBase || '').trim());
+    const despachables = items.filter(it => !(it.sinSku === true || !String(it.skuBase || '').trim()));
+
     // Filtrar por búsqueda + ordenar
     const q = _pickupSearch.trim().toLowerCase();
-    let filtered = items.filter(it => {
+    let filtered = despachables.filter(it => {
       if (!q) return true;
       return String(it.nombre || '').toLowerCase().includes(q) ||
              String(it.skuBase || '').toLowerCase().includes(q);
@@ -15052,6 +15057,27 @@ const DespachoView = (() => {
         </div>`;
     }).join('') || `<div class="text-center text-slate-500 text-sm py-6">Sin coincidencias para "${escHtml(q)}"</div>`;
 
+    // [606] Sección CONSTANCIA "no se entiende": pedido registrado sin código — no se
+    // despacha ni suma deuda (solicitado=0). Espejo de la sección de la lista sombra.
+    if (constancias.length) {
+      cont.innerHTML += `
+        <div class="lsck-libres-titulo">
+          <span class="lsck-libres-ico">❓</span>
+          <span>No se entiende · ${constancias.length} sin identificar · constancia del pedido (no suma deuda)</span>
+        </div>` +
+        constancias.map(it => `
+          <div class="pkck-card lsck-card lsck-libre">
+            <div class="pkck-row">
+              <div class="pkck-icon">📝</div>
+              <div class="flex-1 min-w-0">
+                <p class="pkck-name truncate">${escHtml(it.nombre || 'SIN NOMBRE')}</p>
+                <p class="pkck-meta truncate">pedido sin código · la IA nunca lo identificó</p>
+              </div>
+              <div class="pkck-qty-wrap"><p><span class="pkck-qty-sol">×${parseFloat(it.constancia) || 0}</span></p></div>
+            </div>
+          </div>`).join('');
+    }
+
     // KPIs hero
     const totalUds  = items.reduce((s,it) => s + (parseFloat(it.solicitado) || 0), 0);
     const totalDesp = items.reduce((s,it) => s + (parseFloat(it.despachado) || 0), 0);
@@ -15059,7 +15085,7 @@ const DespachoView = (() => {
     const elIt = document.getElementById('pkckKpiItems');
     const elUd = document.getElementById('pkckKpiUds');
     const elPc = document.getElementById('pkckKpiPct');
-    if (elIt) elIt.textContent = items.length;
+    if (elIt) elIt.textContent = despachables.length;   // [606] las constancias no cuentan como items despachables
     if (elUd) elUd.textContent = `${totalDesp}/${totalUds}`;
     if (elPc) elPc.textContent = pctTot + '%';
 
