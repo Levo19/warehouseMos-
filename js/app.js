@@ -10160,6 +10160,30 @@ const EnvasadosView = (() => {
         ? `S/${total.toFixed(2)} · 🤝 S/${(Math.round(total / 2 * 100) / 100).toFixed(2)} c/u`
         : `${uds} × S/${_envTarifa.toFixed(2)} = S/${total.toFixed(2)}`;
     }
+
+    // [599] 🛍 ENVASE en vivo: 1 bolsa por unidad; los insumos van por MILLAR → uds/1000 MIL
+    // (el descuento real lo hace el server en registrar_envasado; esto solo informa. NUNCA bloquea.)
+    let envEl = document.getElementById('envEnvaseInfo');
+    if (!envEl) {
+      envEl = document.createElement('div');
+      envEl.id = 'envEnvaseInfo';
+      envEl.style.cssText = 'font-size:11px;margin-top:5px';
+      wrap.appendChild(envEl);
+    }
+    const _envSku = String(_envCtx.prod?.envaseSku || '').trim();
+    if (_envSku === 'SIN_ENVASE') {
+      envEl.innerHTML = `<span style="color:#64748b">∅ Este derivado no consume bolsa</span>`;
+    } else if (_envSku) {
+      const _master = (window.App && App.getProductosMaestro && App.getProductosMaestro()) || [];
+      const _ins = _master.find(x => String(x.skuBase||'').trim().toUpperCase() === _envSku.toUpperCase() && String(x.esInsumo) === '1')
+                || _master.find(x => String(x.skuBase||'').trim().toUpperCase() === _envSku.toUpperCase());
+      const _nom = (_ins && _ins.descripcion) || _envSku;
+      envEl.innerHTML = uds > 0
+        ? `<span style="color:#34d399">🛍 ${uds} bolsa${uds !== 1 ? 's' : ''} = ${(uds / 1000).toFixed(3)} MIL de ${escHtml(_nom)} — se descuenta solo del stock</span>`
+        : `<span style="color:#94a3b8">🛍 Bolsa: ${escHtml(_nom)} (1 por unidad, va por millar)</span>`;
+    } else {
+      envEl.innerHTML = `<span style="color:#fbbf24">🛍 Sin bolsa asignada — se asigna en MOS Catálogo (el registro no se bloquea)</span>`;
+    }
   }
 
   // [Bug #7 cleanup] calcularProyeccion era código muerto: leía envCantBase
@@ -11071,7 +11095,17 @@ const EnvasadorView = (() => {
           const ds         = stockMap[String(d.codigoBarra)] || {};
           const stockD     = parseFloat(ds.cantidadDisponible || 0);
           const stockMin = parseFloat(ds.stockMinimo || d.stockMinimo || 0);
+          // [599] envase del derivado (mos.productos.envase_sku, seteado en MOS Catálogo):
+          // sku del insumo → nombre para el chip · 'SIN_ENVASE' = no lleva · vacío = falta elegir en MOS
+          const envSku = String(d.envaseSku || '').trim();
+          let envNombre = '';
+          if (envSku && envSku !== 'SIN_ENVASE') {
+            const ins = master.find(x => String(x.skuBase||'').trim().toUpperCase() === envSku.toUpperCase() && String(x.esInsumo) === '1')
+                     || master.find(x => String(x.skuBase||'').trim().toUpperCase() === envSku.toUpperCase());
+            envNombre = (ins && ins.descripcion) || envSku;
+          }
           return { ...d, stockD, stockMin, posibles, factorBase, merma,
+                   envSku, envNombre,
                    urgencia: _urgencia(stockD, stockMin) };
         });
 
@@ -11140,6 +11174,12 @@ const EnvasadorView = (() => {
           const urgTag = d.urgencia
             ? `<span class="tag-${d.urgencia === 'CRITICA' ? 'danger' : 'warn'} text-xs">${d.urgencia}</span>`
             : '';
+          // [599] chip de ENVASE: verde=celofán asignado · gris=sin envase (decisión) · punteado=falta elegir en MOS
+          const envChip = d.envSku === 'SIN_ENVASE'
+            ? `<span title="No consume bolsa (decisión explícita)" style="font-size:10px;padding:1px 7px;border-radius:6px;background:rgba(148,163,184,.10);color:#64748b">∅ sin envase</span>`
+            : d.envNombre
+            ? `<span title="Bolsa que consume al envasar (se descuenta sola de stock, en millares)" style="font-size:10px;font-weight:700;padding:1px 7px;border-radius:6px;background:rgba(52,211,153,.12);color:#34d399">🛍 ${escHtml(d.envNombre)}</span>`
+            : `<span title="Falta elegir la bolsa — se asigna en MOS Catálogo (chip punteado del derivado)" style="font-size:10px;padding:1px 8px;border-radius:6px;border:1px dashed rgba(251,191,36,.5);color:#fbbf24">🛍 sin bolsa asignada</span>`;
           return `
           <div class="env-deriv-row">
             <div class="flex items-center gap-2 flex-wrap">
@@ -11147,8 +11187,9 @@ const EnvasadorView = (() => {
               ${stockEl}
               ${urgTag}
             </div>
-            <div class="flex items-center gap-2 mt-1">
+            <div class="flex items-center gap-2 mt-1 flex-wrap">
               ${posiblesHtml}
+              ${envChip}
               <button onclick="EnvasadorView.envasar('${escAttr(base.idProducto)}','${escAttr(d.idProducto)}')"
                       class="btn btn-sm btn-primary ml-auto" style="flex-shrink:0">Envasar</button>
             </div>
