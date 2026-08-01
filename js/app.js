@@ -568,6 +568,19 @@ function fmt(n, dec = 0) {
   return (parseFloat(n) || 0).toFixed(dec).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+// [607] Hora corta Lima para trazabilidad por producto (HH:mm hoy · "dd/mm HH:mm" si es otro día).
+// Acepta ISO con Z (tsDespacho) y "YYYY-MM-DDTHH:MM" naive-Lima (tsSolicitud/created_at del server).
+function fmtHora(ts) {
+  if (!ts) return '';
+  try {
+    const d = new Date(ts); if (isNaN(d.getTime())) return '';
+    const hoy = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+    const dia = d.toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+    const hm  = d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Lima' });
+    return dia === hoy ? hm : d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', timeZone: 'America/Lima' }) + ' ' + hm;
+  } catch (_) { return ''; }
+}
+
 // [522] Cantidades de STOCK con decimales reales — los insumos van por MILLAR (0.040 = 40 bolsas)
 // y fmt() con dec=0 los aplastaba a "0". Hasta 3 decimales, SOLO si existen:
 // 3 → "3" · 3.16 → "3.16" · −0.04 → "−0.04" · 1234.5 → "1,234.5"
@@ -6242,6 +6255,7 @@ const GuiasView = (() => {
                 <span>${escHtml(d.codigoProducto)}</span>
                 ${syncDot}
                 ${syncLbl}
+                ${fmtHora(d.createdAt) ? `<span style="color:#64748b;font-family:inherit" title="Hora en que se registró esta línea en la guía">🕐 ${fmtHora(d.createdAt)}</span>` : ''}
               </p>
               ${venc}
             </div>
@@ -12406,7 +12420,7 @@ const DespachoView = (() => {
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
               <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
-              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
             </div>
             <div class="pkck-qty-wrap">
               <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
@@ -14573,7 +14587,7 @@ const DespachoView = (() => {
       return true; // detenemos aquí, modal decide
     }
 
-    item.despachado = prevDesp + 1;
+    item.despachado = prevDesp + 1; item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
     item.despachadoPorCodigo = item.despachadoPorCodigo || {};
     item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
     _savePickup();
@@ -14662,7 +14676,7 @@ const DespachoView = (() => {
     }
     const cb = _pkckCodigoDe(item);
     item._ultimoCb = cb;
-    item.despachado = prevDesp + 1;
+    item.despachado = prevDesp + 1; item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
     item.despachadoPorCodigo = item.despachadoPorCodigo || {};
     item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
     _pickupItemActivo = item.skuBase;
@@ -14677,7 +14691,7 @@ const DespachoView = (() => {
     const base = parseFloat(item.despachadoBaseline) || 0;
     if (prevDesp <= base) return;
     const cb = _pkckCodigoDe(item);
-    item.despachado = Math.max(base, prevDesp - 1);
+    item.despachado = Math.max(base, prevDesp - 1); item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
     if (item.despachadoPorCodigo && item.despachadoPorCodigo[cb] != null) {
       const nv = (parseFloat(item.despachadoPorCodigo[cb]) || 0) - 1;
       if (nv > 0) item.despachadoPorCodigo[cb] = nv;
@@ -14707,7 +14721,7 @@ const DespachoView = (() => {
     item.despachadoPorCodigo = item.despachadoPorCodigo || {};
     item.despachadoPorCodigo[cb] = qty;
     item.despachado = Object.keys(item.despachadoPorCodigo)
-      .reduce((s, k) => s + (parseFloat(item.despachadoPorCodigo[k]) || 0), 0);
+      .reduce((s, k) => s + (parseFloat(item.despachadoPorCodigo[k]) || 0), 0); item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
     _pickupItemActivo = item.skuBase;
     _afterPickupChange(item, prevDesp, sol);
   }
@@ -14784,7 +14798,7 @@ const DespachoView = (() => {
           return;
         }
       }
-      item.despachado = nuevoTotal;
+      item.despachado = nuevoTotal; item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
       item.despachadoPorCodigo = item.despachadoPorCodigo || {};
       item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + qty;
       _savePickup();
@@ -14816,7 +14830,7 @@ const DespachoView = (() => {
     const _close = () => { overlay.style.display = 'none'; };
     document.getElementById('pkckModalSobreCancel').onclick = _close;
     document.getElementById('pkckModalSobreOk').onclick = () => {
-      item.despachado = (parseFloat(item.despachado) || 0) + 1;
+      item.despachado = (parseFloat(item.despachado) || 0) + 1; item.tsDespacho = new Date().toISOString();   // [607] hora de salida del producto
       item.despachadoPorCodigo = item.despachadoPorCodigo || {};
       item.despachadoPorCodigo[cb] = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + 1;
       _savePickup();
@@ -15041,7 +15055,7 @@ const DespachoView = (() => {
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
               <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
-              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
             </div>
             <div class="pkck-qty-wrap">
               <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
