@@ -21239,15 +21239,17 @@ const ProductosView = (() => {
     }
     const stockActual = _s(_ajusteTarget.codigoBarra).cantidadDisponible || 0;
     const diff        = stockReal - stockActual;
-    if (Math.abs(diff) < 0.01) {
+    // [613] mismo umbral fino que confirmarAjuste + fmtQty (decimales reales, no fmt(x,2)
+    // que redondeaba 0.001 a "0.00" y hacía ver como nulo un ajuste válido de insumos).
+    if (Math.abs(diff) < 0.0005) {
       el.className   = 'text-xs text-center mb-3 h-5 text-slate-400';
       el.textContent = 'Sin diferencia';
     } else if (diff > 0) {
       el.className   = 'text-xs text-center mb-3 h-5 text-emerald-400 font-bold';
-      el.textContent = `▲ +${fmt(diff, 2)} unidades`;
+      el.textContent = `▲ +${fmtQty(diff)} unidades`;
     } else {
       el.className   = 'text-xs text-center mb-3 h-5 text-red-400 font-bold';
-      el.textContent = `▼ ${fmt(diff, 2)} unidades`;
+      el.textContent = `▼ ${fmtQty(diff)} unidades`;
     }
   }
 
@@ -21260,7 +21262,9 @@ const ProductosView = (() => {
     const stockActual = _s(target.codigoBarra).cantidadDisponible || 0;
     const diff        = stockReal - stockActual;
 
-    if (Math.abs(diff) < 0.01) {
+    // [613] Umbral 0.0005 (no 0.01): los insumos se mueven por MILLAR — 1 unidad = 0.001 MIL.
+    // Con 0.01 un ajuste legítimo de milésimas se descartaba como "sin cambio".
+    if (Math.abs(diff) < 0.0005) {
       toast('El stock real coincide con el sistema, no hay cambio', 'info', 3000);
       cerrarSheet('sheetAjuste');
       return;
@@ -21279,17 +21283,46 @@ const ProductosView = (() => {
     _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
     _aplicarQuery();
 
-    // Background sync
+    // [613] Se manda el CONTEO (stockReal), no el delta: el backend FIJA ese saldo bajo lock
+    // → "cuento 25, queda 25" aunque alguien envase en paralelo. `tipoAjuste`/`cantidadAjuste`
+    // quedan como respaldo legacy. Si falla, se DESHACE el pintado optimista: antes la card
+    // seguía mostrando el número nuevo aunque no se hubiera guardado nada (el operador creía
+    // que había ajustado y al refrescar volvía el valor viejo).
+    const _revertir = (msg) => {
+      _stockMap[target.codigoBarra] = {
+        ...(_stockMap[target.codigoBarra] || {}),
+        cantidadDisponible: stockActual
+      };
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      _aplicarQuery();
+      toast(msg, 'danger', 6000);
+    };
     API.crearAjuste({
       codigoProducto: target.codigoBarra,
+      conteo:         stockReal,
       tipoAjuste:     tipo,
       cantidadAjuste: Math.abs(diff),
       motivo:         motivo || 'Ajuste manual',
       usuario:        window.WH_CONFIG?.usuario || ''
     }).then(res => {
-      if (!res.ok) toast('Error al guardar ajuste: ' + (res.error || ''), 'danger', 5000);
-    }).catch(() => {
-      toast('Sin conexión — ajuste en cola', 'warn', 4000);
+      if (!res || res.ok === false) {
+        _revertir('❌ NO se guardó el ajuste: ' + ((res && res.error) || 'sin respuesta del servidor'));
+        return;
+      }
+      if (res.offline) { toast('📶 Sin señal — ajuste en cola, se guardará al reconectar', 'warn', 4000); return; }
+      // Confirmado: pintar el saldo REAL que devolvió el servidor (puede diferir si hubo
+      // movimientos en paralelo — el kardex manda, no el optimismo del front).
+      const real = (res.data && res.data.stockNuevo != null) ? res.data.stockNuevo : res.stockNuevo;
+      if (real != null && Math.abs(parseFloat(real) - stockReal) > 0.0005) {
+        _stockMap[target.codigoBarra] = {
+          ...(_stockMap[target.codigoBarra] || {}),
+          cantidadDisponible: parseFloat(real)
+        };
+        _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+        _aplicarQuery();
+      }
+    }).catch(e => {
+      _revertir('❌ NO se guardó el ajuste: ' + ((e && e.message) || 'error de red') + ' — reintenta');
     });
   }
 

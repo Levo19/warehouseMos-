@@ -1475,8 +1475,14 @@ const API = (() => {
     // [cero-rastro] procesarEliminacionMermas eliminado: sistema viejo de mermas sin callers (v2 = mermasEliminarBatch).
 
     if (params.action === 'crearAjuste') {
+      // [613] SET ABSOLUTO: se manda el CONTEO físico, no el delta. El saldo final ES lo
+      // contado aunque alguien envase/despache en paralelo (antes el delta se calculaba en
+      // la pantalla → "pongo 25 y queda 24.9"). `tipo`+`cantidad` viajan solo como respaldo
+      // para ítems viejos en cola (la RPC usa `conteo` cuando viene).
+      const _conteo = (params.conteo != null && params.conteo !== '') ? params.conteo : undefined;
       const out = await _sbRpcWH('crear_ajuste', { p: {
         id_ajuste: 'AJ_' + lid, codigo_producto: String(params.codigoProducto || ''),
+        conteo: _conteo,
         tipo: params.tipoAjuste === 'INC' ? 'INC' : 'DEC', cantidad: params.cantidadAjuste,
         motivo: params.motivo || '', usuario: params.usuario || '', id_auditoria: params.idAuditoria || '',
         id_stock_nuevo: 'STK_' + lid, id_mov: 'MOV_' + lid
