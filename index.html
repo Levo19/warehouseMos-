@@ -4866,7 +4866,17 @@
       const now = Date.now();
       if (now - _preCheckCache.ts < 30000 && _preCheckCache.ok) return true;
       try {
-        const r = await fetch('./version.json?t=' + now, { cache: 'no-store' });
+        // [2.13.532 · cuelgue al generar guía] `fetch` NO tiene timeout propio: con red
+        // a medias (conectado pero sin respuesta) la promesa queda pendiente para
+        // siempre. Como el cierre de despacho hace `await _preCheckVersion()` ANTES de
+        // cualquier toast, el operador presionaba "Generar guía" y no pasaba NADA — ni
+        // error ni aviso. Con AbortController el chequeo se rinde a los 3.5s y cae al
+        // catch, que ya era tolerante (no bloquear si la red falla).
+        const _ac = new AbortController();
+        const _to = setTimeout(() => { try { _ac.abort(); } catch(_){} }, 3500);
+        let r;
+        try { r = await fetch('./version.json?t=' + now, { cache: 'no-store', signal: _ac.signal }); }
+        finally { clearTimeout(_to); }
         if (!r.ok) {
           _preCheckCache = { ts: now, ok: true };
           return true; // tolerante: si la red falla, no bloquear
