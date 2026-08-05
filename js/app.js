@@ -12146,7 +12146,13 @@ const DespachoView = (() => {
   }
   // Pickup activo persistente — sobrevive refresh del browser
   function _savePickup() {
-    if (_pickupActivo) localStorage.setItem(PICKUP_KEY, JSON.stringify(_pickupActivo));
+    if (_pickupActivo) {
+      // [2.13.533] sello de la última vez que este pickup tuvo actividad local. Es la
+      // referencia de respaldo para soltarlo solo cuando el servidor ya lo despachó
+      // (los pickups guardados por versiones anteriores no traen `tsTomado`).
+      _pickupActivo.tsGuardado = Date.now();
+      localStorage.setItem(PICKUP_KEY, JSON.stringify(_pickupActivo));
+    }
     else               localStorage.removeItem(PICKUP_KEY);
   }
   function _loadPickup() {
@@ -14364,6 +14370,7 @@ const DespachoView = (() => {
       : lista;
     _ultimosIdsPickups = idsActuales;
     _saveIdsSnapshot([...idsActuales]);
+    try { _reconciliarPickupActivo(lista); } catch (_) {}   // [2.13.533] soltar solo lo ya despachado
     badgeUpdate();
     // [v2.13.474] Auto-impresión del lunes ELIMINADA (pedido del dueño: gasto de papel).
     // El rezagado se imprime SOLO manual: MOS → zonas (zonaImprimirRezagado) o WH (imprimirAcumuladoManual).
@@ -14380,6 +14387,47 @@ const DespachoView = (() => {
         mostrarAlertaPickupNuevo(nuevos[0]);
       }
     }
+  }
+
+  // [2.13.533 · pickup pegado] El despacho pudo cerrarse en el SERVIDOR sin que esta
+  // pantalla se enterara: si la respuesta tarda más de 55s, la app cae al camino de
+  // "sin conexión" y NO limpia el pickup, aunque la guía ya se emitió y el ticket salió.
+  // Resultado: el pickup quedaba abierto hasta que el operador tocaba "Soltar", y al
+  // día siguiente volvía a aparecer (se restaura de localStorage al arrancar).
+  //
+  // Regla: si el servidor dice que el pickup fue ATENDIDO después del instante en que
+  // yo lo tomé, ese despacho ya salió → se suelta solo. Un acumulado con deuda vuelve
+  // a la lista de pendientes para tomarlo de nuevo limpio, con su saldo real.
+  function _reconciliarPickupActivo(lista) {
+    if (!_pickupActivo || _pickupClosing) return;          // no tocar un cierre en curso
+    const id = String(_pickupActivo.idPickup || '');
+    if (!id) return;
+    // Referencia temporal: cuándo lo tomé o, si viene de una versión anterior, cuándo
+    // fue su última actividad local (último escaneo guardado).
+    const tsTomado = Number(_pickupActivo.tsTomado || _pickupActivo.tsGuardado || 0);
+    if (!tsTomado) return;                                  // sin ninguna marca: no arriesgar
+    const srv = (lista || []).find(p => String(p.idPickup) === id);
+    let cerrado = false, motivo = '';
+
+    if (!srv) {
+      // Ya no está entre PENDIENTE/EN_PROCESO → el servidor lo cerró (COMPLETADO/PARCIAL/…)
+      cerrado = true; motivo = 'ya fue despachado';
+    } else {
+      const atendido = srv.fechaAtendido ? new Date(srv.fechaAtendido).getTime() : 0;
+      // margen de 5s por desfase de reloj entre el celular y el servidor
+      if (atendido && atendido > tsTomado + 5000) { cerrado = true; motivo = 'el despacho ya se registró'; }
+    }
+    if (!cerrado) return;
+
+    _pickupActivo = null;
+    _clearPickup();
+    try { _renderPickupActivoBanner(); } catch (_) {}
+    try { _renderPickupChecklistInline(); } catch (_) {}
+    try { _renderExtrasSection(); } catch (_) {}
+    try { _updateGenerarBtn(); } catch (_) {}
+    try { _renderCart(); } catch (_) {}
+    try { SoundFX.done(); } catch (_) {}
+    toast(`✅ Pickup liberado · ${motivo} (ya no hace falta tocar "Soltar")`, 'ok', 6000);
   }
 
   // Toggles de ordenamiento del checklist (search + sort)
@@ -15597,6 +15645,10 @@ const DespachoView = (() => {
           ...p,
           atendidoPor: usuario,
           estado: 'EN_PROCESO',
+          // [2.13.533] momento en que LO TOMÉ. Sirve para detectar después que el
+          // servidor ya lo cerró (ver _reconciliarPickupActivo): si el pickup fue
+          // atendido DESPUÉS de este instante, el despacho ya salió y hay que soltarlo.
+          tsTomado: Date.now(),
           items: _normalizarItemsPickup(p.items)
         };
       } else {

@@ -4808,7 +4808,13 @@
     async function _checkForcedUpdate() {
       if (_forceUpdateTriggered) return;
       try {
-        const r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store' });
+        // [2.13.533] con timeout: sin él, una red a medias dejaba este chequeo colgado
+        // y el equipo no se enteraba nunca de que había versión nueva.
+        const _ac = new AbortController();
+        const _to = setTimeout(() => { try { _ac.abort(); } catch(_){} }, 4000);
+        let r;
+        try { r = await fetch('./version.json?t=' + Date.now(), { cache: 'no-store', signal: _ac.signal }); }
+        finally { clearTimeout(_to); }
         if (!r.ok) return;
         const j = await r.json();
         if (!j || !j.version) return;
