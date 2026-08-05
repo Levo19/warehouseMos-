@@ -12804,7 +12804,10 @@ const DespachoView = (() => {
     const qty = parseFloat(String(val).replace(',', '.'));
     if (isNaN(qty) || qty < 0) return;
     if (a.tipo === 'pickup') {
-      _pkckSetGranel(a.id, qty);
+      // [623] async: puede pedir confirmación de sobre-despacho. Fire-and-forget a
+      // propósito (el repintado lo hace ella), pero se captura para no dejar una
+      // promesa rechazada suelta si el diálogo falla.
+      Promise.resolve(_pkckSetGranel(a.id, qty)).catch(() => {});
     } else {
       const idx = _cart.findIndex(c => c.codigoBarra === a.id);
       if (idx >= 0) {
@@ -14706,13 +14709,29 @@ const DespachoView = (() => {
     _pickupItemActivo = item.skuBase; // sigue activo aunque quede en 0
     _afterPickupChange(item, prevDesp, parseFloat(item.solicitado) || 0);
   }
-  function _pkckSetGranel(skuBase, valorRaw) {
+  async function _pkckSetGranel(skuBase, valorRaw) {
     const item = _pkckItemPorSku(skuBase);
     if (!item) return;
     const qtyIn = parseFloat(String(valorRaw).replace(',', '.'));
     if (isNaN(qtyIn) || qtyIn < 0) return;
     const sol      = parseFloat(item.solicitado) || 0;
     const prevDesp = parseFloat(item.despachado) || 0;
+    // [623] El peso no tenía NINGUNA red: teclear 25 en vez de 2.5 descontaba 25 kg, emitía
+    // la guía e imprimía el adhesivo sin preguntar nada (el botón de unidades sí confirma).
+    //  · más de 10× lo pedido = casi seguro un punto decimal mal puesto → se rechaza.
+    //  · por encima de lo pedido = sobre-despacho legítimo pero raro → se confirma.
+    if (sol > 0 && qtyIn > sol * 10) {
+      toast(`⛔ ${fmtQty(qtyIn)} es más de 10× lo pedido (${fmtQty(sol)}). Revisa el punto decimal.`, 'danger', 6000);
+      try { vibrate([80, 60, 80]); } catch (_) {}
+      _renderPickupActivo();   // repinta el input con el valor bueno
+      return;
+    }
+    if (sol > 0 && qtyIn > sol) {
+      const okSobre = await _whConfirm(
+        `Estás pesando ${fmtQty(qtyIn)} y se pidieron ${fmtQty(sol)} de "${item.nombre || skuBase}".\n\n¿Despachar de más?`,
+        { warning: true, titulo: 'Más de lo pedido' });
+      if (!okSobre) { _renderPickupActivo(); return; }
+    }
     // [fix] No setear por debajo del baseline (peso ya despachado del rezagado en una guía previa). Para
     // base=0 (caso normal) es transparente (qty sin cambios).
     const base = parseFloat(item.despachadoBaseline) || 0;
