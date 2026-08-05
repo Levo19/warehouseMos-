@@ -15210,15 +15210,27 @@ const DespachoView = (() => {
   // acumulado) al ABRIR el pickup, preservándolo si ya existe (refresh/restore). El baseline alimenta la
   // vista "faltan N" del operador (barra desde 0). DEBE usarse en TODOS los puntos donde se construye
   // _pickupActivo.items (empezarPickup Y abrirPickup) o el flujo rezagado queda sin baseline → vuelve a 1/6.
+  // [619 · DOBLE DESCUENTO] El baseline es "lo que YA salió antes de esta sesión" y sirve
+  // para calcular el neto a descontar (neto = despachado − baseline). Antes se conservaba
+  // el `despachadoBaseline` que venía dentro del JSON del servidor: tras un despacho parcial
+  // el item quedaba {despachado:51, baseline:0} y el SIGUIENTE cierre volvía a descontar
+  // esas 51 unidades. Con 603 el acumulador queda PENDIENTE (ya no PARCIAL), así que el
+  // segundo despacho pasó a ser el camino normal → daño real medido: 79 líneas / 279 uds
+  // descontadas dos veces y 127 códigos en negativo.
+  // El baseline SIEMPRE se re-siembra con el `despachado` que devuelve el servidor: es la
+  // única fuente confiable de "lo ya descontado".
   function _normalizarItemsPickup(items) {
     return (items || []).map(it => {
       const desp0 = parseFloat(it.despachado) || 0;
       return {
+        // [619] conservar los campos que el servidor calcula y el front no debe perder
+        // (constancia sinSku del 606 y las horas del 607) — al re-normalizar se borraban.
+        ...it,
         skuBase:             it.skuBase,
         nombre:              it.nombre || it.skuBase,
         solicitado:          parseFloat(it.solicitado) || 0,
         despachado:          desp0,
-        despachadoBaseline:  (it.despachadoBaseline != null ? parseFloat(it.despachadoBaseline) : desp0),
+        despachadoBaseline:  desp0,
         codigosOriginales:   Array.isArray(it.codigosOriginales) ? it.codigosOriginales : [],
         despachadoPorCodigo: it.despachadoPorCodigo || {}
       };
