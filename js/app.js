@@ -21445,11 +21445,13 @@ const ProductosView = (() => {
   let _audSignoPrev = null;
   function audRecalcDiferencia() {
     const inp  = document.getElementById('auditConteo');
-    const val  = document.getElementById('audDifValor');
     const info = document.getElementById('audDiferenciaInfo');
     const cta  = document.getElementById('cntCta');
     const num  = document.getElementById('cntCtaNum');
-    if (!inp || !val || !info) return;
+    // OJO: NO exigir #audDifValor acá. Ese span vive DENTRO de #audDiferenciaInfo y el
+    // reset lo borra (innerHTML=''), así que al abrir el sheet no existe todavía; pedirlo
+    // en el guard dejaba la función muerta y el CTA nunca se habilitaba.
+    if (!inp || !info) return;
 
     const crudo = String(inp.value).trim().replace(',', '.');
     const fis   = crudo === '' ? NaN : parseFloat(crudo);
@@ -21470,7 +21472,6 @@ const ProductosView = (() => {
     const diff = Math.round((fis - sis) * 100) / 100;   // 2 decimales, sin coma de miles
     const signo = diff > 0.005 ? 1 : (diff < -0.005 ? -1 : 0);
 
-    val.textContent = signo === 0 ? '' : (diff > 0 ? '+' : '') + fmt(diff, 2);
     info.innerHTML = signo === 0
       ? '✓ Sin diferencia'
       : 'Diferencia: <span class="font-black">' + (diff > 0 ? '+' : '') + fmt(diff, 2) + '</span>';
