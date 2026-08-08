@@ -20699,7 +20699,12 @@ const ProductosView = (() => {
     const tipo  = String(m.tipo || '').toUpperCase();
     const cant  = fmtQty(m.cantidad);
     const zona  = m.zona ? escHtml(m.zona) : '';
-    const quien = (m.usuario && m.usuario !== '—') ? escHtml(m.usuario) : '';
+    // [537] Nombres internos del backend no son "quién": el operador no sabe qué es
+    // "sistema-cierre-idem". Si el movimiento lo hizo un proceso, se dice así.
+    const _u = String(m.usuario || '').trim();
+    const quien = (!_u || _u === '—') ? ''
+      : /^sistema[-_]?/i.test(_u) ? 'el sistema (cierre automático)'
+      : escHtml(_u);
     const antes = Number.isFinite(m.stockAntes) ? fmtQty(m.stockAntes) : null;
     const saldo = Number.isFinite(m.saldo) ? fmtQty(m.saldo) : null;
 
