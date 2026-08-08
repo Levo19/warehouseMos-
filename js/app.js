@@ -21293,10 +21293,10 @@ const ProductosView = (() => {
     // volvía -0.023. Lo repitió 4 veces (15:38, 15:40, 15:42, 15:43) creyendo que no
     // se guardaba. En granel/insumos (KG/MIL) 0.5 suele ser MÁS que todo el stock.
     //
-    // No cambiamos la regla del servidor (es lógica de stock). Lo que arreglamos es la
-    // MENTIRA: se avisa por adelantado y, si el servidor confirma que no ajustó, se
-    // revierte el pintado optimista y se le dice al operador qué hacer.
-    const _dentroTolerancia = Math.abs(diff) > 0.0005 && Math.abs(diff) <= 0.5;
+    // [659 · decisión dueño 2026-08-08] LO CONTADO MANDA: el servidor ya NO tiene tolerancia
+    // (toda diferencia ≠ 0 a 2 decimales corrige el stock al físico contado). El guard de
+    // res.ajusto===false de abajo queda como red por si el server rechazara por otra razón.
+    const _dentroTolerancia = false;
 
     // Actualizar stock local optimisticamente
     _stockMap[target.codigoBarra] = {
@@ -21309,8 +21309,7 @@ const ProductosView = (() => {
     _auditTarget = null;
     let msg, tono;
     if (Math.abs(diff) <= 0.0005)   { msg = '✅ Sin diferencias'; tono = 'ok'; }
-    else if (_dentroTolerancia)     { msg = `⚠️ Diferencia ${diff > 0 ? '+' : ''}${fmtQty(diff)} — dentro de la tolerancia (0.5): el stock NO se corrige`; tono = 'warn'; }
-    else                            { msg = `⚠️ Diferencia: ${diff > 0 ? '+' : ''}${fmt(diff, 2)}`; tono = 'warn'; }
+    else                            { msg = `⚠️ Diferencia ${diff > 0 ? '+' : ''}${fmt(diff, 2)} — stock corregido a ${fmt(fisico, 2)}`; tono = 'warn'; }
     toast(msg, tono, _dentroTolerancia ? 7000 : 4000);
     _actualizarBadge();
     _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
@@ -21344,8 +21343,8 @@ const ProductosView = (() => {
       // había diferencia, la card está mintiendo → devolverla al valor real y explicar.
       if (res.ajusto === false && Math.abs(diff) > 0.0005) {
         _revertirAudit(
-          `ℹ️ El stock NO se corrigió: la diferencia (${fmtQty(diff)}) está dentro de la tolerancia de 0.5 de la auditoría. ` +
-          `Si el conteo es correcto, usa "Ajuste" para fijar ${fmtQty(fisico)}.`, 'warn');
+          `ℹ️ El servidor no aplicó la corrección (${res.error || res.resultado || 'sin detalle'}). ` +
+          `El stock sigue en ${fmtQty(stockSistema)} — reintenta o usa "Ajuste".`, 'warn');
         return;
       }
       // Si la auditoría vino de una alerta de cuadre, marcarla como revisada
