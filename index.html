@@ -497,6 +497,23 @@
     }
     .hist-mov-fecha { font-size:.65em;color:#64748b;font-family:ui-monospace,monospace;letter-spacing:.04em; }
     .hist-mov-meta  { font-size:.7em;color:#94a3b8;margin-top:3px; }
+    /* [537 · KARDEX HUMANO] La frase es la protagonista de la fila. */
+    .hist-h-frase {
+      font-size: 13px; line-height: 1.45; color: #e2e8f0;
+      margin-top: 3px; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap;
+    }
+    .hist-h-frase b { color: #f1f5f9; font-weight: 800; }
+    .hist-h-ico { font-size: 14px; flex-shrink: 0; }
+    .hist-h-antes  { color: #94a3b8; font-weight: 600; }
+    .hist-h-motivo { color: #fcd34d; font-weight: 700; }
+    .hist-h-quien  { font-size: 11.5px; color: #94a3b8; margin-top: 2px; }
+    .hist-h-quien strong { color: #cbd5e1; font-weight: 700; }
+    /* Id crudo (AJ_/AUD_/G_): referencia secundaria, nunca protagonista. */
+    .hist-h-ref {
+      font-family: ui-monospace, monospace; font-size: 9.5px; color: #64748b;
+      margin-left: auto; max-width: 46%; overflow: hidden; text-overflow: ellipsis;
+      white-space: nowrap; opacity: .75;
+    }
     .hist-mov-saldo {
       font-size:.65em;color:#64748b;margin-top:4px;
       display:inline-flex;align-items:center;gap:4px;

@@ -381,6 +381,9 @@ const API = (() => {
   // fresco). Barato (Map chico) y correcto: justo tras escribir querés datos frescos.
   function _invalidarLecturas() {
     try { _readCache.clear(); } catch (_) {}
+    // [537] También las tablas de apoyo del kardex: una guía recién creada/cerrada debe
+    // poder resolver su zona destino en el historial sin esperar los 90s del TTL.
+    try { _histAux.lotes = null; _histAux.lotesTs = 0; _histAux.zonas = null; _histAux.zonasTs = 0; } catch (_) {}
   }
   function _dedupRead(key, ttlMs, fn) {
     const inf = _readInflight.get(key);
@@ -756,6 +759,38 @@ const API = (() => {
 
   // Mapea una acción de lectura → su RPC directa. Devuelve la respuesta {ok,data}
   // o null si la acción NO tiene backend RLS listo (→ el llamador cae a GAS).
+  // [537 perf kardex] Cache 90s de las dos tablas de APOYO del historial.
+  // Se comparten entre aperturas del kardex (y entre productos): abrir 5 productos
+  // seguidos ya no baja 5 veces las mismas 1247 guías + 779 lotes.
+  const _histAux = { lotes: null, lotesTs: 0, zonas: null, zonasTs: 0 };
+  const _HIST_AUX_TTL = 90000;
+  async function _histLotes() {
+    if (_histAux.lotes && (Date.now() - _histAux.lotesTs) < _HIST_AUX_TTL) return _histAux.lotes;
+    try {
+      const lo = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
+      const arr = (lo && lo.ok !== false && Array.isArray(lo.data)) ? lo.data : [];
+      _histAux.lotes = arr; _histAux.lotesTs = Date.now();
+      return arr;
+    } catch (_) { return _histAux.lotes || []; }
+  }
+  // idGuia → { zona, tipo, usuario } — autoritativo desde wh.guias (el cache local solo
+  // tiene las recientes, y queremos que TODA salida histórica muestre su zona destino).
+  async function _histZonaGuiaMap() {
+    if (_histAux.zonas && (Date.now() - _histAux.zonasTs) < _HIST_AUX_TTL) return _histAux.zonas;
+    const map = {};
+    try {
+      const gz = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'guias' });
+      if (gz && gz.ok !== false && Array.isArray(gz.data)) {
+        gz.data.forEach(g => {
+          const gid = String(g.id_guia || '');
+          if (gid) map[gid] = { zona: String(g.id_zona || ''), tipo: String(g.tipo || ''), usuario: String(g.usuario || '') };
+        });
+      }
+      _histAux.zonas = map; _histAux.zonasTs = Date.now();
+      return map;
+    } catch (_) { return _histAux.zonas || map; }
+  }
+
   async function _callDirecto(params) {
     const action = params.action;
     if (action === 'descargarMaestros') return await _sbDescargarMaestros();  // catálogo directo (mos.catalogo_wh_rls)
@@ -1145,6 +1180,9 @@ const API = (() => {
       if (params.limit) rows = rows.slice(0, parseInt(params.limit));
       return { ok: true, data: rows };
     }
+    // [537 perf kardex] Tablas de apoyo del historial, cacheadas 90s (son de REFERENCIA:
+    // lotes y cabeceras de guías; no son el dato del movimiento). Un fallo devuelve vacío
+    // y el kardex se pinta igual, solo sin fecha de vencimiento / sin etiqueta de zona.
     if (action === 'getHistorialStock') {
       // [BUG 2 · cutover Supabase] Historial REAL del producto: movimientos APLICADOS de
       // wh.stock_movimientos (con stock_antes/stock_despues ya calculados → saldo = DATO).
@@ -1160,26 +1198,17 @@ const API = (() => {
           .catch(() => [])));
       const movsRaw = [].concat.apply([], lotsArr);
       if (!movsRaw.length) return { ok: true, data: [] };
-      // Lotes (para enriquecer el INGRESO con su fecha de vencimiento).
-      let lotes = [];
-      try {
-        const lo = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
-        if (lo && lo.ok !== false && Array.isArray(lo.data)) lotes = lo.data;
-      } catch (_) {}
-      // [HISTORIAL ENRIQUECIDO] Zona DESTINO de cada salida + tipo de guía (autoritativo desde wh.guias.id_zona).
-      // El cache local de guías (OfflineManager) sólo tiene las recientes → para que TODA salida histórica
-      // muestre su zona, leemos wh.guias directo (read-only, whitelisted en leer_tabla_rls). Sólo necesitamos
-      // id_guia → {id_zona, tipo}; si falla (offline) caemos al cache local sin romper nada.
-      const zonaGuiaMap = {};   // idGuia → { zona: 'ZONA-02'|..., tipo: 'SALIDA_ZONA'|... }
-      try {
-        const gz = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'guias' });
-        if (gz && gz.ok !== false && Array.isArray(gz.data)) {
-          gz.data.forEach(g => {
-            const gid = String(g.id_guia || '');
-            if (gid) zonaGuiaMap[gid] = { zona: String(g.id_zona || ''), tipo: String(g.tipo || ''), usuario: String(g.usuario || '') };
-          });
-        }
-      } catch (_) {}
+      // [537 perf] Lotes + guías EN PARALELO y CACHEADOS 90s.
+      //
+      // Antes eran DOS round-trips EXTRA en SERIE detrás de los movimientos:
+      //   movimientos (~300ms) → leer_tabla_rls('lotes_vencimiento') (~1s, 779 filas)
+      //                        → leer_tabla_rls('guias')            (~1s, 1247 filas, 584KB)
+      // = ~2.5-3.5s de espera con la lista en spinner CADA VEZ que se abre el kardex, aunque
+      // fueran las MISMAS tablas que ya se habían bajado hace 5 segundos. Los movimientos del
+      // producto son pocos (máx ~96) y su tabla SÍ tiene índice por cod_producto: el cuello
+      // NUNCA fue el kardex en sí, eran estas dos tablas completas traídas de nuevo, en fila.
+      // Ahora van juntas (Promise.all) y se reusan 90s → apertura repetida ≈ solo movimientos.
+      const [lotes, zonaGuiaMap] = await Promise.all([_histLotes(), _histZonaGuiaMap()]);
       // Normaliza el código de zona crudo a una etiqueta legible y estable (ZONA-01/ZONA-02/JEFATURA/VENTAS).
       // Tolera variantes históricas (z001/Z001/z002/ALMACEN/vacío). Devuelve '' si no hay zona conocida.
       const _normZona = (raw) => {

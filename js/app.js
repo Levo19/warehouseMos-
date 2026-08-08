@@ -20661,9 +20661,84 @@ const ProductosView = (() => {
     setTimeout(() => abrirAuditBarcode(cb, _histTarget.nombre, ''), 200);
   }
 
+  // [537 · KARDEX HUMANO] Traduce un movimiento a una frase que entienda cualquiera.
+  // Antes la fila decía «AJUSTE ▲ Ajuste INC · AJ_L1786208793555q8n7ffl», que no dice
+  // NI qué pasó, NI a dónde fue, NI quién lo hizo. Ahora el protagonista es la frase y
+  // el id crudo queda chico y gris como referencia.
+  // Devuelve { ico, frase, quien } — `frase` ya viene escapada.
+  function _humanizarMov(m) {
+    const op    = String(m.tipoOperacion || '').toUpperCase();
+    const tipo  = String(m.tipo || '').toUpperCase();
+    const cant  = fmtQty(m.cantidad);
+    const zona  = m.zona ? escHtml(m.zona) : '';
+    const quien = (m.usuario && m.usuario !== '—') ? escHtml(m.usuario) : '';
+    const antes = Number.isFinite(m.stockAntes) ? fmtQty(m.stockAntes) : null;
+    const saldo = Number.isFinite(m.saldo) ? fmtQty(m.saldo) : null;
+
+    // Conteo/auditoría: LO CONTADO MANDA (regla 659) → se dice el resultado, no el delta.
+    if (op === 'AUDITORIA') {
+      const mot = _motivoAuditoria(m.idGuia);
+      return { ico: '📋', quien,
+        frase: `Conteo fijó el stock en <b>${saldo != null ? saldo : cant}</b>` +
+               (antes != null ? ` <span class="hist-h-antes">(antes ${antes})</span>` : '') +
+               (mot ? ` · <span class="hist-h-motivo">motivo: ${escHtml(mot)}</span>` : '') };
+    }
+    // Ajustes manuales viejos (el botón ya no existe, pero el histórico se sigue leyendo bien).
+    if (op === 'AJUSTE_MANUAL' || op.indexOf('AJUSTE') >= 0 || m.fuente === 'ajuste') {
+      const mot = String(m.origen || '').trim();
+      return { ico: '✏', quien,
+        frase: `Ajuste manual <b>${m.esIngreso ? '+' : '−'}${cant}</b>` +
+               (mot && !/^Ajuste manual$/i.test(mot) ? ` · <span class="hist-h-motivo">${escHtml(mot)}</span>` : '') };
+    }
+    if (op.indexOf('INICIAL') >= 0 || tipo === 'INICIAL') {
+      return { ico: '🏁', quien, frase: `Stock inicial <b>+${cant}</b>` };
+    }
+    if (op === 'APROBACION_PN') {
+      return { ico: '🆕', quien, frase: `Alta de producto nuevo <b>+${cant}</b>` };
+    }
+    if (op === 'ANULACION_ENVASADO') {
+      return { ico: '↩', quien, frase: `Se anuló un envasado <b>${m.esIngreso ? '+' : '−'}${cant}</b>` };
+    }
+    if (op === 'ENVASADO_ENVASE') {
+      return { ico: '📦', quien, frase: `Se usaron <b>${cant}</b> envases al envasar` };
+    }
+    if (op.indexOf('ENVASADO') >= 0) {
+      return { ico: '🏭', quien,
+        frase: m.esIngreso
+          ? `Envasado: entraron <b>+${cant}</b> ya envasados`
+          : `Envasado: salieron <b>−${cant}</b> a granel para envasar` };
+    }
+    // Guías (cierre): entrada de proveedor / salida a zona.
+    if (m.esIngreso) {
+      const prov = String(m.origen || '').trim();
+      return { ico: '↑', quien,
+        frase: `Entrada <b>+${cant}</b>` + (prov ? ` de ${escHtml(prov)}` : '') };
+    }
+    return { ico: '↓', quien,
+      frase: `Salida <b>−${cant}</b>` + (zona ? ` a <b>${zona}</b>` : '') };
+  }
+
+  // Motivo/observación del conteo — sale del cache de auditorías que ya baja el operacional
+  // (sin pedir nada extra a la red). idAuditoria = el `origen` del movimiento (AUD_…).
+  let _audObsMap = null;
+  function _motivoAuditoria(idAud) {
+    if (!idAud) return '';
+    if (_audObsMap === null) {
+      _audObsMap = {};
+      try {
+        (OfflineManager.getAuditoriasCache?.() || []).forEach(a => {
+          const o = String(a.observacion || '').trim();
+          if (a.idAuditoria && o) _audObsMap[String(a.idAuditoria)] = o;
+        });
+      } catch (_) {}
+    }
+    return _audObsMap[String(idAud)] || '';
+  }
+
   function _renderHistorial(movs, esLocal, stockActual) {
     if (!movs.length && esLocal) return;
     const stock = stockActual ?? 0;
+    _audObsMap = null;   // recomputar por render (el cache de auditorías pudo refrescarse)
 
     // [BUG 2] Separar APLICADOS (movieron stock) de PENDIENTES (guías abiertas).
     // Los pendientes NO tienen saldo real y NUNCA deben entrar al cálculo de saldos.
@@ -20787,6 +20862,8 @@ const ProductosView = (() => {
       } else if (!m.esIngreso && Array.isArray(m.lotesConsumidos) && m.lotesConsumidos.length > 0) {
         lotesHtml = `<div class="hist-lotes-wrap is-salida">${m.lotesConsumidos.map(l => _renderLoteChip(l, l.cantidad)).join('')}</div>`;
       }
+      // [537 · KARDEX HUMANO] La frase manda; el id crudo va chico y gris al final.
+      const H = _humanizarMov(m);
       return `
         <div class="hist-timeline-row is-${colorCat}">
           <div class="flex-1 min-w-0">
@@ -20794,17 +20871,15 @@ const ProductosView = (() => {
               <span class="hist-mov-amount is-${colorCat}">${sign}${fmtQty(m.cantidad)}</span>
               <span class="hist-mov-fecha">${fmtFechaHora(m.fecha)}</span>
             </div>
-            <p class="hist-mov-meta">
-              ${tipoChip}<span style="color:#94a3b8">${escHtml(m.tipo || '')}</span>${m.idGuia ? ` · <span class="font-mono text-[10px]">${escHtml(m.idGuia)}</span>` : ''}
-            </p>
-            ${(!m.esIngreso && m.zona) ? `<p class="hist-mov-destino">→ <strong>${escHtml(m.zona)}</strong>${m.usuario && m.usuario !== '—' ? ` · por ${escHtml(m.usuario)}` : ''}</p>` : ''}
-            ${m.origen ? `<p class="text-[10px] text-slate-600 truncate mt-0.5">${escHtml(m.origen)}</p>` : ''}
+            <p class="hist-h-frase"><span class="hist-h-ico">${H.ico}</span>${H.frase}</p>
+            ${H.quien ? `<p class="hist-h-quien">por <strong>${H.quien}</strong></p>` : ''}
+            ${esPend ? `<p class="hist-mov-meta">${tipoChip}</p>` : ''}
             ${lotesHtml}
             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
               ${esPend
                 ? `<span class="hist-mov-saldo" style="color:#fb923c">Sin aplicar al stock</span>`
                 : `<span class="hist-mov-saldo">Saldo <strong>${m.bal == null ? '—' : fmtQty(m.bal)}</strong></span>`}
-              ${m.usuario ? `<span class="text-[10px] text-slate-500">por ${escHtml(m.usuario)}</span>` : ''}
+              ${m.idGuia ? `<span class="hist-h-ref" title="Referencia interna">${escHtml(m.idGuia)}</span>` : ''}
             </div>
           </div>
         </div>`;
