@@ -661,9 +661,15 @@
     .prod-detail-kpi.is-rot .prod-detail-kpi-val   { color:#a5b4fc; }
     .prod-detail-kpi.is-codes .prod-detail-kpi-val { color:#fbbf24; }
     /* Tabs */
+    /* [538] STICKY: el dueño no encontraba el historial porque en móvil las pestañas
+       quedaban bajo el hero y había que adivinar que estaban ahí. Ahora la fila viaja
+       pegada arriba mientras se scrollea la ficha, así "Historial" siempre está a la vista. */
     .prod-detail-tabs {
       display:flex;gap:4px;border-bottom:1px solid rgba(51,65,85,.5);
       margin-bottom:12px;overflow-x:auto;scrollbar-width:none;
+      position:sticky;top:0;z-index:5;
+      background:linear-gradient(180deg,#0f172a 70%,rgba(15,23,42,.92));
+      padding-top:6px;
     }
     .prod-detail-tabs::-webkit-scrollbar { display:none; }
     .prod-detail-tab {
@@ -744,8 +750,124 @@
     .prod-action-btn.is-imprimir {
       background:rgba(71,85,105,.35);color:#cbd5e1;border:1px solid rgba(71,85,105,.55);
     }
+    /* ── [538] Sheet "Contar stock": un solo protagonista, el número. ── */
+    /* Entrada con spring suave (leve overshoot) + velo con blur progresivo.
+       Scoped a este sheet para no alterar el resto de la app. */
+    #sheetAudit {
+      transition:transform .26s cubic-bezier(.34,1.4,.64,1), opacity .2s ease;
+      opacity:0; padding-bottom:calc(16px + env(safe-area-inset-bottom));
+    }
+    #sheetAudit.open { opacity:1; }
+    #overlayAudit { background:rgba(2,6,23,.55);backdrop-filter:blur(0);transition:backdrop-filter .28s ease; }
+    #overlayAudit.open { backdrop-filter:blur(7px); }
+    @media (prefers-reduced-motion:reduce) {
+      #sheetAudit { transition:none; }
+      #overlayAudit { transition:none;backdrop-filter:none; }
+      #overlayAudit.open { backdrop-filter:none; }
+    }
+
+    .cnt-nombre { font-size:15px;font-weight:800;color:#f1f5f9;line-height:1.25;margin-bottom:3px; }
+    .cnt-sub { display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:14px; }
+    .cnt-cod { font-family:ui-monospace,monospace;font-size:10.5px;color:#64748b; }
+    .cnt-sis { font-size:11.5px;color:#94a3b8;margin-left:auto; }
+    .cnt-sis b { color:#cbd5e1;font-weight:800; }
+
+    .cnt-stepper { display:flex;align-items:center;gap:12px;margin-bottom:10px; }
+    .cnt-step {
+      width:58px;height:58px;flex-shrink:0;border-radius:50%;
+      border:1.5px solid rgba(99,102,241,.45);background:rgba(99,102,241,.14);
+      color:#c7d2fe;font-size:30px;font-weight:800;line-height:1;cursor:pointer;
+      display:flex;align-items:center;justify-content:center;
+      -webkit-tap-highlight-color:transparent;user-select:none;touch-action:manipulation;
+      transition:transform .12s ease, background .12s ease;
+    }
+    .cnt-step:active { transform:scale(.92);background:rgba(99,102,241,.28); }
+    .cnt-input {
+      flex:1;min-width:0;text-align:center;
+      /* 28px+ : protagonista y además >16px real = iOS no hace zoom al enfocar */
+      font-size:38px;font-weight:900;line-height:1.1;color:#f1f5f9;
+      background:rgba(2,6,23,.55);border:1.5px solid rgba(71,85,105,.6);border-radius:16px;
+      padding:12px 8px;outline:none;font-variant-numeric:tabular-nums;
+    }
+    .cnt-input:focus { border-color:#6366f1;background:rgba(2,6,23,.75); }
+    .cnt-input::placeholder { color:#475569;font-weight:800; }
+
+    .cnt-dif { text-align:center;font-size:13px;font-weight:700;color:#94a3b8;margin-bottom:12px;min-height:19px; }
+    .cnt-dif.is-pos  { color:#34d399; }
+    .cnt-dif.is-neg  { color:#f87171; }
+    .cnt-dif.is-cero { color:#64748b; }
+
+    .cnt-cta {
+      width:100%;border:none;border-radius:16px;cursor:pointer;
+      padding:17px 14px;font-size:15.5px;font-weight:900;letter-spacing:.02em;
+      background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;
+      box-shadow:0 8px 22px -8px rgba(99,102,241,.7);
+      margin-bottom:calc(6px + env(safe-area-inset-bottom));
+      transition:transform .12s ease,opacity .12s ease;
+      -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+    }
+    .cnt-cta:active:not(:disabled) { transform:scale(.985); }
+    .cnt-cta:disabled { opacity:.4;cursor:not-allowed;box-shadow:none; }
+    /* ── [538] Coreografía. Solo transform/opacity (compositor) → 60fps en gama baja. ── */
+    /* El número "late" cada vez que cambia por + / − */
+    @keyframes cntPop { 0%{transform:scale(1)} 45%{transform:scale(1.12)} 100%{transform:scale(1)} }
+    .cnt-input.is-pop { animation:cntPop .12s ease-out; }
+    /* Micro-pulso al tipear (más sutil que el pop del stepper) */
+    @keyframes cntTap { 0%{transform:scale(1)} 50%{transform:scale(1.035)} 100%{transform:scale(1)} }
+    .cnt-input.is-tap { animation:cntTap .09s ease-out; }
+    /* Valor inválido: 3 sacudidas + borde rojo momentáneo */
+    @keyframes cntShake { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-7px)} 40%{transform:translateX(7px)} 60%{transform:translateX(-5px)} 80%{transform:translateX(4px)} }
+    .cnt-input.is-bad { animation:cntShake .3s ease-in-out; border-color:#ef4444!important; }
+    /* La diferencia cambia de color suave y se desliza 4px al cambiar de signo */
+    .cnt-dif { transition:color .3s ease; }
+    .cnt-dif > span { display:inline-block; transition:transform .3s cubic-bezier(.34,1.56,.64,1); }
+    .cnt-dif.is-slide > span { transform:translateX(4px); }
+    /* Chip elegido: spring */
+    @keyframes cntChip { 0%{transform:scale(.95)} 55%{transform:scale(1.05)} 100%{transform:scale(1)} }
+    .aud-motivo-chip.is-spring { animation:cntChip .22s cubic-bezier(.34,1.56,.64,1); }
+    /* El número dentro del CTA entra con crossfade */
+    @keyframes cntNumIn { from{opacity:0;transform:translateY(-3px)} to{opacity:1;transform:none} }
+    #cntCtaNum { display:inline-block; }
+    #cntCtaNum.is-in { animation:cntNumIn .18s ease-out; }
+    /* Al confirmar, el CTA colapsa a círculo con ✓ que rebota */
+    @keyframes cntDone { 0%{transform:scale(1)} 35%{transform:scale(.9)} 70%{transform:scale(1.06)} 100%{transform:scale(1)} }
+    .cnt-cta.is-done {
+      animation:cntDone .4s cubic-bezier(.34,1.56,.64,1);
+      background:linear-gradient(135deg,#10b981,#059669);
+      font-size:22px;
+    }
+    /* Banner de error: el sheet NO se cierra */
+    .cnt-error {
+      background:rgba(239,68,68,.16);border:1px solid rgba(239,68,68,.5);color:#fca5a5;
+      border-radius:12px;padding:9px 12px;font-size:12px;font-weight:700;margin-bottom:10px;
+      display:flex;align-items:center;gap:8px;
+    }
+    .cnt-error button {
+      margin-left:auto;background:rgba(239,68,68,.28);border:none;color:#fecaca;
+      border-radius:8px;padding:5px 10px;font-size:11px;font-weight:800;cursor:pointer;
+    }
+    /* La fila recién creada aterriza en el kardex desde arriba con highlight verde */
+    @keyframes kdxLand { from{opacity:0;transform:translateY(-10px)} to{opacity:1;transform:none} }
+    .hist-timeline-row.is-nueva { animation:kdxLand .32s ease-out; }
+    .hist-timeline-row.is-nueva::after {
+      content:'';position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+      background:rgba(16,185,129,.22);animation:kdxFade 1.5s ease-out forwards;
+    }
+    @keyframes kdxFade { to{opacity:0} }
+
+    @media (prefers-reduced-motion:reduce) {
+      .cnt-step,.cnt-cta { transition:none; }
+      .cnt-step:active,.cnt-cta:active:not(:disabled) { transform:none; }
+      .cnt-input.is-pop,.cnt-input.is-tap,.cnt-input.is-bad,
+      .aud-motivo-chip.is-spring,#cntCtaNum.is-in,.cnt-cta.is-done,
+      .hist-timeline-row.is-nueva { animation:none; }
+      .cnt-dif,.cnt-dif > span { transition:none; }
+      .cnt-dif.is-slide > span { transform:none; }
+      .hist-timeline-row.is-nueva::after { display:none; }
+    }
+
     /* [537] Chips de motivo del conteo. */
-    .aud-motivo-chips { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px; }
+    .aud-motivo-chips { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px; }
     .aud-motivo-chip {
       background:rgba(30,41,59,.8);border:1px solid rgba(71,85,105,.6);color:#cbd5e1;
       border-radius:999px;padding:6px 11px;font-size:11.5px;font-weight:700;cursor:pointer;
@@ -8034,7 +8156,7 @@
     <!-- Tabs -->
     <div class="prod-detail-tabs">
       <button class="prod-detail-tab is-active" data-tab="stock" onclick="ProductosView.detSetTab('stock')">📊 Stock</button>
-      <button class="prod-detail-tab"           data-tab="movs"  onclick="ProductosView.detSetTab('movs')">📜 Movimientos</button>
+      <button class="prod-detail-tab"           data-tab="movs"  onclick="ProductosView.detSetTab('movs')">📜 Historial</button>
       <button class="prod-detail-tab"           data-tab="lotes" onclick="ProductosView.detSetTab('lotes')">📅 Lotes</button>
       <button class="prod-detail-tab"           data-tab="codes" onclick="ProductosView.detSetTab('codes')">🔖 Códigos</button>
     </div>
@@ -10153,29 +10275,30 @@
     </h3>
     <button onclick="cerrarSheet('sheetAudit')" class="text-slate-400 text-xl leading-none">✕</button>
   </div>
-  <p id="auditNombre" class="text-sm font-semibold text-slate-200 mb-0.5 truncate"></p>
-  <p id="auditCodigo" class="text-xs text-slate-500 font-mono mb-3"></p>
-  <div class="flex justify-between items-center text-sm mb-4 bg-slate-900 rounded-lg px-3 py-2">
-    <span class="text-slate-400">Stock sistema:</span>
-    <span id="auditStockSis" class="font-black text-blue-400 text-base"></span>
+  <!-- [538] Header compacto: qué producto y cuánto dice el sistema. Informativo, no editable. -->
+  <p id="auditNombre" class="cnt-nombre"></p>
+  <p class="cnt-sub"><span id="auditCodigo" class="cnt-cod"></span><span class="cnt-sis">Sistema: <b id="auditStockSis">—</b></span></p>
+
+  <!-- [538] EL NÚMERO es el protagonista. − y + grandes; los decimales se tipean. -->
+  <div class="cnt-stepper">
+    <button type="button" class="cnt-step" id="cntMenos" aria-label="Restar uno">−</button>
+    <input id="auditConteo" type="text" inputmode="decimal" autocomplete="off"
+           class="cnt-input" placeholder="0"/>
+    <button type="button" class="cnt-step" id="cntMas" aria-label="Sumar uno">+</button>
   </div>
-  <label class="text-xs text-slate-400 mb-1 block font-semibold">Conteo físico real</label>
-  <input id="auditConteo" type="number" step="0.01" min="0" inputmode="decimal"
-         class="input mb-3 text-lg font-bold" placeholder="0"/>
-  <p id="audDiferenciaInfo" class="hidden text-xs mb-3 mt-1 text-slate-400">Diferencia vs sistema: <span id="audDifValor" class="font-black">—</span></p>
-  <!-- [537] Motivo con chips: la merma sigue siendo TRAZABLE sin que nadie calcule
-       deltas. El chip escribe en la observación, que viaja con la auditoría y luego
-       sale en el kardex ("motivo: merma"). -->
-  <label class="text-xs text-slate-400 mb-1 block font-semibold">Motivo (opcional)</label>
+
+  <p id="audDiferenciaInfo" class="cnt-dif hidden">Diferencia: <span id="audDifValor" class="font-black">—</span></p>
+
+  <!-- [538] Motivo SOLO por chips: esto es un conteo, no un parte. Sin texto libre. -->
   <div class="aud-motivo-chips" id="auditMotivoChips">
-    <button type="button" class="aud-motivo-chip" data-motivo="conteo rutinario" onclick="ProductosView.audSetMotivo('conteo rutinario')">📋 conteo rutinario</button>
-    <button type="button" class="aud-motivo-chip" data-motivo="merma"            onclick="ProductosView.audSetMotivo('merma')">🥀 merma</button>
-    <button type="button" class="aud-motivo-chip" data-motivo="rotura"           onclick="ProductosView.audSetMotivo('rotura')">💔 rotura</button>
-    <button type="button" class="aud-motivo-chip" data-motivo="otro"             onclick="ProductosView.audSetMotivo('otro')">✍ otro</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="rutina" onclick="ProductosView.audSetMotivo('rutina')">📋 rutina</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="merma"  onclick="ProductosView.audSetMotivo('merma')">🥀 merma</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="rotura" onclick="ProductosView.audSetMotivo('rotura')">💔 rotura</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="otro"   onclick="ProductosView.audSetMotivo('otro')">✍ otro</button>
   </div>
-  <input id="auditObs" type="text" class="input mb-4" placeholder="Detalle (opcional)…"/>
-  <button onclick="ProductosView.confirmarAuditoria()" class="btn btn-primary w-full btn-lg">
-    Guardar conteo
+
+  <button id="cntCta" onclick="ProductosView.confirmarAuditoria()" class="cnt-cta" disabled>
+    ✓ FIJAR STOCK EN <span id="cntCtaNum">—</span>
   </button>
 </div>
 
@@ -10735,26 +10858,26 @@
 <script src="https://levo19.github.io/MOS/assets/adhesivo/preview.js?v=1.3.0"></script>
 <!-- [v2.13.121] Sistema centralizado de seguridad (CDN MOS) -->
 <script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=3.13.472"></script>
-<script src="js/offline.js?v=2.13.537"></script>
+<script src="js/offline.js?v=2.13.538"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
-<script src="js/impresion-directa.js?v=2.13.537"></script>
-<script src="js/api.js?v=2.13.537"></script>
-<script src="js/scanner.js?v=2.13.537"></script>
-<script src="js/sounds.js?v=2.13.537"></script>
+<script src="js/impresion-directa.js?v=2.13.538"></script>
+<script src="js/api.js?v=2.13.538"></script>
+<script src="js/scanner.js?v=2.13.538"></script>
+<script src="js/sounds.js?v=2.13.538"></script>
 <!-- F2-F9 — módulos nuevos -->
 <!-- [quirúrgico 2026-07-20] oplog.js ELIMINADO: cola IndexedDB sin NINGÚN productor (superseded por OfflineManager) -->
-<script src="js/voice.js?v=2.13.537"></script>
-<script src="js/photos.js?v=2.13.537"></script>
+<script src="js/voice.js?v=2.13.538"></script>
+<script src="js/photos.js?v=2.13.538"></script>
 <!-- QR generator (offline, MIT · Kazuhiko Arase) — para el link del reporte en la imagen compartida -->
-<script src="js/qrcode-generator.js?v=2.13.537"></script>
+<script src="js/qrcode-generator.js?v=2.13.538"></script>
 <!-- Hoja de compartir con vista previa (móvil: Web Share; PC: copiar+descargar) -->
-<script src="js/sharesheet.js?v=2.13.537"></script>
+<script src="js/sharesheet.js?v=2.13.538"></script>
 <!-- Voucher-imagen de guía/preingreso (usa qrcode-generator) -->
-<script src="js/voucher.js?v=2.13.537"></script>
-<script src="js/cargadores.js?v=2.13.537"></script>
-<script src="js/clienteInbox.js?v=2.13.537"></script>
+<script src="js/voucher.js?v=2.13.538"></script>
+<script src="js/cargadores.js?v=2.13.538"></script>
+<script src="js/clienteInbox.js?v=2.13.538"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
-<script src="js/chat-almacen.js?v=2.13.537"></script>
-<script src="js/app.js?v=2.13.537"></script>
+<script src="js/chat-almacen.js?v=2.13.538"></script>
+<script src="js/app.js?v=2.13.538"></script>
 </body>
 </html>

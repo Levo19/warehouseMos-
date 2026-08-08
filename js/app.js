@@ -3954,17 +3954,8 @@ const App = (() => {
     // [rev200 FIX] Conteo auditoría → diferencia en tiempo real. Los ids viejos (audStockSis/
     // audDifValor) no existían en el sheet → TypeError en CADA tecla y la feature nunca corrió.
     // Ahora lee auditStockSis (el real) y pinta en audDifValor (agregado al sheet).
-    document.getElementById('auditConteo')?.addEventListener('input', e => {
-      const sis = parseFloat(document.getElementById('auditStockSis')?.textContent) || 0;
-      const fis = parseFloat(e.target.value) || 0;
-      const diff = fis - sis;
-      const val = document.getElementById('audDifValor');
-      const info = document.getElementById('audDiferenciaInfo');
-      if (!val || !info) return;
-      val.textContent = (diff >= 0 ? '+' : '') + fmt(diff, 2);
-      val.className = 'font-black ' + (Math.abs(diff) < 0.5 ? 'text-emerald-400' : 'text-red-400');
-      info.classList.toggle('hidden', e.target.value === '');
-    });
+    // [538] El sheet de conteo cablea su propio stepper y tipeo en _cntWire (ProductosView):
+    // la diferencia se re-deriva del DATO del producto activo, nunca del texto del DOM.
 
     // Cerrar filter dropdowns al tocar fuera
     document.addEventListener('click', e => {
@@ -20517,6 +20508,10 @@ const ProductosView = (() => {
   async function verHistorial(codigosStr, nombre) {
     // Acepta barcode único o pipe-separated para grupos multi-barcode
     const codigos = String(codigosStr).split('|').map(s => s.trim()).filter(Boolean);
+    // [538] Fijar el contexto ANTES de tocar el DOM: si venimos de haber abierto el tab
+    // del detalle, _histCtx apuntaría todavía a 'detHistList' y el spinner/las filas del
+    // sheet se pintarían dentro de la ficha (invisibles).
+    _histCtx = { list: 'histList', sello: 'histRefrescado' };
     _histTarget = { codigos, codigo: codigos[0], nombre };
     _histFiltroTipo = 'all';
     document.querySelectorAll('.hist-tipo-chip').forEach(c => {
@@ -20527,7 +20522,7 @@ const ProductosView = (() => {
     document.getElementById('histCodigo').textContent = codigos.length > 1
       ? `${codigos[0]} · ${codigos.length} códigos`
       : codigos[0];
-    document.getElementById('histList').innerHTML =
+    document.getElementById(_histCtx.list).innerHTML =
       '<div class="flex justify-center py-8"><div class="spinner"></div></div>';
     // [v2.13.54] Limpiar footer mientras carga
     const _ftPrev = document.getElementById('histFooter');
@@ -20594,24 +20589,39 @@ const ProductosView = (() => {
   // [537] Carga del kardex, compartida por el sheet de historial y por el tab
   // "Movimientos" del detalle (antes cada uno traía su propio dato, distinto).
   // SIEMPRE va a la red: es el registro de stock, no puede mostrarse de caché vieja.
-  async function _cargarKardex(codigos, nombre, stockTotalOpt) {
+  async function _cargarKardex(codigos, nombre, stockTotalOpt, ctx) {
     codigos = (codigos || []).map(String).filter(Boolean);
     if (!codigos.length) return;
+    // [538] Contexto de pintado: el kardex vive en DOS sitios (tab del detalle y sheet
+    // de historial). Antes ambos usaban el id 'histList' → IDs DUPLICADOS en el DOM y
+    // getElementById devolvía SIEMPRE el primero, así que el sheet escribía dentro del
+    // contenedor del detalle (invisible). Ahora cada sitio declara sus ids.
+    _histCtx = ctx || { list: 'histList', sello: 'histRefrescado' };
     _histTarget = { codigos, codigo: codigos[0], nombre: nombre || '' };
+
+    // [538] CLAVE POR PRODUCTO — mata el destello.
+    // Antes se pintaba PRIMERO un render preliminar del cache local (_movimientosLocal),
+    // que es otro dataset y otro formato: sin saldo real, con la hora recortada a "12:00"
+    // y montos de líneas de guía. El dueño veía "una lista inentendible con montos
+    // grandes" y ~2,5s después la real, con números totalmente distintos.
+    // Ese primer pintado se ELIMINA: la lista arranca vacía con skeleton y solo se pinta
+    // cuando llega el dato bueno DEL PRODUCTO CORRECTO.
+    const key = codigos.join('|');
+    _histKey = key;
+    _histMovsCache = [];
+    _pintarSkeletonKardex();
+    _selloCargando();             // el sello del producto anterior tampoco se hereda
+
     const stockTotal = (stockTotalOpt != null)
       ? stockTotalOpt
       : codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
 
-    const local = _movimientosLocal(codigos);
-    if (local.length) {
-      // Render preliminar offline-only: marca todo como pendiente (aún sin saldo real
-      // del server) para no inventar saldos hacia atrás. Se reemplaza al llegar GAS.
-      _histMovsCache = local.map(m => ({ ...m, _pendiente: true }));
-      _renderHistorial(_histMovsCache, true, stockTotal);
-    }
-
     const _t0 = Date.now();
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
+    // Respuesta de un producto que ya NO es el que se está mirando (el operador cambió
+    // de ficha mientras cargaba) → se descarta: jamás pintar filas de otro producto.
+    if (_histKey !== key) return;
+    const local = _movimientosLocal(codigos);
     _sellarRefresco(res && res.ok ? _t0 : null);
     if (res.ok) {
       // [BUG 2 · fix etiquetado+dup] gasData = movimientos REALES aplicados
@@ -20636,7 +20646,7 @@ const ProductosView = (() => {
       if (merged.length) {
         _renderHistorial(merged, false, stockTotal);
       } else if (!local.length) {
-        document.getElementById('histList').innerHTML = `
+        document.getElementById(_histCtx.list).innerHTML = `
           <div class="hist-empty">
             <div class="hist-empty-icon">📭</div>
             <p class="text-sm">Sin movimientos registrados</p>
@@ -20646,23 +20656,46 @@ const ProductosView = (() => {
     }
   }
 
+  // [538] Dónde pinta el kardex ahora mismo. Por defecto el sheet de historial; el tab
+  // del detalle pasa sus propios ids (ver detSetTab('movs')).
+  let _histCtx = { list: 'histList', sello: 'histRefrescado' };
+  let _histKey = '';   // códigos del producto que se está pintando (anti respuesta tardía)
+  // [538] Cuando se acaba de guardar un conteo, la fila más nueva del kardex entra
+  // desde arriba con un highlight verde que se desvanece: el operador VE aterrizar lo suyo.
+  let _histNuevoId = null;
+
+  // Skeleton shimmer mientras llega el dato. Regla: la lista NUNCA muestra filas de otro
+  // producto ni del formato viejo — o skeleton, o el dato correcto.
+  function _pintarSkeletonKardex() {
+    const el = document.getElementById(_histCtx.list);
+    if (!el) return;
+    el.innerHTML = [1,2,3,4].map(() => '<div class="skel skel-card" style="height:74px;margin-bottom:10px"></div>').join('');
+  }
+
   // [537] Sello "actualizado hace Xs" — el dueño hizo un conteo desde el celular y en la
   // PC "hace rato no aparecía"; sin este sello no había forma de saber si lo que se está
   // mirando es de ahora o de hace media hora. Se refresca solo mientras el kardex esté abierto.
   let _histRefTs = 0, _histRefTimer = null;
+  // [538] Estado "cargando": ni el sello ni la edad del producto anterior se heredan.
+  function _selloCargando() {
+    if (_histRefTimer) { clearInterval(_histRefTimer); _histRefTimer = null; }
+    _histRefTs = 0;
+    const el = document.getElementById(_histCtx.sello);
+    if (el) el.textContent = 'actualizando…';
+  }
   function _sellarRefresco(t0) {
     if (_histRefTimer) { clearInterval(_histRefTimer); _histRefTimer = null; }
     if (t0 == null) { _pintarSelloRefresco(null); return; }
     _histRefTs = Date.now();
     _pintarSelloRefresco(Date.now() - t0);
     _histRefTimer = setInterval(() => {
-      const el = document.getElementById('histRefrescado');
+      const el = document.getElementById(_histCtx.sello);
       if (!el || !el.isConnected) { clearInterval(_histRefTimer); _histRefTimer = null; return; }
       _pintarSelloRefresco(null, true);
     }, 5000);
   }
   function _pintarSelloRefresco(ms, soloEdad) {
-    const el = document.getElementById('histRefrescado');
+    const el = document.getElementById(_histCtx.sello);
     if (!el) return;
     if (!_histRefTs) { el.textContent = '⚠ sin conexión — mostrando lo último guardado'; return; }
     const seg = Math.max(0, Math.round((Date.now() - _histRefTs) / 1000));
@@ -20823,7 +20856,7 @@ const ProductosView = (() => {
     });
 
     if (!filtrados.length) {
-      document.getElementById('histList').innerHTML = `
+      document.getElementById(_histCtx.list).innerHTML = `
         <div class="hist-empty">
           <div class="hist-empty-icon">${_histFiltroTipo === 'all' ? '📭' : '🔎'}</div>
           <p class="text-sm">${_histFiltroTipo === 'all' ? 'Sin movimientos registrados' : 'Sin movimientos de este tipo'}</p>
@@ -20874,7 +20907,9 @@ const ProductosView = (() => {
         </div>`;
     };
 
-    document.getElementById('histList').innerHTML = filtrados.map(m => {
+    // [538] La fila recién guardada (la más nueva) aterriza con highlight verde.
+    let _resaltar = !!_histNuevoId; _histNuevoId = null;
+    document.getElementById(_histCtx.list).innerHTML = filtrados.map((m, _ix) => {
       const cat = _categoria(m);
       const lbl = _label[cat] || cat;
       const sign = _signo(cat);
@@ -20898,7 +20933,7 @@ const ProductosView = (() => {
       // [537 · KARDEX HUMANO] La frase manda; el id crudo va chico y gris al final.
       const H = _humanizarMov(m);
       return `
-        <div class="hist-timeline-row is-${colorCat}">
+        <div class="hist-timeline-row is-${colorCat}${(_resaltar && _ix === 0) ? ' is-nueva' : ''}">
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline justify-between gap-2">
               <span class="hist-mov-amount is-${colorCat}">${sign}${fmtQty(m.cantidad)}</span>
@@ -21366,33 +21401,195 @@ const ProductosView = (() => {
     document.getElementById('auditConteo').value =
       (opts.prefillFisico !== undefined && opts.prefillFisico !== null)
         ? String(opts.prefillFisico) : '';
-    document.getElementById('auditObs').value =
-      opts.idAlerta ? 'Auditoría desde alerta de cuadre' : '';
-    _audMotivo = '';
+    // [538] El campo libre `auditObs` se ELIMINÓ del sheet (el motivo va solo por chips).
+    // Una auditoría nacida de una alerta de cuadre se marca con el chip 'rutina'.
+    _audMotivo = opts.idAlerta ? 'rutina' : '';
     document.querySelectorAll('#auditMotivoChips .aud-motivo-chip')
-      .forEach(c => c.classList.remove('is-active'));
+      .forEach(c => c.classList.toggle('is-active', !!_audMotivo && c.dataset.motivo === _audMotivo));
+    // [538] RESET TOTAL del sheet. La línea de diferencia NO se limpiaba al abrir: quedaba
+    // la del producto ANTERIOR. Caso real del dueño: ALMENDRA EN POLVO 500GR con
+    // "Stock sistema 0" y "Conteo 0" mostrando "Diferencia: −100.00" — ese −100 era
+    // basura del producto que había mirado antes. Una vista que miente sobre stock es
+    // tan grave como un error de cálculo.
+    _audRecalcReset();
+    _audSignoPrev = null;
+    const _cta = document.getElementById('cntCta');
+    const _num = document.getElementById('cntCtaNum');
+    if (_cta) { _cta.disabled = true; _cta.classList.remove('is-done'); _cta.innerHTML = '✓ FIJAR STOCK EN <span id="cntCtaNum">—</span>'; }
+    else if (_num) _num.textContent = '—';
+    document.getElementById('cntErrorBox')?.remove();
+    const _inp = document.getElementById('auditConteo');
+    if (_inp) _inp.classList.remove('is-bad', 'is-pop', 'is-tap');
+    _cntWire();
     abrirSheet('sheetAudit');
+  }
+
+  // [538] Diferencia = conteo − sistema, SIEMPRE re-derivada del producto activo.
+  //
+  // Antes hacía `parseFloat(document.getElementById('auditStockSis').textContent)`, y eso
+  // tenía DOS fallas:
+  //   1) leía el DOM, que podía traer el valor del producto anterior;
+  //   2) fmtQty pone separador de miles con COMA → parseFloat("1,500") === 1. Es decir,
+  //      en CUALQUIER producto con stock ≥ 1000 el "sistema" se leía como 1 y la pantalla
+  //      inventaba una diferencia gigante (stock 1500, cuenta 1500 → "+1499.00").
+  // Ahora sale de _stockMap vía _s(código), que es el mismo dato que se manda a la RPC.
+  function _audStockSistema() {
+    if (!_auditTarget) return 0;
+    return parseFloat(_s(_auditTarget.codigoBarra).cantidadDisponible) || 0;
+  }
+  function _audRecalcReset() {
+    const info = document.getElementById('audDiferenciaInfo');
+    if (info) { info.innerHTML = ''; info.className = 'cnt-dif hidden'; }
+    _audSignoPrev = null;
+  }
+  let _audSignoPrev = null;
+  function audRecalcDiferencia() {
+    const inp  = document.getElementById('auditConteo');
+    const val  = document.getElementById('audDifValor');
+    const info = document.getElementById('audDiferenciaInfo');
+    const cta  = document.getElementById('cntCta');
+    const num  = document.getElementById('cntCtaNum');
+    if (!inp || !val || !info) return;
+
+    const crudo = String(inp.value).trim().replace(',', '.');
+    const fis   = crudo === '' ? NaN : parseFloat(crudo);
+    const valido = crudo !== '' && !isNaN(fis) && fis >= 0 && /^[0-9]*\.?[0-9]*$/.test(crudo);
+
+    // CTA: lleva el número VIVO adentro; el operador confirma viendo lo que va a fijar.
+    if (cta && num) {
+      cta.disabled = !valido;
+      const txt = valido ? fmtQty(fis) : '—';
+      if (num.textContent !== txt) {
+        num.textContent = txt;
+        num.classList.remove('is-in'); void num.offsetWidth; num.classList.add('is-in');
+      }
+    }
+    if (!valido || !_auditTarget) { _audRecalcReset(); return; }
+
+    const sis  = _audStockSistema();
+    const diff = Math.round((fis - sis) * 100) / 100;   // 2 decimales, sin coma de miles
+    const signo = diff > 0.005 ? 1 : (diff < -0.005 ? -1 : 0);
+
+    val.textContent = signo === 0 ? '' : (diff > 0 ? '+' : '') + fmt(diff, 2);
+    info.innerHTML = signo === 0
+      ? '✓ Sin diferencia'
+      : 'Diferencia: <span class="font-black">' + (diff > 0 ? '+' : '') + fmt(diff, 2) + '</span>';
+    info.className = 'cnt-dif ' + (signo > 0 ? 'is-pos' : signo < 0 ? 'is-neg' : 'is-cero');
+
+    // Al CAMBIAR de signo, el badge se desliza 4px (transición de 300ms del CSS).
+    if (_audSignoPrev !== null && _audSignoPrev !== signo) {
+      info.classList.add('is-slide');
+      setTimeout(() => info.classList.remove('is-slide'), 300);
+    }
+    _audSignoPrev = signo;
+  }
+
+  // [538] Stepper − / +. Tap suma/resta 1; mantener presionado ACELERA (y el tick sube
+  // de tono con la aceleración, para que el ritmo se sienta además de verse).
+  let _cntHoldTid = null, _cntHoldPaso = 0;
+  function _cntAplicarPaso(delta) {
+    const inp = document.getElementById('auditConteo');
+    if (!inp) return;
+    const actual = parseFloat(String(inp.value).replace(',', '.'));
+    const base   = isNaN(actual) ? _audStockSistema() : actual;
+    const next   = Math.round((base + delta) * 1000) / 1000;
+    if (next < 0) {   // no existe stock físico negativo → se avisa y no se aplica
+      inp.classList.remove('is-bad'); void inp.offsetWidth; inp.classList.add('is-bad');
+      try { SoundFX.nope && SoundFX.nope(); } catch (_) {}
+      vibrate(20);
+      return;
+    }
+    inp.value = String(next);
+    inp.classList.remove('is-pop'); void inp.offsetWidth; inp.classList.add('is-pop');
+    try { SoundFX.countTick && SoundFX.countTick(_cntHoldPaso); } catch (_) {}
+    vibrate(8);
+    audRecalcDiferencia();
+  }
+  function _cntHoldStart(delta) {
+    _cntHoldPaso = 0;
+    _cntAplicarPaso(delta);
+    let espera = 420;                       // primera repetición tarda; luego acelera
+    const tick = () => {
+      _cntHoldPaso++;
+      _cntAplicarPaso(delta);
+      espera = Math.max(60, espera - 55);    // aceleración progresiva
+      _cntHoldTid = setTimeout(tick, espera);
+    };
+    _cntHoldTid = setTimeout(tick, espera);
+  }
+  function _cntHoldStop() {
+    if (_cntHoldTid) { clearTimeout(_cntHoldTid); _cntHoldTid = null; }
+    _cntHoldPaso = 0;
+  }
+  // Cableado del stepper (una sola vez, al primer uso del sheet).
+  // [538] Banner rojo dentro del sheet, con reintentar. El sheet queda abierto.
+  function _cntBannerError(msg) {
+    const sheet = document.getElementById('sheetAudit');
+    if (!sheet) return;
+    document.getElementById('cntErrorBox')?.remove();
+    const box = document.createElement('div');
+    box.id = 'cntErrorBox';
+    box.className = 'cnt-error';
+    box.innerHTML = `<span>⚠</span><span style="flex:1">${escHtml(String(msg || 'No se pudo guardar').slice(0, 160))}</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = 'Reintentar';
+    btn.onclick = () => { box.remove(); confirmarAuditoria(); };
+    box.appendChild(btn);
+    const ancla = sheet.querySelector('.cnt-stepper');
+    if (ancla) sheet.insertBefore(box, ancla); else sheet.appendChild(box);
+  }
+
+  let _cntWired = false;
+  function _cntWire() {
+    if (_cntWired) return;
+    const menos = document.getElementById('cntMenos');
+    const mas   = document.getElementById('cntMas');
+    const inp   = document.getElementById('auditConteo');
+    if (!menos || !mas || !inp) return;
+    _cntWired = true;
+    const bind = (el, delta) => {
+      el.addEventListener('pointerdown', e => { e.preventDefault(); _cntHoldStart(delta); });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => el.addEventListener(ev, _cntHoldStop));
+    };
+    bind(menos, -1);
+    bind(mas, +1);
+    // Tipeo: micro-pulso por tecla + recálculo en vivo.
+    inp.addEventListener('input', () => {
+      inp.classList.remove('is-tap'); void inp.offsetWidth; inp.classList.add('is-tap');
+      audRecalcDiferencia();
+    });
+    // Tap en el número = seleccionar todo (tipear reemplaza, no concatena).
+    inp.addEventListener('focus', () => { try { inp.select(); } catch (_) {} });
   }
 
   // [537] Motivo del conteo. Se guarda aparte y se antepone a la observación al enviar,
   // así el kardex puede mostrar "motivo: merma" y el admin lo ve en MOS.
-  let _audMotivo = '';
+  let _audMotivo = '', _audMotivoPrev = '';
   function audSetMotivo(m) {
     _audMotivo = (_audMotivo === m) ? '' : m;   // volver a tocar el mismo chip lo deselecciona
     document.querySelectorAll('#auditMotivoChips .aud-motivo-chip').forEach(c => {
-      c.classList.toggle('is-active', c.dataset.motivo === _audMotivo);
+      const on = c.dataset.motivo === _audMotivo;
+      c.classList.toggle('is-active', on);
+      if (on) { c.classList.remove('is-spring'); void c.offsetWidth; c.classList.add('is-spring'); }
     });
+    try { SoundFX.chipTick && SoundFX.chipTick(); } catch (_) {}
     vibrate(8);
-    const det = document.getElementById('auditObs');
-    if (det) det.placeholder = (_audMotivo === 'otro') ? 'Cuenta qué pasó…' : 'Detalle (opcional)…';
   }
 
   function confirmarAuditoria() {
     if (!_auditTarget) return;
-    const fisico = parseFloat(document.getElementById('auditConteo').value);
-    if (isNaN(fisico) || fisico < 0) { toast('Ingresa el conteo físico', 'warn'); return; }
-    const _det = document.getElementById('auditObs').value.trim();
-    const obs  = [_audMotivo, _det].filter(Boolean).join(' · ');
+    const _inpC  = document.getElementById('auditConteo');
+    const fisico = parseFloat(String(_inpC?.value || '').replace(',', '.'));
+    if (isNaN(fisico) || fisico < 0) {
+      // Inválido: shake + buzz corto, el sheet no se mueve.
+      if (_inpC) { _inpC.classList.remove('is-bad'); void _inpC.offsetWidth; _inpC.classList.add('is-bad'); }
+      try { SoundFX.nope && SoundFX.nope(); } catch (_) {}
+      vibrate(20);
+      return;
+    }
+    // [538] Motivo SOLO por chips (sin texto libre: esto es un conteo, no un parte).
+    const obs = _audMotivo || '';
+    _audMotivoPrev = _audMotivo;   // por si hay que reabrir el sheet tras un error
     const target = { ..._auditTarget };
 
     // ── Optimistic: calcular diff antes de tocar stockMap ──────
@@ -21429,13 +21626,22 @@ const ProductosView = (() => {
       cantidadDisponible: fisico
     };
 
-    // Cerrar y re-render sin esperar al servidor
-    cerrarSheet('sheetAudit');
-    _auditTarget = null;
-    let msg, tono;
-    if (Math.abs(diff) <= 0.0005)   { msg = '✅ Sin diferencias'; tono = 'ok'; }
-    else                            { msg = `⚠️ Diferencia ${diff > 0 ? '+' : ''}${fmt(diff, 2)} — stock corregido a ${fmt(fisico, 2)}`; tono = 'warn'; }
-    toast(msg, tono, _dentroTolerancia ? 7000 : 4000);
+    // [538] CIERRE COREOGRAFIADO: el CTA colapsa a un ✓ que rebota, suena el acorde de
+    // 2 notas, vibra, y recién ahí se va el sheet. El operador VE que su conteo aterrizó.
+    const _cta = document.getElementById('cntCta');
+    if (_cta) {
+      _cta.disabled = true;
+      _cta.innerHTML = '✓';
+      _cta.classList.add('is-done');
+    }
+    try { SoundFX.countOk && SoundFX.countOk(); } catch (_) {}
+    vibrate([15, 40, 15]);
+    _cntHoldStop();
+    // Marcar la fila que va a aterrizar en el kardex (highlight verde de 1.5s).
+    _histNuevoId = String(target.codigoBarra);
+    setTimeout(() => { cerrarSheet('sheetAudit'); _auditTarget = null; }, 380);
+
+    toast(`📋 Stock fijado en ${fmtQty(fisico)} — antes ${fmtQty(stockSistema)}`, 'ok', 4500);
     _actualizarBadge();
     _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
     _aplicarQuery();
@@ -21449,6 +21655,17 @@ const ProductosView = (() => {
       _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
       _aplicarQuery();
       toast(aviso, tonoAviso || 'danger', 9000);
+      // [538] El conteo NO se pierde de vista: se reabre el sheet con el número puesto y
+      // un banner rojo con "Reintentar". Nada de un toast que se va y deja al operador
+      // sin saber si contó o no.
+      _histNuevoId = null;
+      try { SoundFX.nope && SoundFX.nope(); } catch (_) {}
+      vibrate(25);
+      abrirAuditBarcode(target.codigoBarra, target.nombre || '', target.skuBase || '');
+      const inp = document.getElementById('auditConteo');
+      if (inp) { inp.value = String(fisico); audRecalcDiferencia(); }
+      if (_audMotivoPrev) { _audMotivo = ''; audSetMotivo(_audMotivoPrev); }
+      _cntBannerError(aviso);
     };
 
     // ── Enviar al servidor en segundo plano ────────────────────
@@ -21916,6 +22133,8 @@ const ProductosView = (() => {
       // ni envasados, no traía saldo, ni usuario, ni zona destino, y cortaba a 30.
       // Por eso "no funcionaban lógicamente igual". Ahora es EL kardex, el mismo dato
       // autoritativo de wh.stock_movimientos, con sus filtros y en frases humanas.
+      // [538] ids PROPIOS (detHist*): compartir 'histList' con el sheet creaba ids
+      // duplicados en el DOM y getElementById devolvía siempre el primero.
       cont.innerHTML = `
         <div class="hist-tipo-chips" id="detMovChips">
           <button class="hist-tipo-chip is-active" data-tipo="all"     onclick="ProductosView.histFiltrarTipo('all')">Todos</button>
@@ -21923,10 +22142,11 @@ const ProductosView = (() => {
           <button class="hist-tipo-chip"           data-tipo="salida"  onclick="ProductosView.histFiltrarTipo('salida')">Salidas</button>
           <button class="hist-tipo-chip"           data-tipo="ajuste"  onclick="ProductosView.histFiltrarTipo('ajuste')">Conteos</button>
         </div>
-        <div id="histRefrescado" class="hist-refrescado"></div>
-        <div id="histList"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>`;
+        <div id="detHistSello" class="hist-refrescado"></div>
+        <div id="detHistList"></div>`;
       const codigos = grupo.children.map(c => c.codigoBarra);
-      _cargarKardex(codigos, grupo.base.descripcion || _detSkuActivo);
+      _cargarKardex(codigos, grupo.base.descripcion || _detSkuActivo, null,
+                    { list: 'detHistList', sello: 'detHistSello' });
     } else if (tab === 'lotes') {
       const lotes = (OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || [])
         .filter(l => grupo.children.some(c => String(c.codigoBarra) === String(l.codigoProducto || l.codigoBarra)));
@@ -22297,7 +22517,7 @@ const ProductosView = (() => {
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial, imprimirMembrete, verCodigos, cerrarCodigos,
-           histFiltrarTipo, histAuditar, audSetMotivo,
+           histFiltrarTipo, histAuditar, audSetMotivo, audRecalcDiferencia,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,

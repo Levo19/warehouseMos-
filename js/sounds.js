@@ -109,6 +109,20 @@ const SoundFX = (() => {
     // Click suave — para ajustes manuales +/- (no satura al repetirse)
     click: () => _tone(1100, 0.04, 'sine', 0.4),
 
+    // ── [538] Coreografía del sheet "Contar stock" ──────────────────────────
+    // Tick del stepper. `paso` sube con la aceleración del mantener-presionado, así
+    // el oído siente que el conteo va más rápido (no es adorno: es feedback de ritmo).
+    countTick: (paso) => {
+      const n = Math.max(0, Math.min(12, paso | 0));
+      _tone(1250 + n * 55, 0.032, 'square', 0.38);
+    },
+    // Chip de motivo: timbre distinto al stepper para no confundir gestos.
+    chipTick:  () => _tone(760, 0.05, 'triangle', 0.45),
+    // Valor inválido: buzz grave MUY corto (acompaña al shake).
+    nope:      () => _tone(190, 0.09, 'square', 0.6),
+    // Conteo guardado: 2 notas ascendentes, limpio y corto.
+    countOk:   () => { _tone(880, 0.11, 'sine', 0.8, 0); _tone(1320, 0.19, 'sine', 0.85, 0.10); },
+
     // Pickup nuevo — alerta fuerte y repetida (almacén con ruido).
     // 3 ciclos de tonos urgentes para que se escuche aunque haya ruido.
     pickupAlerta: () => {
