@@ -736,6 +736,27 @@
     .prod-action-btn.is-hist {
       background:rgba(71,85,105,.35);color:#cbd5e1;border:1px solid rgba(71,85,105,.55);
     }
+    /* [537] CONTAR STOCK es la acción principal del producto → la más visible. */
+    .prod-action-btn.is-contar {
+      background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;
+      box-shadow:0 4px 12px -3px rgba(99,102,241,.45);
+    }
+    .prod-action-btn.is-imprimir {
+      background:rgba(71,85,105,.35);color:#cbd5e1;border:1px solid rgba(71,85,105,.55);
+    }
+    /* [537] Chips de motivo del conteo. */
+    .aud-motivo-chips { display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px; }
+    .aud-motivo-chip {
+      background:rgba(30,41,59,.8);border:1px solid rgba(71,85,105,.6);color:#cbd5e1;
+      border-radius:999px;padding:6px 11px;font-size:11.5px;font-weight:700;cursor:pointer;
+    }
+    .aud-motivo-chip.is-active {
+      background:rgba(99,102,241,.25);border-color:#6366f1;color:#c7d2fe;
+    }
+    /* Sello "actualizado hace Xs" del kardex. */
+    .hist-refrescado {
+      text-align:center;font-size:10.5px;color:#64748b;margin:2px 0 6px;min-height:14px;
+    }
     .prod-action-btn-icon { font-size:1.3em;line-height:1; }
     /* Cámara INLINE telón en productos (igual patrón que pickup) */
     .prod-cam-telon {
@@ -8021,19 +8042,23 @@
     <!-- Contenido tabs -->
     <div id="prodDetTabContent" class="prod-detail-tab-content"></div>
 
-    <!-- Acciones (siempre visibles abajo) -->
+    <!-- [537] ÚNICA casa de las acciones del producto.
+         · AUDITAR + AJUSTAR se unificaron en CONTAR STOCK: contar ES fijar (regla 659,
+           lo contado manda). Ya no hay que calcular deltas nunca.
+         · HISTORIAL salió de acá: el kardex vive embebido en el tab "Movimientos" de
+           este mismo detalle, así que abrirlo ya no cierra la ficha. -->
     <div class="prod-detail-actions">
+      <button class="prod-action-btn is-contar" onclick="ProductosView.detContarActual()">
+        <span class="prod-action-btn-icon">📋</span>
+        <span>CONTAR STOCK</span>
+      </button>
+      <button class="prod-action-btn is-imprimir" onclick="ProductosView.detImprimirActual()">
+        <span class="prod-action-btn-icon">🖨</span>
+        <span>IMPRIMIR</span>
+      </button>
       <button class="prod-action-btn is-despachar" onclick="ProductosView.detDespacharActual()">
         <span class="prod-action-btn-icon">📦</span>
         <span>DESPACHAR</span>
-      </button>
-      <button class="prod-action-btn is-auditar" onclick="ProductosView.detAuditarActual()">
-        <span class="prod-action-btn-icon">🕵</span>
-        <span>AUDITAR</span>
-      </button>
-      <button class="prod-action-btn is-hist" onclick="ProductosView.detHistorialActual()">
-        <span class="prod-action-btn-icon">📊</span>
-        <span>HISTORIAL</span>
       </button>
     </div>
   </div>
@@ -10137,11 +10162,20 @@
   <label class="text-xs text-slate-400 mb-1 block font-semibold">Conteo físico real</label>
   <input id="auditConteo" type="number" step="0.01" min="0" inputmode="decimal"
          class="input mb-3 text-lg font-bold" placeholder="0"/>
-  <label class="text-xs text-slate-400 mb-1 block">Observación (opcional)</label>
   <p id="audDiferenciaInfo" class="hidden text-xs mb-3 mt-1 text-slate-400">Diferencia vs sistema: <span id="audDifValor" class="font-black">—</span></p>
-  <input id="auditObs" type="text" class="input mb-4" placeholder="Sin novedad..."/>
+  <!-- [537] Motivo con chips: la merma sigue siendo TRAZABLE sin que nadie calcule
+       deltas. El chip escribe en la observación, que viaja con la auditoría y luego
+       sale en el kardex ("motivo: merma"). -->
+  <label class="text-xs text-slate-400 mb-1 block font-semibold">Motivo (opcional)</label>
+  <div class="aud-motivo-chips" id="auditMotivoChips">
+    <button type="button" class="aud-motivo-chip" data-motivo="conteo rutinario" onclick="ProductosView.audSetMotivo('conteo rutinario')">📋 conteo rutinario</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="merma"            onclick="ProductosView.audSetMotivo('merma')">🥀 merma</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="rotura"           onclick="ProductosView.audSetMotivo('rotura')">💔 rotura</button>
+    <button type="button" class="aud-motivo-chip" data-motivo="otro"             onclick="ProductosView.audSetMotivo('otro')">✍ otro</button>
+  </div>
+  <input id="auditObs" type="text" class="input mb-4" placeholder="Detalle (opcional)…"/>
   <button onclick="ProductosView.confirmarAuditoria()" class="btn btn-primary w-full btn-lg">
-    Confirmar auditoría
+    Guardar conteo
   </button>
 </div>
 
@@ -10211,24 +10245,12 @@
     <div id="histProyeccion" class="hist-proy" style="display:none"></div>
   </div>
 
-  <!-- Acciones — AUDITAR + AJUSTAR + IMPRIMIR -->
-  <div class="hist-actions">
-    <button class="hist-action-btn is-auditar" onclick="ProductosView.histAuditar()"
-            title="Auditoría · conteo físico">
-      <span class="hist-action-btn-icon">🕵</span>
-      <span>AUDITAR</span>
-    </button>
-    <button class="hist-action-btn is-ajustar" onclick="ProductosView.abrirAjusteDesdeHistorial()"
-            title="Corregir stock manualmente">
-      <span class="hist-action-btn-icon">✏</span>
-      <span>AJUSTAR</span>
-    </button>
-    <button class="hist-action-btn is-imprimir" onclick="ProductosView.imprimirHistorial()"
-            title="Imprimir historial">
-      <span class="hist-action-btn-icon">🖨</span>
-      <span>IMPRIMIR</span>
-    </button>
-  </div>
+  <!-- [537] Fila de acciones ELIMINADA. El kardex solo MUESTRA; las acciones viven en
+       el detalle del producto. Antes repetía AUDITAR (ya estaba en el detalle) e
+       IMPRIMIR, y su AJUSTAR operaba sobre `_histTarget.codigo` = el PRIMER código del
+       grupo, aunque en pantalla se estuviera viendo el historial AGREGADO de varios
+       códigos → se ajustaba un código distinto del que el operador creía. -->
+  <div id="histRefrescado" class="hist-refrescado"></div>
 
   <!-- Filtros chips por tipo de movimiento -->
   <div class="hist-tipo-chips">
@@ -10713,26 +10735,26 @@
 <script src="https://levo19.github.io/MOS/assets/adhesivo/preview.js?v=1.3.0"></script>
 <!-- [v2.13.121] Sistema centralizado de seguridad (CDN MOS) -->
 <script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=3.13.472"></script>
-<script src="js/offline.js?v=2.13.536"></script>
+<script src="js/offline.js?v=2.13.537"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
-<script src="js/impresion-directa.js?v=2.13.536"></script>
-<script src="js/api.js?v=2.13.536"></script>
-<script src="js/scanner.js?v=2.13.536"></script>
-<script src="js/sounds.js?v=2.13.536"></script>
+<script src="js/impresion-directa.js?v=2.13.537"></script>
+<script src="js/api.js?v=2.13.537"></script>
+<script src="js/scanner.js?v=2.13.537"></script>
+<script src="js/sounds.js?v=2.13.537"></script>
 <!-- F2-F9 — módulos nuevos -->
 <!-- [quirúrgico 2026-07-20] oplog.js ELIMINADO: cola IndexedDB sin NINGÚN productor (superseded por OfflineManager) -->
-<script src="js/voice.js?v=2.13.536"></script>
-<script src="js/photos.js?v=2.13.536"></script>
+<script src="js/voice.js?v=2.13.537"></script>
+<script src="js/photos.js?v=2.13.537"></script>
 <!-- QR generator (offline, MIT · Kazuhiko Arase) — para el link del reporte en la imagen compartida -->
-<script src="js/qrcode-generator.js?v=2.13.536"></script>
+<script src="js/qrcode-generator.js?v=2.13.537"></script>
 <!-- Hoja de compartir con vista previa (móvil: Web Share; PC: copiar+descargar) -->
-<script src="js/sharesheet.js?v=2.13.536"></script>
+<script src="js/sharesheet.js?v=2.13.537"></script>
 <!-- Voucher-imagen de guía/preingreso (usa qrcode-generator) -->
-<script src="js/voucher.js?v=2.13.536"></script>
-<script src="js/cargadores.js?v=2.13.536"></script>
-<script src="js/clienteInbox.js?v=2.13.536"></script>
+<script src="js/voucher.js?v=2.13.537"></script>
+<script src="js/cargadores.js?v=2.13.537"></script>
+<script src="js/clienteInbox.js?v=2.13.537"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
-<script src="js/chat-almacen.js?v=2.13.536"></script>
-<script src="js/app.js?v=2.13.536"></script>
+<script src="js/chat-almacen.js?v=2.13.537"></script>
+<script src="js/app.js?v=2.13.537"></script>
 </body>
 </html>

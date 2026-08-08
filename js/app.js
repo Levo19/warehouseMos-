@@ -20264,14 +20264,9 @@ const ProductosView = (() => {
 
       <!-- Acciones -->
       <div class="flex gap-2 mt-2 pt-2 border-t flex-wrap" style="border-color:#334155">
-        <button onclick="event.stopPropagation();ProductosView.verHistorial('${escAttr(g.children.map(c=>c.codigoBarra).join('|'))}','${safe}')"
-                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1">
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
-            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
-          </svg>
-          Historial
-        </button>
+        <!-- [537] "Historial" ELIMINADO de la card: su única casa es el DETALLE
+             (tap en la card → detalle → tab Movimientos). Antes convivían tres
+             historiales distintos con alcances distintos (ver notas de 537). -->
         <button id="memb-${sid}" onclick="event.stopPropagation();ProductosView.imprimirMembrete('${escAttr(g.skuBase)}','${escAttr(g.base.idProducto || '')}','${sid}')"
                 class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1"
                 title="Imprimir membrete (canónico + equivalentes)">
@@ -20353,17 +20348,10 @@ const ProductosView = (() => {
         <div class="bar-bg mt-1.5 mb-1"><div class="bar-fill ${baj ? 'bg-red-500' : pct < 40 ? 'bg-amber-500' : 'bg-emerald-500'}" style="width:${pct.toFixed(0)}%"></div></div>
         <p class="text-xs text-slate-600">Mín: ${fmt(mn)} · Máx: ${fmt(mx)}</p>` : ''}
       ${(() => { const py = _proyGrupo([c.codigoBarra], st); py._real = st; return _proyEtiqueta(py); })()}
-      <div class="flex gap-2 mt-2 flex-wrap">
-        <button onclick="ProductosView.verHistorial('${escAttr(c.codigoBarra)}','${escAttr(c.descripcion)}')"
-                class="btn btn-outline text-xs py-1 px-2 flex items-center gap-1">
-          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
-            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
-          </svg>
-          Historial
-        </button>
-        ${eyeBtn}
-      </div>
+      <!-- [537] "Historial" del sub-código ELIMINADO: era la 2ª instancia y además
+           mostraba SOLO ese barcode, mientras la de la card padre mostraba el grupo
+           completo — dos botones con el mismo nombre y distinto alcance. -->
+      ${eyeBtn ? `<div class="flex gap-2 mt-2 flex-wrap">${eyeBtn}</div>` : ''}
     </div>`;
   }
 
@@ -20600,6 +20588,20 @@ const ProductosView = (() => {
       }
     }
 
+    await _cargarKardex(codigos, nombre, stockTotal);
+  }
+
+  // [537] Carga del kardex, compartida por el sheet de historial y por el tab
+  // "Movimientos" del detalle (antes cada uno traía su propio dato, distinto).
+  // SIEMPRE va a la red: es el registro de stock, no puede mostrarse de caché vieja.
+  async function _cargarKardex(codigos, nombre, stockTotalOpt) {
+    codigos = (codigos || []).map(String).filter(Boolean);
+    if (!codigos.length) return;
+    _histTarget = { codigos, codigo: codigos[0], nombre: nombre || '' };
+    const stockTotal = (stockTotalOpt != null)
+      ? stockTotalOpt
+      : codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
+
     const local = _movimientosLocal(codigos);
     if (local.length) {
       // Render preliminar offline-only: marca todo como pendiente (aún sin saldo real
@@ -20608,7 +20610,9 @@ const ProductosView = (() => {
       _renderHistorial(_histMovsCache, true, stockTotal);
     }
 
+    const _t0 = Date.now();
     const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
+    _sellarRefresco(res && res.ok ? _t0 : null);
     if (res.ok) {
       // [BUG 2 · fix etiquetado+dup] gasData = movimientos REALES aplicados
       // (wh.stock_movimientos), cada uno con su saldo verdadero.
@@ -20640,6 +20644,30 @@ const ProductosView = (() => {
           </div>`;
       }
     }
+  }
+
+  // [537] Sello "actualizado hace Xs" — el dueño hizo un conteo desde el celular y en la
+  // PC "hace rato no aparecía"; sin este sello no había forma de saber si lo que se está
+  // mirando es de ahora o de hace media hora. Se refresca solo mientras el kardex esté abierto.
+  let _histRefTs = 0, _histRefTimer = null;
+  function _sellarRefresco(t0) {
+    if (_histRefTimer) { clearInterval(_histRefTimer); _histRefTimer = null; }
+    if (t0 == null) { _pintarSelloRefresco(null); return; }
+    _histRefTs = Date.now();
+    _pintarSelloRefresco(Date.now() - t0);
+    _histRefTimer = setInterval(() => {
+      const el = document.getElementById('histRefrescado');
+      if (!el || !el.isConnected) { clearInterval(_histRefTimer); _histRefTimer = null; return; }
+      _pintarSelloRefresco(null, true);
+    }, 5000);
+  }
+  function _pintarSelloRefresco(ms, soloEdad) {
+    const el = document.getElementById('histRefrescado');
+    if (!el) return;
+    if (!_histRefTs) { el.textContent = '⚠ sin conexión — mostrando lo último guardado'; return; }
+    const seg = Math.max(0, Math.round((Date.now() - _histRefTs) / 1000));
+    const edad = seg < 5 ? 'recién' : seg < 60 ? `hace ${seg}s` : `hace ${Math.round(seg / 60)} min`;
+    el.textContent = `✓ actualizado ${edad}` + (!soloEdad && ms != null ? ` · ${ms}ms` : '');
   }
 
   // Filtro chip Todos/Entradas/Salidas/Ajustes — re-render desde cache local
@@ -21335,14 +21363,31 @@ const ProductosView = (() => {
         ? String(opts.prefillFisico) : '';
     document.getElementById('auditObs').value =
       opts.idAlerta ? 'Auditoría desde alerta de cuadre' : '';
+    _audMotivo = '';
+    document.querySelectorAll('#auditMotivoChips .aud-motivo-chip')
+      .forEach(c => c.classList.remove('is-active'));
     abrirSheet('sheetAudit');
+  }
+
+  // [537] Motivo del conteo. Se guarda aparte y se antepone a la observación al enviar,
+  // así el kardex puede mostrar "motivo: merma" y el admin lo ve en MOS.
+  let _audMotivo = '';
+  function audSetMotivo(m) {
+    _audMotivo = (_audMotivo === m) ? '' : m;   // volver a tocar el mismo chip lo deselecciona
+    document.querySelectorAll('#auditMotivoChips .aud-motivo-chip').forEach(c => {
+      c.classList.toggle('is-active', c.dataset.motivo === _audMotivo);
+    });
+    vibrate(8);
+    const det = document.getElementById('auditObs');
+    if (det) det.placeholder = (_audMotivo === 'otro') ? 'Cuenta qué pasó…' : 'Detalle (opcional)…';
   }
 
   function confirmarAuditoria() {
     if (!_auditTarget) return;
     const fisico = parseFloat(document.getElementById('auditConteo').value);
     if (isNaN(fisico) || fisico < 0) { toast('Ingresa el conteo físico', 'warn'); return; }
-    const obs    = document.getElementById('auditObs').value.trim();
+    const _det = document.getElementById('auditObs').value.trim();
+    const obs  = [_audMotivo, _det].filter(Boolean).join(' · ');
     const target = { ..._auditTarget };
 
     // ── Optimistic: calcular diff antes de tocar stockMap ──────
@@ -21419,7 +21464,7 @@ const ProductosView = (() => {
       if (res.ajusto === false && Math.abs(diff) > 0.0005) {
         _revertirAudit(
           `ℹ️ El servidor no aplicó la corrección (${res.error || res.resultado || 'sin detalle'}). ` +
-          `El stock sigue en ${fmtQty(stockSistema)} — reintenta o usa "Ajuste".`, 'warn');
+          `El stock sigue en ${fmtQty(stockSistema)} — vuelve a contar.`, 'warn');
         return;
       }
       // Si la auditoría vino de una alerta de cuadre, marcarla como revisada
@@ -21861,40 +21906,22 @@ const ProductosView = (() => {
       }).join('') +
       `<p class="text-[10px] text-slate-500 mt-3 text-center">Total grupo: <span class="text-emerald-400 font-bold">${fmtQty(grupo.stockTotal)}</span> unidades · stock se descuenta por código real al despachar</p>`;
     } else if (tab === 'movs') {
-      // Timeline últimos 30 movimientos
-      const codSet = new Set(grupo.children.map(c => c.codigoBarra));
-      const movs = detalles
-        .filter(d => codSet.has(d.codigoProducto))
-        .map(d => {
-          const g = gMap[d.idGuia] || {};
-          return {
-            fecha: g.fecha,
-            tipo: g.tipo || '',
-            cant: parseFloat(d.cantidad) || 0,
-            cb: d.codigoProducto,
-            idGuia: d.idGuia
-          };
-        })
-        .filter(m => m.fecha)
-        .sort((a,b) => String(b.fecha).localeCompare(String(a.fecha)))
-        .slice(0, 30);
-      if (!movs.length) {
-        cont.innerHTML = '<p class="text-slate-500 text-center py-8 text-sm">Sin movimientos registrados</p>';
-        return;
-      }
-      cont.innerHTML = movs.map(m => {
-        const esEntrada = String(m.tipo).indexOf('ENTRADA') === 0 || String(m.tipo).indexOf('INGRESO') >= 0;
-        const cls = esEntrada ? 'is-entrada' : 'is-salida';
-        const tipoIcon = esEntrada ? '↓' : '↑';
-        return `
-          <div class="prod-timeline-item ${cls}">
-            <div class="flex-1 min-w-0">
-              <p class="prod-timeline-tipo ${cls}">${tipoIcon} ${escHtml(m.tipo)} · ${fmt(m.cant)}</p>
-              <p class="prod-timeline-fecha">${fmtFecha(m.fecha)} · <span class="font-mono">${escHtml(m.cb)}</span></p>
-              <p class="prod-timeline-meta">Guía ${escHtml(m.idGuia)}</p>
-            </div>
-          </div>`;
-      }).join('');
+      // [537] KARDEX EMBEBIDO — antes esta pestaña era un TERCER historial distinto y
+      // peor: leía sólo el cache de guia_detalle, así que NO mostraba ajustes, conteos
+      // ni envasados, no traía saldo, ni usuario, ni zona destino, y cortaba a 30.
+      // Por eso "no funcionaban lógicamente igual". Ahora es EL kardex, el mismo dato
+      // autoritativo de wh.stock_movimientos, con sus filtros y en frases humanas.
+      cont.innerHTML = `
+        <div class="hist-tipo-chips" id="detMovChips">
+          <button class="hist-tipo-chip is-active" data-tipo="all"     onclick="ProductosView.histFiltrarTipo('all')">Todos</button>
+          <button class="hist-tipo-chip"           data-tipo="ingreso" onclick="ProductosView.histFiltrarTipo('ingreso')">Entradas</button>
+          <button class="hist-tipo-chip"           data-tipo="salida"  onclick="ProductosView.histFiltrarTipo('salida')">Salidas</button>
+          <button class="hist-tipo-chip"           data-tipo="ajuste"  onclick="ProductosView.histFiltrarTipo('ajuste')">Conteos</button>
+        </div>
+        <div id="histRefrescado" class="hist-refrescado"></div>
+        <div id="histList"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>`;
+      const codigos = grupo.children.map(c => c.codigoBarra);
+      _cargarKardex(codigos, grupo.base.descripcion || _detSkuActivo);
     } else if (tab === 'lotes') {
       const lotes = (OfflineManager.getLotesCache?.() || OfflineManager.getLotesVencimientoCache?.() || [])
         .filter(l => grupo.children.some(c => String(c.codigoBarra) === String(l.codigoProducto || l.codigoBarra)));
@@ -21949,7 +21976,9 @@ const ProductosView = (() => {
     setTimeout(() => App.nav('despacho'), 250);
   }
 
-  function detAuditarActual() {
+  // [537] CONTAR STOCK — reemplaza AUDITAR y AJUSTAR (unificados).
+  // Contar ES fijar: se escribe el TOTAL que el operador ve, nunca un delta.
+  function detContarActual() {
     if (!_detSkuActivo) return;
     const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
     if (!grupo || !grupo.children.length) return;
@@ -21958,13 +21987,24 @@ const ProductosView = (() => {
     setTimeout(() => abrirAuditBarcode(c0.codigoBarra, c0.descripcion || grupo.base.descripcion, _detSkuActivo), 200);
   }
 
-  function detHistorialActual() {
+  function detImprimirActual() {
     if (!_detSkuActivo) return;
     const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
     if (!grupo || !grupo.children.length) return;
-    cerrarSheet('sheetProdDetalle');
-    const codigos = grupo.children.map(c => c.codigoBarra).join('|');
-    setTimeout(() => verHistorial(codigos, grupo.base.descripcion || _detSkuActivo), 200);
+    // imprimirHistorial() se apoya en _histTarget → lo sembramos con el grupo visible.
+    _histTarget = {
+      codigos: grupo.children.map(c => c.codigoBarra),
+      codigo:  grupo.children[0].codigoBarra,
+      nombre:  grupo.base.descripcion || _detSkuActivo
+    };
+    imprimirHistorial();
+  }
+
+  // [537] Conservada por compatibilidad (swipe/long-press/alertas siguen llamándola),
+  // pero ya NO hay botón "Historial" en la card ni en el detalle: el kardex es el tab.
+  function detHistorialActual() {
+    if (!_detSkuActivo) return;
+    detSetTab('movs');
   }
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -22252,11 +22292,11 @@ const ProductosView = (() => {
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
            verHistorial, imprimirHistorial, imprimirMembrete, verCodigos, cerrarCodigos,
-           histFiltrarTipo, histAuditar,
+           histFiltrarTipo, histAuditar, audSetMotivo,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,
-           detDespacharActual, detAuditarActual, detHistorialActual };
+           detDespacharActual, detContarActual, detImprimirActual, detHistorialActual };
 })();
 
 
