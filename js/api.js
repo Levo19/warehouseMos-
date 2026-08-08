@@ -1487,7 +1487,15 @@ const API = (() => {
         motivo: params.motivo || '', usuario: params.usuario || '', id_auditoria: params.idAuditoria || '',
         id_stock_nuevo: 'STK_' + lid, id_mov: 'MOV_' + lid
       } });
-      if (!out || out.ok === false) return null;   // *_OFF o error → GAS
+      // [534] NO tragarse el error real. Antes CUALQUIER {ok:false} devolvía null y el
+      // operador terminaba viendo el genérico "Acción no disponible sin conexión directa
+      // (cero-GAS)" — que no dice nada y hace pensar que es problema de red cuando en
+      // realidad el server rechazó por CONTEO_NEGATIVO / FALTAN_PARAMS / APP_NO_AUTORIZADA.
+      // Solo el kill-switch (*_DIRECTO_OFF) sigue devolviendo null (= "vía no cableada").
+      if (!out) return null;
+      if (out.ok === false) {
+        return /_OFF$/.test(String(out.error || '')) ? null : out;
+      }
       return out;
     }
     if (params.action === 'registrarEnvasado') {
@@ -2502,6 +2510,30 @@ const API = (() => {
         return { ok: true, offline: true, localId, data: { idLocal: localId } };
       }
       // (si llegamos acá, _postDirecto devolvió null → seguir abajo)
+    }
+
+    // [534 · FIX CRÍTICO "no puedo ajustar stock"] ORDEN: la rama SIN RED va PRIMERO.
+    //
+    // BUG (introducido en 2.13.458 al agregar _IDEMPOTENT_ACTIONS al sello fail-closed):
+    // el bloque de arriba solo corre con `navigator.onLine === true`. Con la red caída
+    // (o con el `onLine` en false por un instante — típico en tablets con WiFi flaky, que
+    // lo reportan false en cada micro-corte) NO se intentaba el directo y se caía al
+    // fail-closed de abajo, que atrapaba TODA acción idempotente: crearAjuste, crearGuia,
+    // cerrarGuia, registrarEnvasado, cerrarPickupConDespacho, auditarProducto…
+    // Resultado: el operador veía "Acción no disponible sin conexión directa (cero-GAS)"
+    // y el trabajo NO se encolaba → se PERDÍA. La cola offline quedó muerta para todo
+    // lo que mueve stock, que es justamente lo que más se hace sin señal.
+    // (La rama de encolar de abajo era inalcanzable para estas acciones.)
+    //
+    // FIX: sin red → ENCOLAR (sellado _viaDirecta, idempotente por el localId → la RPC
+    // dedupea al reintentar). El fail-closed queda SOLO para el caso online-sin-camino.
+    // _WH_NO_GAS (ramas muertas sin RPC cableada) NO se encola: no tiene a dónde ir.
+    if (!navigator.onLine && !_WH_NO_GAS.has(params.action)) {
+      if (params._fromQueue) return { ok: false, error: 'sin-conexion', _retry: true };
+      const _selladoOff = (_whEscrituraDirecta() || _whImpresionDirecta() || _whLoteAdhesivoDirecto())
+        ? { ...params, _viaDirecta: true } : params;
+      const localIdOff = OfflineManager.encolar(params.action, _selladoOff);
+      return { ok: true, offline: true, localId: localIdOff, data: { idLocal: localIdOff } };
     }
 
     // [cero-GAS · WH] Acción propia de WH cuyo directo no commiteó → FAIL-CLOSED: ni GAS ni encolar-a-GAS.

@@ -380,15 +380,35 @@ const OfflineManager = (() => {
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
     return arr.length + ':' + (h >>> 0);
   }
+  // [534] Firma PERSISTIDA. `_masterSig` vivía solo en memoria, así que después de CADA
+  // recarga (F5, update de SW, la recarga de mantenimiento, o simplemente reabrir la PWA)
+  // la firma arrancaba vacía y el catálogo se volvía a comprimir ENTERO con
+  // LZString.compressToUTF16 — cientos de ms en PC y VARIOS SEGUNDOS de hilo principal
+  // bloqueado en un celular de gama baja, aunque el catálogo fuera idéntico al que ya
+  // estaba en localStorage. Guardando la firma, una recarga con el catálogo sin cambios
+  // se salta por completo la compresión.
+  const _SIG_KEY = 'wh_master_sig';
+  function _cargarSigs() {
+    try { return JSON.parse(localStorage.getItem(_SIG_KEY)) || {}; } catch (_) { return {}; }
+  }
+  function _persistirSig(sigKey, sig) {
+    try {
+      const all = _cargarSigs();
+      all[sigKey] = sig;
+      localStorage.setItem(_SIG_KEY, JSON.stringify(all));
+    } catch (_) {}
+  }
   // Marca cambio en `changed` SOLO si la firma del dataset difiere de la última vista.
   function _guardarSiCambia(key, sigKey, arr, label, changed) {
     if (arr == null) return;
     const sig = _firma(arr);
     // Idéntico a lo último visto Y ya hay algo persistido → no reescribir ni avisar a
     // la UI (evita el flash + el costo de recomprimir un array grande en cada refresh).
-    if (_masterSig[sigKey] === sig && (cargar(key) || []).length) return;
+    const sigPrev = (_masterSig[sigKey] !== undefined) ? _masterSig[sigKey] : _cargarSigs()[sigKey];
+    if (sigPrev === sig && (cargar(key) || []).length) { _masterSig[sigKey] = sig; return; }
     _masterSig[sigKey] = sig;
     guardar(key, arr);
+    _persistirSig(sigKey, sig);
     if (label) changed.push(label);
   }
 
@@ -446,6 +466,10 @@ const OfflineManager = (() => {
         // [delta] guardar el punto de corte del servidor → el próximo refresh por versión baja solo el delta.
         if (maestros.server_ts) { try { localStorage.setItem(KEYS.CAT_SYNC_TS, String(maestros.server_ts)); } catch (_) {} }
         if (maestros.errores?.length) console.warn('[Offline] descargarMaestros errores:', maestros.errores);
+        // [534] Bajó bien → resetear el backoff. Sin esto el contador solo subía y, tras
+        // una racha de fallos, un equipo YA recuperado seguía esperando 60s entre refrescos.
+        _retryMaestrosN = 0;
+        if (_retryMaestrosTid) { clearTimeout(_retryMaestrosTid); _retryMaestrosTid = null; }
       } else {
         // [CERO-GAS 2026-07-19] El directo no respondió (boot frío: carrera del mint / red).
         // NADA de GAS: el login sirve del cache local y programamos UN reintento directo.
@@ -528,10 +552,43 @@ const OfflineManager = (() => {
   // [CERO-GAS] Reintento directo del maestro tras un boot frío fallido. Máx 3 intentos
   // espaciados; si todos fallan, los ciclos normales (login/welcome/reconexión) lo retoman.
   let _retryMaestrosN = 0;
+  // [534] Antes: 3 reintentos y SILENCIO ABSOLUTO para siempre.
+  //
+  // Síntoma real que producía: si el maestro no bajaba en el arranque (mint-wh que
+  // 401ea, edge en cold start, red a medias, dispositivo recién reactivado), el equipo
+  // se quedaba con el catálogo VACÍO o viejo y NADIE se enteraba: la app se veía normal,
+  // pero Productos salía vacío, los modales que dependen del catálogo abrían en blanco y
+  // el ajuste de stock no encontraba el producto. Eso explica "a unos dispositivos no les
+  // carga tal modal" y "no pueden ajustar stock" — nunca fue el modal, era el dato.
+  //
+  // Ahora: backoff que NO se rinde (6s,12s,18s,30s,60s… tope 60s) y, si tras 3 fallos
+  // seguidos seguimos sin catálogo, aviso VISIBLE y accionable al operador.
+  const _RETRY_MAX_MS = 60000;
+  let _retryMaestrosTid = null;
   function _retryMaestros() {
-    if (_retryMaestrosN >= 3) return;
+    if (_retryMaestrosTid) return;                 // ya hay uno agendado → no apilar
     _retryMaestrosN++;
-    setTimeout(() => { try { _lastMasterTs = 0; precargar(true); } catch (_) {} }, 6000 * _retryMaestrosN);
+    const espera = Math.min(6000 * _retryMaestrosN, _RETRY_MAX_MS);
+
+    if (_retryMaestrosN === 3) {
+      // ¿Es degradación (hay cache viejo) o apagón total (no hay nada que mostrar)?
+      let hayCatalogo = 0;
+      try { hayCatalogo = (cargar(KEYS.PRODUCTOS) || []).length; } catch (_) {}
+      try {
+        if (typeof toast === 'function') {
+          toast(hayCatalogo
+            ? '⚠ No se pudo actualizar el catálogo — trabajando con datos guardados. Revisa la señal.'
+            : '❌ Sin catálogo: este equipo no pudo descargar los productos. Revisa la señal o avisa al admin.',
+            hayCatalogo ? 'warn' : 'danger', 10000);
+        }
+      } catch (_) {}
+      try { console.warn('[Offline] catálogo NO descargado tras 3 intentos · productos en cache:', hayCatalogo); } catch (_) {}
+    }
+
+    _retryMaestrosTid = setTimeout(() => {
+      _retryMaestrosTid = null;
+      try { _lastMasterTs = 0; precargar(true); } catch (_) {}
+    }, espera);
   }
 
   // [CERO-GAS 2026-07-19] _gasUrl ELIMINADO: no queda NINGÚN camino a GAS en este módulo.
@@ -800,11 +857,16 @@ const OfflineManager = (() => {
 
       // [40x] No pisar cache bueno con un dataset VACÍO: un poll/RPC que devolvió [] no debe borrar
       // datos previos. Solo persiste si trae filas, o si el cache ya estaba vacío.
+      // [534 perf/memoria] Si NO cambió, NO se reescribe.
+      // Antes el `else guardar(key, arr)` reescribía igual: cada ciclo de 60s hacía, por
+      // cada uno de los 6 datasets, JSON.stringify + LZString.compressToUTF16 + setItem
+      // SINCRÓNICOS en el hilo principal, y además invalidaba el _parseCache, forzando
+      // descomprimir+parsear otra vez en la siguiente lectura. 720 ciclos por turno de 12h
+      // sobre datasets que crecen todo el día = el "se va poniendo lenta" de las tablets.
       const _persist = (key, arr, label) => {
         if (arr == null) return;
         if (!arr.length && (cargar(key) || []).length) return;   // vacío sobre lleno → skip
         if (_hayDiff(arr, key)) { guardar(key, arr); changed.push(label); }
-        else guardar(key, arr);
       };
       _persist(KEYS.GUIAS,        d.guias,    'guias');
       _persist(KEYS.GUIA_DETALLE, d.detalles, 'detalles');
@@ -818,8 +880,8 @@ const OfflineManager = (() => {
           const merged  = _mergePreingresos(d.preingresos, viejos);
           // [40x] no pisar con vacío si había datos (el merge ya preserva, guard defensivo)
           if (!(merged.length === 0 && viejos.length)) {
+            // [534] idem _persist: sin cambios → sin reescribir (ver comentario arriba).
             if (_hayDiff(merged, KEYS.PREINGRESOS)) { guardar(KEYS.PREINGRESOS, merged); changed.push('preingresos'); }
-            else                                    { guardar(KEYS.PREINGRESOS, merged); }
           }
         }
       }

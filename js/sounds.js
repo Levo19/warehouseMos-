@@ -48,6 +48,14 @@ const SoundFX = (() => {
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
       osc.start(t);
       osc.stop(t + dur + 0.02);
+      // [534 · fuga] Cada beep creaba un GainNode cableado al compresor y NUNCA lo
+      // desconectaba. Un turno de despacho son miles de escaneos → miles de nodos vivos
+      // colgando del grafo de audio, que ya no suenan pero se siguen procesando.
+      // Al terminar el oscilador, soltamos el nodo.
+      osc.onended = () => {
+        try { osc.disconnect(); } catch (_) {}
+        try { gain.disconnect(); } catch (_) {}
+      };
     } catch(e) {}
   }
 

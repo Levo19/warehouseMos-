@@ -4088,6 +4088,11 @@ const App = (() => {
       try {
         if (currentView === 'despacho')  DespachoView.detener();
         if (currentView === 'envasador') EnvasadorView.detener();
+        // [534] Preingresos y Guías comparten el registry de auto-rotación de fotos
+        // (el panel tablet de Guías se pinta con renderTppList de PreingresosView).
+        // Sin esto, los intervals de 2.7s por card seguían latiendo todo el día en
+        // el resto de las vistas.
+        if (currentView === 'preingresos' || currentView === 'guias') PreingresosView.detener();
       } catch(_){}
     }
 
@@ -5610,7 +5615,7 @@ const GuiasView = (() => {
     const fotoUrl = g.foto ? _normalizeDriveUrl(g.foto) : '';
     const fotoIcon = isIngreso ? '↓' : '↑';
     const fotoBlock = fotoUrl
-      ? `<div class="gcard-photo" onclick="event.stopPropagation();Photos&&Photos.lightbox('${escAttr(fotoUrl)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`
+      ? `<div class="gcard-photo" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(fotoUrl)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`
       : `<div class="gcard-photo placeholder" title="${tipoLabel}">${fotoIcon}</div>`;
 
     return `
@@ -6359,6 +6364,10 @@ const GuiasView = (() => {
       .then(r => {
         // Solo el ÚLTIMO eslabón vigente refleja el estado (evita parpadeos de eslabones viejos).
         if (_qtyChains[id] !== next) return r;
+        // [534] Soltar la cadena ya resuelta: `_qtyChains` solo crecía (una clave por
+        // línea editada, cada una reteniendo la promesa y su closure con la respuesta).
+        // Al ser el eslabón vigente y estar cumplido, la entrada ya no sirve de nada.
+        delete _qtyChains[id];
         item._saving = false;
         if (r && r.ok) {
           item._saveFailed = false;
@@ -17288,10 +17297,10 @@ const PreingresosView = (() => {
       const dots = urls.map((_, i) => `<span class="${i === 0 ? 'on' : ''}"></span>`).join('');
       fotoBlock = `<div class="gcard-photo pre-photo-rot" data-prerot="${urls.length}"
            data-urls="${urls.map(u => u.replace(/"/g, '&quot;')).join('|')}"
-           onclick="event.stopPropagation();Photos&&Photos.lightbox(this.getAttribute('data-urls').split('|'),this._rotIdx||0)">
+           onclick="event.stopPropagation();window.Photos&&Photos.lightbox(this.getAttribute('data-urls').split('|'),this._rotIdx||0)">
            ${imgs}<div class="pre-rot-dots">${dots}</div></div>`;
     } else if (urls.length === 1) {
-      fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation();Photos&&Photos.lightbox('${escAttr(urls[0])}')"><img src="${escAttr(urls[0])}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`;
+      fotoBlock = `<div class="gcard-photo" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(urls[0])}')"><img src="${escAttr(urls[0])}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`;
     } else {
       fotoBlock = `<div class="gcard-photo placeholder" title="Sin foto">${_SVG_CAM}</div>`;
     }
@@ -17327,7 +17336,21 @@ const PreingresosView = (() => {
   function _limpiarFotoRotTimers() {
     _fotoRotTimers.forEach(id => clearInterval(id));
     _fotoRotTimers.length = 0;
+    // [534] Rearmar: `_rotInit` marcaba el elemento como "ya inicializado" y NUNCA se
+    // limpiaba. Los cards que sobreviven a un re-render (los `.card-optimistic`, que se
+    // reinsertan) quedaban con el flag puesto pero sin timer → dejaban de rotar para
+    // siempre. Al limpiar los timers soltamos también el flag.
+    try {
+      document.querySelectorAll('.pre-photo-rot[data-prerot]').forEach(el => { el._rotInit = false; });
+    } catch (_) {}
   }
+
+  // [534 · fuga de memoria] Detener la auto-rotación al ABANDONAR la vista.
+  // Antes los intervals de 2.7s solo se limpiaban en el SIGUIENTE render de
+  // Preingresos (o del panel tablet de Guías, que comparte este registry). Si el
+  // operador entraba a Preingresos y se iba a otra vista, quedaba 1 interval POR
+  // CARD de foto latiendo cada 2.7s el resto del día, en TODAS las demás vistas.
+  function detener() { _limpiarFotoRotTimers(); }
 
   // [Parte 2] Auto-rotación de fotos en los cards de preingreso.
   // Cambia la foto activa con fade cada 2.7s; pausa al hover/tap; respeta
@@ -19402,7 +19425,7 @@ const PreingresosView = (() => {
            toggleEstadoCarreta, agregarCarreta, agregarCarretaEdit,
            abrirPickerCargadorEdit, agregarCargadorEdit, quitarCargadorEdit,
            renderTppList, buscarEnPanel, limpiarBuscarPanel,
-           filtrarTpp, _searchFocusTpp, compartirWA,
+           filtrarTpp, _searchFocusTpp, compartirWA, detener,
            cerrarPreviewAviso: _cerrarPreviewAviso };
 })();
 
@@ -21260,6 +21283,21 @@ const ProductosView = (() => {
       _guardarAuditDia();
     }
 
+    // [534] TOLERANCIA DEL SERVIDOR — la causa del "no perseveraba mi ajuste".
+    //
+    // `wh.auditar_producto` SOLO corrige el stock si abs(físico - sistema) > 0.5; con una
+    // diferencia menor guarda la auditoría como 'OK' y DEJA EL STOCK COMO ESTABA.
+    // La pantalla, en cambio, pintaba el valor contado y decía "✅ Sin diferencias".
+    // Caso real (07/08, Jorgenis, producto 01131): sistema -0.023, contó 0.25 → dif 0.273
+    // ≤ 0.5 → el servidor NO tocó el stock, la card mostró 0.25, y al refrescar (60s)
+    // volvía -0.023. Lo repitió 4 veces (15:38, 15:40, 15:42, 15:43) creyendo que no
+    // se guardaba. En granel/insumos (KG/MIL) 0.5 suele ser MÁS que todo el stock.
+    //
+    // No cambiamos la regla del servidor (es lógica de stock). Lo que arreglamos es la
+    // MENTIRA: se avisa por adelantado y, si el servidor confirma que no ajustó, se
+    // revierte el pintado optimista y se le dice al operador qué hacer.
+    const _dentroTolerancia = Math.abs(diff) > 0.0005 && Math.abs(diff) <= 0.5;
+
     // Actualizar stock local optimisticamente
     _stockMap[target.codigoBarra] = {
       ...(_stockMap[target.codigoBarra] || {}),
@@ -21269,13 +21307,25 @@ const ProductosView = (() => {
     // Cerrar y re-render sin esperar al servidor
     cerrarSheet('sheetAudit');
     _auditTarget = null;
-    const msg = Math.abs(diff) <= 0.5
-      ? '✅ Sin diferencias'
-      : `⚠️ Diferencia: ${diff > 0 ? '+' : ''}${fmt(diff, 2)}`;
-    toast(msg, Math.abs(diff) <= 0.5 ? 'ok' : 'warn', 4000);
+    let msg, tono;
+    if (Math.abs(diff) <= 0.0005)   { msg = '✅ Sin diferencias'; tono = 'ok'; }
+    else if (_dentroTolerancia)     { msg = `⚠️ Diferencia ${diff > 0 ? '+' : ''}${fmtQty(diff)} — dentro de la tolerancia (0.5): el stock NO se corrige`; tono = 'warn'; }
+    else                            { msg = `⚠️ Diferencia: ${diff > 0 ? '+' : ''}${fmt(diff, 2)}`; tono = 'warn'; }
+    toast(msg, tono, _dentroTolerancia ? 7000 : 4000);
     _actualizarBadge();
     _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
     _aplicarQuery();
+
+    // Devuelve la card al valor REAL del servidor (el conteo no se guardó).
+    const _revertirAudit = (aviso, tonoAviso) => {
+      _stockMap[target.codigoBarra] = {
+        ...(_stockMap[target.codigoBarra] || {}),
+        cantidadDisponible: stockSistema
+      };
+      _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+      _aplicarQuery();
+      toast(aviso, tonoAviso || 'danger', 9000);
+    };
 
     // ── Enviar al servidor en segundo plano ────────────────────
     API.auditarProducto({
@@ -21284,9 +21334,22 @@ const ProductosView = (() => {
       observacion: obs,
       usuario:     window.WH_CONFIG?.usuario || ''
     }).then(res => {
-      if (!res.ok) toast('Error al guardar en servidor: ' + (res.error || ''), 'danger', 5000);
+      if (!res || res.ok === false) {
+        // Antes: solo un toast y la card seguía mostrando el conteo NO guardado.
+        _revertirAudit('❌ NO se guardó la auditoría: ' + ((res && res.error) || 'sin respuesta del servidor') + ' — reintenta');
+        return;
+      }
+      if (res.offline) { toast('📶 Sin señal — auditoría en cola, se guardará al reconectar', 'warn', 4000); return; }
+      // El servidor dice explícitamente si movió el stock (`ajusto`). Si NO lo movió y
+      // había diferencia, la card está mintiendo → devolverla al valor real y explicar.
+      if (res.ajusto === false && Math.abs(diff) > 0.0005) {
+        _revertirAudit(
+          `ℹ️ El stock NO se corrigió: la diferencia (${fmtQty(diff)}) está dentro de la tolerancia de 0.5 de la auditoría. ` +
+          `Si el conteo es correcto, usa "Ajuste" para fijar ${fmtQty(fisico)}.`, 'warn');
+        return;
+      }
       // Si la auditoría vino de una alerta de cuadre, marcarla como revisada
-      else if (target.idAlerta && typeof Dashboard !== 'undefined') {
+      if (target.idAlerta && typeof Dashboard !== 'undefined') {
         Dashboard.marcarAlertaRevisada(target.idAlerta);
       }
     }).catch(() => {
@@ -23792,8 +23855,19 @@ window.WhAdhesivoReprint = WhAdhesivoReprint;
   setInterval(function () {
     try {
       if (localStorage.getItem('wh_no_autoreload') === '1') return;
-      if (!document.hidden) return;                                  // solo si nadie está interactuando
       if (Date.now() - _bootTs < 12 * 3600 * 1000) return;           // solo tras 12h de sesión
+      // [534] Antes exigía `document.hidden`. En las tablets del almacén —que es
+      // EXACTAMENTE el caso para el que se escribió esta red de seguridad— la pantalla
+      // queda encendida con la app al frente todo el día, así que `document.hidden` es
+      // SIEMPRE false y la recarga anti-degradación NUNCA se disparaba.
+      // Ahora vale cualquiera de las dos: pestaña oculta, O 10 min sin que nadie toque
+      // la pantalla (misma marca de actividad que usa el auto-bloqueo).
+      var _idleMs = Infinity;
+      try {
+        var _t = parseInt(localStorage.getItem('wh_last_activity'), 10);
+        if (isFinite(_t)) _idleMs = Date.now() - _t;
+      } catch (_) {}
+      if (!document.hidden && _idleMs < 10 * 60 * 1000) return;      // alguien está usándola → no tocar
       // [fix rev 500x] usar el detector canónico de trabajo activo (pickup + carrito de despacho + lista
       // sombra), el mismo que usa el reload diferido (index.html:4695) — antes solo miraba el pickup activo.
       if (window._whHayTrabajoActivo && window._whHayTrabajoActivo()) return;

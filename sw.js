@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.533';
+const VERSION = '2.13.534';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -50,6 +50,11 @@ const LOCAL_ASSETS = [
   './js/offline.js',
   './js/scanner.js',
   './js/sounds.js',
+  // [534] faltaban: sin ellos, un arranque sin red dejaba `Photos`/`Voice` inexistentes
+  // → los onclick de foto (lightbox) lanzaban ReferenceError y el handler moría.
+  './js/photos.js',
+  './js/voice.js',
+  './cargadores.html',
   './js/qrcode-generator.js',
   './js/sharesheet.js',
   './js/voucher.js',
@@ -93,11 +98,22 @@ self.addEventListener('install', e => {
 });
 
 // ── Activar: borrar cachés viejos y reclamar clientes ───────
+// [534 · BUG DE IDENTIDAD] Antes borraba TODA caché que no fuera la nuestra
+// (`k !== CACHE`), y eso incluía `da-device-cache`: la TERCERA réplica del deviceId
+// que mantiene device-auth (localStorage → IndexedDB → Cache Storage) justamente para
+// sobrevivir a un "borrar datos del sitio". O sea: CADA update de versión le arrancaba
+// una de las tres patas a la identidad del equipo. Si después se perdían localStorage e
+// IndexedDB, el equipo generaba un deviceId NUEVO → quedaba PENDIENTE_APROBACION →
+// mint-wh devuelve 401 → la app abre pero sin NINGÚN dato (catálogo/stock vacíos) y sin
+// explicación. Ese es uno de los caminos a "a este equipo no le carga nada / no puedo
+// ajustar stock" después de una actualización.
+// Ahora solo purgamos NUESTRAS cachés versionadas; lo de terceros no se toca.
+const _CACHE_PREFIX = 'warehouse-v';
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
       .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE).map(k => caches.delete(k))
+        keys.filter(k => k.startsWith(_CACHE_PREFIX) && k !== CACHE).map(k => caches.delete(k))
       ))
       .then(() => self.clients.claim())
   );
@@ -145,9 +161,13 @@ self.addEventListener('fetch', e => {
           const clone = net.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
         }
-        return net || (await caches.match(e.request)) || Response.error();
+        // [534] ignoreSearch: index.html ahora pide js/app.js?v=2.13.534. Sin esto, el
+        // fallback offline hacía MISS contra la entrada precacheada './js/app.js' (sin
+        // query) y la app no levantaba sin red. Con ignoreSearch, el ?v= sirve para
+        // reventar el caché HTTP del navegador sin romper el precache del SW.
+        return net || (await caches.match(e.request, { ignoreSearch: true })) || Response.error();
       } catch (_) {
-        const cached = await caches.match(e.request);
+        const cached = await caches.match(e.request, { ignoreSearch: true });
         if (cached) return cached;
         if (e.request.destination === 'document') return (await caches.match('./index.html')) || Response.error();
         return Response.error();
