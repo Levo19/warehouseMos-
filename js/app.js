@@ -3990,6 +3990,22 @@ const App = (() => {
     // red de seguridad si el WS no carga o cae. Carga defensiva: nunca rompe el arranque.
     try { API.iniciarRealtimeCatalogo?.(); } catch (_) {}
 
+    // [v2.13.539 · STOCK EN VIVO] wh.ops_meta['stock'] bumpea con cualquier cambio de
+    // wh.stock / wh.stock_movimientos (guía, ajuste, conteo, envasado, merma) hecho en
+    // CUALQUIER dispositivo. Al recibirlo bajamos el operacional YA (antes: hasta 60s de
+    // espera al poller) y precargarOperacional emite 'wh:data-refresh' → silentRefresh,
+    // que es render DIFF: solo se repintan las cards cuyo stock cambió, con flash sutil.
+    // Money-safe: no recarga la app, no toca sheets abiertos, no pisa nada en edición.
+    let _stockRtT = null;
+    window.addEventListener('wh:stock-realtime', () => {
+      if (document.hidden) return;
+      if (_stockRtT) clearTimeout(_stockRtT);
+      _stockRtT = setTimeout(() => {
+        _stockRtT = null;
+        try { OfflineManager.precargarOperacional(true); } catch (_) {}
+      }, 700);
+    });
+
     // Escuchar refresh silencioso → actualizar vista activa sin flicker
     window.addEventListener('wh:data-refresh', e => {
       const changed = e.detail?.changed || [];
@@ -20663,6 +20679,70 @@ const ProductosView = (() => {
   // [538] Cuando se acaba de guardar un conteo, la fila más nueva del kardex entra
   // desde arriba con un highlight verde que se desvanece: el operador VE aterrizar lo suyo.
   let _histNuevoId = null;
+  // [539] Mismo aterrizaje, pero para movimientos que llegaron de OTRO dispositivo por
+  // realtime. Ahí no vale "la primera fila": pueden haber entrado varias y no siempre
+  // arriba. Se resaltan por idMov exacto (set de los que no estaban en el render previo).
+  let _histNuevosIds = null;
+
+  // ── [539] KARDEX EN VIVO ────────────────────────────────────────────────
+  // Refresco QUIRÚRGICO del kardex abierto cuando wh.ops_meta['stock'] bumpea.
+  // Reglas duras:
+  //   · NUNCA pinta skeleton (eso es lo que causaba el destello que se arregló en 538).
+  //   · Si no hay movimientos nuevos, NO repinta nada: solo actualiza el sello de frescura.
+  //   · Si el operador cambió de producto mientras cargaba, la respuesta se descarta (_histKey).
+  //   · Si el kardex no está visible, no gasta red.
+  async function _kardexRefrescarRealtime() {
+    if (!_histTarget || !_histTarget.codigos || !_histTarget.codigos.length) return;
+    const el = document.getElementById(_histCtx.list);
+    if (!el || !el.isConnected || !el.offsetParent) return;   // no está a la vista
+    const codigos = _histTarget.codigos;
+    const key = codigos.join('|');
+    if (_histKey !== key) return;
+
+    const previos = new Set((_histMovsCache || []).map(m => String(m.idMov || '')).filter(Boolean));
+    const _t0 = Date.now();
+    const res = await API.getHistorialStock(codigos.join(',')).catch(() => ({ ok: false }));
+    if (!res || !res.ok) return;
+    if (_histKey !== key) return;                             // cambió de ficha mientras cargaba
+
+    // Mismo merge que _cargarKardex: aplicados del server + líneas de guías ABIERTAS locales.
+    const gasData = (res.data || []).map(m => ({ ...m, _pendiente: false }));
+    const gasIds  = new Set(gasData.map(m => m.idGuia).filter(Boolean));
+    const extras  = _movimientosLocal(codigos)
+      .filter(m => m.idGuia &&
+                   m.fuente === 'guia' &&
+                   String(m.estado || '').toUpperCase() === 'ABIERTA' &&
+                   !gasIds.has(m.idGuia))
+      .map(m => ({ ...m, _pendiente: true }));
+    const merged = [...gasData, ...extras].sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+    _sellarRefresco(_t0);
+    const nuevos = merged.filter(m => m.idMov && !previos.has(String(m.idMov)));
+    if (!nuevos.length && merged.length === (_histMovsCache || []).length) return;  // nada que mostrar
+
+    _histMovsCache = merged;
+    if (nuevos.length) _histNuevosIds = new Set(nuevos.map(m => String(m.idMov)));
+    const stockTotal = codigos.reduce((sum, c) => sum + (_s(c).cantidadDisponible || 0), 0);
+    _histStockCache = stockTotal;
+    _renderHistorial(merged, false, stockTotal);
+    if (nuevos.length) { try { SoundFX.click && SoundFX.click(); } catch (_) {} }
+  }
+
+  // Debounce corto: el SQL 661 ya manda 1 bump por transacción, pero dos operadores
+  // trabajando a la vez encadenan bumps. 700ms agrupa la ráfaga sin que se sienta lento.
+  let _stockRtWired = false, _stockRtTimer = null;
+  (function _wireStockRealtime() {
+    if (_stockRtWired) return;
+    _stockRtWired = true;
+    window.addEventListener('wh:stock-realtime', () => {
+      if (document.hidden) return;                  // pestaña dormida: el poller de 60s cubre
+      if (_stockRtTimer) clearTimeout(_stockRtTimer);
+      _stockRtTimer = setTimeout(() => {
+        _stockRtTimer = null;
+        _kardexRefrescarRealtime().catch(() => {});
+      }, 700);
+    });
+  })();
 
   // Skeleton shimmer mientras llega el dato. Regla: la lista NUNCA muestra filas de otro
   // producto ni del formato viejo — o skeleton, o el dato correcto.
@@ -20909,6 +20989,8 @@ const ProductosView = (() => {
 
     // [538] La fila recién guardada (la más nueva) aterriza con highlight verde.
     let _resaltar = !!_histNuevoId; _histNuevoId = null;
+    // [539] Y las que llegaron por realtime desde otro dispositivo, por idMov exacto.
+    const _idsNuevos = _histNuevosIds; _histNuevosIds = null;
     document.getElementById(_histCtx.list).innerHTML = filtrados.map((m, _ix) => {
       const cat = _categoria(m);
       const lbl = _label[cat] || cat;
@@ -20933,7 +21015,7 @@ const ProductosView = (() => {
       // [537 · KARDEX HUMANO] La frase manda; el id crudo va chico y gris al final.
       const H = _humanizarMov(m);
       return `
-        <div class="hist-timeline-row is-${colorCat}${(_resaltar && _ix === 0) ? ' is-nueva' : ''}">
+        <div class="hist-timeline-row is-${colorCat}${((_resaltar && _ix === 0) || (_idsNuevos && m.idMov && _idsNuevos.has(String(m.idMov)))) ? ' is-nueva' : ''}">
           <div class="flex-1 min-w-0">
             <div class="flex items-baseline justify-between gap-2">
               <span class="hist-mov-amount is-${colorCat}">${sign}${fmtQty(m.cantidad)}</span>

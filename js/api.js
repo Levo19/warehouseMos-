@@ -2718,13 +2718,24 @@ const API = (() => {
       // [v2.13.344] Realtime de la LISTA DE PICKUP: wh.ops_meta dominio 'pickups' sube cada vez
       // que cambia wh.pickups (cierre de caja, consolidación, despacho). La vista de despacho
       // escucha 'wh:pickups-realtime' y re-pollea al instante (antes esperaba el poller de 30s).
+      //
+      // [v2.13.539 · STOCK EN VIVO] Mismo canal, dominio 'stock'. wh.ops_meta['stock'] sube
+      // cuando cambia wh.stock O wh.stock_movimientos (SQL 660/661: trigger diferido, 1 bump
+      // por transacción — una guía de 50 líneas manda UN solo evento, no 50).
+      // El stock es dato vital: un ajuste/conteo/guía hecho en un dispositivo tiene que verse
+      // en los demás sin que nadie toque nada. Antes esto esperaba al poller de 60s.
       channel.on('postgres_changes',
         { event: 'UPDATE', schema: 'wh', table: 'ops_meta' },
         (payload) => {
           try {
             const rec = (payload && (payload.new || (payload.data && payload.data.record))) || {};
-            if (String(rec.dominio || '') === 'pickups') {
+            const dom = String(rec.dominio || '');
+            if (dom === 'pickups') {
               window.dispatchEvent(new CustomEvent('wh:pickups-realtime'));
+            } else if (dom === 'stock') {
+              window.dispatchEvent(new CustomEvent('wh:stock-realtime', {
+                detail: { version: Number(rec.version) || 0 }
+              }));
             }
           } catch (_) {}
         }
