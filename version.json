@@ -1,1 +1,1 @@
-{"version":"2.13.535","build":"2.13.535 auditoria LO CONTADO MANDA (659): sin tolerancia 0.5, toda diferencia corrige el stock al fisico contado con 2 decimales"}
+{"version":"2.13.536","build":"2.13.536 login auto-curable: el mint del token reintenta solo (3 intentos, conexion fresca, 6-12s) — ya no pide reintentar al usuario por un socket muerto"}

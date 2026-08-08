@@ -55,15 +55,29 @@ const API = (() => {
 
   // Edge `mint-wh`: verify_jwt=false → va con `apikey` (anon, público), SIN Authorization (es quien EMITE el token).
   // Devuelve {ok,token,exp} igual que GAS. Lanza si la Edge no devuelve un token válido → el caller cae a GAS.
-  async function _mintViaEdge(deviceId) {
+  async function _mintViaEdge(deviceId, timeoutMs) {
     const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/mint-wh`, {
       method: 'POST',
       headers: { 'apikey': _SB_ANON, 'Content-Type': 'application/json' },
+      cache: 'no-store',
       body: JSON.stringify({ deviceId })
-    }, 6000);
+    }, timeoutMs || 6000);
     const d = await res.json().catch(() => null);
     if (!d || !d.ok || !d.token) throw new Error('mint-wh edge: ' + ((d && d.error) || res.status));
     return d;
+  }
+
+  // [2.13.536] El mint se auto-cura: 3 intentos con conexión fresca y timeout creciente
+  // (6s→9s→12s, esperas 0.4s/1s). Antes 1 solo intento de 6s → un socket muerto al despertar
+  // la PC = "sin conexión, reintenta" manual en el login. La app reintenta ELLA, no el usuario.
+  async function _mintConReintentos(deviceId) {
+    const planes = [{ t: 6000, espera: 400 }, { t: 9000, espera: 1000 }, { t: 12000, espera: 0 }];
+    let ultimo;
+    for (let i = 0; i < planes.length; i++) {
+      try { return await _mintViaEdge(deviceId, planes[i].t); }
+      catch (e) { ultimo = e; if (planes[i].espera) await new Promise(r => setTimeout(r, planes[i].espera)); }
+    }
+    throw ultimo;
   }
 
   async function _mintTokenWH() {
@@ -74,7 +88,7 @@ const API = (() => {
       const deviceId = _whDeviceId();
       // [CERO-GAS / CERO-FALLBACK] Solo Edge mint-wh. Si falla, propaga el throw → el caller reintenta
       // (el finally de abajo limpia _mintInFlight); ya no cae al GAS mintTokenWH.
-      const d = await _mintViaEdge(deviceId);
+      const d = await _mintConReintentos(deviceId);
       const n = Math.floor(Date.now() / 1000);
       _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
       _agendarRefresh();
@@ -101,7 +115,7 @@ const API = (() => {
         const deviceId = _whDeviceId();
         // [CERO-GAS] Solo Edge mint-wh. Si falla, el outer catch deja que el camino sincrónico re-mintee bajo
         // demanda (antes había un catch → _mintViaGAS(deviceId), función INEXISTENTE = ReferenceError muerto).
-        const d = await _mintViaEdge(deviceId);
+        const d = await _mintConReintentos(deviceId);
         const n = Math.floor(Date.now() / 1000);
         _sbTok.token = d.token; _sbTok.exp = d.exp || (n + 1800);
         _agendarRefresh();                                     // reencadena para el próximo ciclo
