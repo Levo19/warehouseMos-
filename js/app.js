@@ -22428,10 +22428,7 @@ const ProductosView = (() => {
       // del catálogo trae exactamente este mismo fotoUrl → converge, no pisa nada.
       try { OfflineManager.patchProductoCache(idProducto, { fotoUrl: url }); } catch (_) {}
       const g = _grupos.find(x => String(x.skuBase) === String(skuBase));
-      if (g) {
-        g.base.fotoUrl = url;
-        (g.prods || []).forEach(p => { if (String(p.idProducto) === String(idProducto)) p.fotoUrl = url; });
-      }
+      if (g) g.base.fotoUrl = url;
       const ov = document.getElementById('whFotoPreview');
       if (ov) ov.remove();
       // Detalle: repintar con la imagen LOCAL (instantánea, sin esperar al CDN)
