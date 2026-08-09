@@ -66,9 +66,15 @@
     const v = parseFloat(n) || 0;
     return String(Math.round(v * 1000) / 1000);
   }
-  function _prods()  { try { return window.OfflineManager.getProductosCache()      || []; } catch (_) { return []; } }
-  function _equivs() { try { return window.OfflineManager.getEquivalenciasCache()  || []; } catch (_) { return []; } }
-  function _stocks() { try { return window.OfflineManager.getStockCache()          || []; } catch (_) { return []; } }
+  // ⚠ OfflineManager y SoundFX son `const` en el TOP-LEVEL de un script clásico:
+  // eso crea un binding de SCRIPT SCOPE, NO una propiedad de window. `window.OfflineManager`
+  // es undefined y el try/catch se lo tragaba entero → el índice de familias quedaba vacío
+  // en silencio. Se referencian por su identificador, con typeof como guard.
+  function _OM()     { return (typeof OfflineManager !== 'undefined') ? OfflineManager : null; }
+  function _SFX()    { return (typeof SoundFX !== 'undefined') ? SoundFX : (window.SoundFX || null); }
+  function _prods()  { try { return _OM().getProductosCache()     || []; } catch (_) { return []; } }
+  function _equivs() { try { return _OM().getEquivalenciasCache() || []; } catch (_) { return []; } }
+  function _stocks() { try { return _OM().getStockCache()         || []; } catch (_) { return []; } }
   function _activo(p) { return p && p.estado !== '0' && p.estado !== 0; }
   function _canonico(p) { return parseFloat((p && p.factorConversion) || 1) === 1; }
 
@@ -244,8 +250,9 @@
   // ══════════════════════════════════════════════════════════════
   function sonarAmbiguo() {
     try {
-      if (window.SoundFX && SoundFX.scanAmbiguo)          SoundFX.scanAmbiguo();
-      else if (window.SoundFX && SoundFX.scanIncompleto)  SoundFX.scanIncompleto();
+      const fx = _SFX();
+      if (fx && fx.scanAmbiguo)          fx.scanAmbiguo();
+      else if (fx && fx.scanIncompleto)  fx.scanIncompleto();
     } catch (_) {}
     try { if (typeof window.vibrate === 'function') window.vibrate([20, 45, 20, 45, 60]); } catch (_) {}
   }
@@ -492,7 +499,7 @@
       const p = orden.find(x => String(x._scannedCb || x.codigoBarra || '') === cb);
       if (!p) return;
       recordar(r, cb);
-      try { if (window.SoundFX && SoundFX.beep) SoundFX.beep(); } catch (_) {}
+      try { const fx = _SFX(); if (fx && fx.beep) fx.beep(); } catch (_) {}
       try { if (typeof window.vibrate === 'function') window.vibrate(15); } catch (_) {}
       cerrar(p);
     };
