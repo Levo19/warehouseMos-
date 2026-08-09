@@ -1051,8 +1051,10 @@ async function _cargarPNAprobados() {
     const dias = fechaApr ? Math.floor((Date.now() - fechaApr.getTime()) / 86400000) : 0;
     const whenTxt = dias === 0 ? 'Hoy' : dias === 1 ? 'Ayer' : `hace ${dias}d`;
     const recientCls = dias === 0 ? ' recent' : '';
+    // [540] miniatura por render/image: esta tira se pinta EN EL ARRANQUE y aquí viven
+    // las fotos crudas de cámara (hay dos de ~6MB). El original queda para el lightbox.
     const fotoHtml = p.foto
-      ? `<img src="${escHtml(p.foto)}" alt="">`
+      ? `<img src="${escHtml((window.Photos && Photos.thumb) ? Photos.thumb(p.foto, 200) : p.foto)}" loading="lazy" decoding="async" alt="">`
       : '<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21,15 16,10 5,21"/></svg>';
     const fotoClick = p.foto ? ` zoom" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(p.foto)}')` : '';
     return `
@@ -20200,14 +20202,12 @@ const ProductosView = (() => {
   // Las URLs de Supabase Storage se sirven por el transformador `render/image`:
   // una card pide 128px (~6-12KB) en vez del original (que hoy promedia 3MB).
   // ═══════════════════════════════════════════════════════════════════════
-  const _SB_PUBLIC_RE = /^(https?:\/\/[^/]+)\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/;
-
+  // La regla de reescritura vive UNA sola vez, en Photos.thumb (photos.js). Acá solo se
+  // delega; el fallback devuelve el original si photos.js no cargó (nunca deja hueco).
   function _fotoSrc(url, ancho) {
     const u = String(url || '').trim();
     if (!u) return '';
-    const m = u.match(_SB_PUBLIC_RE);
-    if (!m) return u;   // Drive/externa → tal cual (el listener global de photos.js la cubre)
-    return m[1] + '/storage/v1/render/image/public/' + m[2] + '/' + m[3] + '?width=' + ancho + '&quality=70';
+    return (window.Photos && Photos.thumb) ? Photos.thumb(u, ancho) : u;
   }
 
   // Tile de iniciales: determinístico por skuBase → el mismo producto siempre el mismo color.

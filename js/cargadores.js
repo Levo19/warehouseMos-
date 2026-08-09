@@ -278,7 +278,10 @@
     const p = Math.max(0, Math.min(100, parseInt(c.nivel) || 0));
     const fotos = Array.isArray(c.fotos) ? c.fotos : [];
     const col = _thColor(p), colT = _thColorT(p);
-    const thumbs = fotos.map((u, i) => `<div class="cgv-th-img" onclick="Cargadores._carousel('${id}',${i})"><img src="${_escAttr(u)}" loading="lazy" onerror="this.parentNode.style.display='none'"><span class="z">🔍</span></div>`).join('');
+    // [540] la miniatura de 88px se pide a /render/image (los PNG crudos pesan ~5MB c/u);
+    // el carrusel sigue abriendo el ORIGINAL en máxima calidad.
+    const _th = (u) => ((window.Photos && Photos.thumb) ? Photos.thumb(u, 240) : u);
+    const thumbs = fotos.map((u, i) => `<div class="cgv-th-img" onclick="Cargadores._carousel('${id}',${i})"><img src="${_escAttr(_th(u))}" loading="lazy" decoding="async" onerror="this.parentNode.style.display='none'"><span class="z">🔍</span></div>`).join('');
     return `<div class="cgv-carga ${c._prov ? 'prov' : ''}" id="cgvCarga_${id}" data-id="${id}">
       <div class="cgv-ctop">
         <span class="cgv-hora">⏱ ${_escHtml(c.hora || _horaAhora())}</span>

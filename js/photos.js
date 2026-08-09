@@ -102,6 +102,22 @@
     return String(url).replace(/[?&]sz=w\d+/, '&sz=w1600').replace('?&', '?');
   }
 
+  // ── [v2.13.540] Miniatura servida por el transformador de Supabase ──
+  // Toda foto de Storage se muestra en LISTAS a través de /render/image (ancho pedido,
+  // ~10-40KB) en vez del original. Sin esto, un JPEG de 6MB de la cámara de un celular
+  // se descarga entero para pintarlo a 48px — que es exactamente lo que frenaba el boot.
+  // El original SIGUE usándose para el lightbox/zoom. URLs que no son de Storage (Drive,
+  // externas) se devuelven tal cual.
+  const _SB_PUBLIC_RE = /^(https?:\/\/[^/]+)\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/;
+  function thumb(url, ancho, calidad) {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    const m = u.match(_SB_PUBLIC_RE);
+    if (!m) return u;
+    return m[1] + '/storage/v1/render/image/public/' + m[2] + '/' + m[3]
+         + '?width=' + (ancho || 400) + '&quality=' + (calidad || 70);
+  }
+
   // ── Lightbox fullscreen ──
   function lightbox(urls, idx) {
     if (typeof urls === 'string') urls = [urls];
@@ -270,6 +286,7 @@
   }
 
   window.Photos = {
+    thumb,
     lightbox, carouselHTML,
     comprimir, subir,
     abrirPickerFuente, cerrarPickerFuente,
