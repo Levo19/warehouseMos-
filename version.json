@@ -1,1 +1,1 @@
-{"version":"2.13.541","build":"2.13.541 FOTO EN EL CATALOGO: miniatura por card + editar desde el detalle; todas las miniaturas por render/image (el boot ya no baja los JPEG de 6MB)"}
+{"version":"2.13.542","build":"2.13.542 LIGHTBOX DE FOTO: tocar la miniatura (card o detalle) abre la foto en grande al instante — pinta la miniatura cacheada y cambia a 800px sin parpadeo; boton Cambiar/Agregar foto dentro del visor; sin foto abre el tile grande para subir la primera desde la card"}
