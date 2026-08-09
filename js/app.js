@@ -5907,6 +5907,9 @@ const GuiasView = (() => {
       }));
 
     _guiaActual = { ...guia, detalle };
+    // [544] La memoria de "qué variante elegí" es POR OPERACIÓN: al abrir otra guía
+    // se olvida, para que la sugerencia de arriba nunca sea la de una guía ajena.
+    try { window.FamiliaCB && FamiliaCB.nuevaOperacion('guia:' + (guia.idGuia || '')); } catch(_){}
     _mostrarDetalleSheet(_guiaActual);
 
     // 2. Refrescar desde GAS en background (actualiza si hay cambios)
@@ -7151,9 +7154,22 @@ const GuiasView = (() => {
     // Si el picker está abierto, no interrumpir — el usuario está eligiendo
     const picker = document.getElementById('camPicker');
     if (picker?.style.display === 'flex') return;
+    if (window.FamiliaCB && FamiliaCB.abierto()) return;   // [544] eligiendo variante
 
     const candidatos = _buscarCandidatos(codStr);
     const esIngreso = String(_guiaActual?.tipo || '').toUpperCase().startsWith('INGRESO');
+
+    // [544] Código de familia (A/B/C…) → selector rápido con foto, letra y stock.
+    if (candidatos.length && candidatos[0]._familia) {
+      _setScanStatus('prefijo', 'Elige la variante · ' + candidatos.length + ' opciones');
+      _elegirVariante(codStr, candidatos, esIngreso, prod => {
+        const autoSum = _agregarProductoDirecto(prod, true);
+        _addToCamList(prod);
+        _setScanStatus('ok', prod.descripcion || (prod._scannedCb || prod.codigoBarra));
+        if (!autoSum) SoundFX.beep();
+      });
+      return;
+    }
 
     if (!candidatos.length) {
       // Acumular en lista persistente (deduplicar por código)
@@ -7184,6 +7200,28 @@ const GuiasView = (() => {
     if (SoundFX.scanIncompleto) SoundFX.scanIncompleto();
     vibrate(30);
     _mostrarCamPicker(candidatos, codStr);
+  }
+
+  // ── [544] Selector de VARIANTE (familia de códigos duplicados) ────────────
+  // Único punto de entrada para los 3 caminos de escaneo de guías (cámara, HID,
+  // barra de captura). El sheet vive en FamiliaCB; acá solo se decide qué hacer
+  // con lo elegido y se resetea el estado visual si el operador cancela.
+  function _elegirVariante(codStr, candidatos, esIngreso, onProd) {
+    if (!window.FamiliaCB) { onProd(candidatos[0]); return; }
+    FamiliaCB.elegir(codStr, {
+      miembros:      candidatos,
+      permitirNuevo: !!esIngreso,
+      textoNuevo:    'Ninguno · es un producto nuevo',
+      subtitulo:     'El proveedor usa el mismo código físico para varios productos.'
+    }, sel => {
+      if (!sel) { _setScanStatus('ready'); return; }
+      if (sel._nuevo) {
+        // Alta con el siguiente sufijo LIBRE ya propuesto (…036C).
+        abrirModalPN(sel.sugerido, _guiaActual?.idGuia || '');
+        return;
+      }
+      onProd(sel);
+    });
   }
 
   function _mostrarCamPicker(candidatos, codStr) {
@@ -7239,7 +7277,7 @@ const GuiasView = (() => {
   function seleccionarItemCamara(scannedCb) {
     const picker = document.getElementById('camPicker');
     if (picker) picker.style.display = 'none';
-    const candidatos = _buscarCandidatos(scannedCb);
+    const candidatos = _buscarCandidatos(scannedCb, true);   // [544] directo: ya eligió en el picker
     const prod = candidatos[0];
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
@@ -7342,8 +7380,21 @@ const GuiasView = (() => {
 
   function _procesarCodigoHid(codStr) {
     codStr = normCb(codStr);
+    if (window.FamiliaCB && FamiliaCB.abierto()) return;   // [544] eligiendo variante
     const candidatos = _buscarCandidatos(codStr);
     document.getElementById('hidPicker').style.display = 'none';
+
+    // [544] Familia de códigos duplicados → selector de variante (mismo sheet en toda la app)
+    if (candidatos.length && candidatos[0]._familia) {
+      _updateHidDisplay('🔀 ' + candidatos.length + ' variantes · elige');
+      _elegirVariante(codStr, candidatos, true, prod => {
+        _agregarProductoDirecto(prod, true);
+        _agregarItemHidList(prod);
+        _updateHidDisplay('— listo para escanear —');
+        setTimeout(() => _enfocarHid(), 100);
+      });
+      return;
+    }
 
     if (!candidatos.length) {
       _updateHidDisplay('⚠ No existe: ' + codStr);
@@ -7382,7 +7433,7 @@ const GuiasView = (() => {
 
   function seleccionarItemHid(scannedCb) {
     document.getElementById('hidPicker').style.display = 'none';
-    const candidatos = _buscarCandidatos(scannedCb);
+    const candidatos = _buscarCandidatos(scannedCb, true);   // [544] directo
     const prod = candidatos[0];
     if (!prod) return;
     _agregarProductoDirecto(prod, true);
@@ -7448,11 +7499,27 @@ const GuiasView = (() => {
     return m;
   }
 
-  function _buscarCandidatos(codStr) {
+  // `directo` = true → el llamador YA sabe qué producto quiere (viene de un picker,
+  // trae el código CON su letra): se salta la desambiguación de familia para no
+  // volver a preguntar en bucle.
+  function _buscarCandidatos(codStr, directo) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     const cNorm  = normCb(codStr);
     if (!cNorm) return [];
+
+    // 0. [544] FAMILIA DE CÓDIGOS DUPLICADOS — el fabricante reusa el MISMO código
+    //    físico para varias presentaciones y logística las separa con una letra
+    //    (…036A / …036B). Si el código leído es la RAÍZ PELADA y hay más de un
+    //    producto en la familia, NO se resuelve a ciegas: se devuelven todos los
+    //    miembros SIN _exacto, así todo consumidor cae a su picker. El caso
+    //    peligroso que esto arregla: la raíz pelada TAMBIÉN es un producto
+    //    (7750464444799 = LA CHINA TAMARINDO) y antes ganaba el exacto,
+    //    escondiendo los 4 FOCH que cuelgan de ella.
+    if (!directo && window.FamiliaCB) {
+      const amb = FamiliaCB.ambigua(cNorm);
+      if (amb) return amb.miembros.map(p => ({ ...p, _familia: true, _raizFam: amb.raiz }));
+    }
 
     // 1. Exacto en PRODUCTOS_MASTER → código escaneado ES el canónico (O(1) por índice)
     const exacto = _idxPorCodigo(prods, 'prods').get(cNorm);
@@ -7751,8 +7818,20 @@ const GuiasView = (() => {
     if (!_guiaActual) return;
     const codStr = normCb(rawCod);
     if (!codStr) return;
+    if (window.FamiliaCB && FamiliaCB.abierto()) return;   // [544] eligiendo variante
     const cand = _buscarCandidatos(codStr);
     const esIngreso = String(_guiaActual?.tipo || '').toUpperCase().startsWith('INGRESO');
+
+    // [544] Familia de códigos duplicados → selector de variante
+    if (cand.length && cand[0]._familia) {
+      _elegirVariante(codStr, cand, esIngreso, prod => {
+        const autoSum = _agregarProductoDirecto(prod, true);
+        if (!autoSum) { try { SoundFX.beep(); } catch(_){} }
+        _detOcultarUnknown();
+        requestAnimationFrame(() => _focusCapturaBar());
+      });
+      return;
+    }
 
     if (!cand.length) {
       // Desconocido → ofrecer crear nuevo (solo INGRESO). En SALIDA, error.
@@ -7812,7 +7891,7 @@ const GuiasView = (() => {
   }
 
   function capturaPick(scannedCb) {
-    const cand = _buscarCandidatos(scannedCb);
+    const cand = _buscarCandidatos(scannedCb, true);   // [544] directo
     const prod = cand[0];
     _detOcultarUnknown();
     if (!prod) return;
@@ -8160,6 +8239,18 @@ const GuiasView = (() => {
       modal.dataset.pnGuia = guiaId || '';
       modal.classList.add('open');
     }
+    // [544] Aviso de familia: listener delegado UNA sola vez + primer render.
+    const famBox = document.getElementById('pnFamiliaAviso');
+    if (famBox) {
+      if (!famBox.dataset.wired) {
+        famBox.dataset.wired = '1';
+        famBox.addEventListener('click', _pnFamiliaClick);
+      }
+      famBox.dataset.famCod = '';
+      famBox.innerHTML = '';
+    }
+    clearTimeout(_pnFamTimer);
+    _pnRevisarFamilia();
     // Pausar scanner continuo para que no dispare sonidos mientras el modal está abierto
     if (document.getElementById('scannerModal')?.classList.contains('open')) Scanner.stop();
     // [v2.13.188] Foco automático: si falta código, al input de código; si ya
@@ -8175,6 +8266,62 @@ const GuiasView = (() => {
     // Si el usuario escribe manualmente, apagar auto-gen
     const toggle = document.getElementById('pnAutoGenToggle');
     if (toggle?.dataset.on === '1') _pnResetAutoGen();
+    clearTimeout(_pnFamTimer);
+    _pnFamTimer = setTimeout(_pnRevisarFamilia, 220);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // [544] ALTA DE PRODUCTO NUEVO — nunca crear un duplicado sin sufijo.
+  // Si el código tecleado/escaneado YA pertenece a una familia existente
+  // (misma raíz, con o sin letra), el modal avisa CUÁNTAS variantes hay,
+  // las muestra con foto/letra/stock y ofrece dos caminos:
+  //   (a) "es uno de estos" → un tap lo agrega a la guía y cierra el alta;
+  //   (b) "es uno nuevo"    → propone el siguiente sufijo LIBRE (…036C) en el
+  //       input, EDITABLE, porque el dueño usa letras semánticas (O=orégano,
+  //       F=fina) y a veces querrá otra.
+  // ═══════════════════════════════════════════════════════════════════════
+  let _pnFamTimer = null;
+
+  function _pnRevisarFamilia() {
+    const box = document.getElementById('pnFamiliaAviso');
+    if (!box) return;
+    if (!window.FamiliaCB) { box.innerHTML = ''; return; }
+    let html = '';
+    try { html = FamiliaCB.avisoPNHtml(_pnCodigo); } catch (e) { console.warn('[544] avisoPNHtml', e); }
+    if (box.dataset.famCod === normCb(_pnCodigo) && box.innerHTML === html) return;
+    box.dataset.famCod = normCb(_pnCodigo);
+    box.innerHTML = html;
+    if (!html) return;
+    try { SoundFX.scanAmbiguo ? SoundFX.scanAmbiguo() : SoundFX.scanIncompleto(); } catch (_) {}
+    vibrate([20, 45, 20]);
+  }
+
+  function _pnFamiliaClick(e) {
+    const box = document.getElementById('pnFamiliaAviso');
+    if (!box) return;
+    const nuevoBtn = e.target.closest('[data-famcb-pn-nuevo]');
+    if (nuevoBtn) {
+      const sug = nuevoBtn.getAttribute('data-famcb-pn-nuevo') || '';
+      const inp = document.getElementById('pnCodigoBarra');
+      if (inp) { inp.readOnly = false; inp.style.opacity = '1'; inp.value = sug; inp.focus(); }
+      _pnCodigo = sug;
+      box.dataset.famCod = '';
+      box.innerHTML = '';
+      try { SoundFX.beep(); } catch (_) {}
+      toast('Código propuesto: ' + sug + ' · puedes cambiar la letra', 'info', 3500);
+      return;
+    }
+    const item = e.target.closest('[data-famcb-pn-cb]');
+    if (!item) return;
+    const cb   = item.getAttribute('data-famcb-pn-cb') || '';
+    const cand = _buscarCandidatos(cb, true);   // directo: el operador ya eligió cuál
+    const prod = cand[0];
+    if (!prod) return;
+    cerrarModalPN();
+    _agregarProductoDirecto(prod, true);
+    try { SoundFX.beep(); } catch (_) {}
+    vibrate(15);
+    toast('✓ ' + (prod.descripcion || cb) + ' · ya existía en el catálogo', 'ok', 3500);
   }
 
   function _pnToggleAutoGen() {
@@ -8209,6 +8356,9 @@ const GuiasView = (() => {
   function cerrarModalPN() {
     const modal = document.getElementById('modalProductoNuevo');
     if (modal) modal.classList.remove('open');
+    clearTimeout(_pnFamTimer);
+    const famBox = document.getElementById('pnFamiliaAviso');
+    if (famBox) { famBox.dataset.famCod = ''; famBox.innerHTML = ''; }
     // Reanudar scanner si la cámara sigue abierta
     if (document.getElementById('scannerModal')?.classList.contains('open')) {
       Scanner.start('scanVideo', _onCamResult,
@@ -12677,6 +12827,9 @@ const DespachoView = (() => {
       toast('⚠ ' + codStr + ' · no existe en catálogo', 'warn', 3500);
       return true;
     }
+    // [544] Familia ambigua: _onDespResult abre el selector y da su propio feedback.
+    // Acá cortamos para no emitir el toast de "agregado" antes de que el operador elija.
+    if (candidatos[0]._familia) { _onDespResult(cod); return true; }
     // Reusa el flujo normal (maneja pickup, cart, sobrestock, picker prefijo)
     _onDespResult(cod);
     // Feedback visible cross-módulo: el operador está en Productos, no ve
@@ -12848,10 +13001,30 @@ const DespachoView = (() => {
     if (!codStr) return;
     const picker = document.getElementById('despCamPicker');
     if (picker?.style.display === 'flex') return;
+    if (window.FamiliaCB && FamiliaCB.abierto()) return;   // [544] eligiendo variante
     const candidatos = _buscarDespCandidatos(codStr);
     if (!candidatos.length) {
       _setDespStatus('no_existe', codStr + ' · no existe en catálogo');
       SoundFX.warn(); vibrate([60, 30, 60]);
+      return;
+    }
+
+    // [544] FAMILIA DE CÓDIGOS DUPLICADOS — en salida NUNCA se registra nuevo, así que
+    // el selector no ofrece "es otro": o elige una variante existente, o cancela.
+    if (candidatos[0]._familia) {
+      _setDespStatus('prefijo', 'Elige la variante · ' + candidatos.length + ' opciones');
+      _elegirVarianteDesp(codStr, candidatos, prod => {
+        _agregarDespDirecto(prod);
+        const cb = String(prod._scannedCb || prod.codigoBarra || '');
+        if (!_pickupActivo) _despItemActivo = cb;
+        _renderDespFlotante();
+        const item   = _cart.find(c => c.codigoBarra === cb);
+        const stockD = item?.stockDisp || 0;
+        if (!item || stockD === 0 || item.cantidad <= stockD) {
+          const stockTxt = stockD > 0 ? ` · Stock: ${fmtQty(stockD)}` : '';
+          _setDespStatus('ok', (prod.descripcion || cb) + stockTxt);
+        }
+      });
       return;
     }
     if (candidatos[0]._exacto) {
@@ -12901,11 +13074,18 @@ const DespachoView = (() => {
 
   // ── Búsqueda por codigoBarra — maestro + equivalencias, exacto o prefijo.
   // En salidas NUNCA se acepta nuevo: si no existe → error.
-  function _buscarDespCandidatos(codStr) {
+  function _buscarDespCandidatos(codStr, directo) {
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
     const cNorm  = normCb(codStr);
     if (!cNorm) return [];
+
+    // 0. [544] FAMILIA DE CÓDIGOS DUPLICADOS (raíz + letra). En SALIDA solo cuentan
+    //    los canónicos (factor=1) — la regla de oro de acá abajo no se toca.
+    if (!directo && window.FamiliaCB) {
+      const amb = FamiliaCB.ambigua(cNorm, { soloCanonicos: true });
+      if (amb) return amb.miembros.map(p => ({ ...p, _familia: true, _raizFam: amb.raiz }));
+    }
 
     // 1. Exacto en PRODUCTOS_MASTER. [FIX bifurcación] Puede haber MÁS DE UNO con el MISMO codigoBarra exacto
     //    (el proveedor le puso el mismo código físico a 2 productos, ej. wantán dorado/azul). Si hay varios →
@@ -13037,6 +13217,21 @@ const DespachoView = (() => {
   }
 
   // ── Picker prefijo ───────────────────────────────────────────
+  // ── [544] Selector de VARIANTE en SALIDA ──────────────────────────────────
+  // Mismo sheet que en guías, pero sin la salida "es un producto nuevo": la regla
+  // de oro dice que en una salida jamás se da de alta un código.
+  function _elegirVarianteDesp(codStr, candidatos, onProd) {
+    if (!window.FamiliaCB) { onProd(candidatos[0]); return; }
+    FamiliaCB.elegir(codStr, {
+      miembros:      candidatos,
+      permitirNuevo: false,
+      subtitulo:     'El proveedor usa el mismo código físico para varios productos.'
+    }, sel => {
+      if (!sel || sel._nuevo) { _setDespStatus('ready'); return; }
+      onProd(sel);
+    });
+  }
+
   function _mostrarDespPicker(candidatos, codStr) {
     document.getElementById('despCamPickerCod').textContent = codStr;
     document.getElementById('despCamPickerList').innerHTML = candidatos.map(p => {
@@ -13082,7 +13277,7 @@ const DespachoView = (() => {
       const _p = _prods.find(p => String(p.idProducto) === String(idProd));
       if (_p) prod = { ..._p, _scannedCb: String(scannedCb), _exacto: true };
     }
-    if (!prod) { const candidatos = _buscarDespCandidatos(scannedCb); prod = candidatos[0]; }
+    if (!prod) { const candidatos = _buscarDespCandidatos(scannedCb, true); prod = candidatos[0]; }   // [544] directo
     if (!prod) return;
     _agregarDespDirecto(prod);
     const cb     = String(prod._scannedCb || prod.codigoBarra || scannedCb);
@@ -13297,7 +13492,7 @@ const DespachoView = (() => {
 
   function seleccionarItemDespInline(scannedCb) {
     _cerrarInlinePicker();
-    const candidatos = _buscarDespCandidatos(scannedCb);
+    const candidatos = _buscarDespCandidatos(scannedCb, true);   // [544] directo
     const prod = candidatos[0];
     if (!prod) return;
     _agregarDespDirecto(prod);
@@ -13325,6 +13520,15 @@ const DespachoView = (() => {
     if (!val) return;
     _cerrarInlinePicker();
     const candidatos = _buscarDespCandidatos(val);
+    // [544] Familia de códigos duplicados → selector de variante (mismo sheet)
+    if (candidatos.length && candidatos[0]._familia) {
+      if (statusEl) { statusEl.textContent = `🔀 ${candidatos.length} variantes — elige`; statusEl.style.color = '#fbbf24'; }
+      _elegirVarianteDesp(val, candidatos, prod => {
+        seleccionarItemDespInline(String(prod._scannedCb || prod.codigoBarra || val));
+      });
+      inp.value = '';
+      return;
+    }
     if (!candidatos.length) {
       // [v2.13.30] Diagnóstico útil: si las cachés están vacías, el error
       // no es del código sino del setup. Avisar explícito al operador.
@@ -13967,6 +14171,7 @@ const DespachoView = (() => {
     const histBase = { ts: Date.now(), n: cartSnapshot.length, tipo: tipoSnapshot,
                        idZona, nombreZona, nota, items: itemsSnapshot };
     _cart = []; _tipoSalida = 'SALIDA_ZONA'; _saveCart();
+    try { window.FamiliaCB && FamiliaCB.nuevaOperacion('desp:' + Date.now()); } catch(_){}   // [544] nueva operación → memoria limpia
     cerrarSheet('sheetDespFinalizar');
     _renderCart(); _updateFooter(); badgeUpdate();
     toast('⏳ Generando guía...', 'info', 55000);
@@ -22108,8 +22313,33 @@ const ProductosView = (() => {
   function _onProdCamResult(cod) {
     const cNorm  = normCb(cod);
     if (!cNorm) return;
+    if (window.FamiliaCB && FamiliaCB.abierto()) return;   // [544] eligiendo variante
     const prods  = OfflineManager.getProductosCache();
     const equivs = OfflineManager.getEquivalenciasCache();
+
+    // 0. [544] FAMILIA DE CÓDIGOS DUPLICADOS — buscar en el catálogo el código pelado
+    //    llevaba a UNA card a ciegas (o a la equivocada). Ahora se elige la variante
+    //    y recién ahí se busca; el catálogo abre exactamente el producto de la caja.
+    if (window.FamiliaCB) {
+      const amb = FamiliaCB.ambigua(cNorm);
+      if (amb) {
+        _setProdCamStatus('ok', amb.miembros.length + ' variantes · elige cuál');
+        FamiliaCB.elegir(amb.raiz, {
+          miembros:  amb.miembros,
+          subtitulo: 'El proveedor usa el mismo código físico para varios productos.'
+        }, sel => {
+          if (!sel || sel._nuevo) { _setProdCamStatus('ready'); return; }
+          const inp2 = document.getElementById('inputBuscarProd');
+          const sc   = sel.codigoBarra || sel._scannedCb || cNorm;
+          if (inp2) inp2.value = sc;
+          buscar(sc);
+          _setProdCamStatus('ok', sel.descripcion || sc);
+          _vozAnunciar && _vozAnunciar(sel.descripcion || 'Producto encontrado', { rate: 1.05 });
+          setTimeout(() => cerrarProdCamara(), 700);
+        });
+        return;
+      }
+    }
 
     // 1. Exacto en PRODUCTOS_MASTER
     let found = prods.find(p => String(p.codigoBarra || '').trim().toUpperCase() === cNorm);

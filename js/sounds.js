@@ -206,6 +206,15 @@ const SoundFX = (() => {
       _tone(800,  0.10, 'square', 0.5);
       setTimeout(() => _tone(1200, 0.12, 'square', 0.55), 110);
     },
+    // scanAmbiguo — el código pertenece a una FAMILIA (A/B/C…): hay que ELEGIR.
+    // Timbre propio, imposible de confundir con beep (ok), warn (no existe) ni
+    // scanIncompleto (prefijo): triángulo, dos notas altas iguales y una tercera
+    // MÁS ALTA — suena a "¿cuál?" y no a error. El operador aprende el patrón.
+    scanAmbiguo: () => {
+      _tone(1320, 0.07, 'triangle', 0.6, 0.00);
+      _tone(1320, 0.07, 'triangle', 0.6, 0.11);
+      _tone(1980, 0.16, 'triangle', 0.7, 0.23);
+    },
     // scanNuevo — código no existe (chime curioso 3 notas ascendentes)
     scanNuevo: () => {
       _tone(600, 0.08, 'sine', 0.5);

@@ -9449,6 +9449,11 @@
                     box-sizing:border-box;-webkit-tap-highlight-color:transparent">
     </div>
 
+    <!-- [544] DESAMBIGUACIÓN: si el código escrito/escaneado YA pertenece a una
+         familia (misma raíz + letras), acá se listan las variantes que existen y
+         se ofrece el siguiente sufijo LIBRE. Lo pinta GuiasView._pnRevisarFamilia(). -->
+    <div id="pnFamiliaAviso"></div>
+
     <!-- [v2.13.49] Foto — patrón nativo <label for> en vez de button+click()
          para que el picker abra confiable en todas las tablets/browsers.
          Quitado capture="environment" para permitir elegir cámara O galería
@@ -11075,7 +11080,8 @@
 <!-- F2-F9 — módulos nuevos -->
 <!-- [quirúrgico 2026-07-20] oplog.js ELIMINADO: cola IndexedDB sin NINGÚN productor (superseded por OfflineManager) -->
 <script src="js/voice.js?v=2.13.543"></script>
-<script src="js/photos.js?v=2.13.543"></script>
+<script src="js/photos.js?v=2.13.544"></script>
+<script src="js/familia.js?v=2.13.544"></script>
 <!-- QR generator (offline, MIT · Kazuhiko Arase) — para el link del reporte en la imagen compartida -->
 <script src="js/qrcode-generator.js?v=2.13.543"></script>
 <!-- Hoja de compartir con vista previa (móvil: Web Share; PC: copiar+descargar) -->
