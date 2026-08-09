@@ -553,8 +553,15 @@ function abrirScanner(onResult) {
 function abrirScannerPara(inputId, callback) {
   _scannerCallback = callback || (code => {
     const el = document.getElementById(inputId);
-    if (el) { el.value = code; el.dispatchEvent(new Event('input')); }
     _scannerCallback = null;
+    if (!el) return;
+    const poner = c => { el.value = c; el.dispatchEvent(new Event('input')); };
+    // [544] Si el código leído es la RAÍZ de una familia (mismo código físico para
+    // varias presentaciones), el input NO puede quedarse con el código pelado: el
+    // servidor no sabría cuál es. Se pregunta y se escribe el código CON su letra.
+    // Cubre mermas y cualquier campo futuro que use este helper.
+    if (window.FamiliaCB && FamiliaCB.interceptar(code, {}, sel => { if (sel && !sel._nuevo) poner(String(sel._scannedCb || sel.codigoBarra || code)); })) return;
+    poner(code);
   });
   abrirScanner();
 }
@@ -19986,6 +19993,15 @@ const MermasView = (() => {
 
   async function crear() {
     const codigoProducto = document.getElementById('mermaCodigoProd').value.trim();
+    // [544] Código de FAMILIA tecleado a mano (…799 con 5 variantes): mandarlo así al
+    // servidor descontaría stock del producto equivocado. Se pregunta cuál es, se
+    // escribe el código CON su letra y se reintenta con lo elegido.
+    if (window.FamiliaCB && FamiliaCB.interceptar(codigoProducto, {}, sel => {
+      if (!sel || sel._nuevo) return;
+      const el = document.getElementById('mermaCodigoProd');
+      if (el) el.value = String(sel._scannedCb || sel.codigoBarra || codigoProducto);
+      crear();
+    })) return;
     const responsable = 'ALMACEN';  // [v2] culpa fija: hallazgo interno
     const cantidad       = parseFloat(document.getElementById('mermaCantidad').value);
     const motivo         = document.getElementById('mermaMotivo').value.trim();
