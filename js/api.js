@@ -217,7 +217,10 @@ const API = (() => {
 
   // [PASO 5 · B5] Subir foto a Supabase Storage (bucket wh-fotos) en MÁXIMA calidad. path: <tipo>/<id>/<único>.
   // Devuelve {url} (original, full quality) + {preview} (render on-the-fly liviano para listas) + {path}.
-  async function _subirFotoStorage(tipo, id, base64, mime, nombreSeed) {
+  // [v2.13.540] `bucket` opcional (default 'wh-fotos'). La foto del CATÁLOGO va a 'producto-fotos' — el MISMO
+  // bucket/carpeta que usa MOS — para que la foto se vea igual en MOS/ME/MosGo/WH sin duplicar backends.
+  async function _subirFotoStorage(tipo, id, base64, mime, nombreSeed, bucket) {
+    const bkt = bucket || 'wh-fotos';
     const token = await _mintTokenWH();
     const ext = (mime || '').includes('png') ? 'png' : (mime || '').includes('webp') ? 'webp' : 'jpg';
     // [40x #2] limpiar prefijo data-URI (FileReader.readAsDataURL lo agrega) — sin esto atob() lanza.
@@ -236,8 +239,8 @@ const API = (() => {
     // path devuelve {"statusCode":"409","error":"Duplicate"} → lo tratamos como ÉXITO (la foto ya está ahí).
     const _urlObj = () => ({
       ok: true, path,
-      url:     `${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`,                          // original (ver detalle/zoom)
-      preview: `${_SB_URL}/storage/v1/render/image/public/wh-fotos/${path}?width=800&quality=72` // liviano (listas)
+      url:     `${_SB_URL}/storage/v1/object/public/${bkt}/${path}`,                          // original (ver detalle/zoom)
+      preview: `${_SB_URL}/storage/v1/render/image/public/${bkt}/${path}?width=800&quality=72` // liviano (listas)
     });
     // [v2.13.503] Sube con VERIFICACIÓN. Bug real: un "409 Duplicate" se tomaba como éxito SIN comprobar que el
     // objeto exista → si el 409 era espurio (o el objeto nunca llegó a persistir) se guardaba una URL ROTA
@@ -245,7 +248,7 @@ const API = (() => {
     // si el objeto existe → éxito; si NO existe → se reintenta la subida una vez y, si vuelve a fallar, se LANZA
     // error transitorio (el caller devuelve null → NO se guarda URL fantasma; mejor sin foto que rota).
     for (let intento = 1; intento <= 2; intento++) {
-      const res = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/wh-fotos/${path}`, {
+      const res = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/${bkt}/${path}`, {
         method: 'POST',
         headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': mime || 'image/jpeg' },
         body: bin
@@ -257,7 +260,7 @@ const API = (() => {
       if (bodyCode === 409 || (body && /duplicate/i.test(String(body.error || '')))) {
         // ¿el objeto REALMENTE existe? HEAD al público (bucket público, sin auth). Solo así damos por buena la URL.
         let existe = false;
-        try { const h = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/public/wh-fotos/${path}`, { method: 'HEAD' }, 8000); existe = h.ok; } catch(_) { existe = false; }
+        try { const h = await _whFetchTimeout(`${_SB_URL}/storage/v1/object/public/${bkt}/${path}`, { method: 'HEAD' }, 8000); existe = h.ok; } catch(_) { existe = false; }
         if (existe) return _urlObj();
         if (intento === 1) continue;   // 409 espurio (objeto ausente) → reintentar la subida una vez
         throw new Error('storage 409 sin objeto tras reintento');   // transitorio → el caller no guarda URL rota
@@ -269,6 +272,34 @@ const API = (() => {
       throw err;
     }
     throw new Error('storage upload sin resultado');
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // [v2.13.540] FOTO DEL CATÁLOGO desde WH — MISMO camino que MOS.
+  // ----------------------------------------------------------------------------
+  // 1) binario → bucket `producto-fotos`, carpeta `productos/<idProducto>/` (idéntico a MOS)
+  // 2) `mos.set_foto_producto({idProducto, fotoUrl})` persiste foto_url en mos.productos
+  //    → la foto viaja por el DELTA del catálogo y se ve en MOS/ME/MosGo/WH.
+  // ⚠ REGLA DEL DUEÑO: la foto es INDIVIDUAL por producto → SIEMPRE por idProducto,
+  //   NUNCA por skuBase (skuBase pintaría al canónico y no es lo que se editó).
+  // ⚠ Nombre de archivo ÚNICO por subida (`<id>_<ts>.jpg`): la URL cambia en cada cambio
+  //   de foto → ningún CDN/navegador puede servir la anterior. Sin x-upsert, sin query params.
+  // ⚠ 409 ≠ éxito: `_subirFotoStorage` verifica con HEAD antes de dar la URL por buena.
+  async function _subirFotoProductoWH(idProducto, base64, mime) {
+    const id = String(idProducto || '').trim();
+    if (!id) throw new Error('idProducto requerido');
+    const b64 = String(base64 || '').replace(/^data:[^;]+;base64,/, '');
+    if (b64.length < 500) throw new Error('foto vacía o corrupta');
+    const seed = id.replace(/[^a-zA-Z0-9_-]/g, '_') + '_' + Date.now();
+    const up = await _subirFotoStorage('productos', id, b64, mime || 'image/jpeg', seed, 'producto-fotos');
+    // persistir en mos.productos (perfil 'mos': la RPC vive en el schema mos)
+    const out = await _sbRpcWH('set_foto_producto', { p: { idProducto: id, fotoUrl: up.url } }, 'mos', 15000);
+    if (!out || out.ok === false) {
+      // La foto YA está en Storage pero foto_url no se persistió → error VISIBLE (jamás fallo silencioso).
+      throw new Error((out && out.error) || 'no se pudo guardar la foto del producto');
+    }
+    const d = (out.data && typeof out.data === 'object') ? out.data : {};
+    return { ok: true, url: up.url, preview: up.preview, path: up.path, actualizados: d.actualizados || 0 };
   }
 
   // [PASO 5 · B5] Llama la Edge `ia` (proxy a Claude). body = {messages, system?, model?, max_tokens?}. Devuelve el JSON de Claude.
@@ -2859,6 +2890,8 @@ const API = (() => {
     escposB64:          (str) => _escposB64(str),   // string ESC/POS/ZPL → base64 (= Utilities.base64Encode de GAS)
     // [PASO 5 · B5] Subir foto a Storage (máxima calidad). Devuelve {url, preview, path}. Para subirFotoGuia/Preingreso/etc.
     subirFotoStorage:   (tipo, id, base64, mime) => _subirFotoStorage(tipo, id, base64, mime),
+    // [v2.13.540] foto del catálogo (bucket producto-fotos + mos.set_foto_producto) — se ve en TODAS las apps
+    subirFotoProducto:  (idProducto, base64, mime) => _subirFotoProductoWH(idProducto, base64, mime),
     // [Pregúntale a tu almacén] Acceso directo a la Edge `ia` (proxy a Claude). body={messages, system?, model?, max_tokens?, tools?}.
     // READ-ONLY: el chat de almacén lo usa para el loop tool-use. Devuelve el JSON de Claude tal cual.
     llamarEdgeIA:       (body) => _llamarEdgeIA(body),

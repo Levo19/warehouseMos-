@@ -645,6 +645,136 @@
       font-size:30px;margin-bottom:6px;display:inline-block;
       filter:drop-shadow(0 4px 12px rgba(129,140,248,.4));
     }
+
+    /* ════ [540] FOTO DEL PRODUCTO — card (thumb) + detalle (grande, editable) ════
+       Un solo componente `.wh-foto`: el tile de INICIALES es el fondo y la <img> se
+       monta encima. Si la imagen falla (onerror la quita) el tile queda a la vista,
+       así que nunca hay hueco ni icono roto. */
+    .wh-foto {
+      position:relative;flex-shrink:0;overflow:hidden;
+      background:var(--wf-bg,rgba(99,102,241,.18));
+      border:1px solid rgba(148,163,184,.18);
+      display:flex;align-items:center;justify-content:center;
+    }
+    .wh-foto-ini {
+      font-weight:900;color:var(--wf-fg,#a5b4fc);letter-spacing:.5px;
+      user-select:none;line-height:1;
+    }
+    .wh-foto-img {
+      position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+      background:#0f172a;
+    }
+    .wh-foto-sm { width:48px;height:48px;border-radius:12px; }
+    .wh-foto-sm .wh-foto-ini { font-size:15px; }
+    .wh-foto-lg {
+      width:112px;height:112px;border-radius:20px;margin:0 auto 8px;
+      box-shadow:0 8px 26px rgba(2,6,23,.55);
+      border:1px solid rgba(148,163,184,.28);
+    }
+    .wh-foto-lg .wh-foto-ini { font-size:34px; }
+    @media (min-width:768px) { .wh-foto-lg { width:132px;height:132px; } }
+
+    /* micro-animación al cambiar la foto */
+    .wh-foto-pop { animation:whFotoPop .55s cubic-bezier(.34,1.56,.64,1); }
+    @keyframes whFotoPop {
+      0%   { transform:scale(.72);opacity:.25 }
+      55%  { transform:scale(1.07);opacity:1 }
+      100% { transform:scale(1);opacity:1 }
+    }
+
+    .prod-detail-fotobox { position:relative;text-align:center;margin-bottom:8px;z-index:1; }
+    .prod-detail-foto-btn {
+      display:inline-flex;align-items:center;gap:5px;cursor:pointer;
+      background:rgba(15,23,42,.72);border:1px solid rgba(148,163,184,.34);
+      color:#cbd5e1;font-size:11.5px;font-weight:800;letter-spacing:.02em;
+      border-radius:999px;padding:5px 12px;margin-bottom:2px;
+      transition:background .16s,border-color .16s,color .16s,transform .12s;
+    }
+    .prod-detail-foto-btn:hover  { background:rgba(99,102,241,.24);border-color:rgba(129,140,248,.6);color:#e0e7ff; }
+    .prod-detail-foto-btn:active { transform:scale(.95); }
+
+    /* selector Cámara / Galería (mismo patrón probado en cargadores 2.13.515) */
+    .wh-foto-chooser {
+      position:fixed;inset:0;z-index:2147483000;background:rgba(2,6,23,.74);
+      backdrop-filter:blur(6px);display:flex;align-items:flex-end;justify-content:center;
+      padding:16px;padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));
+      animation:whFotoFade .18s ease;
+    }
+    @media (min-width:768px) { .wh-foto-chooser { align-items:center; } }
+    @keyframes whFotoFade { from{opacity:0} to{opacity:1} }
+    @keyframes whFotoUp   { from{transform:translateY(16px)} to{transform:translateY(0)} }
+    .wh-foto-chooser-card {
+      width:100%;max-width:420px;background:#0f172a;border:1px solid #1e293b;
+      border-radius:18px;padding:14px;box-shadow:0 -12px 44px rgba(0,0,0,.55);
+      animation:whFotoUp .22s cubic-bezier(.34,1.56,.64,1);
+    }
+    .wh-foto-chooser-tit {
+      text-align:center;font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:.6px;
+      text-transform:uppercase;margin-bottom:12px;
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    }
+    .wh-foto-chooser-row { display:flex;gap:10px; }
+    .wh-foto-chooser-op {
+      flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;
+      border-radius:14px;padding:18px 12px;font-size:13px;font-weight:700;cursor:pointer;
+    }
+    .wh-foto-chooser-op.is-cam {
+      background:linear-gradient(135deg,rgba(99,102,241,.16),rgba(99,102,241,.05));
+      border:1px solid rgba(99,102,241,.4);color:#c7d2fe;
+    }
+    .wh-foto-chooser-op.is-gal {
+      background:linear-gradient(135deg,rgba(16,185,129,.16),rgba(16,185,129,.05));
+      border:1px solid rgba(16,185,129,.4);color:#a7f3d0;
+    }
+    .wh-foto-chooser-ico { font-size:30px;line-height:1; }
+    .wh-foto-chooser-cancel {
+      width:100%;margin-top:10px;background:transparent;border:0;color:#64748b;
+      font-size:13px;font-weight:600;padding:10px;cursor:pointer;
+    }
+
+    /* preview antes de confirmar + estados subiendo/error */
+    .wh-foto-prev {
+      position:fixed;inset:0;z-index:2147483001;background:rgba(2,6,23,.80);
+      backdrop-filter:blur(7px);display:flex;align-items:center;justify-content:center;
+      padding:18px;padding-bottom:calc(18px + env(safe-area-inset-bottom,0px));
+      animation:whFotoFade .18s ease;
+    }
+    .wh-foto-prev-card {
+      width:100%;max-width:360px;background:#0f172a;border:1px solid #1e293b;
+      border-radius:20px;padding:16px;box-shadow:0 18px 60px rgba(0,0,0,.6);
+      animation:whFotoUp .22s cubic-bezier(.34,1.56,.64,1);
+    }
+    .wh-foto-prev-tit {
+      text-align:center;font-size:11px;font-weight:800;color:#94a3b8;letter-spacing:.6px;
+      text-transform:uppercase;margin-bottom:12px;
+    }
+    .wh-foto-prev-img {
+      position:relative;width:100%;aspect-ratio:1/1;max-height:44vh;border-radius:16px;
+      overflow:hidden;background:#020617;border:1px solid #1e293b;
+      display:flex;align-items:center;justify-content:center;
+    }
+    .wh-foto-prev-img img { width:100%;height:100%;object-fit:contain;display:block; }
+    .wh-foto-prev-img.is-busy img { opacity:.45;filter:blur(1px); }
+    .wh-foto-prev-ph { font-size:40px;color:#334155; }
+    .wh-foto-prev-msg { text-align:center;font-size:12px;color:#94a3b8;margin-top:10px;line-height:1.45; }
+    .wh-foto-prev-msg.is-err { color:#fca5a5;font-weight:700; }
+    .wh-foto-prev-acts { display:flex;gap:8px;margin-top:12px;flex-wrap:wrap; }
+    .wh-foto-btn {
+      flex:1;min-width:92px;border-radius:12px;padding:11px 10px;font-size:12.5px;
+      font-weight:800;cursor:pointer;border:1px solid transparent;
+      transition:transform .12s,filter .16s;
+    }
+    .wh-foto-btn:active { transform:scale(.96); }
+    .wh-foto-btn.is-ghost { background:transparent;border-color:#334155;color:#94a3b8; }
+    .wh-foto-btn.is-alt   { background:rgba(51,65,85,.55);border-color:#475569;color:#cbd5e1; }
+    .wh-foto-btn.is-go    { background:linear-gradient(135deg,#4f46e5,#6366f1);color:#fff; }
+    .wh-foto-spin {
+      width:24px;height:24px;border-radius:50%;display:inline-block;
+      border:3px solid rgba(148,163,184,.28);border-top-color:#a5b4fc;
+      animation:whFotoSpin .8s linear infinite;
+    }
+    .wh-foto-spin.is-over { position:absolute;top:50%;left:50%;margin:-12px 0 0 -12px; }
+    @keyframes whFotoSpin { to { transform:rotate(360deg) } }
     .prod-detail-title { font-size:1.05em;font-weight:900;color:#f1f5f9;letter-spacing:-.01em;line-height:1.3;margin-bottom:3px; }
     .prod-detail-sku   { font-size:.7em;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;letter-spacing:.04em; }
     .prod-detail-kpi-row {
@@ -8134,7 +8264,9 @@
               style="position:absolute;top:10px;right:10px;width:30px;height:30px;
                      border-radius:9px;border:none;cursor:pointer;color:#94a3b8;font-size:16px;
                      background:rgba(15,23,42,.6);z-index:2">✕</button>
-      <div class="prod-detail-emoji">📦</div>
+      <!-- [540] Foto grande del producto + botón "Editar". La CARD queda limpia
+           (decisión del dueño, 537): editar la foto vive SOLO acá. -->
+      <div class="prod-detail-fotobox" id="prodDetFotoBox"></div>
       <p class="prod-detail-title" id="prodDetTitulo">—</p>
       <p class="prod-detail-sku" id="prodDetSku">—</p>
       <div class="prod-detail-kpi-row">
@@ -10858,26 +10990,26 @@
 <script src="https://levo19.github.io/MOS/assets/adhesivo/preview.js?v=1.3.0"></script>
 <!-- [v2.13.121] Sistema centralizado de seguridad (CDN MOS) -->
 <script src="https://levo19.github.io/MOS/assets/seguridad/seguridad-modal.js?v=3.13.472"></script>
-<script src="js/offline.js?v=2.13.539"></script>
+<script src="js/offline.js?v=2.13.540"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
-<script src="js/impresion-directa.js?v=2.13.539"></script>
-<script src="js/api.js?v=2.13.539"></script>
-<script src="js/scanner.js?v=2.13.539"></script>
-<script src="js/sounds.js?v=2.13.539"></script>
+<script src="js/impresion-directa.js?v=2.13.540"></script>
+<script src="js/api.js?v=2.13.540"></script>
+<script src="js/scanner.js?v=2.13.540"></script>
+<script src="js/sounds.js?v=2.13.540"></script>
 <!-- F2-F9 — módulos nuevos -->
 <!-- [quirúrgico 2026-07-20] oplog.js ELIMINADO: cola IndexedDB sin NINGÚN productor (superseded por OfflineManager) -->
-<script src="js/voice.js?v=2.13.539"></script>
-<script src="js/photos.js?v=2.13.539"></script>
+<script src="js/voice.js?v=2.13.540"></script>
+<script src="js/photos.js?v=2.13.540"></script>
 <!-- QR generator (offline, MIT · Kazuhiko Arase) — para el link del reporte en la imagen compartida -->
-<script src="js/qrcode-generator.js?v=2.13.539"></script>
+<script src="js/qrcode-generator.js?v=2.13.540"></script>
 <!-- Hoja de compartir con vista previa (móvil: Web Share; PC: copiar+descargar) -->
-<script src="js/sharesheet.js?v=2.13.539"></script>
+<script src="js/sharesheet.js?v=2.13.540"></script>
 <!-- Voucher-imagen de guía/preingreso (usa qrcode-generator) -->
-<script src="js/voucher.js?v=2.13.539"></script>
-<script src="js/cargadores.js?v=2.13.539"></script>
-<script src="js/clienteInbox.js?v=2.13.539"></script>
+<script src="js/voucher.js?v=2.13.540"></script>
+<script src="js/cargadores.js?v=2.13.540"></script>
+<script src="js/clienteInbox.js?v=2.13.540"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
-<script src="js/chat-almacen.js?v=2.13.539"></script>
-<script src="js/app.js?v=2.13.539"></script>
+<script src="js/chat-almacen.js?v=2.13.540"></script>
+<script src="js/app.js?v=2.13.540"></script>
 </body>
 </html>

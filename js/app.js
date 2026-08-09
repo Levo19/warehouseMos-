@@ -20191,6 +20191,58 @@ const ProductosView = (() => {
     return out;
   }
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // [v2.13.540] FOTO DEL PRODUCTO — thumbnail en la card + edición en el detalle
+  // ----------------------------------------------------------------------
+  // La foto vive en mos.productos.foto_url y viaja YA en el delta del catálogo
+  // (mos.catalogo_wh_delta devuelve to_jsonb(productos) completo; api.js la mapea
+  // foto_url→fotoUrl). No hubo que tocar la RPC.
+  // Las URLs de Supabase Storage se sirven por el transformador `render/image`:
+  // una card pide 128px (~6-12KB) en vez del original (que hoy promedia 3MB).
+  // ═══════════════════════════════════════════════════════════════════════
+  const _SB_PUBLIC_RE = /^(https?:\/\/[^/]+)\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/;
+
+  function _fotoSrc(url, ancho) {
+    const u = String(url || '').trim();
+    if (!u) return '';
+    const m = u.match(_SB_PUBLIC_RE);
+    if (!m) return u;   // Drive/externa → tal cual (el listener global de photos.js la cubre)
+    return m[1] + '/storage/v1/render/image/public/' + m[2] + '/' + m[3] + '?width=' + ancho + '&quality=70';
+  }
+
+  // Tile de iniciales: determinístico por skuBase → el mismo producto siempre el mismo color.
+  const _FOTO_TINTES = [
+    ['rgba(99,102,241,.18)',  '#a5b4fc'], ['rgba(16,185,129,.18)', '#6ee7b7'],
+    ['rgba(245,158,11,.18)',  '#fcd34d'], ['rgba(14,165,233,.18)', '#7dd3fc'],
+    ['rgba(236,72,153,.18)',  '#f9a8d4'], ['rgba(168,85,247,.18)', '#d8b4fe'],
+    ['rgba(20,184,166,.18)',  '#5eead4'], ['rgba(248,113,113,.18)','#fca5a5']
+  ];
+  function _fotoTinte(key) {
+    const s = String(key || '');
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return _FOTO_TINTES[h % _FOTO_TINTES.length];
+  }
+  function _fotoIniciales(txt) {
+    const partes = String(txt || '?').trim().split(/[\s\-_/.]+/).filter(Boolean);
+    const a = (partes[0] || '?').charAt(0) || '?';
+    const b = (partes[1] || '').charAt(0) || (partes[0] || '').charAt(1) || '';
+    return (a + b).toUpperCase();
+  }
+
+  // clase: 'wh-foto-sm' (card 48px) | 'wh-foto-lg' (detalle 118px)
+  function _fotoTileHTML(base, skuBase, clase, ancho) {
+    const url = String((base && base.fotoUrl) || '').trim();
+    const t   = _fotoTinte(skuBase);
+    const ini = _fotoIniciales((base && base.descripcion) || skuBase);
+    const img = url
+      ? `<img class="wh-foto-img" loading="lazy" decoding="async" src="${escAttr(_fotoSrc(url, ancho))}" alt="" onerror="this.remove()">`
+      : '';
+    return `<div class="wh-foto ${clase}" style="--wf-bg:${t[0]};--wf-fg:${t[1]}">
+      <span class="wh-foto-ini">${escHtml(ini)}</span>${img}
+    </div>`;
+  }
+
   function _cardGrupo(g, cbCount, cbFecha) {
     const codigos = g.children.map(c => c.codigoBarra).filter(Boolean);
     // Rotación: suma de movimientos de todos los barcodes del grupo en los últimos 30 días
@@ -20229,6 +20281,7 @@ const ProductosView = (() => {
     <div class="prod-card ca ${accentCls} ${auditCls} ${dormidoCls} ${vencerCls}" id="grp-${sid}" style="position:relative">
       <!-- Cabecera -->
       <div class="flex items-start gap-2">
+        ${_fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128)}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <p class="font-bold text-sm leading-snug">${descRender}</p>
@@ -21291,6 +21344,7 @@ const ProductosView = (() => {
       g.base.descripcion || '',
       g.base.stockMinimo || 0,
       g.base.stockMaximo || 0,
+      g.base.fotoUrl || '',   // [540] sin esto, cambiar la foto NO repintaba la card en el refresh de fondo
       (p.porRecibir || 0) + '/' + (p.porSalir || 0)
     ].join('·');
   }
@@ -22137,6 +22191,290 @@ const ProductosView = (() => {
   let _detSkuActivo = null;
   let _detTabActivo = 'stock';
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // [v2.13.540] EDITAR LA FOTO DEL PRODUCTO (solo desde el detalle)
+  // ----------------------------------------------------------------------
+  // Flujo: 📷 Editar → selector Cámara/Galería (táctil) o archivos (desktop) →
+  // compresión client-side (≤1200px y <300KB SIEMPRE, canvas) → PREVIEW con
+  // confirmar/cancelar → subida a Storage `producto-fotos` + mos.set_foto_producto
+  // → card y detalle refrescan con micro-animación.
+  // Estados: subiendo (spinner sobre la foto) · error VISIBLE con "Reintentar".
+  // ⚠ La foto es INDIVIDUAL por producto (regla del dueño) → siempre idProducto.
+  // ⚠ Nada de fallo silencioso: 409 de Storage ≠ éxito (api.js verifica con HEAD).
+  // ═══════════════════════════════════════════════════════════════════════
+  const _FOTO_MAX_DIM   = 1200;
+  const _FOTO_MAX_BYTES = 300 * 1024;
+  let _fotoEdit = null;   // { idProducto, skuBase, base64, mime, dataUrl, bytes, w, h }
+
+  function _detGrupoActivo() {
+    return _grupos.find(g => String(g.skuBase) === String(_detSkuActivo)) || null;
+  }
+
+  function _detPintarFoto(grupo) {
+    const box = document.getElementById('prodDetFotoBox');
+    if (!box || !grupo) return;
+    const tieneFoto = !!String(grupo.base.fotoUrl || '').trim();
+    box.innerHTML = `
+      ${_fotoTileHTML(grupo.base, grupo.skuBase, 'wh-foto-lg', 400)}
+      <button class="prod-detail-foto-btn" onclick="ProductosView.detEditarFoto()"
+              title="${tieneFoto ? 'Cambiar la foto del producto' : 'Agregar una foto al producto'}">
+        📷 ${tieneFoto ? 'Editar' : 'Agregar foto'}
+      </button>`;
+    // Ver la foto en grande (lightbox) solo si hay foto real
+    if (tieneFoto) {
+      const img = box.querySelector('.wh-foto-img');
+      if (img) {
+        img.style.cursor = 'zoom-in';
+        img.onclick = () => { try { window.Photos && Photos.lightbox(String(grupo.base.fotoUrl)); } catch (_) {} };
+      }
+    }
+  }
+
+  // ── 1) Elegir la fuente ────────────────────────────────────
+  // En táctil se ofrece Cámara/Galería (mismo patrón que cargadores 2.13.515): con
+  // capture='environment' fijo, el celular abre la cámara DIRECTO y no deja subir una
+  // foto ya existente. En desktop no hay cámara relevante → diálogo de archivos directo.
+  function detEditarFoto() {
+    const g = _detGrupoActivo();
+    if (!g) { toast('Abre un producto primero', 'warn'); return; }
+    if (!g.base.idProducto) { toast('Este producto no tiene idProducto — no se puede guardar la foto', 'warn', 4000); return; }
+    _fotoEdit = { idProducto: String(g.base.idProducto), skuBase: g.skuBase, base64: '', mime: 'image/jpeg', dataUrl: '', bytes: 0 };
+    const esTactil = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    if (!esTactil) { fotoDesde(false); return; }
+    let ov = document.getElementById('whFotoChooser');
+    if (ov) ov.remove();
+    ov = document.createElement('div');
+    ov.id = 'whFotoChooser';
+    ov.className = 'wh-foto-chooser';
+    ov.onclick = (e) => { if (e.target === ov) fotoCerrarChooser(); };
+    ov.innerHTML = `
+      <div class="wh-foto-chooser-card">
+        <div class="wh-foto-chooser-tit">Foto de ${escHtml(g.base.descripcion || g.skuBase)}</div>
+        <div class="wh-foto-chooser-row">
+          <button class="wh-foto-chooser-op is-cam" onclick="ProductosView.fotoDesde(true)">
+            <span class="wh-foto-chooser-ico">📷</span>Cámara</button>
+          <button class="wh-foto-chooser-op is-gal" onclick="ProductosView.fotoDesde(false)">
+            <span class="wh-foto-chooser-ico">🖼</span>Galería</button>
+        </div>
+        <button class="wh-foto-chooser-cancel" onclick="ProductosView.fotoCerrarChooser()">Cancelar</button>
+      </div>`;
+    document.body.appendChild(ov);
+    try { SoundFX.click && SoundFX.click(); } catch (_) {}
+    vibrate(8);
+  }
+
+  function fotoCerrarChooser() {
+    const ov = document.getElementById('whFotoChooser');
+    if (ov) ov.remove();
+  }
+
+  function fotoDesde(usarCamara) {
+    fotoCerrarChooser();
+    if (!_fotoEdit) return;
+    let inp = document.getElementById('whFotoProdInput');
+    if (!inp) {
+      inp = document.createElement('input');
+      inp.type = 'file';
+      inp.id = 'whFotoProdInput';
+      inp.style.display = 'none';
+      document.body.appendChild(inp);
+    }
+    inp.accept = 'image/*';
+    // iOS/Android: capture='environment' abre la cámara trasera. Sin el atributo, el
+    // selector nativo (iOS Fotos / Android archivos / Windows explorador) aparece igual.
+    if (usarCamara) inp.setAttribute('capture', 'environment'); else inp.removeAttribute('capture');
+    inp.value = '';
+    inp.onchange = (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if (f) _fotoArchivoElegido(f);
+    };
+    inp.click();
+  }
+
+  // ── 2) Comprimir SIEMPRE antes de nada ─────────────────────
+  // Sin esto entran JPEG de 6MB de la cámara del celular (ya hay dos así en Storage
+  // matando el arranque). Baja calidad primero y, si aún pesa, baja resolución.
+  async function _comprimirFoto(file, maxDim, maxBytes) {
+    if (!/^image\//.test(file.type || '')) throw new Error('el archivo no es una imagen');
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload  = () => res(String(fr.result || ''));
+      fr.onerror = () => rej(new Error('no se pudo leer el archivo'));
+      fr.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload  = () => res(im);
+      im.onerror = () => rej(new Error('formato de imagen no soportado'));
+      im.src = dataUrl;
+    });
+    const w0 = img.naturalWidth || img.width, h0 = img.naturalHeight || img.height;
+    if (!w0 || !h0) throw new Error('la imagen no tiene dimensiones');
+    const pintar = (dim) => {
+      const esc = Math.min(1, dim / Math.max(w0, h0));
+      const w = Math.max(1, Math.round(w0 * esc));
+      const h = Math.max(1, Math.round(h0 * esc));
+      const cv = document.createElement('canvas');
+      cv.width = w; cv.height = h;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff';          // PNG/WebP con alfa → fondo blanco (no negro)
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      return { cv, w, h };
+    };
+    const pesoDe = (du) => Math.round((du.length - du.indexOf(',') - 1) * 3 / 4);
+    let dim = maxDim, q = 0.82;
+    let { cv, w, h } = pintar(dim);
+    let out = cv.toDataURL('image/jpeg', q);
+    let bytes = pesoDe(out);
+    // 1º bajar calidad, 2º bajar resolución. Máximo 8 vueltas (termina siempre).
+    let vueltas = 0;
+    while (bytes > maxBytes && vueltas < 8) {
+      vueltas++;
+      if (q > 0.5) { q = Math.max(0.5, q - 0.1); }
+      else { dim = Math.max(500, Math.round(dim * 0.8)); const r = pintar(dim); cv = r.cv; w = r.w; h = r.h; q = 0.72; }
+      out = cv.toDataURL('image/jpeg', q);
+      bytes = pesoDe(out);
+    }
+    const b64 = out.split(',')[1] || '';
+    if (b64.length < 500) throw new Error('la foto quedó vacía al comprimir');
+    return { dataUrl: out, base64: b64, bytes, w, h, q };
+  }
+
+  async function _fotoArchivoElegido(file) {
+    if (!_fotoEdit) return;
+    if (file.size > 25 * 1024 * 1024) { toast('Foto muy pesada (máx 25MB) — saca una más liviana', 'warn', 4000); return; }
+    _fotoAbrirPreview('procesando');
+    try {
+      const c = await _comprimirFoto(file, _FOTO_MAX_DIM, _FOTO_MAX_BYTES);
+      _fotoEdit.base64  = c.base64;
+      _fotoEdit.mime    = 'image/jpeg';
+      _fotoEdit.dataUrl = c.dataUrl;
+      _fotoEdit.bytes   = c.bytes;
+      _fotoEdit.w = c.w; _fotoEdit.h = c.h;
+      _fotoAbrirPreview('listo', { origen: file.size });
+    } catch (e) {
+      _fotoAbrirPreview('error', { msg: (e && e.message) || 'no se pudo procesar la foto' });
+    }
+  }
+
+  // ── 3) Preview antes de confirmar ──────────────────────────
+  function _fotoAbrirPreview(estado, extra) {
+    extra = extra || {};
+    let ov = document.getElementById('whFotoPreview');
+    if (!ov) {
+      ov = document.createElement('div');
+      ov.id = 'whFotoPreview';
+      ov.className = 'wh-foto-prev';
+      ov.onclick = (e) => { if (e.target === ov && estado !== 'subiendo') fotoCancelarPreview(); };
+      document.body.appendChild(ov);
+    }
+    const kb = (n) => (n >= 1024 * 1024 ? (n / 1024 / 1024).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
+    const img = _fotoEdit && _fotoEdit.dataUrl
+      ? `<img src="${_fotoEdit.dataUrl}" alt="">`
+      : '<div class="wh-foto-prev-ph">🖼</div>';
+
+    let cuerpo = '';
+    if (estado === 'procesando') {
+      cuerpo = `<div class="wh-foto-prev-img"><div class="wh-foto-prev-ph"><span class="wh-foto-spin"></span></div></div>
+                <p class="wh-foto-prev-msg">Optimizando la foto…</p>`;
+    } else if (estado === 'error') {
+      cuerpo = `<div class="wh-foto-prev-img">${img}</div>
+                <p class="wh-foto-prev-msg is-err">⚠ ${escHtml(extra.msg || 'error')}</p>
+                <div class="wh-foto-prev-acts">
+                  <button class="wh-foto-btn is-ghost" onclick="ProductosView.fotoCancelarPreview()">Cerrar</button>
+                  <button class="wh-foto-btn is-go" onclick="ProductosView.fotoReintentar()">↻ Reintentar</button>
+                </div>`;
+    } else if (estado === 'subiendo') {
+      cuerpo = `<div class="wh-foto-prev-img is-busy">${img}<span class="wh-foto-spin is-over"></span></div>
+                <p class="wh-foto-prev-msg">Subiendo… no cierres la app</p>`;
+    } else {
+      const de = extra.origen ? `${kb(extra.origen)} → ` : '';
+      cuerpo = `<div class="wh-foto-prev-img">${img}</div>
+                <p class="wh-foto-prev-msg">${de}<b>${kb(_fotoEdit.bytes)}</b> · ${_fotoEdit.w}×${_fotoEdit.h}px</p>
+                <div class="wh-foto-prev-acts">
+                  <button class="wh-foto-btn is-ghost" onclick="ProductosView.fotoCancelarPreview()">Cancelar</button>
+                  <button class="wh-foto-btn is-alt" onclick="ProductosView.fotoReintentar()">↻ Otra</button>
+                  <button class="wh-foto-btn is-go" onclick="ProductosView.fotoConfirmar()">✓ Usar esta foto</button>
+                </div>`;
+    }
+    ov.innerHTML = `<div class="wh-foto-prev-card">
+      <div class="wh-foto-prev-tit">Foto del producto</div>${cuerpo}</div>`;
+  }
+
+  function fotoCancelarPreview() {
+    const ov = document.getElementById('whFotoPreview');
+    if (ov) ov.remove();
+    _fotoEdit = null;
+  }
+
+  function fotoReintentar() {
+    const ov = document.getElementById('whFotoPreview');
+    if (ov) ov.remove();
+    if (_fotoEdit) { _fotoEdit.base64 = ''; _fotoEdit.dataUrl = ''; }
+    detEditarFoto();
+  }
+
+  // ── 4) Subir + persistir + refrescar ───────────────────────
+  async function fotoConfirmar() {
+    if (!_fotoEdit || !_fotoEdit.base64) { toast('Elige una foto primero', 'warn'); return; }
+    const { idProducto, skuBase, base64, mime, dataUrl } = _fotoEdit;
+    _fotoAbrirPreview('subiendo');
+    try {
+      const r = await API.subirFotoProducto(idProducto, base64, mime);
+      const url = r && r.url;
+      if (!url) throw new Error('la subida no devolvió URL');
+      // Optimista COHERENTE: cache local + grupo en memoria + DOM. El próximo delta
+      // del catálogo trae exactamente este mismo fotoUrl → converge, no pisa nada.
+      try { OfflineManager.patchProductoCache(idProducto, { fotoUrl: url }); } catch (_) {}
+      const g = _grupos.find(x => String(x.skuBase) === String(skuBase));
+      if (g) {
+        g.base.fotoUrl = url;
+        (g.prods || []).forEach(p => { if (String(p.idProducto) === String(idProducto)) p.fotoUrl = url; });
+      }
+      const ov = document.getElementById('whFotoPreview');
+      if (ov) ov.remove();
+      // Detalle: repintar con la imagen LOCAL (instantánea, sin esperar al CDN)
+      if (g && String(_detSkuActivo) === String(skuBase)) {
+        _detPintarFoto(g);
+        const im = document.querySelector('#prodDetFotoBox .wh-foto-img');
+        if (im) im.src = dataUrl;
+        const bx = document.querySelector('#prodDetFotoBox .wh-foto');
+        if (bx) { bx.classList.add('wh-foto-pop'); setTimeout(() => bx.classList.remove('wh-foto-pop'), 700); }
+      }
+      // Card de la lista: micro-animación al aparecer la foto nueva
+      _fotoRefrescarCard(skuBase, dataUrl);
+      _fotoEdit = null;
+      try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch (_) {}
+      vibrate(18);
+      toast('📷 Foto guardada — ya se ve en todas las apps', 'ok', 2600);
+    } catch (e) {
+      console.error('[foto producto] falló', e);
+      _fotoAbrirPreview('error', { msg: 'No se guardó: ' + ((e && e.message) || e) });
+      try { toast('⚠ La foto NO se guardó — reintenta', 'error', 4500); } catch (_) {}
+    }
+  }
+
+  function _fotoRefrescarCard(skuBase, dataUrlLocal) {
+    const sid  = String(skuBase).replace(/[^a-zA-Z0-9_-]/g, '_');
+    const card = document.getElementById('grp-' + sid);
+    if (!card) return;
+    const g = _grupos.find(x => String(x.skuBase) === String(skuBase));
+    if (!g) return;
+    const viejo = card.querySelector(':scope > .flex > .wh-foto');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = _fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128);
+    const nuevo = tmp.firstElementChild;
+    if (!nuevo) return;
+    const im = nuevo.querySelector('.wh-foto-img');
+    if (im && dataUrlLocal) im.src = dataUrlLocal;   // instantáneo, sin round-trip al CDN
+    nuevo.classList.add('wh-foto-pop');
+    if (viejo) viejo.replaceWith(nuevo); else card.querySelector('.flex').prepend(nuevo);
+    setTimeout(() => nuevo.classList.remove('wh-foto-pop'), 700);
+    // el snapshot ya incluye fotoUrl → el próximo diff no repinta de más
+    try { _cardSnapshots.set(sid, _snapshotGrupo(g)); } catch (_) {}
+  }
+
   function abrirSheetDetalleProducto(skuBase) {
     if (!skuBase) return;
     const grupo = _grupos.find(g => String(g.skuBase) === String(skuBase));
@@ -22148,6 +22486,7 @@ const ProductosView = (() => {
     const skuEl = document.getElementById('prodDetSku');
     if (titEl) titEl.textContent = grupo.base.descripcion || skuBase;
     if (skuEl) skuEl.textContent = `${skuBase} · ${grupo.base.unidad || ''}`;
+    _detPintarFoto(grupo);   // [540] foto grande + botón Editar
     // KPIs
     const codigos = grupo.children.map(c => c.codigoBarra).filter(Boolean);
     const detalles = OfflineManager.getGuiaDetalleCache();
@@ -22604,6 +22943,7 @@ const ProductosView = (() => {
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
            toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,
+           detEditarFoto, fotoDesde, fotoCerrarChooser, fotoConfirmar, fotoCancelarPreview, fotoReintentar,
            detDespacharActual, detContarActual, detImprimirActual, detHistorialActual };
 })();
 

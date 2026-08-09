@@ -1098,6 +1098,15 @@ const OfflineManager = (() => {
     if (idx >= 0) { Object.assign(cache[idx], changes); guardar(KEYS.GUIAS, cache); }
   }
 
+  // ── Patch de un producto del catálogo en caché ──────────────
+  // [v2.13.540] Al cambiar la foto desde WH, el cambio se ve YA (sin esperar el próximo
+  // delta del catálogo). El delta posterior trae el mismo fotoUrl → converge, no pisa nada.
+  function patchProductoCache(idProducto, changes) {
+    const cache = cargar(KEYS.PRODUCTOS) || [];
+    const idx   = cache.findIndex(p => String(p.idProducto) === String(idProducto));
+    if (idx >= 0) { Object.assign(cache[idx], changes); guardar(KEYS.PRODUCTOS, cache); }
+  }
+
   // ── Patch de un preingreso existente en caché ───────────────
   function patchPreingresosCache(id, changes) {
     const cache = cargar(KEYS.PREINGRESOS) || [];
@@ -1160,7 +1169,7 @@ const OfflineManager = (() => {
     getGuiasCache, getGuiaDetalleCache, getPreingresosCache,
     getAjustesCache, getAuditoriasCache,
     actualizarDetallesGuia, addDetalleCache, inyectarPreingreso, patchPreingresosCache, patchStockCache,
-    patchGuiaCache,
+    patchGuiaCache, patchProductoCache,
     getPNCache, setPNCache,
     getEnvasadosCache, guardarEnvasadosCache, inyectarEnvasadoCache, removerEnvasadoCache,
     precargarOperacional, iniciarRefreshOperacional, detenerRefreshOperacional,
