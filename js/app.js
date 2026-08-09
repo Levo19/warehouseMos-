@@ -20231,14 +20231,22 @@ const ProductosView = (() => {
   }
 
   // clase: 'wh-foto-sm' (card 48px) | 'wh-foto-lg' (detalle 118px)
-  function _fotoTileHTML(base, skuBase, clase, ancho) {
+  // [542] `tap` marca el tile como abridor del lightbox. NO se escribe un onclick
+  // inline: el sku puede traer comillas/apóstrofes y romper el atributo. El click lo
+  // atiende UN listener delegado en captura (más abajo) que además hace el
+  // stopPropagation para que la card no abra el detalle al mismo tiempo.
+  function _fotoTileHTML(base, skuBase, clase, ancho, tap) {
     const url = String((base && base.fotoUrl) || '').trim();
     const t   = _fotoTinte(skuBase);
     const ini = _fotoIniciales((base && base.descripcion) || skuBase);
     const img = url
       ? `<img class="wh-foto-img" loading="lazy" decoding="async" src="${escAttr(_fotoSrc(url, ancho))}" alt="" onerror="this.remove()">`
       : '';
-    return `<div class="wh-foto ${clase}" style="--wf-bg:${t[0]};--wf-fg:${t[1]}">
+    const cls  = 'wh-foto ' + clase + (tap ? ' is-tap' : '');
+    const attr = tap
+      ? ` role="button" tabindex="0" data-sku="${escAttr(skuBase)}" title="${url ? 'Ver la foto en grande' : 'Agregar una foto'}"`
+      : '';
+    return `<div class="${cls}"${attr} style="--wf-bg:${t[0]};--wf-fg:${t[1]}">
       <span class="wh-foto-ini">${escHtml(ini)}</span>${img}
     </div>`;
   }
@@ -20281,7 +20289,7 @@ const ProductosView = (() => {
     <div class="prod-card ca ${accentCls} ${auditCls} ${dormidoCls} ${vencerCls}" id="grp-${sid}" style="position:relative">
       <!-- Cabecera -->
       <div class="flex items-start gap-2">
-        ${_fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128)}
+        ${_fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128, true)}
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <p class="font-bold text-sm leading-snug">${descRender}</p>
@@ -22206,36 +22214,251 @@ const ProductosView = (() => {
   const _FOTO_MAX_BYTES = 300 * 1024;
   let _fotoEdit = null;   // { idProducto, skuBase, base64, mime, dataUrl, bytes, w, h }
 
-  function _detGrupoActivo() {
-    return _grupos.find(g => String(g.skuBase) === String(_detSkuActivo)) || null;
-  }
+  // [542] _detGrupoActivo() eliminada: su único llamador (detEditarFoto) ahora resuelve
+  // el grupo por sku explícito en _fotoEditarPara, porque la edición ya no nace sólo
+  // del detalle — también del lightbox abierto desde una card.
 
   function _detPintarFoto(grupo) {
     const box = document.getElementById('prodDetFotoBox');
     if (!box || !grupo) return;
     const tieneFoto = !!String(grupo.base.fotoUrl || '').trim();
     box.innerHTML = `
-      ${_fotoTileHTML(grupo.base, grupo.skuBase, 'wh-foto-lg', 400)}
+      ${_fotoTileHTML(grupo.base, grupo.skuBase, 'wh-foto-lg', 400, true)}
       <button class="prod-detail-foto-btn" onclick="ProductosView.detEditarFoto()"
               title="${tieneFoto ? 'Cambiar la foto del producto' : 'Agregar una foto al producto'}">
         📷 ${tieneFoto ? 'Editar' : 'Agregar foto'}
       </button>`;
-    // Ver la foto en grande (lightbox) solo si hay foto real
-    if (tieneFoto) {
-      const img = box.querySelector('.wh-foto-img');
-      if (img) {
-        img.style.cursor = 'zoom-in';
-        img.onclick = () => { try { window.Photos && Photos.lightbox(String(grupo.base.fotoUrl)); } catch (_) {} };
-      }
-    }
+    // [542] El tap en la foto del detalle ya abre el lightbox por el listener delegado
+    // (tap=true arriba), con foto o con tile de iniciales. No hace falta cablear nada acá.
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // [v2.13.542] LIGHTBOX DE FOTO DEL PRODUCTO — propio, independiente y RÁPIDO
+  // ----------------------------------------------------------------------
+  // Regla del dueño: "que mi operador VEA RÁPIDO". El almacenero abre esto decenas de
+  // veces al día para confirmar el producto al vuelo, así que manda la VELOCIDAD:
+  //   · Se pinta PRIMERO la miniatura que la card ya tiene decodificada (currentSrc,
+  //     0 bytes de red) escalada a pantalla → la foto está visible en el mismo frame.
+  //   · En paralelo precarga render/image?width=800 en un Image() suelto y recién
+  //     cuando ESE terminó de decodificar cambia el src → swap sin parpadeo.
+  //   · Entrada de 120-130ms (fade+scale corto). Cierre inmediato: velo, ✕ o ESC.
+  // Es un visor PROPIO, no Photos.lightbox (ese es el de guías/preingresos, con ruleta
+  // y retries de Drive): acá hace falta el botón de cambiar foto y el tile de iniciales.
+  // ═══════════════════════════════════════════════════════════════════════
+  let _lbSku = null;
+  let _lbPre = null;   // Image() precargando la versión grande (guard anti-carrera)
+  let _lbEsc = null;   // handler ESC vivo
+
+  function _lbEl() { return document.getElementById('whProdLb'); }
+
+  function _lbCerrar(silencioso) {
+    const ov = _lbEl();
+    if (ov) ov.remove();
+    _lbPre = null;
+    if (_lbEsc) { document.removeEventListener('keydown', _lbEsc, true); _lbEsc = null; }
+    if (!silencioso) { _lbSku = null; vibrate(6); }
+  }
+
+  // Abre el visor. `elTile` es el .wh-foto que se tocó (para robar su src ya cacheado).
+  function verFoto(skuBase, elTile) {
+    const g = _grupos.find(x => String(x.skuBase) === String(skuBase));
+    if (!g) return;
+    const t0 = (window.performance && performance.now) ? performance.now() : 0;
+    _lbCerrar(true);
+    _lbSku = String(skuBase);
+
+    const url = String(g.base.fotoUrl || '').trim();
+    // src instantáneo = el que YA está pintado en la card/detalle (caché del navegador).
+    let src0 = '';
+    if (elTile) {
+      const im = elTile.querySelector('.wh-foto-img');
+      if (im) src0 = im.currentSrc || im.src || '';
+    }
+    if (!src0 && url) src0 = _fotoSrc(url, 128);
+
+    const tinte = _fotoTinte(skuBase);
+    const desc  = g.base.descripcion || skuBase;
+    const cuerpo = url
+      ? `<img class="wh-lb-img" id="whProdLbImg" src="${escAttr(src0)}" alt="${escAttr(desc)}" draggable="false">`
+      : `<div class="wh-foto wh-foto-xl" style="--wf-bg:${tinte[0]};--wf-fg:${tinte[1]}">
+           <span class="wh-foto-ini">${escHtml(_fotoIniciales(desc))}</span>
+         </div>`;
+
+    const ov = document.createElement('div');
+    ov.id = 'whProdLb';
+    ov.className = 'wh-lb';
+    ov.innerHTML = `
+      <div class="wh-lb-velo" data-lbclose="1"></div>
+      <button class="wh-lb-x" data-lbclose="1" aria-label="Cerrar" title="Cerrar (ESC)">✕</button>
+      <div class="wh-lb-stage" id="whProdLbStage" data-lbclose="1">${cuerpo}</div>
+      <div class="wh-lb-pie">
+        <p class="wh-lb-tit">${escHtml(desc)}</p>
+        <p class="wh-lb-sub">${escHtml(skuBase)}${g.base.unidad ? ' · ' + escHtml(g.base.unidad) : ''}</p>
+        <div class="wh-lb-acts">
+          <button class="wh-foto-btn is-go" id="whProdLbBtn" onclick="ProductosView.lbCambiarFoto()">
+            📷 ${url ? 'Cambiar foto' : 'Agregar foto'}
+          </button>
+        </div>
+      </div>`;
+    // Cerrar por velo / ✕ / fondo del escenario. El guard `_lbGesto` evita que soltar
+    // un arrastre de zoom sobre el fondo cuente como "tap en el velo" y cierre solo.
+    ov._lbGesto = 0;
+    ov.addEventListener('click', (e) => {
+      if (Date.now() - (ov._lbGesto || 0) < 350) return;
+      const t = e.target;
+      if (t && t.getAttribute && t.getAttribute('data-lbclose')) _lbCerrar();
+    });
+    document.body.appendChild(ov);
+
+    _lbEsc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); _lbCerrar(); } };
+    document.addEventListener('keydown', _lbEsc, true);
+
+    // Swap a la versión grande SOLO cuando ya está decodificada (sin parpadeo).
+    if (url) {
+      const grande = _fotoSrc(url, 800);
+      if (grande && grande !== src0) {
+        const pre = new Image();
+        _lbPre = pre;
+        pre.onload = () => {
+          if (_lbPre !== pre || String(_lbSku) !== String(skuBase)) return;
+          const im = document.getElementById('whProdLbImg');
+          if (im) im.src = grande;   // ya está en caché HTTP → el cambio pinta en el acto
+        };
+        pre.src = grande;
+      }
+      _lbCablearZoom(ov, ov.querySelector('#whProdLbStage'), ov.querySelector('#whProdLbImg'));
+    }
+
+    // Medición real tap→visible (la deja también en window para el harness de pruebas).
+    if (t0) requestAnimationFrame(() => {
+      const ms = Math.round(performance.now() - t0);
+      window.__whLbMs = ms;
+      if (ms > 150) console.warn('[foto lightbox] abrió en ' + ms + 'ms');
+    });
+    try { SoundFX.click && SoundFX.click(); } catch (_) {}
+    vibrate(8);
+  }
+
+  // Zoom barato y propio: rueda en desktop, pinch de 2 dedos en táctil, arrastre para
+  // desplazar y doble tap para alternar 1× ↔ 2.4×. Sin librerías ni dependencias.
+  function _lbCablearZoom(ov, stage, img) {
+    if (!stage || !img) return;
+    let esc = 1, tx = 0, ty = 0, pinch0 = 0, esc0 = 1, arrX = 0, arrY = 0, arrastrando = false;
+    const punt = new Map();
+    const aplicar = () => {
+      img.style.transform = esc === 1 ? '' : `translate(${tx}px,${ty}px) scale(${esc})`;
+      img.classList.toggle('is-zoom', esc > 1);
+    };
+    const setEsc = (n, cx, cy) => {
+      const prev = esc;
+      esc = Math.min(4, Math.max(1, n));
+      if (esc === 1) { tx = 0; ty = 0; }
+      else if (cx != null && prev > 0) {
+        const r = img.getBoundingClientRect();
+        const px = cx - (r.left + r.width / 2);
+        const py = cy - (r.top + r.height / 2);
+        tx -= px * (esc / prev - 1);
+        ty -= py * (esc / prev - 1);
+      }
+      aplicar();
+    };
+    const gesto = () => { ov._lbGesto = Date.now(); };
+    stage.addEventListener('wheel', (e) => {
+      e.preventDefault(); gesto();
+      setEsc(esc * (e.deltaY < 0 ? 1.18 : 1 / 1.18), e.clientX, e.clientY);
+    }, { passive: false });
+    stage.addEventListener('pointerdown', (e) => {
+      punt.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (punt.size === 2) {
+        const p = Array.from(punt.values());
+        pinch0 = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1;
+        esc0 = esc;
+      } else if (punt.size === 1 && esc > 1) {
+        arrastrando = true; arrX = e.clientX - tx; arrY = e.clientY - ty;
+        img.classList.add('is-drag');
+        try { stage.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+    });
+    stage.addEventListener('pointermove', (e) => {
+      if (!punt.has(e.pointerId)) return;
+      punt.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (punt.size === 2) {
+        const p = Array.from(punt.values());
+        const d = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) || 1;
+        gesto();
+        setEsc(esc0 * (d / pinch0), (p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2);
+      } else if (arrastrando) {
+        gesto();
+        tx = e.clientX - arrX; ty = e.clientY - arrY;
+        aplicar();
+      }
+    });
+    let ultimoTap = 0;
+    const soltar = (e) => {
+      const solo = punt.size === 1;
+      punt.delete(e.pointerId);
+      if (punt.size < 2) pinch0 = 0;
+      if (punt.size === 0) { arrastrando = false; img.classList.remove('is-drag'); }
+      // doble tap sobre la IMAGEN (no sobre el velo) alterna el zoom
+      if (solo && e.target === img) {
+        const t = Date.now();
+        if (t - ultimoTap < 300) { gesto(); setEsc(esc > 1 ? 1 : 2.4, e.clientX, e.clientY); ultimoTap = 0; }
+        else ultimoTap = t;
+      }
+    };
+    stage.addEventListener('pointerup', soltar);
+    stage.addEventListener('pointercancel', soltar);
+  }
+
+  // Repinta el lightbox vivo con la foto recién subida (dataUrl local = instantáneo).
+  function _lbAplicarFoto(skuBase, dataUrlLocal) {
+    const ov = _lbEl();
+    if (!ov || String(_lbSku) !== String(skuBase)) return;
+    const stage = ov.querySelector('#whProdLbStage');
+    if (!stage) return;
+    stage.innerHTML = `<img class="wh-lb-img" id="whProdLbImg" src="${escAttr(dataUrlLocal || '')}" alt="" draggable="false">`;
+    const im = stage.querySelector('#whProdLbImg');
+    if (im) { im.classList.add('wh-foto-pop'); setTimeout(() => im.classList.remove('wh-foto-pop'), 700); }
+    _lbCablearZoom(ov, stage, im);
+    const btn = ov.querySelector('#whProdLbBtn');
+    if (btn) btn.textContent = '📷 Cambiar foto';
+  }
+
+  // Listener DELEGADO en captura: un solo handler para todas las miniaturas, vivas o
+  // repintadas. En captura porque hay que cortar la propagación ANTES de que el click
+  // llegue a la .prod-card (que abriría el detalle) — el resto de la card sigue igual.
+  document.addEventListener('click', (e) => {
+    const t = e.target;
+    const tile = t && t.closest ? t.closest('.wh-foto.is-tap') : null;
+    if (!tile) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const sku = tile.getAttribute('data-sku') || '';
+    if (sku) verFoto(sku, tile);
+  }, true);
+  // Teclado: Enter/Espacio sobre la miniatura enfocada abre igual que el tap.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const t = e.target;
+    const tile = t && t.closest ? t.closest('.wh-foto.is-tap') : null;
+    if (!tile) return;
+    e.preventDefault(); e.stopPropagation();
+    const sku = tile.getAttribute('data-sku') || '';
+    if (sku) verFoto(sku, tile);
+  }, true);
 
   // ── 1) Elegir la fuente ────────────────────────────────────
   // En táctil se ofrece Cámara/Galería (mismo patrón que cargadores 2.13.515): con
   // capture='environment' fijo, el celular abre la cámara DIRECTO y no deja subir una
   // foto ya existente. En desktop no hay cámara relevante → diálogo de archivos directo.
-  function detEditarFoto() {
-    const g = _detGrupoActivo();
+  // [542] Un solo punto de entrada al pipeline de subida, con el sku EXPLÍCITO: ahora se
+  // dispara desde el detalle (📷 Editar) y también desde el lightbox (📷 Cambiar foto),
+  // que puede estar abierto sobre una card sin haber abierto el detalle nunca.
+  function detEditarFoto() { _fotoEditarPara(_detSkuActivo); }
+  function lbCambiarFoto()  { _fotoEditarPara(_lbSku); }
+
+  function _fotoEditarPara(skuBase) {
+    const g = skuBase ? _grupos.find(x => String(x.skuBase) === String(skuBase)) : null;
     if (!g) { toast('Abre un producto primero', 'warn'); return; }
     if (!g.base.idProducto) { toast('Este producto no tiene idProducto — no se puede guardar la foto', 'warn', 4000); return; }
     _fotoEdit = { idProducto: String(g.base.idProducto), skuBase: g.skuBase, base64: '', mime: 'image/jpeg', dataUrl: '', bytes: 0 };
@@ -22251,7 +22474,7 @@ const ProductosView = (() => {
       <div class="wh-foto-chooser-card">
         <div class="wh-foto-chooser-tit">Foto de ${escHtml(g.base.descripcion || g.skuBase)}</div>
         <div class="wh-foto-chooser-row">
-          <button class="wh-foto-chooser-op is-cam" onclick="ProductosView.fotoDesde(true)">
+          <button class="wh-foto-chooser-op is-cam" id="whFotoChooserCam" onclick="ProductosView.fotoDesde(true)">
             <span class="wh-foto-chooser-ico">📷</span>Cámara</button>
           <button class="wh-foto-chooser-op is-gal" onclick="ProductosView.fotoDesde(false)">
             <span class="wh-foto-chooser-ico">🖼</span>Galería</button>
@@ -22411,8 +22634,11 @@ const ProductosView = (() => {
   function fotoReintentar() {
     const ov = document.getElementById('whFotoPreview');
     if (ov) ov.remove();
+    // [542] Reintentar sobre el MISMO sku que se estaba editando. Antes reabría por
+    // _detSkuActivo, que desde el lightbox de una card puede ser otro producto (o nulo).
+    const sku = (_fotoEdit && _fotoEdit.skuBase) || _detSkuActivo;
     if (_fotoEdit) { _fotoEdit.base64 = ''; _fotoEdit.dataUrl = ''; }
-    detEditarFoto();
+    _fotoEditarPara(sku);
   }
 
   // ── 4) Subir + persistir + refrescar ───────────────────────
@@ -22441,6 +22667,8 @@ const ProductosView = (() => {
       }
       // Card de la lista: micro-animación al aparecer la foto nueva
       _fotoRefrescarCard(skuBase, dataUrl);
+      // [542] Lightbox vivo: si sigue abierto sobre este producto, cambia en el acto
+      _lbAplicarFoto(skuBase, dataUrl);
       _fotoEdit = null;
       try { SoundFX.beepDouble && SoundFX.beepDouble(); } catch (_) {}
       vibrate(18);
@@ -22460,7 +22688,7 @@ const ProductosView = (() => {
     if (!g) return;
     const viejo = card.querySelector(':scope > .flex > .wh-foto');
     const tmp = document.createElement('div');
-    tmp.innerHTML = _fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128);
+    tmp.innerHTML = _fotoTileHTML(g.base, g.skuBase, 'wh-foto-sm', 128, true);
     const nuevo = tmp.firstElementChild;
     if (!nuevo) return;
     const im = nuevo.querySelector('.wh-foto-img');
@@ -22941,6 +23169,7 @@ const ProductosView = (() => {
            toggleFiltro, toggleVozBusqueda,
            abrirSheetDetalleProducto, detSetTab,
            detEditarFoto, fotoDesde, fotoCerrarChooser, fotoConfirmar, fotoCancelarPreview, fotoReintentar,
+           verFoto, lbCambiarFoto, cerrarFoto: _lbCerrar,
            detDespacharActual, detContarActual, detImprimirActual, detHistorialActual };
 })();
 

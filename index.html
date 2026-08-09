@@ -682,6 +682,73 @@
       100% { transform:scale(1);opacity:1 }
     }
 
+    /* ════ [542] LIGHTBOX DE FOTO — tocar la miniatura la abre EN GRANDE ════
+       Objetivo del dueño: "que mi operador VEA RÁPIDO". Por eso:
+        · la entrada es corta (120ms fade+scale), VELOCIDAD antes que espectáculo;
+        · se pinta primero la miniatura ya decodificada (caché) y se cambia a la
+          versión de 800px sin parpadeo cuando termina de cargar;
+        · funciona igual con foto o con el tile de iniciales (ahí ofrece Agregar).
+       Independiente de Photos.lightbox (ese es el visor de guías/preingresos). */
+    .wh-foto.is-tap { cursor:zoom-in;transition:transform .12s ease; }
+    .wh-foto.is-tap:active { transform:scale(.93); }
+    .wh-foto.is-tap:focus-visible { outline:2px solid #818cf8;outline-offset:2px; }
+
+    .wh-lb {
+      position:fixed;inset:0;z-index:2147482000;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;
+      padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom,0px));
+      padding-top:calc(14px + env(safe-area-inset-top,0px));
+      touch-action:none;
+    }
+    .wh-lb-velo {
+      position:absolute;inset:0;background:rgba(2,6,23,.88);
+      -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+      animation:whLbVelo .12s ease-out;
+    }
+    @keyframes whLbVelo { from { opacity:0 } to { opacity:1 } }
+    .wh-lb-stage {
+      position:relative;z-index:1;flex:1;width:100%;min-height:0;
+      display:flex;align-items:center;justify-content:center;overflow:hidden;
+      animation:whLbIn .13s cubic-bezier(.22,1,.36,1);
+    }
+    @keyframes whLbIn { from { opacity:0;transform:scale(.90) } to { opacity:1;transform:scale(1) } }
+    .wh-lb-img {
+      max-width:100%;max-height:100%;object-fit:contain;display:block;
+      border-radius:14px;box-shadow:0 24px 70px rgba(2,6,23,.7);
+      transform-origin:center center;will-change:transform;
+      -webkit-user-select:none;user-select:none;-webkit-user-drag:none;
+    }
+    .wh-lb-img.is-zoom { cursor:grab; }
+    .wh-lb-img.is-drag { cursor:grabbing; }
+    /* tile de iniciales en grande (producto sin foto) */
+    .wh-foto-xl {
+      width:min(62vw,300px);height:min(62vw,300px);border-radius:28px;
+      box-shadow:0 24px 70px rgba(2,6,23,.7);border:1px solid rgba(148,163,184,.28);
+    }
+    .wh-foto-xl .wh-foto-ini { font-size:min(19vw,86px); }
+    .wh-lb-x {
+      position:absolute;top:calc(10px + env(safe-area-inset-top,0px));right:12px;z-index:3;
+      width:40px;height:40px;border-radius:50%;font-size:19px;line-height:1;
+      background:rgba(15,23,42,.82);border:1px solid rgba(148,163,184,.3);color:#e2e8f0;
+      display:flex;align-items:center;justify-content:center;cursor:pointer;
+    }
+    .wh-lb-x:active { transform:scale(.92); }
+    .wh-lb-pie {
+      position:relative;z-index:2;width:100%;max-width:520px;flex-shrink:0;
+      text-align:center;margin-top:12px;
+      animation:whLbPie .16s ease-out both;
+    }
+    @keyframes whLbPie { from { opacity:0;transform:translateY(8px) } to { opacity:1;transform:none } }
+    .wh-lb-tit { font-size:14px;font-weight:800;color:#e2e8f0;line-height:1.3; }
+    .wh-lb-sub { font-size:11px;color:#94a3b8;font-family:ui-monospace,monospace;margin-top:2px; }
+    .wh-lb-acts { display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap; }
+    @media (min-width:768px) { .wh-foto-xl { width:300px;height:300px; } .wh-lb-tit { font-size:15px; } }
+    @media (prefers-reduced-motion: reduce) {
+      .wh-lb-velo, .wh-lb-stage, .wh-lb-pie { animation:none; }
+      .wh-foto.is-tap { transition:none; }
+      .wh-foto-pop { animation:none; }
+    }
+
     .prod-detail-fotobox { position:relative;text-align:center;margin-bottom:8px;z-index:1; }
     .prod-detail-foto-btn {
       display:inline-flex;align-items:center;gap:5px;cursor:pointer;
