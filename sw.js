@@ -34,7 +34,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   });
 });
 
-const VERSION = '2.13.543';
+const VERSION = '2.13.544';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -53,6 +53,7 @@ const LOCAL_ASSETS = [
   // [534] faltaban: sin ellos, un arranque sin red dejaba `Photos`/`Voice` inexistentes
   // → los onclick de foto (lightbox) lanzaban ReferenceError y el handler moría.
   './js/photos.js',
+  './js/familia.js',
   './js/voice.js',
   './cargadores.html',
   './js/qrcode-generator.js',
