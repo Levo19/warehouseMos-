@@ -8256,6 +8256,10 @@ const GuiasView = (() => {
     // [v2.13.188] Foco automático: si falta código, al input de código; si ya
     // viene escaneado, a la descripción (campo obligatorio).
     setTimeout(() => {
+      // [544] Si el código ya pertenece a una familia, el aviso manda: NO se enfoca
+      // (enfocar scrollea el modal y esconde justo lo que hay que leer).
+      const fam = document.getElementById('pnFamiliaAviso');
+      if (fam && fam.innerHTML.trim()) { const c = fam.closest('.modal-box'); if (c) c.scrollTop = 0; return; }
       try { (hasCode ? (obs || codInput) : (codInput || obs))?.focus(); } catch(_){}
     }, 120);
   }
@@ -8289,9 +8293,18 @@ const GuiasView = (() => {
     let html = '';
     try { html = FamiliaCB.avisoPNHtml(_pnCodigo); } catch (e) { console.warn('[544] avisoPNHtml', e); }
     if (box.dataset.famCod === normCb(_pnCodigo) && box.innerHTML === html) return;
+    const eraNuevo = !box.innerHTML.trim() && !!html;
     box.dataset.famCod = normCb(_pnCodigo);
     box.innerHTML = html;
     if (!html) return;
+    // El aviso APARECE arriba y empuja el formulario: si el modal quedó scrolleado
+    // (abrirModalPN enfoca la descripción), el operador no lo vería. Se sube al tope
+    // y se le quita el foco al campo para que primero DECIDA si es uno de los que hay.
+    if (eraNuevo) {
+      const caja = box.closest('.modal-box');
+      if (caja) caja.scrollTop = 0;
+      try { document.activeElement?.blur(); } catch (_) {}
+    }
     try { SoundFX.scanAmbiguo ? SoundFX.scanAmbiguo() : SoundFX.scanIncompleto(); } catch (_) {}
     vibrate([20, 45, 20]);
   }
