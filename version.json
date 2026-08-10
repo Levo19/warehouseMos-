@@ -1,1 +1,1 @@
-{"version":"2.13.546","build":"2.13.546 ROLLBACK de la resiliencia 2.13.545 (mismo cambio que colgo MOS en verificando dispositivo). Vuelve al estado estable 2.13.544."}
+{"version":"2.13.547","build":"2.13.547 arranque: se acabo el doble overlay de Verificando dispositivo (el modulo se cargaba antes del body y se pintaban dos: el estado resolvia a los 7s pero el texto visible recien a los 15s) + plazo maximo de pantalla y gracia hasta el fin del dia"}
