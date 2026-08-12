@@ -15,26 +15,21 @@ firebase.initializeApp({
 });
 
 const _fcmMsg = firebase.messaging();
+// ⚠️ [740/755] NO llamar showNotification aquí para los avisos VISIBLES: llegaban DOS veces.
+// El SDK de Firebase, al recibir un push cuyo payload trae `notification`, PRIMERO la muestra
+// él mismo y RECIÉN DESPUÉS invoca este handler (firebase-messaging-compat 10.12.0). Mostrarla
+// aquí otra vez la duplicaba. Este handler queda SOLO para los comandos data-only
+// (audio_start, audio_stop, gps_locate), que el SDK no muestra: se reenvían al cliente.
 _fcmMsg.onBackgroundMessage(payload => {
-  // Comandos data-only (audio_start, audio_stop, gps_locate) → reenviar al cliente sin notificación
   if (payload.data && payload.data.action) {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       clients.forEach(c => c.postMessage({ type: 'mos_command', data: payload.data }));
     });
-    return;
   }
-  const title = payload.notification?.title || 'warehouseMos';
-  const body  = payload.notification?.body  || '';
-  self.registration.showNotification(title, {
-    body,
-    icon:    'https://levo19.github.io/MOS/icons/icon-192.png',
-    badge:   'https://levo19.github.io/MOS/icons/icon-192.png',
-    tag:     'wh-push',
-    vibrate: [200, 100, 200]
-  });
+  // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.554';
+const VERSION = '2.13.555';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
