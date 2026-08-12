@@ -665,6 +665,13 @@ const API = (() => {
       return o;
     });
   }
+  // [551] items de pickup: tolera string (shape-hoja normal) u objeto ya parseado (fila
+  // mutada por un lector viejo / jsonb directo). JAMÁS lanza — lista vacía como piso.
+  function _pickupItemsParse(v) {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') { try { return JSON.parse(v || '[]') || []; } catch (_) { return []; } }
+    return [];
+  }
   // Lee una tabla wh.* completa directo (RPC genérica leer_tabla_rls, 1 request, sin límite) → shape-hoja.
   // [perf v2.13.242] Dedup + micro-cache 4s: si getDashboard y descargarOperacional
   // piden 'guias' en la misma ráfaga, se hace UNA sola leer_tabla_rls compartida.
@@ -1163,7 +1170,11 @@ const API = (() => {
         if (filtroEstado === 'TODOS') return true;
         const estados = String(filtroEstado).split(',').map(s => s.trim());
         return estados.indexOf(r.estado) >= 0;
-      }).map(r => { try { r.items = JSON.parse(r.items || '[]'); } catch (e) { r.items = []; } return r; });
+      // [551] COPIA + parse tolerante — antes `r.items = JSON.parse(r.items)` MUTABA la fila
+      // dentro del micro-caché de 4s: el segundo lector en la ráfaga recibía items ya-array,
+      // JSON.parse(array) reventaba y el catch escribía [] sobre el objeto COMPARTIDO que el
+      // feed estaba mostrando → tarjetas "0 productos · 0 uds" hasta el próximo poll.
+      }).map(r => ({ ...r, items: _pickupItemsParse(r.items) }));
       rows.sort((a, b) => (_diaLimaMs(b.fechaCreado) || 0) - (_diaLimaMs(a.fechaCreado) || 0));  // recientes primero
       return { ok: true, data: rows };
     }
@@ -1171,8 +1182,7 @@ const API = (() => {
       const rows = await _sbLeerTablaWH('pickups');
       const p = rows.find(r => String(r.idPickup) === String(params.idPickup));
       if (!p) return { ok: false, error: 'Pickup no encontrado' };
-      try { p.items = JSON.parse(p.items || '[]'); } catch (_) { p.items = []; }
-      return { ok: true, data: p };
+      return { ok: true, data: { ...p, items: _pickupItemsParse(p.items) } };   // [551] sin mutar el caché
     }
     if (action === 'getListasSombra') {
       // Listas DISPONIBLE/EN_USO + completadas de HOY (TZ Lima). Réplica fiel de getListasSombra (GAS).
