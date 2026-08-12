@@ -14661,21 +14661,29 @@ const DespachoView = (() => {
   //   · del OPERADOR → lo que lleva escaneado y aún no envió (despachado + su hora).
   function _fusionarPickupConServidor(srv) {
     const locales = new Map((_pickupActivo.items || []).map(it => [_pkKey(it), it]));
+    let cambio = false;                            // [752] ¿cambió la DEUDA de verdad?
     const fusion = _normalizarItemsPickup(srv.items || []).map(base => {
       const mio = locales.get(_pkKey(base));
-      if (!mio) return base;                       // producto nuevo: entra en cero
+      if (!mio) { cambio = true; return base; }    // producto nuevo: entra en cero
+      if ((parseFloat(mio.solicitado) || 0) !== (parseFloat(base.solicitado) || 0)) cambio = true;
       return {
         ...base,                                   // el servidor manda en la deuda
         despachado: parseFloat(mio.despachado) || 0,   // mi avance se respeta
+        // [752] el AVANCE es 100% local: el baseline y el mapa por-código JAMÁS se
+        // re-siembran del servidor (el eco del propio autosave ponía baseline = mi
+        // avance → todas las barras a cero, y borraba el mapa → la guía salía vacía).
+        despachadoBaseline:  (mio.despachadoBaseline != null) ? (parseFloat(mio.despachadoBaseline) || 0) : (parseFloat(base.despachadoBaseline) || 0),
+        despachadoPorCodigo: (mio.despachadoPorCodigo && Object.keys(mio.despachadoPorCodigo).length) ? mio.despachadoPorCodigo : (base.despachadoPorCodigo || {}),
         tsDespacho: mio.tsDespacho || base.tsDespacho
       };
     });
     const antes = (_pickupActivo.items || []).length;
+    if (fusion.length !== antes) cambio = true;    // se saldó/salió un producto
     const nuevos = fusion.filter(b => !locales.has(_pkKey(b))).length;
     _pickupActivo.items = fusion;
     _pickupActivo.rev   = srv.rev;
     _savePickup();
-    return { nuevos, antes, ahora: fusion.length };
+    return { nuevos, antes, ahora: fusion.length, cambio };
   }
 
   function _reconciliarPickupActivo(lista) {
@@ -14695,12 +14703,18 @@ const DespachoView = (() => {
         _renderPickupActivoBanner();
         _renderPickupChecklistInline();
         _updateGenerarBtn();
-        try { SoundFX.beepDouble(); } catch (_) {}
-        vibrate([25, 40, 25]);
-        toast(d.nuevos > 0
-          ? `🔄 Esta lista fue actualizada · entraron ${d.nuevos} producto${d.nuevos === 1 ? '' : 's'} · tu avance se mantiene`
-          : '🔄 Esta lista fue actualizada · tu avance se mantiene', 'info', 6000);
-        _vozAnunciar('La lista fue actualizada', { rate: 1.1 });
+        // [752] la voz/aviso SOLO cuando la deuda cambió de verdad (entró un pickup al
+        // acumulado, cambió un solicitado o se saldó un producto). Un rev más alto sin
+        // cambio visible (el eco del propio autosave, una consolidación sin novedades)
+        // se sella en silencio — antes cada escaneo hacía sonar "la lista fue actualizada".
+        if (d.cambio) {
+          try { SoundFX.beepDouble(); } catch (_) {}
+          vibrate([25, 40, 25]);
+          toast(d.nuevos > 0
+            ? `🔄 Esta lista fue actualizada · entraron ${d.nuevos} producto${d.nuevos === 1 ? '' : 's'} · tu avance se mantiene`
+            : '🔄 Esta lista fue actualizada · tu avance se mantiene', 'info', 6000);
+          _vozAnunciar('La lista fue actualizada', { rate: 1.1 });
+        }
       } else if (srvRev && srvRev.rev != null && _pickupActivo.rev == null) {
         _pickupActivo.rev = srvRev.rev;               // primera vez: solo sellar
         _savePickup();
@@ -15130,6 +15144,12 @@ const DespachoView = (() => {
           if (lblEl) lblEl.textContent = `⚠ atiende ${r.atendidoPor}`;
           toast(`🔒 ${r.atendidoPor} también está atendiendo este pickup. Tu progreso puede no guardarse.`, 'warn', 6000);
           return;
+        }
+        // [752] sellar el rev que produjo MI autosave: sin esto, el bump de rev viaja
+        // por realtime y el propio celular lo toma como cambio ajeno (voz + barras a cero).
+        if (r && r.ok !== false && r.rev != null && _pickupActivo) {
+          _pickupActivo.rev = Math.max(Number(_pickupActivo.rev) || 0, Number(r.rev) || 0);
+          _savePickup();
         }
         _autosaveLastTs = Date.now();
         if (lblEl) lblEl.textContent = 'guardado';
