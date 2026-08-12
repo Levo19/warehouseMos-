@@ -14641,10 +14641,71 @@ const DespachoView = (() => {
   // Regla: si el servidor dice que el pickup fue ATENDIDO después del instante en que
   // yo lo tomé, ese despacho ya salió → se suelta solo. Un acumulado con deuda vuelve
   // a la lista de pendientes para tomarlo de nuevo limpio, con su saldo real.
+  // [747] Clave de producto — misma regla que usa el backend (wh._pickup_item_key).
+  function _pkKey(it) {
+    const sku = String((it && it.skuBase) || '').trim().toUpperCase();
+    if (!sku || it?.sinSku) return 'SINSKU::' + String((it && it.nombre) || '').trim().toUpperCase();
+    return sku;
+  }
+
+  // [747] La lista abierta se ajusta con lo que dice el SERVIDOR, sin perder el avance.
+  //
+  // Regla del dueño: "si de golpe el servidor envía nueva data, simplemente avisa al que
+  // está con el pickup abierto y puede seguir atendiendo. Si debía 20 nakamitos y escaneó
+  // 20, y en el nuevo pickup le piden 5, su barra aparece que faltan 5: visualmente se
+  // ajusta la deuda". Y ante un choque, manda el servidor.
+  //
+  // Qué se toma de cada lado:
+  //   · del SERVIDOR → lo que se DEBE de cada producto (solicitado), los productos que
+  //     entraron y la desaparición de los que ya se saldaron;
+  //   · del OPERADOR → lo que lleva escaneado y aún no envió (despachado + su hora).
+  function _fusionarPickupConServidor(srv) {
+    const locales = new Map((_pickupActivo.items || []).map(it => [_pkKey(it), it]));
+    const fusion = _normalizarItemsPickup(srv.items || []).map(base => {
+      const mio = locales.get(_pkKey(base));
+      if (!mio) return base;                       // producto nuevo: entra en cero
+      return {
+        ...base,                                   // el servidor manda en la deuda
+        despachado: parseFloat(mio.despachado) || 0,   // mi avance se respeta
+        tsDespacho: mio.tsDespacho || base.tsDespacho
+      };
+    });
+    const antes = (_pickupActivo.items || []).length;
+    const nuevos = fusion.filter(b => !locales.has(_pkKey(b))).length;
+    _pickupActivo.items = fusion;
+    _pickupActivo.rev   = srv.rev;
+    _savePickup();
+    return { nuevos, antes, ahora: fusion.length };
+  }
+
   function _reconciliarPickupActivo(lista) {
     if (!_pickupActivo || _pickupClosing) return;          // no tocar un cierre en curso
     const id = String(_pickupActivo.idPickup || '');
     if (!id) return;
+
+    // [747] ¿El servidor está más adelantado que mi copia? Antes esto se adivinaba por
+    // fechas, y fallaba justo en el caso peligroso: el acumulado NUNCA desaparece de la
+    // lista (es cuenta corriente), así que un despacho ya facturado revivía en el celular
+    // y podía repetirse en la guía. Ahora se compara la versión de la lista.
+    try {
+      const srvRev = (lista || []).find(p => String(p.idPickup) === id);
+      if (srvRev && srvRev.rev != null && _pickupActivo.rev != null &&
+          Number(srvRev.rev) > Number(_pickupActivo.rev)) {
+        const d = _fusionarPickupConServidor(srvRev);
+        _renderPickupActivoBanner();
+        _renderPickupChecklistInline();
+        _updateGenerarBtn();
+        try { SoundFX.beepDouble(); } catch (_) {}
+        vibrate([25, 40, 25]);
+        toast(d.nuevos > 0
+          ? `🔄 Esta lista fue actualizada · entraron ${d.nuevos} producto${d.nuevos === 1 ? '' : 's'} · tu avance se mantiene`
+          : '🔄 Esta lista fue actualizada · tu avance se mantiene', 'info', 6000);
+        _vozAnunciar('La lista fue actualizada', { rate: 1.1 });
+      } else if (srvRev && srvRev.rev != null && _pickupActivo.rev == null) {
+        _pickupActivo.rev = srvRev.rev;               // primera vez: solo sellar
+        _savePickup();
+      }
+    } catch (_) {}
     // Referencia temporal: cuándo lo tomé o, si viene de una versión anterior, cuándo
     // fue su última actividad local (último escaneo guardado).
     const tsTomado = Number(_pickupActivo.tsTomado || _pickupActivo.tsGuardado || 0);
@@ -15892,12 +15953,17 @@ const DespachoView = (() => {
           // servidor ya lo cerró (ver _reconciliarPickupActivo): si el pickup fue
           // atendido DESPUÉS de este instante, el despacho ya salió y hay que soltarlo.
           tsTomado: Date.now(),
+          // [747] versión de la lista con la que arranco: si el servidor avanza,
+          // la comparación en _reconciliarPickupActivo lo detecta y ajusta la deuda.
+          rev: p.rev,
           items: _normalizarItemsPickup(p.items)
         };
       } else {
         // Conservar progreso local, solo refrescar metadata
         _pickupActivo.estado      = 'EN_PROCESO';
         _pickupActivo.atendidoPor = p.atendidoPor || usuario;
+        // [747] al re-jalar, la deuda del servidor manda (puede haber cambiado mientras)
+        try { if (p.rev != null && Number(p.rev) > Number(_pickupActivo.rev || 0)) _fusionarPickupConServidor(p); } catch (_) {}
       }
       _savePickup();
       // Quitar de la lista de pendientes (ya está activo, no debe duplicarse)
