@@ -6046,7 +6046,7 @@ const GuiasView = (() => {
         <span onclick="event.stopPropagation()">${lockBtn}</span>
       </div>
       <p class="font-black text-lg text-white leading-tight" onclick="GuiasView.deselectItem()">${escHtml(provNombreHdr)}</p>
-      <p class="text-xs text-slate-500 mt-0.5" onclick="GuiasView.deselectItem()">${fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
+      <p class="text-xs text-slate-500 mt-0.5" onclick="GuiasView.deselectItem()">${String(g.fecha || '').length > 10 ? fmtFechaHora(g.fecha) : fmtFecha(g.fecha)} · ${g.usuario || '—'}</p>
       ${esDiaAnterior && abierta ? `<p class="text-xs text-amber-400 mt-1 font-semibold">⚠ Guía de un día anterior aún abierta</p>` : ''}
       <div class="flex gap-2 mt-2 mb-1">
         <button onclick="GuiasView.toggleFotoPanel()" id="btnHdrFoto"
@@ -6195,7 +6195,7 @@ const GuiasView = (() => {
               <div class="flex items-start gap-3 mb-2.5">
                 <div class="flex-1">
                   <p class="text-base font-bold text-white leading-snug">${escHtml(d.descripcionProducto || d.codigoProducto)}</p>
-                  <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}</p>
+                  <p class="text-xs text-slate-500 font-mono mt-0.5">${escHtml(d.codigoProducto)}${fmtHora(d.createdAt) ? `<span style="font-family:inherit" title="Hora en que se registró esta línea en la guía"> · 🕐 ${fmtHora(d.createdAt)}</span>` : ''}</p>
                 </div>
                 <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
                   <button onclick="GuiasView.inlineQtyDelta(-1)"
