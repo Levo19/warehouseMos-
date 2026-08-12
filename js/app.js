@@ -16031,7 +16031,8 @@ const DespachoView = (() => {
     if (!_pickupActivo) return;
     const idP = _pickupActivo.idPickup;
     const zona = _pickupActivo.idZona || '';
-    if (!await _whConfirm('¿Soltar este pickup?\n\nLo que ya escaneaste queda guardado.\nOtro operador (o vos desde otro equipo) podrá continuarlo.', { warning: true, titulo: 'Soltar pickup', okText: 'Soltar' })) return;
+    // [753] soltar = la separación nunca existió: la lista vuelve a su deuda completa.
+    if (!await _whConfirm('¿Soltar este pickup?\n\nLo separado vuelve a CERO: la lista queda como si no se hubiera tocado (regresa los productos al andamio).\nOtro operador podrá jalarla limpia, con la deuda completa.', { warning: true, titulo: 'Soltar pickup', okText: 'Soltar' })) return;
 
     try { SoundFX.warn(); } catch(_){}
     vibrate([30, 20, 60]);
