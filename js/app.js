@@ -12492,8 +12492,16 @@ const DespachoView = (() => {
     const cont = document.getElementById('despPickupChecklistInline');
     if (!cont) return;
     if (!_pickupActivo) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
-    const items = _pickupActivo.items || [];
-    if (!items.length) { cont.style.display = 'none'; return; }
+    const itemsTodos = _pickupActivo.items || [];
+    // [754] separar constancias "no se entiende" (sinSku / sin skuBase): NO son despachables,
+    // se muestran en su propia sección ámbar abajo (antes solo existía en el sheet legacy
+    // y en inline caían como cards fantasma "0/0 · ✓ listo").
+    const constancias = itemsTodos.filter(it => it && (it.sinSku === true || !String(it.skuBase || '').trim()));
+    const items = itemsTodos.filter(it => !(it && (it.sinSku === true || !String(it.skuBase || '').trim())));
+    // [754] extras del carrito (escaneados fuera de la lista) — tarjetas de PRIMERA CLASE
+    // arriba del checklist, con focus y +/− igual que un item normal.
+    const extras = _cart.filter(c => c._extraPickup);
+    if (!items.length && !extras.length && !constancias.length) { cont.style.display = 'none'; return; }
 
     // Stock cache indexado por TODOS los códigos posibles del row
     // (codigoProducto + idProducto). Así un row guardado por EAN físico
@@ -12539,7 +12547,61 @@ const DespachoView = (() => {
     });
 
     cont.style.display = 'block';
-    cont.innerHTML = sorted.map(it => {
+    // [754] tarjetas EXTRA (naranja) — mismo lenguaje visual que un item del pickup:
+    // focus (is-activo) + botones +/− en unidades, input decimal en granel, ✕ quitar.
+    const extrasHtml = extras.map(c => {
+      const key = 'EXTRA::' + String(c.codigoBarra);
+      const esActivoX = String(_pickupItemActivo || '') === key;
+      const esKgX = !!c._granel;
+      const qtyX = parseFloat(c.cantidad) || 0;
+      const uX = String(c.unidad || 'kg').toLowerCase();
+      const cbAttr = escAttr(String(c.codigoBarra));
+      let ctrlsX = '';
+      if (esActivoX) {
+        ctrlsX = esKgX
+          ? `<div class="pkck-ctrls">
+               <span class="pkck-ctrl-lbl">⚖ Peso:</span>
+               <input type="number" inputmode="decimal" step="0.001" min="0" class="pkck-ctrl-granel" value="${fmt(qtyX,3)}"
+                      onchange="DespachoView.pkckExtraSet('${cbAttr}', this.value)"
+                      onkeydown="if(event.key==='Enter'){this.blur();}">
+               <span class="pkck-ctrl-unit">${escHtml(uX)}</span>
+             </div>`
+          : `<div class="pkck-ctrls">
+               <button class="pkck-ctrl-btn pkck-ctrl-menos" onclick="DespachoView.pkckExtraMenos('${cbAttr}')">−</button>
+               <span class="pkck-ctrl-val">${qtyX}</span>
+               <button class="pkck-ctrl-btn pkck-ctrl-mas" onclick="DespachoView.pkckExtraMas('${cbAttr}')">+</button>
+             </div>`;
+      }
+      return `
+        <div class="pkck-card is-progreso ${esActivoX ? 'is-activo' : ''}" data-sku="${escAttr(key)}" style="border-color:rgba(245,158,11,.5)">
+          <div class="pkck-row">
+            <div class="pkck-icon">🟠</div>
+            <div class="flex-1 min-w-0">
+              <p class="pkck-name truncate">${escHtml(c.descripcion)} <span style="font-size:.6em;color:#fbbf24;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.4);padding:1px 5px;border-radius:6px;font-weight:800;vertical-align:middle;white-space:nowrap">EXTRA</span></p>
+              <p class="pkck-meta truncate">${escHtml(String(c.codigoBarra))} · fuera de la lista · va en la misma guía</p>
+            </div>
+            <div class="pkck-qty-wrap" style="display:flex;align-items:center;gap:8px">
+              <p><span class="pkck-qty">${esKgX ? fmt(qtyX,3) : qtyX}</span><span class="pkck-qty-sol"> ${esKgX ? escHtml(uX) : 'uds'}</span></p>
+              <button onclick="DespachoView.pkckExtraQuitar('${cbAttr}')" title="Quitar extra"
+                      style="padding:4px 9px;border-radius:7px;border:none;cursor:pointer;background:rgba(239,68,68,.18);color:#fca5a5;font-size:.72em;font-weight:800">✕</button>
+            </div>
+          </div>
+          ${ctrlsX}
+        </div>`;
+    }).join('');
+    // [754] sección "❓ No se entiende" — constancia del pedido que la IA no identificó.
+    // Solo lectura: no suma deuda ni KPIs, pero el operador la VE (puede resolverla como extra).
+    const sinIdHtml = !constancias.length ? '' : `
+      <div style="margin-top:8px;padding:8px 10px;background:rgba(251,191,36,.07);border:1px dashed rgba(251,191,36,.35);border-radius:12px">
+        <p style="font-size:11px;font-weight:800;color:#f59e0b;margin-bottom:4px">❓ No se entiende
+          <span style="font-weight:600;color:#94a3b8;font-size:9.5px">· pedido que la IA no identificó · solo constancia (no suma deuda) · si lo ubicas, escanéalo y saldrá como EXTRA</span></p>
+        ${constancias.map(s => `
+          <div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-top:1px solid rgba(148,163,184,.1)">
+            <span style="font-size:11.5px;color:#e2e8f0;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.nombre || '—')}</span>
+            <span style="font-size:10.5px;color:#fbbf24;font-weight:700;white-space:nowrap">pidió ${fmtQty(parseFloat(s.constancia) || parseFloat(s.solicitado) || 0)}${fmtHora(s.tsSolicitud) ? ' · 🕐 ' + fmtHora(s.tsSolicitud) : ''}</span>
+          </div>`).join('')}
+      </div>`;
+    cont.innerHTML = extrasHtml + sorted.map(it => {
       const sol  = parseFloat(it.solicitado) || 0;
       const desp = parseFloat(it.despachado) || 0;
       // [fix UX operador] medir contra lo que falta HOY: objetivo = solicitado − baseline (lo que ya venía
@@ -12634,7 +12696,7 @@ const DespachoView = (() => {
           ${ctrlsHtml}
           <div class="pkck-check-overlay">✓</div>
         </div>`;
-    }).join('');
+    }).join('') + sinIdHtml;
   }
 
   // Render sección extras (items escaneados fuera del pickup activo)
@@ -12658,6 +12720,67 @@ const DespachoView = (() => {
                        background:rgba(239,68,68,.18);color:#fca5a5;font-size:.7em">✕</button>
       </div>
     `).join('');
+  }
+
+  // ── [754] EXTRAS como items de primera clase en el checklist ─────────────
+  // Un extra vive en _cart (flag _extraPickup) pero se maneja desde el checklist
+  // con la misma UX que un item de la lista: focus + botones +/− (unidades) o
+  // input de peso (granel). Clave de focus: 'EXTRA::<codigoBarra>'.
+  function _pkckExtraRow(cb) {
+    return _cart.find(c => c._extraPickup && String(c.codigoBarra) === String(cb));
+  }
+  function _pkckExtraRerender() {
+    _saveCart();
+    _renderPickupChecklistInline();
+    _renderExtrasSection();
+    _updateGenerarBtn();
+    badgeUpdate();
+  }
+  function _pkckFocusExtra(cb) {
+    _pickupItemActivo = 'EXTRA::' + String(cb);
+    _renderPickupChecklistInline();
+    _renderExtrasSection();
+    _updateGenerarBtn();
+    // Llevar la tarjeta activa a la vista — el operador no debe bajar toda la lista.
+    setTimeout(() => { try {
+      const el = document.querySelector('#despPickupChecklistInline .pkck-card.is-activo');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch(_){} }, 90);
+  }
+  function pkckExtraMas(cb) {
+    const r = _pkckExtraRow(cb); if (!r) return;
+    r.cantidad = (parseFloat(r.cantidad) || 0) + 1;
+    try { SoundFX.beep(); } catch(_){} vibrate(10);
+    _pickupItemActivo = 'EXTRA::' + String(cb);
+    _pkckExtraRerender();
+  }
+  function pkckExtraMenos(cb) {
+    const r = _pkckExtraRow(cb); if (!r) return;
+    const n = (parseFloat(r.cantidad) || 0) - 1;
+    if (n <= 0) {
+      _cart = _cart.filter(c => c !== r);
+      if (String(_pickupItemActivo || '') === 'EXTRA::' + String(cb)) _pickupItemActivo = null;
+      toast('Extra quitado', 'info', 1500);
+    } else { r.cantidad = n; }
+    vibrate(10);
+    _pkckExtraRerender();
+  }
+  function pkckExtraSet(cb, val) {
+    const r = _pkckExtraRow(cb); if (!r) return;
+    const n = Math.max(0, parseFloat(String(val).replace(',', '.')) || 0);
+    if (n <= 0) {
+      _cart = _cart.filter(c => c !== r);
+      if (String(_pickupItemActivo || '') === 'EXTRA::' + String(cb)) _pickupItemActivo = null;
+      toast('Extra quitado', 'info', 1500);
+    } else { r.cantidad = Math.round(n * 1000) / 1000; }
+    _pkckExtraRerender();
+  }
+  function pkckExtraQuitar(cb) {
+    const r = _pkckExtraRow(cb); if (!r) return;
+    _cart = _cart.filter(c => c !== r);
+    if (String(_pickupItemActivo || '') === 'EXTRA::' + String(cb)) _pickupItemActivo = null;
+    toast('Extra quitado', 'info', 1500);
+    _pkckExtraRerender();
   }
 
   // Actualiza el botón único "GENERAR GUÍA" según contexto
@@ -13201,6 +13324,7 @@ const DespachoView = (() => {
     const idx = _cart.findIndex(c => c.codigoBarra === cb);
     if (idx >= 0) {
       _cart[idx].cantidad = (parseFloat(_cart[idx].cantidad) || 0) + 1;
+      if (_pickupActivo) _cart[idx]._extraPickup = true;   // [754] re-escaneado ya con pickup → es extra
       SoundFX.beepDouble(); vibrate(12);
     } else {
       _cart.push({ codigoBarra: cb, descripcion: desc, unidad: prod.unidad || '', cantidad: 1, stockDisp: stockD, _extraPickup: !!_pickupActivo, ts: new Date().toISOString() });   // [608] hora del escaneo
@@ -13213,6 +13337,9 @@ const DespachoView = (() => {
     _despLastHistory.push(cb);
     _saveCart();
     _renderDespList();
+    // [754] extra dentro de pickup → tarjeta de primera clase en el checklist,
+    // con focus inmediato y +/− (sin tener que bajar toda la lista).
+    if (_pickupActivo) _pkckFocusExtra(cb);
     // Pulse visual en la fila recién escaneada
     requestAnimationFrame(() => {
       const row = document.querySelector(`[data-desp-cb="${CSS.escape(cb)}"]`);
@@ -15286,6 +15413,7 @@ const DespachoView = (() => {
       vibrate(15);
       if (_pickupActivo) {
         toast(`🟠 ${fmt(qty,3)} ${u} de ${prod.descripcion || cb} · fuera de pickup, irá como extra`, 'warn', 3000);
+        _pkckFocusExtra(cb);   // [754] tarjeta EXTRA con focus en el checklist
       } else {
         toast(`✓ ${fmt(qty,3)} ${u} de ${prod.descripcion || cb}`, 'ok', 2000);
       }
@@ -17347,6 +17475,7 @@ const DespachoView = (() => {
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
            soltarPickupActivo, eliminarPickupAdmin, imprimirAcumuladoManual, pickupSetSearch, pickupSetSort,
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
+           pkckExtraMas, pkckExtraMenos, pkckExtraSet, pkckExtraQuitar,
            hayDespachoActivo, procesarScanGlobal,
            flotMas, flotMenos, flotSetGranel,
            renderFlotante: _renderDespFlotante,
