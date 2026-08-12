@@ -12488,9 +12488,50 @@ const DespachoView = (() => {
 
   // ── Render del checklist inline (en view-despacho, debajo de cám/scan) ──
   // Reemplaza el sheet modal — todo va en una sola vista.
+  // [755] Reactivar la tarjeta de un item YA marcado (✓): click derecho en desktop o
+  // mantener apretado (500ms) en móvil reabre el mini-control de cantidad (+/− o peso),
+  // que permite bajar hasta 0 — como si no se hubiera escaneado nada.
+  function _pkckActivarCard(key) {
+    key = String(key || '');
+    if (!key) return;
+    if (key.indexOf('EXTRA::') !== 0 && !_pkckItemPorSku(key)) return;
+    _pickupItemActivo = key;
+    vibrate(20);
+    _renderPickupChecklistInline();
+    _renderExtrasSection();
+    setTimeout(() => { try {
+      const el = document.querySelector('#despPickupChecklistInline .pkck-card.is-activo');
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch(_){} }, 90);
+  }
+  function _pkckWirePressHandlers(cont) {
+    if (cont._pkckPressWired) return;
+    cont._pkckPressWired = true;
+    const _keyDe = (e) => {
+      const card = e.target && e.target.closest ? e.target.closest('.pkck-card') : null;
+      return card ? (card.getAttribute('data-sku') || '') : '';
+    };
+    cont.addEventListener('contextmenu', (e) => {
+      const k = _keyDe(e); if (!k) return;
+      e.preventDefault();
+      _pkckActivarCard(k);
+    });
+    let _lpTimer = null;
+    const _lpCancel = () => { if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; } };
+    cont.addEventListener('touchstart', (e) => {
+      const k = _keyDe(e); if (!k) return;
+      _lpCancel();
+      _lpTimer = setTimeout(() => { _lpTimer = null; _pkckActivarCard(k); }, 500);
+    }, { passive: true });
+    cont.addEventListener('touchmove', _lpCancel, { passive: true });
+    cont.addEventListener('touchend', _lpCancel, { passive: true });
+    cont.addEventListener('touchcancel', _lpCancel, { passive: true });
+  }
+
   function _renderPickupChecklistInline() {
     const cont = document.getElementById('despPickupChecklistInline');
     if (!cont) return;
+    _pkckWirePressHandlers(cont);
     if (!_pickupActivo) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
     const itemsTodos = _pickupActivo.items || [];
     // [754] separar constancias "no se entiende" (sinSku / sin skuBase): NO son despachables,
@@ -13517,8 +13558,12 @@ const DespachoView = (() => {
       // escribe "'". Usar e.code para emitir SIEMPRE "-" (layout-independiente). Sin esto, este
       // camino DESCARTABA el "'" → el guion se perdía (WH-9S7XBPX → WH9S7XBPX, tampoco matchea).
       const ch = (e.code === 'Minus' || e.code === 'NumpadSubtract') ? '-' : e.key;
-      // Solo aceptar caracteres alfanuméricos y guiones (típicos de barcodes EAN/Code)
-      if (!/^[a-zA-Z0-9\-_.]$/.test(ch)) return;
+      // [755] Cualquier carácter IMPRIMIBLE entra al buffer — la whitelist estrecha
+      // [a-zA-Z0-9-_.] se comía símbolos reales de códigos ('>' en 7733855306889>A,
+      // '/', '+', '%', espacio en Code39) → el código llegaba mutilado y el match
+      // estricto decía "producto no existe en catálogo". El modal de guías y ME
+      // siempre aceptaron todo imprimible; este era el único camino que recortaba.
+      if (e.key.length !== 1 || !/^[\x20-\x7E]$/.test(ch)) return;
 
       // El discriminador por TIMING (gap>80ms = tipeo humano → reiniciar) SOLO tiene sentido SOBRE el peso
       // granel, donde el humano tipea dígitos lentamente. En el modal de scan puro (foco readonly/body) NO hay
