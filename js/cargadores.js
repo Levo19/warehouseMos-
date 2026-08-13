@@ -568,7 +568,13 @@
         if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
       } else {
         if (loadEl) loadEl.remove();
-        if (typeof toast === 'function') toast('No se subió la foto: ' + ((res && res.error) || '?'), 'warn');
+        // [763] mensajes humanos: FALTAN_DATOS ya casi no puede pasar (el server resuelve el
+        // cargador solo); si la carga de verdad ya no existe, decirlo con la acción a tomar.
+        const _err = String((res && res.error) || '?');
+        const _msg = _err === 'CARGA_NO_ENCONTRADA' ? 'Esa carga ya no existe — desliza para refrescar y reintenta'
+                   : _err === 'FALTAN_DATOS' ? 'La vista quedó desfasada — refresca y reintenta'
+                   : 'No se subió la foto: ' + _err;
+        if (typeof toast === 'function') toast(_msg, 'warn', 4500);
       }
     } catch(e){ if (loadEl) loadEl.remove(); if (typeof toast === 'function') toast('No se subió la foto — reintenta', 'warn'); }
     finally { if (add) add.classList.remove('busy'); if (localUrl) { try { URL.revokeObjectURL(localUrl); } catch(_){} } }
