@@ -12711,7 +12711,8 @@ const DespachoView = (() => {
           <div class="pkck-ctrls">
             <button class="pkck-ctrl-btn pkck-ctrl-menos" ${hechoHoy <= 0 ? 'disabled' : ''}
                     onclick="DespachoView.pkckMenos('${skuAttr}')">−</button>
-            <span class="pkck-ctrl-val">${hechoHoy}</span>
+            <span class="pkck-ctrl-val" title="Toca para escribir la cantidad" style="cursor:pointer;text-decoration:underline dotted rgba(148,163,184,.5);text-underline-offset:3px"
+                  onclick="DespachoView.pkckEditQty('${skuAttr}', this)">${hechoHoy}</span>
             <button class="pkck-ctrl-btn pkck-ctrl-mas"
                     onclick="DespachoView.pkckMas('${skuAttr}')">+</button>
           </div>`;
@@ -15317,6 +15318,66 @@ const DespachoView = (() => {
     _pickupItemActivo = item.skuBase; // sigue activo aunque quede en 0
     _afterPickupChange(item, prevDesp, parseFloat(item.solicitado) || 0);
   }
+  // [contador editable] Toca el número del stepper → input entero inline (escribir 100
+  // en vez de apretar + cien veces). Solo NIU (granel ya tiene su input decimal). El
+  // número solo se vuelve editable AL CLICK para no estorbar el flujo de escaneo.
+  function _pkckEditQty(skuBase, spanEl) {
+    const item = _pkckItemPorSku(skuBase);
+    if (!item || !spanEl || spanEl.querySelector('input')) return;
+    const base  = parseFloat(item.despachadoBaseline) || 0;
+    const hecho = Math.max(0, (parseFloat(item.despachado) || 0) - base);
+    spanEl.innerHTML = `<input type="number" inputmode="numeric" step="1" min="0" value="${hecho}"
+      style="width:64px;text-align:center;font-weight:800;font-size:1em;background:#0f172a;color:#e2e8f0;border:1.5px solid rgba(56,189,248,.6);border-radius:8px;padding:2px 4px;outline:none">`;
+    const inp = spanEl.querySelector('input');
+    let listo = false;
+    const commit = () => {
+      if (listo) return; listo = true;
+      _pkckSetUnidades(skuBase, inp.value);
+    };
+    const cancelar = () => {
+      if (listo) return; listo = true;
+      _renderPickupChecklistInSheet(); _renderPickupChecklistInline();
+    };
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); inp.blur(); }
+      if (e.key === 'Escape') { cancelar(); }
+    });
+    inp.addEventListener('blur', commit);
+    setTimeout(() => { try { inp.focus(); inp.select(); } catch(_){} }, 30);
+  }
+  async function _pkckSetUnidades(skuBase, valorRaw) {
+    const restaurar = () => { _renderPickupChecklistInSheet(); _renderPickupChecklistInline(); };
+    const item = _pkckItemPorSku(skuBase);
+    if (!item) return;
+    const qty = Math.floor(parseFloat(String(valorRaw).replace(',', '.')));   // NIU = SIEMPRE entero
+    if (isNaN(qty) || qty < 0) { restaurar(); return; }
+    const sol      = parseFloat(item.solicitado) || 0;
+    const base     = parseFloat(item.despachadoBaseline) || 0;
+    const objetivo = Math.max(0, sol - base);
+    const prevDesp = parseFloat(item.despachado) || 0;
+    const nuevoDesp = base + qty;
+    if (nuevoDesp === prevDesp) { restaurar(); return; }
+    // [misma red que el granel 623] >10× lo pedido = casi seguro un dedazo → se rechaza.
+    if (objetivo > 0 && qty > objetivo * 10) {
+      toast(`⛔ ${qty} es más de 10× lo pedido (${fmtQty(objetivo)}). Revisa la cantidad.`, 'danger', 6000);
+      try { vibrate([80, 60, 80]); } catch (_) {}
+      restaurar(); return;
+    }
+    if (objetivo > 0 && qty > objetivo) {
+      const okSobre = await _whConfirm(
+        `Estás poniendo ${qty} y se pidieron ${fmtQty(objetivo)} de "${item.nombre || skuBase}".\n\n¿Despachar de más?`,
+        { warning: true, titulo: 'Más de lo pedido' });
+      if (!okSobre) { restaurar(); return; }
+    }
+    const cb = _pkckCodigoDe(item);
+    item._ultimoCb = cb;
+    item.despachado = nuevoDesp; item.tsDespacho = new Date().toISOString();
+    item.despachadoPorCodigo = item.despachadoPorCodigo || {};
+    const nvCod = (parseFloat(item.despachadoPorCodigo[cb]) || 0) + (nuevoDesp - prevDesp);
+    if (nvCod > 0) item.despachadoPorCodigo[cb] = nvCod; else delete item.despachadoPorCodigo[cb];
+    _pickupItemActivo = item.skuBase;
+    _afterPickupChange(item, prevDesp, sol);
+  }
   async function _pkckSetGranel(skuBase, valorRaw) {
     const item = _pkckItemPorSku(skuBase);
     if (!item) return;
@@ -15684,7 +15745,8 @@ const DespachoView = (() => {
           <div class="pkck-ctrls">
             <button class="pkck-ctrl-btn pkck-ctrl-menos" ${hechoHoy <= 0 ? 'disabled' : ''}
                     onclick="DespachoView.pkckMenos('${skuAttr}')">−</button>
-            <span class="pkck-ctrl-val">${hechoHoy}</span>
+            <span class="pkck-ctrl-val" title="Toca para escribir la cantidad" style="cursor:pointer;text-decoration:underline dotted rgba(148,163,184,.5);text-underline-offset:3px"
+                  onclick="DespachoView.pkckEditQty('${skuAttr}', this)">${hechoHoy}</span>
             <button class="pkck-ctrl-btn pkck-ctrl-mas"
                     onclick="DespachoView.pkckMas('${skuAttr}')">+</button>
           </div>`;
@@ -17590,6 +17652,7 @@ const DespachoView = (() => {
            empezarPickup, cerrarDespachoPickup, abrirSheetPickupActivo,
            soltarPickupActivo, eliminarPickupAdmin, imprimirAcumuladoManual, pickupSetSearch, pickupSetSort,
            pkckMas: _pkckMas, pkckMenos: _pkckMenos, pkckSetGranel: _pkckSetGranel,
+           pkckEditQty: _pkckEditQty,
            pkckExtraMas, pkckExtraMenos, pkckExtraSet, pkckExtraQuitar,
            hayDespachoActivo, procesarScanGlobal,
            flotMas, flotMenos, flotSetGranel,
