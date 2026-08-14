@@ -14835,10 +14835,25 @@ const DespachoView = (() => {
   function _fusionarPickupConServidor(srv) {
     const locales = new Map((_pickupActivo.items || []).map(it => [_pkKey(it), it]));
     let cambio = false;                            // [752] ¿cambió la DEUDA de verdad?
+    // [791 · anti-zombi local] El servidor sella marcas_reset_ts al EMITIR la guía (764) y
+    // pone las marcas en cero. Una copia local con avance ANTERIOR al sello (escaneado antes
+    // de la emisión) NO debe revivirlo: ese avance YA salió en una guía. Solo se respeta el
+    // avance con tsDespacho POSTERIOR al sello (trabajo nuevo tras la emisión).
+    const resetMs = srv.marcasResetTs ? (new Date(srv.marcasResetTs).getTime() || 0) : 0;
+    const _avanceVigente = (mio) => {
+      if (!resetMs) return true;                                        // sin sello: comportamiento de siempre
+      const tsMio = mio.tsDespacho ? (new Date(mio.tsDespacho).getTime() || 0) : 0;
+      return tsMio > resetMs;                                           // solo sobrevive lo escaneado DESPUÉS de emitir
+    };
     const fusion = _normalizarItemsPickup(srv.items || []).map(base => {
       const mio = locales.get(_pkKey(base));
       if (!mio) { cambio = true; return base; }    // producto nuevo: entra en cero
       if ((parseFloat(mio.solicitado) || 0) !== (parseFloat(base.solicitado) || 0)) cambio = true;
+      if ((parseFloat(mio.despachado) || 0) > 0 && !_avanceVigente(mio)) {
+        // avance zombi (anterior a la emisión) → manda el servidor (viene en cero/limpio)
+        cambio = true;
+        return base;
+      }
       return {
         ...base,                                   // el servidor manda en la deuda
         despachado: parseFloat(mio.despachado) || 0,   // mi avance se respeta
