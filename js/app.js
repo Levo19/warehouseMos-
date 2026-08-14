@@ -15142,13 +15142,18 @@ const DespachoView = (() => {
     const justCompletado = prevDesp < sol && item.despachado >= sol;
     const sobreDespacho  = item.despachado > sol;
 
-    // Re-render checklist inline + banner activo + botón generar
-    _renderPickupChecklistInSheet(item.skuBase);
-    _renderPickupChecklistInline();
-    _renderPickupActivoBanner();
-    _renderExtrasSection();
-    _updateGenerarBtn();
-    badgeUpdate();
+    // [FAST-TICK anti-lag] Escaneo repetido sobre card existente → actualización quirúrgica
+    // + render completo debounced. Transición (completado/sobre) → render completo inmediato.
+    if (!justCompletado && !sobreDespacho && _pkckFastTick(item)) {
+      _pkckScheduleRenderFull();
+    } else {
+      _renderPickupChecklistInSheet(item.skuBase);
+      _renderPickupChecklistInline();
+      _renderPickupActivoBanner();
+      _renderExtrasSection();
+      _updateGenerarBtn();
+      badgeUpdate();
+    }
 
     // Sonidos + animaciones según estado
     if (justCompletado) {
@@ -15188,14 +15193,79 @@ const DespachoView = (() => {
         || (item.codigosOriginales && item.codigosOriginales[0])
         || item.skuBase;
   }
+  // [FAST-TICK anti-lag] Un +1/−1 sobre una card EXISTENTE ya no reconstruye el checklist
+  // entero (×2 superficies + mapa de stock + banner + extras: a 20+ unidades el sheet se
+  // arrastraba). Actualiza SOLO los nodos vivos de esa card (contador, x/y, faltan, barra,
+  // botón −) y difiere el re-render completo (badges de stock, íconos, shimmer, banner)
+  // a un debounce de 500ms tras el último toque. Transiciones estructurales (completado,
+  // sobre-despacho, granel, card inexistente) siguen por el render completo de siempre.
+  let _pkckRenderDebTimer = null;
+  function _pkckScheduleRenderFull() {
+    if (_pkckRenderDebTimer) clearTimeout(_pkckRenderDebTimer);
+    _pkckRenderDebTimer = setTimeout(() => {
+      _pkckRenderDebTimer = null;
+      try {
+        _renderPickupChecklistInSheet();
+        _renderPickupChecklistInline();
+        _renderPickupActivoBanner();
+        _renderExtrasSection();
+        _updateGenerarBtn();
+        badgeUpdate();
+      } catch(_){}
+    }, 500);
+  }
+  function _pkckFastTick(item) {
+    const sol  = parseFloat(item.solicitado) || 0;
+    const desp = parseFloat(item.despachado) || 0;
+    const base = parseFloat(item.despachadoBaseline) || 0;
+    const objetivo  = Math.max(0, sol - base);
+    const hechoHoy  = Math.max(0, desp - base);
+    const faltanHoy = Math.max(0, objetivo - hechoHoy);
+    const pct = objetivo > 0 ? Math.min(100, Math.round((hechoHoy / objetivo) * 100)) : (sol > 0 && desp >= sol ? 100 : 0);
+    const skuEsc = (window.CSS && CSS.escape ? CSS.escape(String(item.skuBase)) : String(item.skuBase));
+    let tocado = false, sinActivo = false;
+    ['despPickupChecklistInline', 'despPickChecklist'].forEach(idCont => {
+      const cont = document.getElementById(idCont);
+      const card = cont && cont.querySelector('.pkck-card[data-sku="' + skuEsc + '"]');
+      if (!card) return;
+      // Si la card visible aún NO es la activa (primer escaneo de este producto), los
+      // controles +/− no existen en el DOM → forzar render completo para que aparezcan YA.
+      if (!card.classList.contains('is-activo')) { sinActivo = true; return; }
+      tocado = true;
+      const val = card.querySelector('.pkck-ctrl-val');
+      if (val) val.textContent = hechoHoy;
+      const qty = card.querySelector('.pkck-qty');
+      if (qty) qty.textContent = hechoHoy;
+      const faltanP = card.querySelector('.pkck-qty-wrap p:last-child');
+      if (faltanP) {
+        faltanP.textContent = faltanHoy > 0 ? 'faltan ' + faltanHoy : '✓ listo';
+        faltanP.classList.toggle('text-amber-300', faltanHoy > 0);
+        faltanP.classList.toggle('text-emerald-400', faltanHoy <= 0);
+      }
+      const bar = card.querySelector('.pkck-bar-fill');
+      if (bar) bar.style.width = pct + '%';
+      const menos = card.querySelector('.pkck-ctrl-menos');
+      if (menos) menos.disabled = hechoHoy <= 0;
+      card.classList.toggle('is-progreso', hechoHoy > 0 && faltanHoy > 0);
+    });
+    return tocado && !sinActivo;
+  }
   function _afterPickupChange(item, prevDesp, sol) {
     _savePickup();
-    _renderPickupChecklistInSheet(item.skuBase);
-    _renderPickupChecklistInline();
-    _renderPickupActivoBanner();
-    _renderExtrasSection();
-    _updateGenerarBtn();
-    badgeUpdate();
+    const _despFT = parseFloat(item.despachado) || 0;
+    const _rapido = !(prevDesp < sol && _despFT >= sol && sol > 0)   // no acaba de completarse (flash/celebración)
+                 && _despFT <= sol                                   // no está en sobre-despacho (card cambia de clase)
+                 && _pkckFastTick(item);                             // y la card existe en el DOM
+    if (_rapido) {
+      _pkckScheduleRenderFull();
+    } else {
+      _renderPickupChecklistInSheet(item.skuBase);
+      _renderPickupChecklistInline();
+      _renderPickupActivoBanner();
+      _renderExtrasSection();
+      _updateGenerarBtn();
+      badgeUpdate();
+    }
     const desp = parseFloat(item.despachado) || 0;
     const justCompletado = prevDesp < sol && desp >= sol && sol > 0;
     try {
