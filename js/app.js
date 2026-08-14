@@ -2468,7 +2468,7 @@ const Session = (() => {
       // Port del de MosExpress adaptado a WH (vanilla JS, sin Vue).
       // ════════════════════════════════════════════════════════════════════
       window._espiaCliWH = null;
-      // [F6 espía · cero-GAS] Acción→RPC Supabase (mos.espia_*). El chunk (Drive) NO está mapeado → sigue GAS.
+      // [F6 espía · cero-GAS] Acción→RPC Supabase (mos.espia_*). Los chunks (audio/video) van por Edge espia-chunk.
       const _ESPIA_RPC = {
         espiaIniciarDispositivo: 'espia_iniciar_dispositivo', espiaConfig: 'espia_config',
         espiaSync: 'espia_sync', espiaPushBatch: 'espia_push_batch',
