@@ -29,7 +29,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.556';
+const VERSION = '2.13.557';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -55,10 +55,7 @@ const LOCAL_ASSETS = [
   './js/sharesheet.js',
   './js/voucher.js',
   './js/cargadores.js',
-  './js/clienteInbox.js',
   './js/chat-almacen.js',
-  './pedido.html',
-  './clientes.html',
 ];
 
 // ── Instalar: cachear secuencial con reporte de progreso ──
