@@ -1691,6 +1691,11 @@
     .pkck-card.is-flash {
       animation: pkckFlash .9s cubic-bezier(.4,0,.2,1);
     }
+    /* [semáforo] urgencia del item: raya izquierda por nivel (espejo del pickup de MOS).
+       Los completos no la llevan (is-completo pinta verde por su cuenta). */
+    .pkck-card.pkck-u-rojo    { border-color:rgba(239,68,68,.55);  box-shadow:inset 3px 0 0 #ef4444; }
+    .pkck-card.pkck-u-naranja { border-color:rgba(251,146,60,.45); box-shadow:inset 3px 0 0 #fb923c; }
+    .pkck-card.pkck-u-ambar   { box-shadow:inset 3px 0 0 rgba(251,191,36,.6); }
     @keyframes pkckFlash {
       0%   { transform:scale(1); box-shadow:0 0 0 0 rgba(16,185,129,.0); }
       30%  { transform:scale(1.025); box-shadow:0 0 30px 4px rgba(16,185,129,.55); }
@@ -11091,6 +11096,6 @@
 <script src="js/cargadores.js?v=2.13.556"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.556"></script>
+<script src="js/app.js?v=2.13.563"></script>
 </body>
 </html>

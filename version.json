@@ -1,1 +1,1 @@
-{"version":"2.13.562","build":"2.13.562 el token de aviso del equipo de almacen ahora se renueva solo cada 30 minutos mientras la app esta abierta, para que nunca caduque y siempre se pueda monitorear."}
+{"version":"2.13.563","build":"2.13.563 [semaforo] el checklist del pickup ahora ordena por URGENCIA (deuda + dias esperando + si hay stock para despachar) con raya de color rojo/naranja/ambar por item y chip de dias esperando; las tarjetas del panel de pickups muestran chip 'espera max Nd' para elegir que lista jalar primero. Espejo del semaforo de MOS-Zonas."}

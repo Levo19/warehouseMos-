@@ -12666,11 +12666,46 @@ const DespachoView = (() => {
       return count > 0 ? { cantidadDisponible: total, codigosEncontrados: count } : null;
     }
 
-    // Orden: pendientes primero, completados al final
+    // [semáforo] URGENCIA por item — espejo del semáforo de MOS→Zonas→Pickup (pedido del
+    // dueño): deuda pendiente (55) + días esperando (30), relativos a ESTA lista, + bonus
+    // si HAY stock para despacharla (15 cubre todo · 8 parcial). El operador ataca lo rojo
+    // primero. Niveles: ≥70 rojo · ≥45 naranja · ≥25 ámbar · resto normal.
+    const _urg = new Map();
+    (function () {
+      const ahora = Date.now();
+      const enr = items.map(it => {
+        const pend = Math.max(0, (parseFloat(it.solicitado) || 0) - (parseFloat(it.despachado) || 0));
+        let dias = 0;
+        if (it.tsSolicitud) {
+          const t = new Date(String(it.tsSolicitud).slice(0, 16));
+          if (!isNaN(t)) dias = Math.max(0, (ahora - t.getTime()) / 86400000);
+        }
+        const st = _buscarStock(it);
+        const stock = st ? (parseFloat(st.cantidadDisponible) || 0) : null;
+        return { key: String(it.skuBase), pend, dias, stock };
+      });
+      const mP = Math.max(1, ...enr.map(e => e.pend));
+      const mD = Math.max(0.05, ...enr.map(e => e.dias));
+      enr.forEach(e => {
+        let s = 55 * (e.pend / mP) + 30 * (e.dias / mD);
+        if (e.pend > 0 && e.stock !== null && e.stock > 0) s += (e.stock >= e.pend ? 15 : 8);
+        _urg.set(e.key, {
+          score: e.pend > 0 ? s : 0, dias: e.dias,
+          nivel: e.pend <= 0 ? 'ok' : (s >= 70 ? 'rojo' : s >= 45 ? 'naranja' : s >= 25 ? 'ambar' : 'ok')
+        });
+      });
+    })();
+
+    // Orden: pendientes primero POR URGENCIA (rojo arriba), completados al final
     const sorted = items.slice().sort((a, b) => {
       const aP = (parseFloat(a.despachado)||0) < (parseFloat(a.solicitado)||0) ? 0 : 1;
       const bP = (parseFloat(b.despachado)||0) < (parseFloat(b.solicitado)||0) ? 0 : 1;
       if (aP !== bP) return aP - bP;
+      if (aP === 0) {
+        const sa = (_urg.get(String(a.skuBase)) || {}).score || 0;
+        const sb = (_urg.get(String(b.skuBase)) || {}).score || 0;
+        if (sb !== sa) return sb - sa;
+      }
       return String(a.nombre).localeCompare(String(b.nombre));
     });
 
@@ -12805,13 +12840,19 @@ const DespachoView = (() => {
           </div>`;
         }
       }
+      // [semáforo] nivel del item (los completos no llevan raya) + chip de días esperando.
+      const urg = _urg.get(String(it.skuBase)) || { nivel: 'ok', dias: 0 };
+      const urgCls = completo ? '' : (' pkck-u-' + urg.nivel);
+      const diasChip = (!completo && urg.dias >= 1)
+        ? ` · <span style="font-size:.62em;font-weight:800;padding:1px 6px;border-radius:6px;white-space:nowrap;${urg.nivel === 'rojo' ? 'color:#fca5a5;background:rgba(220,38,38,.18)' : urg.nivel === 'naranja' ? 'color:#fdba74;background:rgba(251,146,60,.15)' : 'color:#fbbf24;background:rgba(245,158,11,.12)'}">⏳ ${Math.floor(urg.dias)}d</span>`
+        : '';
       return `
-        <div class="pkck-card ${cls} ${esActivo ? 'is-activo' : ''}" data-sku="${skuAttr}">
+        <div class="pkck-card ${cls}${urgCls} ${esActivo ? 'is-activo' : ''}" data-sku="${skuAttr}">
           <div class="pkck-row">
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
               <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
-              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${diasChip}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
             </div>
             <div class="pkck-qty-wrap">
               <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
@@ -14676,6 +14717,22 @@ const DespachoView = (() => {
           const totalUds = items.reduce((s, it) => s + (parseFloat(it.solicitado) || 0), 0);
           const totalDesp = items.reduce((s, it) => s + (parseFloat(it.despachado) || 0), 0);
           const pct = totalUds > 0 ? Math.round((totalDesp / totalUds) * 100) : 0;
+          // [semáforo] espera máxima entre los items CON deuda → chip de urgencia del feed
+          // (rojo ≥3d · naranja ≥2d · ámbar ≥1d). Ayuda a elegir qué lista jalar primero.
+          let esperaMax = 0;
+          try {
+            const _ah = Date.now();
+            items.forEach(it => {
+              const _pend = (parseFloat(it.solicitado) || 0) - (parseFloat(it.despachado) || 0);
+              if (_pend > 0 && it.tsSolicitud) {
+                const _t = new Date(String(it.tsSolicitud).slice(0, 16));
+                if (!isNaN(_t)) esperaMax = Math.max(esperaMax, (_ah - _t.getTime()) / 86400000);
+              }
+            });
+          } catch (_) {}
+          const espChip = esperaMax >= 1
+            ? `<span style="font-size:.68em;font-weight:800;padding:1px 7px;border-radius:6px;white-space:nowrap;${esperaMax >= 3 ? 'color:#fca5a5;background:rgba(220,38,38,.18);border:1px solid rgba(239,68,68,.4)' : esperaMax >= 2 ? 'color:#fdba74;background:rgba(251,146,60,.15);border:1px solid rgba(251,146,60,.35)' : 'color:#fbbf24;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3)'}">⏳ espera máx ${Math.floor(esperaMax)}d</span>`
+            : '';
           const enProceso = String(p.estado) === 'EN_PROCESO';
           const fuente = String(p.fuente || '').toLowerCase();
           let fuenteIcon = '📥', fuenteLbl = (p.fuente || 'Externo');
@@ -14753,6 +14810,7 @@ const DespachoView = (() => {
                 <p class="text-xs text-slate-300 mt-0.5">
                   ${items.length} producto${items.length !== 1 ? 's' : ''} · ${Math.round(totalUds)} uds
                   ${enProceso ? ` · <span style="color:#a5b4fc;font-weight:700">${pct}% despachado</span>` : ''}
+                  ${espChip ? ' · ' + espChip : ''}
                 </p>
                 ${p.creadoPor ? `<p class="text-[10px] text-slate-500">cajero: ${escHtml(p.creadoPor)}</p>` : ''}
               </div>
