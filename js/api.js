@@ -3011,6 +3011,10 @@ const API = (() => {
     // Producto Nuevo — WH solo EMITE el PN (registrarPN); la APROBACIÓN es de MOS (aprobarPN removido).
     getProductosNuevos:          (p={}) => call({ action: 'getProductosNuevos', ...p }),
     getProductosNuevosRecientes: (p={}) => call({ action: 'getProductosNuevosRecientes', ...p }),
+    // [790] Considerados + priorizado por ingreso de mercadería (RPC directas, cero GAS)
+    consideradosListar:  ()     => _sbRpcWH('considerados_listar',  { p: {} }),
+    consideradoResolver: (p={}) => _sbRpcWH('considerado_resolver', { p }),
+    ingresosRecientes:   (p={}) => _sbRpcWH('ingresos_recientes',   { p: { dias: (p && p.dias) || 3 } }),
     registrarPN:                 (p)    => post({ action: 'registrarProductoNuevo', ...p }),
 
     // Config

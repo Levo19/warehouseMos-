@@ -4487,6 +4487,28 @@
   .hist-time  { font-size:11px; color:#475569; margin-top:3px; }
 
   /* ── Productos nuevos aprobados (3 días) ─────────────── */
+  /* ── [790] Considerados: ingresó mercadería que alguna vez se debió ── */
+  .consid-count { font-size:.65rem; font-weight:800; color:#c4b5fd; background:rgba(139,92,246,.18);
+    border:1px solid rgba(167,139,250,.45); border-radius:999px; padding:1px 8px; }
+  .consid-card { position:relative; display:flex; align-items:center; gap:10px; padding:11px 12px;
+    margin-bottom:8px; border-radius:14px; overflow:hidden;
+    background:linear-gradient(135deg,rgba(76,29,149,.25),rgba(15,23,42,.75));
+    border:1.5px solid rgba(167,139,250,.5);
+    animation:considEntra .4s cubic-bezier(.2,.9,.3,1) both; }
+  @keyframes considEntra { from { opacity:0; transform:translateY(-10px) scale(.97); } to { opacity:1; transform:none; } }
+  .consid-glow { position:absolute; inset:0; pointer-events:none; border-radius:14px;
+    box-shadow:inset 0 0 22px rgba(139,92,246,.28); animation:considPulsa 2s ease-in-out infinite; }
+  @keyframes considPulsa { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+  .consid-name { font-size:.82rem; font-weight:800; color:#e9e4ff; }
+  .consid-meta { font-size:.66rem; color:#a5b4fc; margin-top:2px; line-height:1.5; }
+  .consid-meta b { color:#c4b5fd; }
+  .consid-btns { display:flex; gap:6px; flex-shrink:0; position:relative; }
+  .consid-btn { width:38px; height:38px; border-radius:11px; border:1px solid; cursor:pointer;
+    font-size:.95rem; font-weight:800; display:flex; align-items:center; justify-content:center;
+    background:rgba(15,23,42,.6); transition:transform .12s; }
+  .consid-btn:active { transform:scale(.9); }
+  .consid-btn.ok { color:#4ade80; border-color:rgba(34,197,94,.5); }
+  .consid-btn.no { color:#94a3b8; border-color:rgba(71,85,105,.6); }
   .pn-aprob-count {
     background: linear-gradient(135deg,#c9a227,#ffd700);
     color: #020817; font-size: 10px; font-weight: 800;
@@ -6504,6 +6526,16 @@
 
     <!-- [456] Sección "🚨 Alertas" (kpiGrid) ELIMINADA: cada alerta vive ahora SOBRE el
          acceso rápido de su módulo (badges) — pedido del dueño. -->
+
+    <!-- [790] Considerados: ingresó mercadería que alguna vez se debió (rezagados 4 sem) -->
+    <div id="dashConsiderados" class="mb-3 hidden">
+      <div class="pre-date-hdr" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span style="font-size:1rem">🎯</span>
+        <span>Considerados · ingresó y alguna vez se debió</span>
+        <span id="considCount" class="consid-count">0</span>
+      </div>
+      <div id="considList"></div>
+    </div>
 
     <!-- Productos nuevos aprobados (últimos 3 días) -->
     <div id="dashPNAprob" class="mb-3 hidden">
@@ -11079,7 +11111,7 @@
 <script src="js/offline.js?v=2.13.556"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
 <script src="js/impresion-directa.js?v=2.13.556"></script>
-<script src="js/api.js?v=2.13.556"></script>
+<script src="js/api.js?v=2.13.564"></script>
 <script src="js/scanner.js?v=2.13.556"></script>
 <script src="js/sounds.js?v=2.13.556"></script>
 <!-- F2-F9 — módulos nuevos -->
@@ -11096,6 +11128,6 @@
 <script src="js/cargadores.js?v=2.13.556"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.563"></script>
+<script src="js/app.js?v=2.13.564"></script>
 </body>
 </html>

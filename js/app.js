@@ -958,6 +958,70 @@ function _calcularCargadoresDelDia(key) {
 // Normaliza un código de barras: elimina chars de control (GS1, null, etc.), trim, uppercase
 function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '').replace(/['’‘´]/g, '-').trim().toUpperCase(); }  // [fix layout ES-LatAm] apóstrofo (recto/curvo) = "-" mal leído por lector HID con teclado Español → red de seguridad universal para la búsqueda en catálogo
 
+// ── [790] Considerados — ingresó mercadería que ALGUNA VEZ se debió ──────────
+// El backend (trigger de guía de ingreso) cruza cada producto que entra contra los
+// rezagados de las últimas 4 semanas: si quedó debiendo y HOY nadie lo pide, cae aquí.
+// El operador decide: ✔ Atendido (ya lo mandó) o ✕ Descartar. Expira solo a los 7 días.
+function _considHaceLbl(ts) {
+  try {
+    const d = Math.floor((Date.now() - new Date(String(ts).slice(0, 16)).getTime()) / 86400000);
+    return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : 'hace ' + d + 'd';
+  } catch (_) { return ''; }
+}
+async function _cargarConsiderados() {
+  const cont = document.getElementById('dashConsiderados');
+  const list = document.getElementById('considList');
+  const cnt  = document.getElementById('considCount');
+  if (!cont || !list) return;
+  let r = null;
+  try { r = await API.consideradosListar(); } catch (_) {}
+  const items = (r && r.ok !== false && r.items) || [];
+  if (!items.length) { cont.classList.add('hidden'); return; }
+  cont.classList.remove('hidden');
+  if (cnt) cnt.textContent = items.length;
+  // Aviso sonoro/visual si apareció uno nuevo desde la última vista (patrón PN aprobados).
+  try {
+    const k = 'wh_considerados_lastSeen';
+    const last = parseInt(localStorage.getItem(k) || '0');
+    const hayNuevo = items.some(i => new Date(String(i.creado).slice(0, 16)).getTime() > last);
+    localStorage.setItem(k, String(Date.now()));
+    if (hayNuevo && last > 0) toast('🎯 Ingresó mercadería que alguna vez se debió — revisa Considerados', 'warn', 5000);
+  } catch (_) {}
+  list.innerHTML = items.map(it => {
+    const zonas = (Array.isArray(it.zonas) ? it.zonas : []).map(z => {
+      let sem = '';
+      try { sem = Math.max(1, Math.round((Date.now() - new Date(z.bucket + 'T12:00:00').getTime()) / (7 * 86400000))); } catch (_) {}
+      return `${escHtml(z.zona)} debía ${fmtQty(parseFloat(z.pend) || 0)}${sem ? ` (hace ${sem} sem)` : ''}`;
+    }).join(' · ');
+    return `
+      <div class="consid-card" data-id="${escAttr(String(it.id))}">
+        <div class="consid-glow"></div>
+        <div class="flex-1 min-w-0" style="position:relative">
+          <p class="consid-name">🎯 ${escHtml(it.nombre || it.skuBase)}</p>
+          <p class="consid-meta">ingresó ${_considHaceLbl(it.creado)} (${fmtQty(parseFloat(it.cant) || 0)} uds) · <b>considera enviarlo:</b> ${zonas || 'fue solicitado en semanas pasadas'}</p>
+        </div>
+        <div class="consid-btns">
+          <button class="consid-btn ok" title="Ya lo atendí / lo mandé"
+                  onclick="WHConsiderados.resolver('${escAttr(String(it.id))}','ATENDIDO')">✔</button>
+          <button class="consid-btn no" title="Descartar"
+                  onclick="WHConsiderados.resolver('${escAttr(String(it.id))}','DESCARTADO')">✕</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+window.WHConsiderados = {
+  resolver: async function (id, estado) {
+    const card = document.querySelector('.consid-card[data-id="' + (window.CSS && CSS.escape ? CSS.escape(String(id)) : String(id)) + '"]');
+    if (card) { card.style.transition = 'opacity .3s, transform .3s'; card.style.opacity = '0'; card.style.transform = 'translateX(14px)'; }
+    try {
+      const usuario = (window.AppSession && AppSession.getNombre && AppSession.getNombre()) || (window.WH_CONFIG && WH_CONFIG.usuario) || '';
+      const r = await API.consideradoResolver({ id: String(id), estado, usuario });
+      if (r && r.ok) toast(estado === 'ATENDIDO' ? '✔ Considerado atendido' : 'Considerado descartado', estado === 'ATENDIDO' ? 'ok' : 'info', 2500);
+    } catch (_) { toast('No se pudo resolver — reintenta', 'error', 3000); }
+    _cargarConsiderados();
+  }
+};
+
 // ── Productos nuevos aprobados — últimos 3 días ─────────────
 async function _cargarPNAprobados() {
   const cont = document.getElementById('dashPNAprob');
@@ -4527,6 +4591,8 @@ const App = (() => {
 
     // Productos nuevos aprobados (últimos 3 días) — carga en background
     if (!esCache) _cargarPNAprobados();
+    // [790] Considerados (ingresó y alguna vez se debió) — carga en background
+    if (!esCache) _cargarConsiderados();
 
     // [456] renders de los panels expandibles eliminados (los badges llevan a la vista real).
   }
@@ -12615,6 +12681,19 @@ const DespachoView = (() => {
     cont.addEventListener('touchcancel', _lpCancel, { passive: true });
   }
 
+  // [790] caché de ingresos recientes (sku → {ts,cant}) para el chip PRIORIZADO 🆕:
+  // se carga async (caché 5 min) y repinta el checklist UNA vez al llegar.
+  let _ingRecMap = null, _ingRecTs = 0, _ingRecBusy = false;
+  function _ingRecAsegurar() {
+    if (_ingRecBusy || (_ingRecMap && (Date.now() - _ingRecTs) < 300000)) return;
+    _ingRecBusy = true;
+    API.ingresosRecientes({ dias: 3 }).then(r => {
+      const m = {};
+      (((r && r.items) || [])).forEach(i => { m[String(i.sku)] = i; });
+      _ingRecMap = m; _ingRecTs = Date.now(); _ingRecBusy = false;
+      try { _renderPickupChecklistInline(); } catch (_) {}
+    }).catch(() => { _ingRecBusy = false; if (!_ingRecMap) _ingRecMap = {}; });
+  }
   function _renderPickupChecklistInline() {
     const cont = document.getElementById('despPickupChecklistInline');
     if (!cont) return;
@@ -12666,10 +12745,13 @@ const DespachoView = (() => {
       return count > 0 ? { cantidadDisponible: total, codigosEncontrados: count } : null;
     }
 
+    // [790] PRIORIZADO: mapa sku → ingreso reciente (se carga async con caché 5 min y
+    // repinta una vez). Producto adeudado que ACABA de ingresar → chip 🆕 y sube el score.
+    _ingRecAsegurar();
     // [semáforo] URGENCIA por item — espejo del semáforo de MOS→Zonas→Pickup (pedido del
     // dueño): deuda pendiente (55) + días esperando (30), relativos a ESTA lista, + bonus
-    // si HAY stock para despacharla (15 cubre todo · 8 parcial). El operador ataca lo rojo
-    // primero. Niveles: ≥70 rojo · ≥45 naranja · ≥25 ámbar · resto normal.
+    // si HAY stock para despacharla (15 cubre todo · 8 parcial) + ingreso reciente (20).
+    // El operador ataca lo rojo primero. Niveles: ≥70 rojo · ≥45 naranja · ≥25 ámbar.
     const _urg = new Map();
     (function () {
       const ahora = Date.now();
@@ -12682,15 +12764,17 @@ const DespachoView = (() => {
         }
         const st = _buscarStock(it);
         const stock = st ? (parseFloat(st.cantidadDisponible) || 0) : null;
-        return { key: String(it.skuBase), pend, dias, stock };
+        const ing = (pend > 0 && _ingRecMap && _ingRecMap[String(it.skuBase)]) || null;
+        return { key: String(it.skuBase), pend, dias, stock, ing };
       });
       const mP = Math.max(1, ...enr.map(e => e.pend));
       const mD = Math.max(0.05, ...enr.map(e => e.dias));
       enr.forEach(e => {
         let s = 55 * (e.pend / mP) + 30 * (e.dias / mD);
         if (e.pend > 0 && e.stock !== null && e.stock > 0) s += (e.stock >= e.pend ? 15 : 8);
+        if (e.ing) s += 20;   // [790] mercadería fresca de un producto adeudado → sube
         _urg.set(e.key, {
-          score: e.pend > 0 ? s : 0, dias: e.dias,
+          score: e.pend > 0 ? s : 0, dias: e.dias, ing: e.ing,
           nivel: e.pend <= 0 ? 'ok' : (s >= 70 ? 'rojo' : s >= 45 ? 'naranja' : s >= 25 ? 'ambar' : 'ok')
         });
       });
@@ -12840,9 +12924,12 @@ const DespachoView = (() => {
           </div>`;
         }
       }
-      // [semáforo] nivel del item (los completos no llevan raya) + chip de días esperando.
-      const urg = _urg.get(String(it.skuBase)) || { nivel: 'ok', dias: 0 };
+      // [semáforo] nivel del item (los completos no llevan raya) + chips de días/ingreso.
+      const urg = _urg.get(String(it.skuBase)) || { nivel: 'ok', dias: 0, ing: null };
       const urgCls = completo ? '' : (' pkck-u-' + urg.nivel);
+      const ingChip = (!completo && urg.ing)
+        ? ` · <span style="font-size:.62em;font-weight:800;padding:1px 6px;border-radius:6px;white-space:nowrap;color:#c4b5fd;background:rgba(139,92,246,.14);border:1px solid rgba(167,139,250,.45);animation:considPulsa 1.6s ease-in-out infinite">🆕 ingresó ${_considHaceLbl(urg.ing.ts)}</span>`
+        : '';
       const diasChip = (!completo && urg.dias >= 1)
         ? ` · <span style="font-size:.62em;font-weight:800;padding:1px 6px;border-radius:6px;white-space:nowrap;${urg.nivel === 'rojo' ? 'color:#fca5a5;background:rgba(220,38,38,.18)' : urg.nivel === 'naranja' ? 'color:#fdba74;background:rgba(251,146,60,.15)' : 'color:#fbbf24;background:rgba(245,158,11,.12)'}">⏳ ${Math.floor(urg.dias)}d</span>`
         : '';
@@ -12852,7 +12939,7 @@ const DespachoView = (() => {
             <div class="pkck-icon">${icon}</div>
             <div class="flex-1 min-w-0">
               <p class="pkck-name truncate">${escHtml(_pckCanonName(it.skuBase, it.nombre))}${kgBadge}</p>
-              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${diasChip}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
+              <p class="pkck-meta truncate">${escHtml(it.skuBase)}${equivTxt} · ${stockBadge}${ingChip}${diasChip}${fmtHora(it.tsSolicitud) ? ` · <span style="color:#94a3b8">🕐 pedido ${fmtHora(it.tsSolicitud)}</span>` : ''}${fmtHora(it.tsDespacho) ? ` <span style="color:#34d399">→ salió ${fmtHora(it.tsDespacho)}</span>` : ''}</p>
             </div>
             <div class="pkck-qty-wrap">
               <p><span class="pkck-qty">${esKg ? fmt(hechoHoy,3) : hechoHoy}</span><span class="pkck-qty-sol"> / ${esKg ? fmt(objetivo,3) : objetivo}${esKg ? ' '+unidadLbl : ''}</span></p>
