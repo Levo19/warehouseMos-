@@ -4031,6 +4031,12 @@ const App = (() => {
           origen:         'WH',
           unwrapData:     false,
           endpointPrefix: '',
+          // [792] COLA DE MEMBRETES por usuario + zona (RPC mos.membrete_cola_*). WH no tiene
+          // concepto propio de zona (es EL almacén): se usa 'ALMACEN' como zona fija salvo que
+          // WH_CONFIG.zona esté seteada. Sin esto la cola vivía en localStorage por dispositivo
+          // → el operador del turno siguiente heredaba productos que no agregó.
+          zona:           function() { return String((window.WH_CONFIG && WH_CONFIG.zona) || 'ALMACEN'); },
+          rpc:            function(fn, p) { return API.rpcMos(fn, p || {}); },
           // [v2.13.310] Membrete 100% Supabase: el modal imprime vía Edge print-adhesivo
           // (mode:'crear-membrete'). Si falla/flag OFF, el modal cae al flujo GAS.
           edgeCall:       function(body) { return API.printAdhesivoEdge(body); }

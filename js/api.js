@@ -3004,6 +3004,11 @@ const API = (() => {
     // [v2.13.310] Edge print-adhesivo genérico (membretes vía edgeCall del modal compartido)
     printAdhesivoEdge:  (body)    => _printAdhesivoEdge(body),
 
+    // [792] RPC genérica al esquema `mos` con la convención {p: jsonb}. La usa el modal
+    // compartido de membretes para su cola por usuario+zona (mos.membrete_cola_*).
+    // Devuelve el jsonb tal cual (o lanza ante HTTP de error / timeout).
+    rpcMos:             (fn, p={}) => _sbRpcWH(fn, { p }, 'mos'),
+
     // Proveedores — [WH nivel-inferior] WH solo LEE proveedores (los crea/edita el admin en MOS y se
     // propagan). crear/actualizar proveedor removidos (eran código muerto que iba a GAS/Hoja).
     getProveedores:     (p={})   => call({ action: 'getProveedores', ...p }),
