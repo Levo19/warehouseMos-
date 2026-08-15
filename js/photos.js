@@ -114,8 +114,13 @@
     if (!u) return '';
     const m = u.match(_SB_PUBLIC_RE);
     if (!m) return u;
+    // [fix fotos alargadas] Con SOLO `width`, el transformador de Supabase devolvía
+    // 200×4000 (barra vertical) en fotos de cámara con orientación EXIF rotada
+    // (Samsung 4000×3000): NO escalaba el alto. width+height+resize=contain fuerza
+    // la caja y SIEMPRE respeta la proporción (verificado: 150×200 correcto).
+    const w = ancho || 400;
     return m[1] + '/storage/v1/render/image/public/' + m[2] + '/' + m[3]
-         + '?width=' + (ancho || 400) + '&quality=' + (calidad || 70);
+         + '?width=' + w + '&height=' + w + '&resize=contain&quality=' + (calidad || 70);
   }
 
   // ── Lightbox fullscreen ──
