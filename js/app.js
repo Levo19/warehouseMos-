@@ -12698,7 +12698,12 @@ const DespachoView = (() => {
       (((r && r.items) || [])).forEach(i => { m[String(i.sku)] = i; });
       _ingRecMap = m; _ingRecTs = Date.now(); _ingRecBusy = false;
       try { _renderPickupChecklistInline(); } catch (_) {}
-    }).catch(() => { _ingRecBusy = false; if (!_ingRecMap) _ingRecMap = {}; });
+    }).catch(() => {
+      // [AUDITORIA 15-ago] Sellar el reloj TAMBIEN al fallar. Sin esto _ingRecTs quedaba
+      // en 0, el guard de 5 min nunca cerraba y CADA render del checklist (cada escaneo)
+      // disparaba otra RPC + mint de token: tormenta de red con la RPC caida.
+      _ingRecBusy = false; _ingRecMap = _ingRecMap || {}; _ingRecTs = Date.now() - 240000;
+    });
   }
   function _renderPickupChecklistInline() {
     const cont = document.getElementById('despPickupChecklistInline');
@@ -15873,7 +15878,10 @@ const DespachoView = (() => {
     const items = _pickupActivo.items || [];
     // Si el item activo ya no pertenece a este pickup (cambió de pickup,
     // se cerró, etc.) → limpiar para que no queden controles huérfanos.
-    if (_pickupItemActivo && !items.some(it => String(it.skuBase) === String(_pickupItemActivo))) {
+    // [AUDITORIA 15-ago] Los EXTRA usan la clave 'EXTRA::<cb>', que JAMAS puede igualar un
+    // skuBase -> esta limpieza les borraba el foco (y sus +/-) en cada render completo.
+    if (_pickupItemActivo && String(_pickupItemActivo).indexOf('EXTRA::') !== 0 &&
+        !items.some(it => String(it.skuBase) === String(_pickupItemActivo))) {
       _pickupItemActivo = null;
     }
     // Stock cache indexado por codigoProducto Y idProducto (un row puede
