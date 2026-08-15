@@ -1,1 +1,1 @@
-{"version":"2.13.561","build":"2.13.561 los equipos de almacen ahora tambien responden al boton Rotar camara del monitoreo (antes solo los equipos con la app MOS): cambian de camara frontal/trasera al instante cuando el master lo pide."}
+{"version":"2.13.562","build":"2.13.562 el token de aviso del equipo de almacen ahora se renueva solo cada 30 minutos mientras la app esta abierta, para que nunca caduque y siempre se pueda monitorear."}

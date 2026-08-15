@@ -1644,6 +1644,10 @@ const Session = (() => {
 
     // Push notifications — registrar token con nombre del operador
     setTimeout(_pushInitWH, 3000);
+    // [800] Refresco PERIÓDICO del token cada 30 min (FCM rota/caduca el token; solo el propio
+    // equipo lo renueva). Mantiene fresco el token de equipos de almacén abiertos horas → deja de
+    // fallar el monitoreo "FCM 3x" por token muerto.
+    setInterval(() => { try { _pushInitWH(); } catch(_){} }, 30 * 60 * 1000);
 
     // GPS tracking pasivo: cada 5 min mientras la app está visible
     setTimeout(() => _gpsRegistrarWH(false), 8000);
