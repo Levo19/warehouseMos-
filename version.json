@@ -1,1 +1,1 @@
-{"version": "2.13.567", "build": "2.13.567 [AUDITORIA 7 dias] icono de la app 16x mas liviano (3.3 MB -> 207 KB), el foco de las tarjetas EXTRA ya no se pierde al escanear otro producto, y con la red caida el checklist deja de reintentar sin freno la consulta de ingresos (tormenta de red). Miniaturas de foto ahora si se refrescan (cache-buster que habia quedado congelado)."}
+{"version": "2.13.568", "build": "2.13.568 La foto del comprobante respeta el giro que se le haya dado desde MOS: si alguien la enderezo alla, aca se ve derecha tambien."}

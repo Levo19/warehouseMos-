@@ -5790,7 +5790,7 @@ const GuiasView = (() => {
     const fotoUrl = g.foto ? _normalizeDriveUrl(g.foto) : '';
     const fotoIcon = isIngreso ? '↓' : '↑';
     const fotoBlock = fotoUrl
-      ? `<div class="gcard-photo" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(fotoUrl)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" onerror="this.style.opacity='.3'"/></div>`
+      ? `<div class="gcard-photo" onclick="event.stopPropagation();window.Photos&&Photos.lightbox('${escAttr(fotoUrl)}')"><img src="${escAttr(fotoUrl)}" loading="lazy" style="transform:rotate(${(+g.fotoRot || 0)}deg)" onerror="this.style.opacity='.3'"/></div>`
       : `<div class="gcard-photo placeholder" title="${tipoLabel}">${fotoIcon}</div>`;
 
     return `
@@ -6246,7 +6246,7 @@ const GuiasView = (() => {
       } else if (g.foto) {
         fotoEl.innerHTML = `
           <div class="relative rounded-lg overflow-hidden mb-3" style="height:110px">
-            <img src="${escAttr(_normalizeDriveUrl(g.foto))}" class="w-full h-full object-cover cursor-pointer" loading="lazy"
+            <img src="${escAttr(_normalizeDriveUrl(g.foto))}" class="w-full h-full object-cover cursor-pointer" loading="lazy" style="transform:rotate(${(+g.fotoRot || 0)}deg)"
                  onclick="GuiasView.verFotoGuia()" onerror="this.style.opacity='.3'"/>
             ${abierta ? `<div class="absolute top-2 right-2 flex gap-1">
               <label class="bg-slate-900/80 rounded-lg px-2 py-1 cursor-pointer text-xs text-slate-300" title="Cambiar - Galería">
