@@ -1,1 +1,1 @@
-{"version": "2.13.569", "build": "2.13.569 Avisos de dispositivo honestos: abrir la app ya no dispara 'un dispositivo pide acceso'. El aviso sale solo si alguien pide acceso a distancia, y una reactivacion in situ ahora avisa quien la hizo."}
+{"version": "2.13.570", "build": "2.13.570 Cada llamada a la IA declara su funcion (lista sombra por foto/PDF, lista sombra por texto, OCR de comprobante, chat de almacen) para que el panel de gestion de IA en MOS diga en que se gasta, no solo cuanto."}

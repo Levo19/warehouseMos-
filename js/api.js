@@ -359,6 +359,7 @@ const API = (() => {
     let resp;
     try {
       resp = await _llamarEdgeIA({
+        funcion: 'ocrComprobante',   // [852] etiqueta para la contabilidad de IA
         max_tokens: 1536, system,   // 1536 > 1024 del GAS: margen para JSON con notas largas (cap Edge=8192)
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data } },
@@ -1773,9 +1774,9 @@ const API = (() => {
           ? 'Estas ' + nImg + ' imágenes son partes de la MISMA lista: combínalas en un solo resultado, sin duplicar. '
           : '') + 'Extrae cada producto con su cantidad SOLICITADA (no el mín/máx/stock/precio), INCLUYENDO los que estén en 0/0.00 (ponles cantidad 0.0, NO los omitas). Devuelve solo el JSON indicado.' });
         // [fix 500x S5] thinking desactivado: baja latencia y evita el bloque `thinking` que arriesgaba el timeout de visión.
-        body = { model: 'claude-sonnet-5', max_tokens: 8192, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: bloques }] };
+        body = { funcion: 'listaSombra (foto/PDF)', model: 'claude-sonnet-5', max_tokens: 8192, thinking: { type: 'disabled' }, system, messages: [{ role: 'user', content: bloques }] };
       } else {
-        body = { max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] };
+        body = { funcion: 'listaSombra (texto)', max_tokens: 8192, system, messages: [{ role: 'user', content: 'Limpia esta lista y devuelve solo JSON:\n\n' + texto }] };
       }
       let resp;
       // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa.
