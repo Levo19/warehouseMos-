@@ -1,1 +1,1 @@
-{"version": "2.13.568", "build": "2.13.568 La foto del comprobante respeta el giro que se le haya dado desde MOS: si alguien la enderezo alla, aca se ve derecha tambien."}
+{"version": "2.13.569", "build": "2.13.569 Avisos de dispositivo honestos: abrir la app ya no dispara 'un dispositivo pide acceso'. El aviso sale solo si alguien pide acceso a distancia, y una reactivacion in situ ahora avisa quien la hizo."}
