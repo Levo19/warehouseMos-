@@ -29,7 +29,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.570';
+const VERSION = '2.13.571';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso

@@ -21275,7 +21275,11 @@ const ProductosView = (() => {
     // Botón ojo de auditoría
     const sku    = skuBase || base.skuBase || base.idProducto || '';
     const isDone = _esBarcodeAuditado(sku, c.codigoBarra);
-    const eyeBtn = _auditModo ? `
+    // [contar por código] fuera del modo auditoría, cada código (canónico o equivalente) se
+    // puede contar por separado: lo que hay en el andamio es ESE código, no el canónico.
+    const eyeBtn = !_auditModo ? `
+      <button onclick="event.stopPropagation();ProductosView.abrirAuditBarcode('${escAttr(String(c.codigoBarra))}','${escAttr(c.descripcion || base.descripcion || '')}','${escAttr(sku)}')"
+              class="btn-eye" title="Contar stock de este código">📋 Contar</button>` : `
       <button onclick="event.stopPropagation();${isDone ? '' : `ProductosView.abrirAuditBarcode('${escAttr(String(c.codigoBarra))}','${escAttr(c.descripcion)}','${escAttr(sku)}')`}"
               class="btn-eye${isDone ? ' done' : ''}">
         <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
@@ -21284,7 +21288,7 @@ const ProductosView = (() => {
             : '<path d="M16 8s-3-5.5-8-5.5S0 8 0 8s3 5.5 8 5.5S16 8 16 8zM1.173 8a13.133 13.133 0 0 1 1.66-2.043C4.12 4.668 5.88 3.5 8 3.5c2.12 0 3.879 1.168 5.168 2.457A13.133 13.133 0 0 1 14.828 8c-.058.087-.122.183-.195.288-.335.48-.83 1.12-1.465 1.755C11.879 11.332 10.119 12.5 8 12.5c-2.12 0-3.879-1.168-5.168-2.457A13.134 13.134 0 0 1 1.172 8z"/><path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM4.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0z"/>'}
         </svg>
         ${isDone ? 'OK' : 'Auditar'}
-      </button>` : '';
+      </button>`;
 
     return `
     <div class="rounded-lg p-2.5" style="background:#0f172a">
@@ -21321,9 +21325,11 @@ const ProductosView = (() => {
   }
 
   // ── Búsqueda inteligente ─────────────────────────
+  let _codigoExactoBuscado = null;   // [contar por código] último código EXACTO escaneado/tipeado en el buscador
   function buscar(q) {
     const query = (q || '').trim();
     _queryActual = query;   // persistir para el bg-refresh
+    if (!query) _codigoExactoBuscado = null;
     const cl = document.getElementById('clearBuscarProd');
     if (cl) cl.style.display = query ? 'flex' : 'none';
 
@@ -21338,13 +21344,16 @@ const ProductosView = (() => {
 
     // ── Detectar coincidencia exacta (barcode / SKU / idProducto) ──
     let exactGrupo = null;
+    _codigoExactoBuscado = null;
     for (const g of _grupos) {
       if (String(g.skuBase || '').toLowerCase() === qL ||
           String(g.base.idProducto || '').toLowerCase() === qL) {
         exactGrupo = g; break;
       }
-      if (g.children.some(c => String(c.codigoBarra || '').toLowerCase() === qL)) {
-        exactGrupo = g; break;
+      const hijo = g.children.find(c => String(c.codigoBarra || '').toLowerCase() === qL);
+      if (hijo) {
+        exactGrupo = g; _codigoExactoBuscado = String(hijo.codigoBarra);   // [contar por código] el del andamio
+        break;
       }
     }
 
@@ -22454,7 +22463,60 @@ const ProductosView = (() => {
     const _inp = document.getElementById('auditConteo');
     if (_inp) _inp.classList.remove('is-bad', 'is-pop', 'is-tap');
     _cntWire();
+    _audPintarSelectorCodigos();
     abrirSheet('sheetAudit');
+  }
+
+  // [contar por código] Si el producto tiene varios códigos (canónico + equivalentes), el
+  // conteo se hace SOBRE UNO: el stock vive por codigoBarra real (regla de oro §7). Acá se
+  // pintan como chips para cambiar de objetivo sin salir del sheet. Con un solo código no
+  // se muestra nada.
+  function _audGrupoDe(codigoBarra, skuBase) {
+    const cod = String(codigoBarra || '');
+    let g = skuBase ? _grupos.find(x => String(x.skuBase) === String(skuBase)) : null;
+    if (!g) g = _grupos.find(x => x.children.some(c => String(c.codigoBarra) === cod)) || null;
+    return g;
+  }
+  function _audPintarSelectorCodigos() {
+    let box = document.getElementById('auditCodChips');
+    if (!box) {
+      const sub = document.querySelector('#sheetAudit .cnt-sub');
+      if (!sub) return;
+      box = document.createElement('div'); box.id = 'auditCodChips'; box.className = 'aud-cod-chips';
+      sub.insertAdjacentElement('afterend', box);
+    }
+    const g = _auditTarget ? _audGrupoDe(_auditTarget.codigoBarra, _auditTarget.skuBase) : null;
+    if (!g || g.children.length < 2) { box.innerHTML = ''; box.style.display = 'none'; return; }
+    if (!_auditTarget.skuBase) _auditTarget.skuBase = g.skuBase;
+    box.style.display = '';
+    box.innerHTML = '<span class="aud-cod-lbl">¿Qué código contás?</span>' + g.children.map(c => {
+      const cod = String(c.codigoBarra || '');
+      const st  = parseFloat(_s(cod).cantidadDisponible) || 0;
+      const act = cod === String(_auditTarget.codigoBarra);
+      const tag = c.origen === 'equiv' ? 'EQUIV' : 'CANÓN';
+      const cola = cod.length > 7 ? '…' + cod.slice(-6) : cod;
+      return `<button type="button" class="aud-cod-chip${act ? ' is-active' : ''}${c.origen === 'equiv' ? ' is-equiv' : ''}" data-cod="${escAttr(cod)}"
+                onclick="ProductosView.audElegirCodigo('${escAttr(cod)}')" title="${escAttr(cod)}">
+                <span class="aud-cod-tag">${tag}</span><span class="aud-cod-cola">${escHtml(cola)}</span><span class="aud-cod-st">${fmtQty(st)}</span></button>`;
+    }).join('');
+  }
+  function audElegirCodigo(codigoBarra) {
+    if (!_auditTarget) return;
+    const cod = String(codigoBarra || '');
+    if (cod === String(_auditTarget.codigoBarra)) return;
+    const g = _audGrupoDe(cod, _auditTarget.skuBase);
+    const c = g ? g.children.find(x => String(x.codigoBarra) === cod) : null;
+    if (!c) return;
+    _auditTarget.codigoBarra = cod;
+    if (c.descripcion) { _auditTarget.nombre = c.descripcion; document.getElementById('auditNombre').textContent = c.descripcion; }
+    document.getElementById('auditCodigo').textContent   = cod;
+    document.getElementById('auditStockSis').textContent = fmtQty(parseFloat(_s(cod).cantidadDisponible) || 0);
+    // el conteo es de OTRO código: se vacía, la diferencia se re-deriva
+    const inp = document.getElementById('auditConteo'); if (inp) inp.value = '';
+    _audRecalcReset(); audRecalcDiferencia();
+    _audPintarSelectorCodigos();
+    try { SoundFX.click && SoundFX.click(); } catch (_) {}
+    vibrate(8);
   }
 
   // [538] Diferencia = conteo − sistema, SIEMPRE re-derivada del producto activo.
@@ -23685,6 +23747,7 @@ const ProductosView = (() => {
               <p class="text-[10px] text-slate-500 truncate">${escHtml(c.descripcion || '')}</p>
             </div>
             <span class="font-black text-sm ${cant > 0 ? 'text-emerald-400' : 'text-slate-500'}">${fmtQty(cant)}</span>
+            <button class="btn-eye" onclick="event.stopPropagation();ProductosView.detContarCodigo('${escAttr(String(c.codigoBarra))}')" title="Contar stock de este código">📋</button>
           </div>`;
       }).join('') +
       `<p class="text-[10px] text-slate-500 mt-3 text-center">Total grupo: <span class="text-emerald-400 font-bold">${fmtQty(grupo.stockTotal)}</span> unidades · stock se descuenta por código real al despachar</p>`;
@@ -23745,6 +23808,7 @@ const ProductosView = (() => {
               <p class="text-xs font-mono truncate">${escHtml(c.codigoBarra)}</p>
               <p class="text-[10px] text-slate-500 truncate">${escHtml(c.descripcion || '')}</p>
             </div>
+            <button class="btn-eye" onclick="event.stopPropagation();ProductosView.detContarCodigo('${escAttr(String(c.codigoBarra))}')" title="Contar stock de este código">📋 Contar</button>
           </div>`;
       }).join('') +
       `<p class="text-[10px] text-slate-500 mt-3 text-center">${grupo.children.length} código${grupo.children.length!==1?'s':''} aceptado${grupo.children.length!==1?'s':''} al escanear · canónico es lo nominal, equivalentes son aliases válidos</p>`;
@@ -23769,8 +23833,20 @@ const ProductosView = (() => {
     const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
     if (!grupo || !grupo.children.length) return;
     cerrarSheet('sheetProdDetalle');
-    const c0 = grupo.children[0];
+    // [contar por código] si se llegó escaneando/tipeando un código EXACTO del grupo, se
+    // cuenta ESE código (el del andamio), no el canónico por defecto.
+    const pref = _codigoExactoBuscado && grupo.children.find(c => String(c.codigoBarra) === String(_codigoExactoBuscado));
+    const c0 = pref || grupo.children[0];
     setTimeout(() => abrirAuditBarcode(c0.codigoBarra, c0.descripcion || grupo.base.descripcion, _detSkuActivo), 200);
+  }
+  // [contar por código] desde una fila de código del detalle: se cuenta ese código, directo.
+  function detContarCodigo(codigoBarra) {
+    if (!_detSkuActivo) return;
+    const grupo = _grupos.find(g => String(g.skuBase) === String(_detSkuActivo));
+    const c = grupo && grupo.children.find(x => String(x.codigoBarra) === String(codigoBarra));
+    if (!c) return;
+    cerrarSheet('sheetProdDetalle');
+    setTimeout(() => abrirAuditBarcode(c.codigoBarra, c.descripcion || grupo.base.descripcion, _detSkuActivo), 200);
   }
 
   function detImprimirActual() {
@@ -24077,6 +24153,7 @@ const ProductosView = (() => {
   return { cargar, silentRefresh, buscar, buscarClear, _searchFocusProd, toggleGrupo, toggleAuditoriaDia,
            abrirAuditBarcode, confirmarAuditoria,
            abrirAjuste, abrirAjusteDesdeHistorial, previewAjuste, confirmarAjuste,
+           audElegirCodigo, detContarCodigo,
            verHistorial, imprimirHistorial, imprimirMembrete, verCodigos, cerrarCodigos,
            histFiltrarTipo, histAuditar, audSetMotivo, audRecalcDiferencia,
            abrirProdCamara, cerrarProdCamara, toggleProdCamara,
