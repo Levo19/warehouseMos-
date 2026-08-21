@@ -17631,14 +17631,17 @@ const DespachoView = (() => {
     } else {
       const err = (res && res.error) || 'Error';
       const msgRaw = String((res && res.mensaje) || '');
+      const sinCupo = err === 'IA_SIN_CUPO';
       const esTimeout = err === 'IA_EDGE_FAIL' && /abort|timeout|signal/i.test(msgRaw);
       const sinItems = res && res.ok && res.data && Array.isArray(res.data.items) && !res.data.items.length;
       document.getElementById('lsErrorTitulo').textContent =
-        err === 'KEY_NOT_SET' ? 'IA no configurada'
+        sinCupo ? '⚠ IA sin tokens'
+        : err === 'KEY_NOT_SET' ? 'IA no configurada'
         : esTimeout ? 'Tardó demasiado'
         : (sinItems ? 'No detecté productos' : 'No pude analizar');
       document.getElementById('lsErrorMsg').textContent =
-        err === 'KEY_NOT_SET' ? 'La API key de Claude no está configurada. Avisa al administrador.'
+        sinCupo ? 'Se acabaron los tokens de IA por ahora. Reintenta en unos minutos o ingresa la lista a mano (pegá el texto o escaneá).'
+        : err === 'KEY_NOT_SET' ? 'La API key de Claude no está configurada. Avisa al administrador.'
         : esTimeout ? (esPdf ? 'El PDF es muy pesado o la conexión está lenta. Prueba con un PDF más liviano, o sacá fotos de las hojas y súbelas.'
                              : 'La conexión está lenta o hay muchas fotos. Prueba con menos fotos o con mejor señal.')
         : (sinItems ? 'La IA no encontró productos. Prueba con fotos más nítidas y derechas, agregá más fotos si la lista sigue, o pegá la lista como texto.'
@@ -17713,8 +17716,8 @@ const DespachoView = (() => {
           chunkErr++;
           if (!primerError) primerError = res;
           console.warn('[Chunk', i + 1, '/', totalChunks, '] error:', res?.error);
-          // Si es KEY_NOT_SET, abortar todo (no tiene sentido seguir)
-          if (res?.error === 'KEY_NOT_SET') break;
+          // Si es KEY_NOT_SET o se acabaron los tokens, abortar todo (no tiene sentido seguir gastando/reintentando)
+          if (res?.error === 'KEY_NOT_SET' || res?.error === 'IA_SIN_CUPO') break;
         }
       } catch(e) {
         chunkErr++;
@@ -17726,10 +17729,12 @@ const DespachoView = (() => {
     // ── 4. Mostrar resultado ───────────────────────────────────
     if (!buffer.length) {
       const err = primerError?.error || 'Error desconocido';
-      const msg = err === 'KEY_NOT_SET'
+      const msg = err === 'IA_SIN_CUPO'
+        ? 'Se acabaron los tokens de IA por ahora. Reintenta en unos minutos o ingresa la lista a mano.'
+        : err === 'KEY_NOT_SET'
         ? 'La API key de Claude no está configurada. Avisa al administrador.'
         : (primerError?.mensaje || 'Inténtalo de nuevo o pega la lista en formato más limpio');
-      document.getElementById('lsErrorTitulo').textContent = err === 'KEY_NOT_SET' ? 'IA no configurada' : 'No pude analizar';
+      document.getElementById('lsErrorTitulo').textContent = err === 'IA_SIN_CUPO' ? '⚠ IA sin tokens' : err === 'KEY_NOT_SET' ? 'IA no configurada' : 'No pude analizar';
       document.getElementById('lsErrorMsg').textContent = msg;
       _lsMostrarPaso(4);
       try { SoundFX.warn(); } catch(_){}

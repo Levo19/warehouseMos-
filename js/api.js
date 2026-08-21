@@ -303,6 +303,13 @@ const API = (() => {
   }
 
   // [PASO 5 · B5] Llama la Edge `ia` (proxy a Claude). body = {messages, system?, model?, max_tokens?}. Devuelve el JSON de Claude.
+  // [IA sin cupo] Detecta si un error de la Edge `ia` es por CUOTA/CRÉDITO agotado (no un bug):
+  // 429 de Gemini (quota/RESOURCE_EXHAUSTED), o Claude 400 "credit balance too low" cuando Anthropic no tiene saldo.
+  // Sirve para dar un aviso humano ("se acabaron los tokens, reintenta") en vez de un PARSE_FAIL/IA_EDGE_FAIL mudo.
+  function _iaSinCupo(status, txt) {
+    if (status === 429) return true;
+    return /quota|exceeded|resource_exhausted|credit balance|too low|rate[\s_-]*limit|sin cupo|agotad/i.test(String(txt || ''));
+  }
   async function _llamarEdgeIA(body, timeoutMs) {
     const token = await _mintTokenWH();
     const res = await _whFetchTimeout(`${_SB_URL}/functions/v1/ia`, {
@@ -310,7 +317,14 @@ const API = (() => {
       headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     }, timeoutMs || 40000);   // la IA puede tardar; visión/PDF necesita MÁS (subida del archivo en red móvil)
-    if (!res.ok) throw new Error('ia ' + res.status);
+    if (!res.ok) {
+      // [sin cupo] leer el cuerpo para distinguir "sin tokens" de un error real; antes se perdía (throw 'ia 502' mudo).
+      let detalle = ''; try { detalle = await res.text(); } catch (_) {}
+      const err = new Error('ia ' + res.status + (detalle ? ': ' + detalle.slice(0, 200) : ''));
+      err.status = res.status;
+      err.sinCupo = _iaSinCupo(res.status, detalle);
+      throw err;
+    }
     return res.json();   // {content:[{text}], ...} de Claude
   }
 
@@ -1782,7 +1796,11 @@ const API = (() => {
       // [CERO-FALLBACK] Sin fallback GAS: si el Edge `ia` falla, se devuelve error → el front reintenta/avisa.
       // Visión/PDF: timeout amplio (subida del/los archivo(s) en red móvil + procesamiento). Texto: 40s.
       try { resp = await _llamarEdgeIA(body, esArchivo ? 120000 : 40000); }
-      catch (e) { return { ok: false, error: 'IA_EDGE_FAIL', mensaje: 'IA no disponible (Edge): ' + ((e && e.message) || 'red') }; }
+      catch (e) {
+        // [sin cupo] mensaje humano diferenciado: la IA no falló por bug, se quedó sin tokens/cuota → reintentar luego o manual.
+        if (e && e.sinCupo) return { ok: false, error: 'IA_SIN_CUPO', mensaje: '⚠ Se acabaron los tokens de IA por ahora. Reintenta en unos minutos o ingresa la lista a mano.' };
+        return { ok: false, error: 'IA_EDGE_FAIL', mensaje: 'IA no disponible (Edge): ' + ((e && e.message) || 'red') };
+      }
       // [robusto] Sonnet-5 puede emitir un bloque `thinking` ANTES del texto → tomar el primer bloque type==='text',
       // no content[0] (que podría ser el thinking con .text vacío → PARSE_FAIL falso).
       const text = (resp && Array.isArray(resp.content)
