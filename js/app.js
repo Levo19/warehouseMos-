@@ -17779,9 +17779,9 @@ const DespachoView = (() => {
   //   2. CÓDIGO (codigoVisto): match exacto contra canónico.codigoBarra o equivalencia → resuelve al padre.
   //   3. Ni nombre ni código → null → el item queda skuBase='' + nombre LITERAL (el picker humano decide al escanear).
   function _lsIdentificarSkuBase(nombre, productos, codigoVisto) {
-    // [MODELO padre/hijo — pedido del dueño] Prioridad: NOMBRE (todas las palabras) → CÓDIGO (desambigua) → nada.
-    const _norm = s => String(s || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-                        .replace(/[^A-Z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    // [matcher inteligente — pedido del dueño] Prioridad: CÓDIGO exacto → NOMBRE por cercanía (fuzzy + cubrir
+    //   palabras − sobrantes) → si empata, "ambiguo" con resumen (¿A o B?) → si nada confiable, null (literal).
+    //   Reemplaza el "todas las palabras" estricto que elegía el descontinuado (ej. NAKAMITO 250GR SOBRE).
     const _canon = productos.filter(p => parseFloat(p.factorConversion || 1) === 1 && String(p.estado) !== '0');
     const _shape = (p, via) => ({
       skuBase:     String(p.skuBase || p.idProducto || p.codigoBarra || ''),
@@ -17790,16 +17790,7 @@ const DespachoView = (() => {
       unidad:      String(p.unidad || ''),
       via, score: 1.0
     });
-    // PASO 1 — NOMBRE: TODAS las palabras del item presentes en la descripción (orden indistinto). ESTRICTO
-    // (no fuzzy/score): "ajinomoto granel" NO matchea "ajinomoto sopa" (falta 'granel'). Único match → usar.
-    // Si 0 o VARIOS (ej. rojo/verde) → ambiguo → se intenta desambiguar por código abajo.
-    const palabras = _norm(nombre).split(' ').filter(w => w.length >= 2);
-    if (palabras.length) {
-      const conTodas = _canon.filter(p => { const d = _norm(p.descripcion); return palabras.every(w => d.includes(w)); });
-      if (conTodas.length === 1) return _shape(conTodas[0], 'nombre_todas_palabras');
-    }
-    // PASO 2 — CÓDIGO (codigoVisto exacto): canónico directo o vía equivalencia. Desambigua rojo/verde y rescata
-    // items cuyo nombre no fue concluyente pero traían un código.
+    // PASO 1 — CÓDIGO exacto (codigoVisto): la señal MÁS confiable (desambigua rojo/verde). Canónico o equivalencia.
     if (codigoVisto) {
       const cb = normCb(codigoVisto);
       if (cb) {
@@ -17816,8 +17807,32 @@ const DespachoView = (() => {
         }
       }
     }
-    // Sin match confiable → null → el item queda skuBase='' + nombre LITERAL (el operador decide al escanear).
-    return null;
+    // PASO 2 — NOMBRE por SCORING: tokeniza (separa número-letra: 1kg=1+kg; ignora relleno de/la/x), fuzzy por
+    //   token (tolera typos: comine→comino), cubre las palabras del pedido y penaliza palabras de más (así el
+    //   genérico gana al que trae "sobre"/pack). Gana el más cercano; empate real → ambiguo con resumen.
+    const STOP = { de:1, del:1, la:1, el:1, los:1, las:1, un:1, una:1, con:1, y:1, para:1, x:1 };
+    const _tok = s => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/([a-z])(\d)/g, '$1 $2').replace(/(\d)([a-z])/g, '$1 $2').replace(/[^a-z0-9]+/g, ' ').trim()
+      .split(' ').filter(t => t && !STOP[t]);
+    const _lev = (a, b) => { const m = a.length, n = b.length; if (!m) return n; if (!n) return m; let prev = Array.from({ length: n + 1 }, (_, i) => i), cur = new Array(n + 1); for (let i = 1; i <= m; i++) { cur[0] = i; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); const t = prev; prev = cur; cur = t; } return prev[n]; };
+    const _sim = (a, b) => { if (a === b) return 1; if (/^\d+$/.test(a) || /^\d+$/.test(b)) return a === b ? 1 : 0; const m = Math.max(a.length, b.length); return m ? 1 - _lev(a, b) / m : 0; };
+    const qt = _tok(nombre);
+    if (!qt.length) return null;
+    const _score = ct => { let cov = 0; const used = {}; for (const q of qt) { let best = 0, bi = -1; for (let i = 0; i < ct.length; i++) { if (used[i]) continue; const s = _sim(q, ct[i]); if (s > best) { best = s; bi = i; } } if (best >= 0.7) { cov += best; if (bi >= 0) used[bi] = 1; } } const cr = cov / qt.length; const extra = ct.length - Object.keys(used).length; return { sc: cr * 100 - extra * 4, cr }; };
+    const ranked = _canon.map(p => { const tks = _tok(p.descripcion); return Object.assign({ p, tks }, _score(tks)); })
+      .filter(x => x.cr >= 0.5).sort((a, b) => b.sc - a.sc);
+    if (!ranked.length) return null;
+    const top = ranked[0], seg = ranked[1];
+    if (seg && (top.sc - seg.sc) < 3) {
+      // EMPATE real → resumen de ambigüedad: parte común + ¿distintivo A o B? (ayuda al operador a decidir).
+      const emp = ranked.filter(x => top.sc - x.sc < 3).slice(0, 4);
+      const comun = emp[0].tks.filter(t => emp.every(e => e.tks.includes(t)));
+      const dif = Array.from(new Set(emp.map(e => e.tks.filter(t => comun.indexOf(t) < 0).join(' ')).filter(Boolean)));
+      const resumen = (comun.join(' ').toUpperCase() || String(nombre || '').toUpperCase()) + (dif.length ? ' — ¿' + dif.join(' o ') + '?' : '');
+      return { ambiguo: true, resumen: resumen };
+    }
+    if (top.cr >= 0.8) return _shape(top.p, 'nombre_score');   // único y confiable → elige el más cercano
+    return null;   // único pero débil → literal / el operador escanea
   }
 
   function activarListaSombra() {
@@ -17858,15 +17873,17 @@ const DespachoView = (() => {
       const items = validos.map(it => {
         // [FIX] pasar codigoVisto → habilita el match por código (antes se omitía y solo corría el de nombre).
         const m = _lsIdentificarSkuBase(it.nombre, productos, it.codigoVisto);
-        if (m) identificados++;
+        const esMatch = !!(m && m.skuBase);          // match real (con sku)
+        const esAmbiguo = !!(m && m.ambiguo);         // empate → mostrar la duda
+        if (esMatch) identificados++;
         return {
-          nombre: it.nombre,
+          nombre: esAmbiguo ? ('⚠ ' + m.resumen) : it.nombre,   // el operador ve la ambigüedad y decide/escanea
           cantidad: it.cantidad,
           codigoVisto: it.codigoVisto || '',
-          skuBase: m ? m.skuBase : '',
-          codigoBarra: m ? m.codigoBarra : '',
-          nombreMaster: m ? m.descripcion : '',
-          unidad: m ? m.unidad : '',
+          skuBase: esMatch ? m.skuBase : '',
+          codigoBarra: esMatch ? m.codigoBarra : '',
+          nombreMaster: esMatch ? m.descripcion : (esAmbiguo ? m.resumen : ''),
+          unidad: esMatch ? m.unidad : '',
           cantidadEscaneada: 0,
           productos: []
         };
