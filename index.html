@@ -6557,6 +6557,16 @@
       <div class="pn-aprob-scroll" id="pnAprobList"></div>
     </div>
 
+    <!-- [FASE 3 notif] Estrellas por agotarse: alta rotación, sin stock en zona, pero HAY en almacén → despachar. -->
+    <div id="dashEstrellas" class="mb-3 hidden">
+      <div class="pre-date-hdr" style="margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        <span style="font-size:1rem">⭐</span>
+        <span>Estrellas por agotarse · por despachar</span>
+        <span id="estrellasCount" class="consid-count">0</span>
+      </div>
+      <div id="estrellasList"></div>
+    </div>
+
     <!-- [456] Panels expandibles venc/env/stock/mermas ELIMINADOS: los badges de los accesos
          rápidos llevan directo a la vista real de cada módulo. -->
 
@@ -11121,7 +11131,7 @@
 <script src="js/offline.js?v=2.13.556"></script>
 <!-- [PASO 5 · B5] Armado de tickets/etiquetas en el navegador. ANTES de api.js (api.js usa ImpresionDirecta). -->
 <script src="js/impresion-directa.js?v=2.13.556"></script>
-<script src="js/api.js?v=2.13.571"></script>
+<script src="js/api.js?v=2.13.572"></script>
 <script src="js/scanner.js?v=2.13.556"></script>
 <script src="js/sounds.js?v=2.13.556"></script>
 <!-- F2-F9 — módulos nuevos -->
@@ -11138,6 +11148,6 @@
 <script src="js/cargadores.js?v=2.13.556"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.571"></script>
+<script src="js/app.js?v=2.13.572"></script>
 </body>
 </html>

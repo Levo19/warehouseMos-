@@ -1009,6 +1009,35 @@ async function _cargarConsiderados() {
       </div>`;
   }).join('');
 }
+// [FASE 3 notif] Estrellas por agotarse en el dashboard de WH, agrupadas por zona (título grande de la zona
+//   a la que se le debe). Alta rotación, sin stock en zona, pero HAY en almacén → hay que despachar. Dinámico:
+//   la RPC solo devuelve las que siguen críticas (si se despachó, se cae sola).
+async function _cargarEstrellas() {
+  const cont = document.getElementById('dashEstrellas');
+  const list = document.getElementById('estrellasList');
+  const cnt  = document.getElementById('estrellasCount');
+  if (!cont || !list) return;
+  let r = null;
+  try { r = await API.estrellasCriticas(); } catch (_) {}
+  const zonas = (r && r.ok !== false && r.data && r.data.zonas) || [];
+  const total = zonas.reduce((a, z) => a + ((z.items && z.items.length) || 0), 0);
+  if (!total) { cont.classList.add('hidden'); return; }
+  cont.classList.remove('hidden');
+  if (cnt) cnt.textContent = total;
+  const zlbl = (id) => { const m = String(id || '').toUpperCase().replace(/ZONA-?/, ''); return /^\d+$/.test(m) ? 'Zona ' + parseInt(m, 10) : (id || '—'); };
+  list.innerHTML = zonas.map(z => {
+    const its = Array.isArray(z.items) ? z.items : [];
+    const rows = its.slice(0, 12).map(i =>
+      `<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 10px;border-top:1px solid rgba(148,163,184,.1);font-size:.72rem">
+         <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(i.nombre || i.sku)}</span>
+         <span style="color:#94a3b8;white-space:nowrap;flex-shrink:0">zona ${fmtQty(parseFloat(i.eff) || 0)}/${fmtQty(parseFloat(i.esperado) || 0)} · alm ${fmtQty(parseFloat(i.almacen) || 0)}</span>
+       </div>`).join('');
+    const mas = its.length > 12 ? `<div style="font-size:.66rem;color:#64748b;padding:4px 10px">y ${its.length - 12} más…</div>` : '';
+    return `<div style="margin-bottom:8px;border:1px solid rgba(250,204,21,.3);border-radius:12px;background:rgba(234,179,8,.06);overflow:hidden">
+      <div style="font-weight:900;font-size:.95rem;color:#fde68a;padding:8px 10px;background:rgba(234,179,8,.1)">⭐ ${escHtml(zlbl(z.zona))} <span style="font-weight:700;font-size:.7rem;color:#eab308">· ${its.length} por despachar</span></div>
+      ${rows}${mas}</div>`;
+  }).join('');
+}
 window.WHConsiderados = {
   resolver: async function (id, estado) {
     const card = document.querySelector('.consid-card[data-id="' + (window.CSS && CSS.escape ? CSS.escape(String(id)) : String(id)) + '"]');
@@ -4599,6 +4628,8 @@ const App = (() => {
     if (!esCache) _cargarPNAprobados();
     // [790] Considerados (ingresó y alguna vez se debió) — carga en background
     if (!esCache) _cargarConsiderados();
+    // [FASE 3 notif] Estrellas por agotarse por zona — carga en background
+    if (!esCache) _cargarEstrellas();
 
     // [456] renders de los panels expandibles eliminados (los badges llevan a la vista real).
   }

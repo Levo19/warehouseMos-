@@ -3020,6 +3020,8 @@ const API = (() => {
     // [790] Considerados + priorizado por ingreso de mercadería (RPC directas, cero GAS)
     consideradosListar:  ()     => _sbRpcWH('considerados_listar',  { p: {} }),
     consideradoResolver: (p={}) => _sbRpcWH('considerado_resolver', { p }),
+    // [FASE 3 notif] estrellas por agotarse por zona (RPC mos, perfil 'mos') → {ok,data:{zonas:[{zona,total,items:[...]}]}}
+    estrellasCriticas:   ()     => _sbRpcWH('estrellas_criticas_listar', { p: {} }, 'mos'),
     ingresosRecientes:   (p={}) => _sbRpcWH('ingresos_recientes',   { p: { dias: (p && p.dias) || 3 } }),
     registrarPN:                 (p)    => post({ action: 'registrarProductoNuevo', ...p }),
 
