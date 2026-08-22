@@ -1,1 +1,1 @@
-{"version": "2.13.576", "build": "Despacho · Considerados: card con FOTO + zonas AGRUPADAS por zona (antes repetía una fila por semana = confuso) con SELLO de despacho por zona (✓ despachado / ⏳ pendiente). Se quitaron el ✔/✕ (eran inutiles); es informativo y expira solo a los 7 días."}
+{"version": "2.13.577", "build": "Despacho · Considerados: ahora tambien entran los productos que YA HAY en almacen y se deben de semanas atras (barrido de stock), etiquetados 📦 ya en almacen / hay N en almacen. Antes solo se activaban al ingresar mercaderia."}
