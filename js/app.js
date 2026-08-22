@@ -961,7 +961,8 @@ function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '')
 // ── [790] Considerados — ingresó mercadería que ALGUNA VEZ se debió ──────────
 // El backend (trigger de guía de ingreso) cruza cada producto que entra contra los
 // rezagados de las últimas 4 semanas: si quedó debiendo y HOY nadie lo pide, cae aquí.
-// El operador decide: ✔ Atendido (ya lo mandó) o ✕ Descartar. Expira solo a los 7 días.
+// [942] Informativo: card con foto + zonas AGRUPADAS con sello de despacho (✓ despachado / ⏳ pendiente).
+// Sin ✔/✕ (eran confusos): expira solo a los 7 días. El sello sale del server (última SALIDA a esa zona).
 function _considHaceLbl(ts) {
   try {
     const d = Math.floor((Date.now() - new Date(String(ts).slice(0, 16)).getTime()) / 86400000);
@@ -987,24 +988,41 @@ async function _cargarConsiderados() {
     localStorage.setItem(k, String(Date.now()));
     if (hayNuevo && last > 0) toast('🎯 Ingresó mercadería que alguna vez se debió — revisa Considerados', 'warn', 5000);
   } catch (_) {}
+  const _semLbl = (bucket) => { try { const n = Math.max(1, Math.round((Date.now() - new Date(bucket + 'T12:00:00').getTime()) / (7 * 86400000))); return 'hace ' + n + ' sem'; } catch (_) { return ''; } };
   list.innerHTML = items.map(it => {
-    const zonas = (Array.isArray(it.zonas) ? it.zonas : []).map(z => {
-      let sem = '';
-      try { sem = Math.max(1, Math.round((Date.now() - new Date(z.bucket + 'T12:00:00').getTime()) / (7 * 86400000))); } catch (_) {}
-      return `${escHtml(z.zona)} debía ${fmtQty(parseFloat(z.pend) || 0)}${sem ? ` (hace ${sem} sem)` : ''}`;
-    }).join(' · ');
+    const tipoLbl = String(it.guiaTipo || '') === 'INGRESO_ENVASADO' ? '🏭 de envasado'
+      : String(it.guiaTipo || '') === 'INGRESO_PROVEEDOR' ? '🚚 de proveedor' : '';
+    // [942] AGRUPAR por zona (una zona podía repetirse por semana = confuso) + SELLO de despacho por zona.
+    //   El check/✕ se quitaron: es informativo y se limpia solo a los 7 días. El sello dice si YA se despachó.
+    const g = {};
+    (Array.isArray(it.zonas) ? it.zonas : []).forEach(z => {
+      const k = String(z.zona || '—');
+      if (!g[k]) g[k] = { zona: k, pend: 0, bucketMin: null, desp: null };
+      g[k].pend += (parseFloat(z.pend) || 0);
+      if (z.bucket && (!g[k].bucketMin || z.bucket < g[k].bucketMin)) g[k].bucketMin = z.bucket;
+      if (z.despachadoTs && (!g[k].desp || z.despachadoTs > g[k].desp)) g[k].desp = z.despachadoTs;
+    });
+    const zonasHtml = Object.keys(g).map(k => {
+      const z = g[k]; const sem = _semLbl(z.bucketMin);
+      const sello = z.desp
+        ? `<span style="color:#34d399;font-weight:700;white-space:nowrap">✓ despachado ${escHtml(_considHaceLbl(z.desp))}</span>`
+        : `<span style="color:#fbbf24;font-weight:700;white-space:nowrap">⏳ aún sin despachar</span>`;
+      return `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:4px 0;border-top:1px solid rgba(148,163,184,.1);font-size:.72rem">
+        <span style="color:#e2e8f0;font-weight:700">${escHtml(z.zona)}</span>
+        <span style="color:#94a3b8;flex:1;text-align:right">debía ${fmtQty(z.pend)}${sem ? ' · ' + sem : ''}</span>
+        ${sello}</div>`;
+    }).join('') || '<div style="font-size:.72rem;color:#94a3b8;padding:4px 0">fue solicitado en semanas pasadas</div>';
+    const foto = it.foto
+      ? `<img src="${escHtml(it.foto)}" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover">`
+      : '<span style="font-size:1.4rem">🎯</span>';
     return `
-      <div class="consid-card" data-id="${escAttr(String(it.id))}">
+      <div class="consid-card" data-id="${escAttr(String(it.id))}" style="align-items:flex-start;gap:10px">
         <div class="consid-glow"></div>
+        <div style="flex:0 0 auto;width:50px;height:50px;border-radius:12px;overflow:hidden;background:rgba(148,163,184,.12);display:flex;align-items:center;justify-content:center;position:relative">${foto}</div>
         <div class="flex-1 min-w-0" style="position:relative">
-          <p class="consid-name">🎯 ${escHtml(it.nombre || it.skuBase)}</p>
-          <p class="consid-meta">ingresó ${_considHaceLbl(it.creado)} (${fmtQty(parseFloat(it.cant) || 0)} uds) · <b>considera enviarlo:</b> ${zonas || 'fue solicitado en semanas pasadas'}</p>
-        </div>
-        <div class="consid-btns">
-          <button class="consid-btn ok" title="Ya lo atendí / lo mandé"
-                  onclick="WHConsiderados.resolver('${escAttr(String(it.id))}','ATENDIDO')">✔</button>
-          <button class="consid-btn no" title="Descartar"
-                  onclick="WHConsiderados.resolver('${escAttr(String(it.id))}','DESCARTADO')">✕</button>
+          <p class="consid-name">${escHtml(it.nombre || it.skuBase)}</p>
+          <p class="consid-meta" style="margin-bottom:4px">ingresó ${_considHaceLbl(it.creado)} · ${fmtQty(parseFloat(it.cant) || 0)} uds${tipoLbl ? ' · ' + tipoLbl : ''}</p>
+          ${zonasHtml}
         </div>
       </div>`;
   }).join('');
