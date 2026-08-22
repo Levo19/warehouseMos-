@@ -308,7 +308,9 @@ const API = (() => {
   // Sirve para dar un aviso humano ("se acabaron los tokens, reintenta") en vez de un PARSE_FAIL/IA_EDGE_FAIL mudo.
   function _iaSinCupo(status, txt) {
     if (status === 429) return true;
-    return /quota|exceeded|resource_exhausted|credit balance|too low|rate[\s_-]*limit|sin cupo|agotad/i.test(String(txt || ''));
+    // [fix M1] patrones ACOTADos a cuota/crédito (no 'exceeded'/'too low' sueltos, que atrapaban errores de input largo
+    // como "maximum tokens exceeded" / "prompt is too long" y los marcaban falsamente como "sin cupo").
+    return /quota|resource_exhausted|credit balance|rate[\s_-]*limit|too many requests|insufficient|sin cupo|agotad/i.test(String(txt || ''));
   }
   async function _llamarEdgeIA(body, timeoutMs) {
     const token = await _mintTokenWH();

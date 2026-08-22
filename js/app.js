@@ -17700,6 +17700,7 @@ const DespachoView = (() => {
       'Casi listo…'
     ];
     let subRotIdx = 0;
+    let corteSinCupo = false;   // se cortó el bucle por falta de tokens → hay partes SIN procesar
 
     for (let i = 0; i < chunks.length; i++) {
       if (subEl) {
@@ -17717,7 +17718,8 @@ const DespachoView = (() => {
           if (!primerError) primerError = res;
           console.warn('[Chunk', i + 1, '/', totalChunks, '] error:', res?.error);
           // Si es KEY_NOT_SET o se acabaron los tokens, abortar todo (no tiene sentido seguir gastando/reintentando)
-          if (res?.error === 'KEY_NOT_SET' || res?.error === 'IA_SIN_CUPO') break;
+          if (res?.error === 'IA_SIN_CUPO') { corteSinCupo = true; break; }
+          if (res?.error === 'KEY_NOT_SET') break;
         }
       } catch(e) {
         chunkErr++;
@@ -17748,9 +17750,16 @@ const DespachoView = (() => {
     vibrate([20, 30, 40]);
 
     if (totalChunks > 1) {
-      const errTxt = chunkErr > 0 ? ` (${chunkErr} parte(s) fallaron)` : '';
-      toast(`✓ ${totalChunks} partes procesadas · ${buffer.length} productos${errTxt}`,
-            chunkErr ? 'warn' : 'ok', 5000);
+      const procesados = chunkOk + chunkErr;          // partes realmente intentadas (no el total si se cortó)
+      const faltan = totalChunks - procesados;
+      if (corteSinCupo && faltan > 0) {
+        // [fix A2] NO decir "completa": la IA se quedó sin tokens a mitad y quedaron partes SIN procesar.
+        toast(`⚠ IA sin tokens: quedaron ${faltan} de ${totalChunks} partes SIN leer. La lista está INCOMPLETA — reintenta en unos minutos para completar el resto.`, 'warn', 9000);
+      } else {
+        const errTxt = chunkErr > 0 ? ` (${chunkErr} parte(s) fallaron)` : '';
+        toast(`✓ ${procesados} partes procesadas · ${buffer.length} productos${errTxt}`,
+              chunkErr ? 'warn' : 'ok', 5000);
+      }
     }
   }
 
@@ -17823,14 +17832,21 @@ const DespachoView = (() => {
     const _sim = (a, b) => { if (a === b) return 1; if (/^\d+$/.test(a) || /^\d+$/.test(b)) return a === b ? 1 : 0; const m = Math.max(a.length, b.length); return m ? 1 - _lev(a, b) / m : 0; };
     const qt = _tok(nombre);
     if (!qt.length) return null;
-    const _score = ct => { let cov = 0; const used = {}; for (const q of qt) { let best = 0, bi = -1; for (let i = 0; i < ct.length; i++) { if (used[i]) continue; const s = _sim(q, ct[i]); if (s > best) { best = s; bi = i; } } if (best >= 0.7) { cov += best; if (bi >= 0) used[bi] = 1; } } const cr = cov / qt.length; const extra = ct.length - Object.keys(used).length; return { sc: cr * 100 - extra * 4, cr }; };
+    const _score = ct => { let cov = 0; const used = {}; for (const q of qt) { let best = 0, bi = -1; for (let i = 0; i < ct.length; i++) { if (used[i]) continue; const s = _sim(q, ct[i]); if (s > best) { best = s; bi = i; } } if (best >= 0.7) { cov += best; if (bi >= 0) used[bi] = 1; } } const cr = cov / qt.length; const extra = ct.length - Object.keys(used).length; return { sc: cr * 100 - extra * 4, cr, extra }; };
     const ranked = _canon.map(p => { const tks = _tok(p.descripcion); return Object.assign({ p, tks }, _score(tks)); })
       .filter(x => x.cr >= 0.5).sort((a, b) => b.sc - a.sc);
     if (!ranked.length) return null;
     const top = ranked[0], seg = ranked[1];
-    if (seg && (top.sc - seg.sc) < 3) {
+    // AMBIGÜEDAD por SCORE (variantes de igual largo) o por COBERTURA. Esta última es clave: si el pedido cubre
+    // IGUAL a dos variantes y NO trae la palabra que las distingue (ej. "PIMIENTA NEGRA" → entera vs molida granel),
+    // la penalización por sobrantes (extra×4) hacía que el gap de score superara 3 y se elegía la de descripción más
+    // corta EN SILENCIO. Ahora, si ambas cubren bien el pedido (cr≥0.8, casi igual) y el top aún tiene palabras que el
+    // pedido no especificó (extra>0), es ambiguo → el operador decide. Si el pedido calza EXACTO (extra=0), no pregunta.
+    const empateScore  = seg && (top.sc - seg.sc) < 3;
+    const empateCober  = seg && top.cr >= 0.8 && seg.cr >= 0.8 && (top.cr - seg.cr) < 0.2 && top.extra > 0;
+    if (empateScore || empateCober) {
       // EMPATE real → resumen de ambigüedad: parte común + ¿distintivo A o B? (ayuda al operador a decidir).
-      const emp = ranked.filter(x => top.sc - x.sc < 3).slice(0, 4);
+      const emp = ranked.filter(x => (top.sc - x.sc < 3) || (x.cr >= 0.8 && (top.cr - x.cr) < 0.2)).slice(0, 4);
       const comun = emp[0].tks.filter(t => emp.every(e => e.tks.includes(t)));
       const dif = Array.from(new Set(emp.map(e => e.tks.filter(t => comun.indexOf(t) < 0).join(' ')).filter(Boolean)));
       const resumen = (comun.join(' ').toUpperCase() || String(nombre || '').toUpperCase()) + (dif.length ? ' — ¿' + dif.join(' o ') + '?' : '');
