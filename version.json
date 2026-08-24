@@ -1,1 +1,1 @@
-{"version": "2.13.577", "build": "Despacho · Considerados: ahora tambien entran los productos que YA HAY en almacen y se deben de semanas atras (barrido de stock), etiquetados 📦 ya en almacen / hay N en almacen. Antes solo se activaban al ingresar mercaderia."}
+{"version": "2.13.578", "build": "Considerados v3: la lista viene por PRIORIDAD (deuda+stock+antiguedad); los 3 primeros marcados con 🔥 = despachar primero. Ya no se vencen a 7 dias: se atienden despachando; los atendidos y los imposibles (stock 0) salen solos. Rotativo por prioridad en notificaciones."}

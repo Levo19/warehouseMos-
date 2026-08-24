@@ -989,8 +989,9 @@ async function _cargarConsiderados() {
     if (hayNuevo && last > 0) toast('🎯 Ingresó mercadería que alguna vez se debió — revisa Considerados', 'warn', 5000);
   } catch (_) {}
   const _semLbl = (bucket) => { try { const n = Math.max(1, Math.round((Date.now() - new Date(bucket + 'T12:00:00').getTime()) / (7 * 86400000))); return 'hace ' + n + ' sem'; } catch (_) { return ''; } };
-  list.innerHTML = items.map(it => {
+  list.innerHTML = items.map((it, idx) => {
     const esStock = String(it.guiaTipo || '') === 'STOCK';   // [945] había stock y se debe (no ingresó hoy)
+    const esPrio = idx < 3;   // [v3] los 3 primeros vienen por mayor prioridad del server → despachar primero
     const tipoLbl = esStock ? '📦 ya en almacén'
       : String(it.guiaTipo || '') === 'INGRESO_ENVASADO' ? '🏭 de envasado'
       : String(it.guiaTipo || '') === 'INGRESO_PROVEEDOR' ? '🚚 de proveedor' : '';
@@ -1022,7 +1023,7 @@ async function _cargarConsiderados() {
         <div class="consid-glow"></div>
         <div style="flex:0 0 auto;width:50px;height:50px;border-radius:12px;overflow:hidden;background:rgba(148,163,184,.12);display:flex;align-items:center;justify-content:center;position:relative">${foto}</div>
         <div class="flex-1 min-w-0" style="position:relative">
-          <p class="consid-name">${escHtml(it.nombre || it.skuBase)}</p>
+          <p class="consid-name">${esPrio ? '<span style="color:#f87171">🔥 </span>' : ''}${escHtml(it.nombre || it.skuBase)}</p>
           <p class="consid-meta" style="margin-bottom:4px">${esStock ? 'hay ' + fmtQty(parseFloat(it.cant) || 0) + ' en almacén' : 'ingresó ' + _considHaceLbl(it.creado) + ' · ' + fmtQty(parseFloat(it.cant) || 0) + ' uds'}${tipoLbl && !esStock ? ' · ' + tipoLbl : ''}</p>
           ${zonasHtml}
         </div>
