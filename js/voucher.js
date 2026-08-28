@@ -37,6 +37,7 @@
   function _fmtFecha(f){ const raw = String(f||'').slice(0,10); if(!raw) return ''; const p=raw.split('-'); if(p.length<3) return raw;
     const ms=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']; return parseInt(p[2],10)+' '+ms[parseInt(p[1],10)-1]+' '+p[0]; }
   function _accent(t){
+    if (t.remision) return { main:'#6e56cf', bg:'#efe9fb', ribbon:'GUÍA DE REMISIÓN', rb:'#6e56cf' };  // [983] pedido MosGo
     if (t.kind === 'preingreso') return { main:'#5b3fb8', bg:'#efe9fb', ribbon:'PREINGRESO', rb:'#5b3fb8' };
     const g = String(t.tipoGuia||'');
     if (g.indexOf('INGRESO') === 0) return { main:'#15803d', bg:'#e7f4ec', ribbon:'GUÍA', rb:'#15803d' };
@@ -92,7 +93,7 @@
       x.fillStyle = '#1b1e26'; x.font = '900 20px -apple-system,Segoe UI,sans-serif';
       x.fillText(trunc(t.proveedor || '—', leftRight-(PAD+16), '900 20px -apple-system,Segoe UI,sans-serif'), PAD+16, y+43);
       // subtítulo (tipo guía)
-      if (isG) { x.fillStyle = '#565d6b'; x.font = '700 13px -apple-system,Segoe UI,sans-serif'; x.fillText(_tipoLabel(t.tipoGuia), PAD+16, y+62); }
+      if (isG) { x.fillStyle = '#565d6b'; x.font = '700 13px -apple-system,Segoe UI,sans-serif'; x.fillText(t.remision ? ('🚚 Pedido MosGo' + (t.vendedor ? ' · ' + t.vendedor : '')) : _tipoLabel(t.tipoGuia), PAD+16, y+62); }
       // id + estado pill
       const id = isG ? t.idGuia : t.idPreingreso;
       const idY = isG ? y+88 : y+70;

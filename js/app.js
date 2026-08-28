@@ -13610,6 +13610,18 @@ const DespachoView = (() => {
       return; // absorbido por el pickup, no entra al carrito como extra
     }
 
+    // [980 F2] Pickup MOSGO = pedido directo del cliente/vendedor: NO se despacha nada FUERA de la lista.
+    //   Un código equivalente de un producto solicitado SÍ entra (lo resuelve _intentarSumarAPickup arriba);
+    //   pero un producto que no está en el pedido → "PRODUCTO NO SOLICITADO" y se rechaza (no entra como extra).
+    if (_pickupActivo && _esPickupMosgo() && !_matchPickupItem(prod, cb)) {
+      try { SoundFX.error ? SoundFX.error() : SoundFX.warn(); } catch(_){}
+      vibrate([40, 40, 40]);
+      toast(`❌ PRODUCTO NO SOLICITADO · ${desc} no está en este pedido`, 'error', 3200);
+      try { if (typeof _vozAnunciar === 'function') _vozAnunciar('Producto no solicitado'); } catch(_){}
+      _despLastHistory.push(cb);
+      return; // rechazado: en un pedido MosGo solo se despacha lo pedido
+    }
+
     // ── Producto a granel SIEMPRE pide peso, esté o no dentro de pickup.
     //    Si llega aquí es porque NO matcheó con pickup activo (extra) o
     //    no hay pickup activo en absoluto. Cualquier caso → modal qty.
@@ -14889,6 +14901,7 @@ const DespachoView = (() => {
           if (fuente.indexOf('acumulado') >= 0)      { fuenteIcon = '📋'; fuenteLbl = 'Acumulado semanal'; }
           else if (fuente.indexOf('me_cierre') >= 0) { fuenteIcon = '🛒'; fuenteLbl = 'Cierre caja'; }
           else if (fuente.indexOf('riz') >= 0)       { fuenteIcon = '🛒'; fuenteLbl = 'Pedido de zona'; }
+          else if (fuente.indexOf('mosgo') >= 0)     { fuenteIcon = '🚚'; fuenteLbl = 'Pedido MosGo'; }
           // [fix display] hace robusto: m / h / ayer / Nd / fecha. Parse defensivo (NaN → vacío).
           // El ACUMULADO usa ULTIMA ACTIVIDAD (último cierre que lo alimentó) en vez de fechaCreado
           // (que es cuando nació la lista) → así refleja "hace 2h" cuando recién cerró una caja.
@@ -15342,6 +15355,14 @@ const DespachoView = (() => {
   }
 
   // Buscar item del pickup que matchee con el producto/código escaneado.
+  // [980 F2] ¿el pickup activo es un pedido MosGo? (despacho restringido a lo solicitado)
+  function _esPickupMosgo() {
+    if (!_pickupActivo) return false;
+    return String(_pickupActivo.fuente || '').toUpperCase() === 'MOSGO'
+        || String(_pickupActivo.idZona || '').toUpperCase() === 'MOSGO'
+        || String(_pickupActivo.idPickup || '').toUpperCase().indexOf('PCK-MOSGO') === 0;
+  }
+
   function _matchPickupItem(prod, cb) {
     if (!_pickupActivo || !Array.isArray(_pickupActivo.items)) return null;
     const cbU  = String(cb || '').toUpperCase();
