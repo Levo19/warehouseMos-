@@ -29,7 +29,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.578';
+const VERSION = '2.13.579';
 const CACHE   = 'warehouse-v' + VERSION;
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
@@ -154,7 +154,7 @@ self.addEventListener('fetch', e => {
           const clone = net.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
         }
-        // [534] ignoreSearch: index.html ahora pide js/app.js?v=2.13.578. Sin esto, el
+        // [534] ignoreSearch: index.html ahora pide js/app.js?v=2.13.579. Sin esto, el
         // fallback offline hacía MISS contra la entrada precacheada './js/app.js' (sin
         // query) y la app no levantaba sin red. Con ignoreSearch, el ?v= sirve para
         // reventar el caché HTTP del navegador sin romper el precache del SW.

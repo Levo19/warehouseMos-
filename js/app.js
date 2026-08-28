@@ -9652,11 +9652,11 @@ const GuiasView = (() => {
   //   - Si r.ok === false con error transitorio (printer offline, apikey, 5xx)
   //     → un solo reintento tras 3s; si vuelve a fallar, encolar
   //   - Si r.ya_impresa === true (backend dedupó) → toast informativo, NO encolar
-  async function _imprimirConReintento(idGuia, reporteUrl, titulo) {
+  async function _imprimirConReintento(idGuia, reporteUrl, titulo, soloQR) {
     let resp = null;
     let lastErr = null;
     try {
-      resp = await API.imprimirTicketGuia({ idGuia, reporteUrl });
+      resp = await API.imprimirTicketGuia({ idGuia, reporteUrl, soloQR });
       if (resp && resp.ok !== false) {
         _removerImpresionPendiente(idGuia);
         if (resp.ya_impresa) {
@@ -9682,7 +9682,7 @@ const GuiasView = (() => {
       toast('🖨 Error transitorio · reintento único en 3s…', 'info', 3500);
       await new Promise(r => setTimeout(r, 3000));
       try {
-        const r2 = await API.imprimirTicketGuia({ idGuia, reporteUrl });
+        const r2 = await API.imprimirTicketGuia({ idGuia, reporteUrl, soloQR });
         if (r2 && r2.ok !== false) {
           _removerImpresionPendiente(idGuia);
           toast('🖨 Impresión OK tras 1 reintento', 'ok', 3000);
@@ -16449,7 +16449,7 @@ const DespachoView = (() => {
           try {
             const base = location.origin + location.pathname.replace(/\/[^/]*$/, '');
             const reporteUrl = `${base}/reporte.html?tipo=guia&id=${encodeURIComponent(d.idGuia)}`;
-            _imprimirConReintento(d.idGuia, reporteUrl, 'Guía ' + d.idGuia);
+            _imprimirConReintento(d.idGuia, reporteUrl, 'Guía ' + d.idGuia, true);  // [963] pickup → ticket QR-only (sin lista)
           } catch(eImp){
             _encolarImpresionPendiente(d.idGuia, 'Guía ' + d.idGuia);
             toast('🖨 No se pudo imprimir: ' + (eImp.message || eImp) + ' · encolado para reintento', 'warn', 9000);

@@ -3081,7 +3081,7 @@ const API = (() => {
             method: 'POST',
             headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' },
             // reporteUrl → la Edge imprime el QR del reporte (sin esto el ticket sale sin QR).
-            body: JSON.stringify({ idGuia: String(p.idGuia), reporteUrl: p.reporteUrl || '', printerIdOverride: p.printerIdOverride || null, fuerzaCopia: !!p.fuerzaCopia, usuario: p.usuario || '' })
+            body: JSON.stringify({ idGuia: String(p.idGuia), reporteUrl: p.reporteUrl || '', printerIdOverride: p.printerIdOverride || null, fuerzaCopia: !!p.fuerzaCopia, usuario: p.usuario || '', soloQR: !!p.soloQR })
           }, 15000);
           const d = await res.json().catch(() => ({}));
           if (d && d.ok) return { ok: true, data: { idGuia: p.idGuia, via: 'edge-ticket', jobId: d.jobId, detallesImpresos: d.detallesImpresos } };
