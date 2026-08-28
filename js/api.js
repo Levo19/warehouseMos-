@@ -1599,6 +1599,7 @@ const API = (() => {
       // Solo el kill-switch (*_DIRECTO_OFF) sigue devolviendo null (= "vía no cableada").
       if (!out) return null;
       if (out.ok === false) {
+        if (out.mensaje) out.error = out.mensaje;   // guardián guía-abierta → texto amigable en cualquier display
         return /_OFF$/.test(String(out.error || '')) ? null : out;
       }
       return out;
@@ -1674,7 +1675,11 @@ const API = (() => {
         usuario: params.usuario || '', observacion: params.observacion || '',
         id_auditoria: 'AUD_' + lid, id_ajuste: 'AJ_' + lid, id_stock_nuevo: 'STK_' + lid, id_mov: 'MOV_' + lid
       } });
-      if (!out || out.ok === false) return null;
+      if (!out) return null;
+      if (out.ok === false) {   // guardián guía-abierta → surface el mensaje (no tragarlo como null)
+        if (out.mensaje) out.error = out.mensaje;
+        return /_OFF$/.test(String(out.error || '')) ? null : out;
+      }
       if (!out.dedup) { _sbRpcWH('registrar_actividad', { p_id_sesion: (window.WH_CONFIG && window.WH_CONFIG.idSesion) || '', p_tipo: 'AUDITORIA_EJECUTADA', p_cantidad: 1 }).catch(function(){}); }
       return out;
     }
