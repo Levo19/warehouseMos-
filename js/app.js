@@ -19790,6 +19790,12 @@ const PreingresosView = (() => {
       fecha: new Date().toISOString(), fotos: '',
       usuario: window.WH_CONFIG.usuario
     });
+    // [BUG comentario vacío al reabrir] Blindar comentario/monto/proveedor del merge de polling igual que
+    //   guardarEdicion. Sin esto, el aviso disparaba silentRefresh → _mergePreingresos NO protegía el
+    //   comentario (no estaba "pendiente") y lo pisaba con el backend aún sin reflejar la fila recién creada
+    //   → el cuadro salía VACÍO al reabrir y el operador re-escribía, chancando el comentario anterior.
+    //   TTL amplio (90s) por si el aviso/fotos en background disparan varios merges antes de que cuaje.
+    OfflineManager.marcarPreingresoPendiente(idPreingresoReal, ['comentario', 'monto', 'idProveedor'], 90000);
     // [v2.13.173] Si trae cargadores, blindarlos del merge de polling hasta
     // que el backend confirme la fila recién creada.
     if (cargadores) OfflineManager.marcarCargadoresPendiente(idPreingresoReal);
