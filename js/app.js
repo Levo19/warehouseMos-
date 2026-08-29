@@ -22894,12 +22894,24 @@ const ProductosView = (() => {
         return;
       }
       if (res.offline) { toast('📶 Sin señal — auditoría en cola, se guardará al reconectar', 'warn', 4000); return; }
-      // El servidor dice explícitamente si movió el stock (`ajusto`). Si NO lo movió y
-      // había diferencia, la card está mintiendo → devolverla al valor real y explicar.
-      if (res.ajusto === false && Math.abs(diff) > 0.0005) {
-        _revertirAudit(
-          `ℹ️ El servidor no aplicó la corrección (${res.error || res.resultado || 'sin detalle'}). ` +
-          `El stock sigue en ${fmtQty(stockSistema)} — vuelve a contar.`, 'warn');
+      // [FIX doble-conteo "vuelve a contar"] `ajusto:false` NO es un fallo. El RPC wh.auditar_producto solo
+      // lo devuelve cuando v_diff = round(físico - stock_servidor, 2) = 0, es decir, el stock del SERVIDOR
+      // YA coincide con lo contado: o un conteo previo tuyo ya se aplicó, o la card mostraba un valor viejo
+      // (la caché de stock se refresca cada 60s). El conteo QUEDÓ REGISTRADO (fila en wh.auditorias, resultado
+      // OK, diff 0). Antes se revertía la card al valor viejo y se decía "vuelve a contar" → bucle frustrante
+      // (le pasaba a quien cuenta mucho y cae en la ventana de caché stale, p.ej. Jorgenis; a otros les pasa y
+      // no se dan cuenta). Como ajusto:false GARANTIZA stock_servidor == físico, la verdad es el físico: lo
+      // confirmamos en la card (ya lo muestra optimista) y seguimos, sin nagging ni revertir a un valor stale.
+      if (res.ajusto === false) {
+        _stockMap[target.codigoBarra] = {
+          ...(_stockMap[target.codigoBarra] || {}),
+          cantidadDisponible: fisico
+        };
+        _grupos = _agrupar(OfflineManager.getProductosCache(), OfflineManager.getEquivalenciasCache());
+        _aplicarQuery();
+        // Si la card mostraba un valor distinto, aclarar que ya estaba correcto (no fue un cambio, pero tampoco un error).
+        if (Math.abs(diff) > 0.0005) toast(`✅ Ya estaba en ${fmtQty(fisico)} — conteo registrado, sin cambios.`, 'ok', 3500);
+        if (target.idAlerta && typeof Dashboard !== 'undefined') Dashboard.marcarAlertaRevisada(target.idAlerta);
         return;
       }
       // Si la auditoría vino de una alerta de cuadre, marcarla como revisada
