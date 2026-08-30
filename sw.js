@@ -29,7 +29,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.584';
+const VERSION = '2.13.585';
 const CACHE   = 'warehouse-v' + VERSION;
 // [egress] Cache dedicado de imágenes de Supabase Storage. Nombre que NO empieza con `warehouse-v` → el
 //   cleanup por prefijo del activate NO lo borra → las fotos sobreviven a los updates de la app y NO se
@@ -179,7 +179,7 @@ self.addEventListener('fetch', e => {
           const clone = net.clone();
           caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {});
         }
-        // [534] ignoreSearch: index.html ahora pide js/app.js?v=2.13.581. Sin esto, el
+        // [534] ignoreSearch: index.html ahora pide js/app.js?v=2.13.585. Sin esto, el
         // fallback offline hacía MISS contra la entrada precacheada './js/app.js' (sin
         // query) y la app no levantaba sin red. Con ignoreSearch, el ?v= sirve para
         // reventar el caché HTTP del navegador sin romper el precache del SW.

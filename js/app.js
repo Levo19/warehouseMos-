@@ -8620,16 +8620,36 @@ const GuiasView = (() => {
       reader.onload = e => {
         try {
           const dataUrl = e.target.result;
-          _pnFotoBase64 = String(dataUrl || '').split(',')[1] || '';
-          _pnFotoMime   = file.type || 'image/jpeg';
-          const img = document.getElementById('pnFotoImg');
-          if (img) img.src = dataUrl;
-          const prev = document.getElementById('pnFotoPreview');
-          if (prev) prev.style.display = 'block';
-          try { vibrate?.(15); } catch(_){}
-          // [v2.13.478] SUBIR YA a Storage (no esperar al registro) — la URL corta es lo
-          // único que viajará al backend/cola. El operador ve el estado real de la subida.
-          _pnSubirFotoAhora();
+          // [egress] Comprimir en canvas ANTES de subir (antes subía CRUDO → JPEG/PNG de cámara de varios MB
+          //   quedaban en Storage y pesaban en egress). Resize 1200px + JPEG q0.8; si algo falla, respaldo:
+          //   subir el original (jamás romper el flujo). Sube DESPUÉS de comprimir (dentro del onload de la Image).
+          const _pnFinalizar = (b64, mime, previewUrl) => {
+            _pnFotoBase64 = b64;
+            _pnFotoMime   = mime;
+            const pimg = document.getElementById('pnFotoImg');
+            if (pimg) pimg.src = previewUrl;
+            const prev = document.getElementById('pnFotoPreview');
+            if (prev) prev.style.display = 'block';
+            try { vibrate?.(15); } catch(_){}
+            // [v2.13.478] SUBIR YA a Storage (no esperar al registro) — la URL corta es lo único que viaja.
+            _pnSubirFotoAhora();
+          };
+          const _crudo = () => _pnFinalizar(String(dataUrl || '').split(',')[1] || '', file.type || 'image/jpeg', dataUrl);
+          const _img = new Image();
+          _img.onerror = _crudo;
+          _img.onload = () => {
+            try {
+              let w = _img.naturalWidth || _img.width, h = _img.naturalHeight || _img.height;
+              const MAX = 1200;
+              if (w > MAX || h > MAX) { if (w >= h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
+              const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+              const ctx = cv.getContext('2d'); ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, w, h); ctx.drawImage(_img, 0, 0, w, h);
+              const cdu = cv.toDataURL('image/jpeg', 0.8);
+              const cb64 = (cdu.split(',')[1] || '');
+              if (cb64.length > 500) _pnFinalizar(cb64, 'image/jpeg', cdu); else _crudo();
+            } catch(_) { _crudo(); }
+          };
+          _img.src = dataUrl;
         } catch(eIn) {
           console.error('[PN foto] onload handler error', eIn);
           try { toast('❌ Error procesando la foto', 'error', 4000); } catch(_){}
