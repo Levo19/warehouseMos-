@@ -29,8 +29,12 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.583';
+const VERSION = '2.13.584';
 const CACHE   = 'warehouse-v' + VERSION;
+// [egress] Cache dedicado de imágenes de Supabase Storage. Nombre que NO empieza con `warehouse-v` → el
+//   cleanup por prefijo del activate NO lo borra → las fotos sobreviven a los updates de la app y NO se
+//   re-descargan en cada deploy/sesión. Las fotos de WH tienen path ÚNICO (sin upsert) → URL inmutable.
+const IMG_CACHE = 'wh-img-v1';
 
 // Solo assets locales — CDN se cachea en el fetch handler al primer uso
 const LOCAL_ASSETS = [
@@ -116,6 +120,27 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
+
+  // [egress] Imágenes de Supabase Storage → CACHE-FIRST en IMG_CACHE dedicado. Las fotos de WH tienen path
+  //   ÚNICO (sin upsert) → URL inmutable → cache-first coherente. Cada equipo baja cada thumbnail UNA vez, no
+  //   en cada sesión (WH muestra listas con fotos todo el día = grueso del egress). SOLO /storage/v1/
+  //   (imágenes); el resto de Supabase (datos/API) cae a la exclusión de abajo = SIEMPRE en vivo, jamás cacheado.
+  if ((url.hostname.includes('supabase.co') || url.hostname.includes('supabase.in')) && url.pathname.startsWith('/storage/v1/')) {
+    e.respondWith((async () => {
+      try {
+        const cache = await caches.open(IMG_CACHE);
+        const hit = await cache.match(e.request);
+        if (hit) return hit;
+        const res = await fetch(e.request);
+        try { if (res && (res.status === 200 || res.status === 0)) cache.put(e.request, res.clone()).catch(() => {}); } catch (_) {}
+        return res;
+      } catch (_) {
+        try { const c = await caches.open(IMG_CACHE); const h = await c.match(e.request); if (h) return h; } catch (_) {}
+        return Response.error();
+      }
+    })());
+    return;
+  }
 
   // No interceptar GAS ni Supabase (son datos dinámicos / API). Supabase SIEMPRE va a la red
   // → evita servir datos VIEJOS cacheados (ej. la lista de pickup que mostraba "ayer").
