@@ -999,14 +999,17 @@ async function _cargarConsiderados() {
     const n = Math.max(1, Math.round((Date.now() - t) / (7 * 86400000)));
     return isFinite(n) ? 'hace ' + n + ' sem' : '';
   };
-  list.innerHTML = items.map((it, idx) => {
-    const esStock = String(it.guiaTipo || '') === 'STOCK';   // [945] había stock y se debe (no ingresó hoy)
-    const esPrio = idx < 3;   // [v3] los 3 primeros vienen por mayor prioridad del server → despachar primero
+  const _zlbl = (id) => { const m = String(id || '').toUpperCase().replace(/ZONA-?/, '').trim(); return /^\d+$/.test(m) ? 'Zona ' + parseInt(m, 10) : (id || '—'); };
+  // [618] PIVOTE por ZONA — una columna por zona con scroll propio. Cada producto que una zona debe = una card.
+  //   Si esa zona YA despachó (cualquier cantidad, despachadoTs presente) → NO aparece en su columna (desaparece);
+  //   el mismo producto sigue apareciendo en las otras zonas que aún lo deben. Más intuitivo e inmersivo.
+  const cols = {};   // zonaKey -> { zona, cards:[], desp:int }
+  items.forEach((it, idx) => {
+    const esStock = String(it.guiaTipo || '') === 'STOCK';
     const tipoLbl = esStock ? '📦 ya en almacén'
       : String(it.guiaTipo || '') === 'INGRESO_ENVASADO' ? '🏭 de envasado'
       : String(it.guiaTipo || '') === 'INGRESO_PROVEEDOR' ? '🚚 de proveedor' : '';
-    // [942] AGRUPAR por zona (una zona podía repetirse por semana = confuso) + SELLO de despacho por zona.
-    //   El check/✕ se quitaron: es informativo y se limpia solo a los 7 días. El sello dice si YA se despachó.
+    // agrupar las zonas del item (una zona podía repetirse por semana → merge, quedándonos con la más antigua)
     const g = {};
     (Array.isArray(it.zonas) ? it.zonas : []).forEach(z => {
       const k = String(z.zona || '—');
@@ -1015,30 +1018,45 @@ async function _cargarConsiderados() {
       if (z.bucket && (!g[k].bucketMin || z.bucket < g[k].bucketMin)) g[k].bucketMin = z.bucket;
       if (z.despachadoTs && (!g[k].desp || z.despachadoTs > g[k].desp)) g[k].desp = z.despachadoTs;
     });
-    const zonasHtml = Object.keys(g).map(k => {
-      const z = g[k]; const sem = _semLbl(z.bucketMin);
-      const sello = z.desp
-        ? `<span style="color:#34d399;font-weight:700;white-space:nowrap">✓ despachado ${escHtml(_considHaceLbl(z.desp))}</span>`
-        : `<span style="color:#fbbf24;font-weight:700;white-space:nowrap">⏳ aún sin despachar</span>`;
-      return `<div style="display:flex;align-items:center;gap:8px;justify-content:space-between;padding:4px 0;border-top:1px solid rgba(148,163,184,.1);font-size:.72rem">
-        <span style="color:#e2e8f0;font-weight:700">${escHtml(z.zona)}</span>
-        <span style="color:#94a3b8;flex:1;text-align:right">debía ${fmtQty(z.pend)}${sem ? ' · ' + sem : ''}</span>
-        ${sello}</div>`;
-    }).join('') || '<div style="font-size:.72rem;color:#94a3b8;padding:4px 0">fue solicitado en semanas pasadas</div>';
+    Object.keys(g).forEach(k => {
+      const z = g[k];
+      if (!cols[k]) cols[k] = { zona: k, cards: [], desp: 0 };
+      if (z.desp) { cols[k].desp++; return; }   // despachado → sale de la columna de esta zona
+      cols[k].cards.push({ it, esStock, tipoLbl, pend: z.pend, sem: _semLbl(z.bucketMin) });
+    });
+  });
+  const zonaKeys = Object.keys(cols).sort((a, b) => _zlbl(a).localeCompare(_zlbl(b), 'es', { numeric: true }));
+  const totalPend = zonaKeys.reduce((s, k) => s + cols[k].cards.length, 0);
+  if (cnt) cnt.textContent = totalPend;
+
+  const cardHtml = (c, rank) => {
+    const it = c.it, prio = rank < 3;   // los primeros de CADA columna = más urgentes
     const foto = it.foto
-      ? `<img src="${escHtml(it.foto)}" alt="" loading="lazy" decoding="async" style="width:100%;height:100%;object-fit:cover">`
-      : '<span style="font-size:1.4rem">🎯</span>';
-    return `
-      <div class="consid-card" data-id="${escAttr(String(it.id))}" style="align-items:flex-start;gap:10px">
-        <div class="consid-glow"></div>
-        <div style="flex:0 0 auto;width:50px;height:50px;border-radius:12px;overflow:hidden;background:rgba(148,163,184,.12);display:flex;align-items:center;justify-content:center;position:relative">${foto}</div>
-        <div class="flex-1 min-w-0" style="position:relative">
-          <p class="consid-name">${esPrio ? '<span style="color:#f87171">🔥 </span>' : ''}${escHtml(it.nombre || it.skuBase)}</p>
-          <p class="consid-meta" style="margin-bottom:4px">${esStock ? 'hay ' + fmtQty(parseFloat(it.cant) || 0) + ' en almacén' : 'ingresó ' + _considHaceLbl(it.creado) + ' · ' + fmtQty(parseFloat(it.cant) || 0) + ' uds'}${tipoLbl && !esStock ? ' · ' + tipoLbl : ''}</p>
-          ${zonasHtml}
-        </div>
-      </div>`;
-  }).join('');
+      ? `<img src="${escHtml(it.foto)}" alt="" loading="lazy" decoding="async">`
+      : '<span style="font-size:1.5rem">🎯</span>';
+    const origen = c.esStock
+      ? ('hay ' + fmtQty(parseFloat(it.cant) || 0) + ' en almacén')
+      : ('ingresó ' + _considHaceLbl(it.creado) + ' · ' + fmtQty(parseFloat(it.cant) || 0) + ' uds' + (c.tipoLbl ? ' · ' + c.tipoLbl : ''));
+    return `<div class="cons-zcard${prio ? ' prio' : ''}">
+      <div class="cons-zthumb">${foto}</div>
+      <div class="cons-zbody">
+        <p class="cons-zname">${prio ? '<span class="cons-fire">🔥</span> ' : ''}${escHtml(it.nombre || it.skuBase)}</p>
+        <div class="cons-zrow"><span class="cons-zdebe">debía ${fmtQty(c.pend)}</span><span class="cons-zage">⏱ ${escHtml(c.sem || 'semanas atrás')}</span></div>
+        <p class="cons-zorigen">${escHtml(origen)}</p>
+      </div>
+    </div>`;
+  };
+  const colHtml = (k) => {
+    const col = cols[k];
+    const cards = col.cards.map((c, i) => cardHtml(c, i)).join('')
+      || '<div class="cons-zempty">✓ Todo despachado<br><small>nada pendiente aquí</small></div>';
+    const despChip = col.desp > 0 ? `<span class="cons-zdone">✓ ${col.desp} despachado${col.desp === 1 ? '' : 's'}</span>` : '';
+    return `<div class="cons-zcol">
+      <div class="cons-zhead"><span class="cons-zttl">🏬 ${escHtml(_zlbl(k))}</span><span class="cons-zcnt">${col.cards.length}</span>${despChip}</div>
+      <div class="cons-zscroll">${cards}</div>
+    </div>`;
+  };
+  list.innerHTML = `<div class="cons-zgrid">${zonaKeys.map(colHtml).join('')}</div>`;
 }
 // [FASE 3 notif] Estrellas por agotarse en el dashboard de WH, agrupadas por zona (título grande de la zona
 //   a la que se le debe). Alta rotación, sin stock en zona, pero HAY en almacén → hay que despachar. Dinámico:

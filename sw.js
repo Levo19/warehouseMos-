@@ -29,7 +29,7 @@ _fcmMsg.onBackgroundMessage(payload => {
   // Aviso visible → ya lo mostró el SDK. No hacer nada más.
 });
 
-const VERSION = '2.13.587';
+const VERSION = '2.13.588';
 const CACHE   = 'warehouse-v' + VERSION;
 // [egress] Cache dedicado de imágenes de Supabase Storage. Nombre que NO empieza con `warehouse-v` → el
 //   cleanup por prefijo del activate NO lo borra → las fotos sobreviven a los updates de la app y NO se
