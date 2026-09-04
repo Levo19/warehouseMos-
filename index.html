@@ -4513,8 +4513,8 @@
   .consid-meta { font-size:.66rem; color:#a5b4fc; margin-top:2px; line-height:1.5; }
   .consid-meta b { color:#c4b5fd; }
   /* ── [618b] Considerados por ZONA — flip-cards cuadradas, grid 2–3 por fila (mobile-first) ── */
-  .cz-wrap { display:grid; grid-template-columns:1fr; gap:16px; }
-  @media (min-width:720px){ .cz-wrap { grid-template-columns:1fr 1fr; align-items:start; } }
+  /* 4 cuadrantes: 2 zonas por bloque, SIEMPRE 2 columnas (mobile-first) → se ven los 4 al abrir */
+  .cz-wrap { display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:start; }
   .cz-sec { min-width:0; display:flex; flex-direction:column; border-radius:16px; overflow:hidden;
     border:1.5px solid rgba(167,139,250,.34);
     background:linear-gradient(180deg,rgba(76,29,149,.12),rgba(15,23,42,.5)); }
@@ -4526,8 +4526,8 @@
   .cz-seccnt { font-size:.62rem; font-weight:800; color:#0b1020; background:#c4b5fd; border-radius:999px; padding:1px 7px; flex-shrink:0; }
   .cons-zdone { margin-left:auto; font-size:.58rem; font-weight:800; color:#6ee7b7; white-space:nowrap; flex-shrink:0;
     background:rgba(16,185,129,.14); border:1px solid rgba(16,185,129,.4); border-radius:999px; padding:1px 6px; }
-  .cz-grid { max-height:56vh; overflow-y:auto; overflow-x:hidden; padding:10px;
-    display:grid; grid-template-columns:repeat(auto-fill, minmax(138px,1fr)); gap:10px; align-content:start;
+  .cz-grid { max-height:42vh; overflow-y:auto; overflow-x:hidden; padding:8px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:8px; align-content:start;
     scrollbar-width:thin; scrollbar-color:rgba(167,139,250,.55) transparent; -webkit-overflow-scrolling:touch; }
   .cz-grid::-webkit-scrollbar { width:7px; }
   .cz-grid::-webkit-scrollbar-thumb { background:rgba(167,139,250,.55); border-radius:4px; }
@@ -4564,6 +4564,15 @@
   .cz-bstk { font-size:.58rem; color:#94a3b8; margin-top:5px; line-height:1.3; }
   .cz-bhint { font-size:.55rem; color:#818cf8; text-align:center; margin-top:5px; font-weight:700; }
   .cz-empty { grid-column:1/-1; text-align:center; color:#6ee7b7; font-weight:800; font-size:.8rem; padding:24px 8px; }
+  /* variante ámbar para Estrellas (mismo layout de cuadrantes/flip-cards) */
+  .cz-sec.est { border-color:rgba(250,204,21,.36); background:linear-gradient(180deg,rgba(146,97,0,.14),rgba(15,23,42,.5)); }
+  .cz-sechd.est { background:linear-gradient(135deg,rgba(161,98,7,.95),rgba(45,30,0,.96)); border-bottom-color:rgba(250,204,21,.32); }
+  .cz-sechd.est .cz-secttl { color:#fef3c7; }
+  .cz-seccnt.est { background:#fde68a; color:#3a2a00; }
+  .cz-card.est .cz-face { border-color:rgba(250,204,21,.42); background:linear-gradient(135deg,rgba(120,80,0,.42),rgba(15,23,42,.9)); }
+  .cz-card.est .cz-fire { filter:drop-shadow(0 0 5px rgba(251,191,36,.9)); }
+  .cz-debe.est { background:#fecaca; color:#7f1d1d; }
+  .cz-back.est { background:linear-gradient(160deg,rgba(120,80,0,.55),rgba(15,23,42,.97)); }
   .consid-btns { display:flex; gap:6px; flex-shrink:0; position:relative; }
   .consid-btn { width:38px; height:38px; border-radius:11px; border:1px solid; cursor:pointer;
     font-size:.95rem; font-weight:800; display:flex; align-items:center; justify-content:center;
@@ -11200,6 +11209,6 @@
 <script src="js/cargadores.js?v=2.13.586"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.590"></script>
+<script src="js/app.js?v=2.13.591"></script>
 </body>
 </html>

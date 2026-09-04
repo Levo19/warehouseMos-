@@ -1062,10 +1062,45 @@ async function _cargarConsiderados() {
     const despChip = col.desp > 0 ? `<span class="cons-zdone">✓ ${col.desp} despachado${col.desp === 1 ? '' : 's'}</span>` : '';
     return `<section class="cz-sec">
       <div class="cz-sechd"><span class="cz-secttl">🏬 ${escHtml(_zlbl(k))}</span><span class="cz-seccnt">${col.cards.length}</span>${despChip}</div>
-      <div class="cz-grid">${cards}</div>
+      <div class="cz-grid marq">${cards}</div>
     </section>`;
   };
   list.innerHTML = `<div class="cz-wrap">${zonaKeys.map(colHtml).join('')}</div>`;
+  _marqueeMount();
+}
+
+// [618c] Marquesina automática para las columnas de cuadrantes (.cz-grid.marq): auto-scroll vertical lento
+//   tipo cinta, ping-pong. Se DETIENE al pasar el mouse o tocar/scrollear (para leer, dar click o desplazar
+//   a mano) y retoma solo tras ~1.4s. Un único loop RAF para todos los cuadrantes; respeta reduce-motion.
+function _marqueeMount() {
+  if (_marqueeMount._on) return; _marqueeMount._on = true;
+  const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const attach = (el) => {
+    if (el._mqInit) return; el._mqInit = true; el._mqDir = 1; el._mqPaused = false; el._mqResumeAt = 0;
+    const pause = () => { el._mqPaused = true; };
+    const later = () => { el._mqPaused = false; el._mqResumeAt = performance.now() + 1400; };
+    el.addEventListener('pointerenter', pause);
+    el.addEventListener('pointerdown', pause);
+    el.addEventListener('touchstart', pause, { passive: true });
+    el.addEventListener('wheel', () => { el._mqResumeAt = performance.now() + 1800; }, { passive: true });
+    el.addEventListener('pointerleave', later);
+    el.addEventListener('pointerup', later);
+    el.addEventListener('touchend', later, { passive: true });
+    el.addEventListener('touchcancel', later, { passive: true });
+  };
+  const loop = (t) => {
+    requestAnimationFrame(loop);
+    if (reduce) return;
+    document.querySelectorAll('.cz-grid.marq').forEach(el => {
+      attach(el);
+      const max = el.scrollHeight - el.clientHeight;
+      if (max <= 4 || el._mqPaused || (el._mqResumeAt && t < el._mqResumeAt)) return;
+      let y = el.scrollTop + el._mqDir * 0.4;   // ~24px/s
+      if (y >= max) { y = max; el._mqDir = -1; } else if (y <= 0) { y = 0; el._mqDir = 1; }
+      el.scrollTop = y;
+    });
+  };
+  requestAnimationFrame(loop);
 }
 // [FASE 3 notif] Estrellas por agotarse en el dashboard de WH, agrupadas por zona (título grande de la zona
 //   a la que se le debe). Alta rotación, sin stock en zona, pero HAY en almacén → hay que despachar. Dinámico:
@@ -1083,18 +1118,44 @@ async function _cargarEstrellas() {
   cont.classList.remove('hidden');
   if (cnt) cnt.textContent = total;
   const zlbl = (id) => { const m = String(id || '').toUpperCase().replace(/ZONA-?/, ''); return /^\d+$/.test(m) ? 'Zona ' + parseInt(m, 10) : (id || '—'); };
-  list.innerHTML = zonas.map(z => {
+  // [618c] Mismo estilo que Considerados: cuadrantes por zona + cards CUADRADAS (foto+nombre) que giran y
+  //   marquesina automática. Front: foto+nombre+faltan; reverso: en zona X/Y, faltan, en almacén.
+  const cardHtml = (i, rank) => {
+    const eff = parseFloat(i.eff) || 0, esp = parseFloat(i.esperado) || 0, alm = parseFloat(i.almacen) || 0;
+    const faltan = Math.max(0, esp - eff), prio = rank < 3;
+    const foto = i.foto ? `<img src="${escHtml(i.foto)}" alt="" loading="lazy" decoding="async">` : '<div class="cz-noimg">⭐</div>';
+    const nm = escHtml(i.nombre || i.sku);
+    return `<div class="cz-card est" onclick="this.classList.toggle('flip')">
+      <div class="cz-inner">
+        <div class="cz-face cz-front">
+          <div class="cz-photo">${foto}</div>
+          ${prio ? '<span class="cz-fire">⚡</span>' : ''}
+          <span class="cz-debe est">faltan ${fmtQty(faltan)}</span>
+          <div class="cz-nmwrap"><p class="cz-nm">${nm}</p><p class="cz-age">zona ${fmtQty(eff)}/${fmtQty(esp)} · alm ${fmtQty(alm)}</p></div>
+        </div>
+        <div class="cz-face cz-back est">
+          <p class="cz-bnm">${nm}</p>
+          <div class="cz-wks">
+            <div class="cz-wk"><span>En zona</span><b>${fmtQty(eff)} / ${fmtQty(esp)}</b></div>
+            <div class="cz-wk"><span>Faltan</span><b>${fmtQty(faltan)}</b></div>
+            <div class="cz-wk"><span>En almacén</span><b>${fmtQty(alm)}</b></div>
+          </div>
+          <p class="cz-bstk">estrella por agotarse — cargar a la zona</p>
+          <p class="cz-bhint">↻ toca para volver</p>
+        </div>
+      </div>
+    </div>`;
+  };
+  const colHtml = (z) => {
     const its = Array.isArray(z.items) ? z.items : [];
-    const rows = its.slice(0, 12).map(i =>
-      `<div style="display:flex;justify-content:space-between;gap:8px;padding:4px 10px;border-top:1px solid rgba(148,163,184,.1);font-size:.72rem">
-         <span style="color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(i.nombre || i.sku)}</span>
-         <span style="color:#94a3b8;white-space:nowrap;flex-shrink:0">zona ${fmtQty(parseFloat(i.eff) || 0)}/${fmtQty(parseFloat(i.esperado) || 0)} · alm ${fmtQty(parseFloat(i.almacen) || 0)}</span>
-       </div>`).join('');
-    const mas = its.length > 12 ? `<div style="font-size:.66rem;color:#64748b;padding:4px 10px">y ${its.length - 12} más…</div>` : '';
-    return `<div style="margin-bottom:8px;border:1px solid rgba(250,204,21,.3);border-radius:12px;background:rgba(234,179,8,.06);overflow:hidden">
-      <div style="font-weight:900;font-size:.95rem;color:#fde68a;padding:8px 10px;background:rgba(234,179,8,.1)">⭐ ${escHtml(zlbl(z.zona))} <span style="font-weight:700;font-size:.7rem;color:#eab308">· ${its.length} por despachar</span></div>
-      ${rows}${mas}</div>`;
-  }).join('');
+    const cards = its.map((i, idx) => cardHtml(i, idx)).join('') || '<div class="cz-empty">✓ nada crítico</div>';
+    return `<section class="cz-sec est">
+      <div class="cz-sechd est"><span class="cz-secttl">⭐ ${escHtml(zlbl(z.zona))}</span><span class="cz-seccnt est">${its.length}</span></div>
+      <div class="cz-grid marq">${cards}</div>
+    </section>`;
+  };
+  list.innerHTML = `<div class="cz-wrap">${zonas.map(colHtml).join('')}</div>`;
+  _marqueeMount();
 }
 window.WHConsiderados = {
   resolver: async function (id, estado) {
