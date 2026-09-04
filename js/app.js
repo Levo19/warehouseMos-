@@ -1047,10 +1047,8 @@ async function _cargarConsiderados() {
           <div class="cz-nmwrap"><p class="cz-nm">${nm}</p><p class="cz-age">⏱ ${escHtml(c.semFront || 'semanas atrás')}</p></div>
         </div>
         <div class="cz-face cz-back">
-          <p class="cz-bnm">${nm}</p>
           <div class="cz-wks">${weeksHtml}</div>
           <p class="cz-bstk">${escHtml(stock)}</p>
-          <p class="cz-bhint">↻ toca para volver</p>
         </div>
       </div>
     </div>`;
@@ -1074,7 +1072,6 @@ async function _cargarConsiderados() {
 //   a mano) y retoma solo tras ~1.4s. Un único loop RAF para todos los cuadrantes; respeta reduce-motion.
 function _marqueeMount() {
   if (_marqueeMount._on) return; _marqueeMount._on = true;
-  const reduce = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   const attach = (el) => {
     if (el._mqInit) return; el._mqInit = true; el._mqDir = 1; el._mqPaused = false; el._mqResumeAt = 0;
     const pause = () => { el._mqPaused = true; };
@@ -1090,12 +1087,11 @@ function _marqueeMount() {
   };
   const loop = (t) => {
     requestAnimationFrame(loop);
-    if (reduce) return;
     document.querySelectorAll('.cz-grid.marq').forEach(el => {
       attach(el);
       const max = el.scrollHeight - el.clientHeight;
       if (max <= 4 || el._mqPaused || (el._mqResumeAt && t < el._mqResumeAt)) return;
-      let y = el.scrollTop + el._mqDir * 0.4;   // ~24px/s
+      let y = el.scrollTop + el._mqDir * 0.55;   // ~33px/s, cinta lenta y visible
       if (y >= max) { y = max; el._mqDir = -1; } else if (y <= 0) { y = 0; el._mqDir = 1; }
       el.scrollTop = y;
     });
@@ -1134,14 +1130,12 @@ async function _cargarEstrellas() {
           <div class="cz-nmwrap"><p class="cz-nm">${nm}</p><p class="cz-age">zona ${fmtQty(eff)}/${fmtQty(esp)} · alm ${fmtQty(alm)}</p></div>
         </div>
         <div class="cz-face cz-back est">
-          <p class="cz-bnm">${nm}</p>
           <div class="cz-wks">
             <div class="cz-wk"><span>En zona</span><b>${fmtQty(eff)} / ${fmtQty(esp)}</b></div>
             <div class="cz-wk"><span>Faltan</span><b>${fmtQty(faltan)}</b></div>
             <div class="cz-wk"><span>En almacén</span><b>${fmtQty(alm)}</b></div>
           </div>
           <p class="cz-bstk">estrella por agotarse — cargar a la zona</p>
-          <p class="cz-bhint">↻ toca para volver</p>
         </div>
       </div>
     </div>`;
