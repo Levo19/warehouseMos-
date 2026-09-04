@@ -1000,29 +1000,35 @@ async function _cargarConsiderados() {
     return isFinite(n) ? 'hace ' + n + ' sem' : '';
   };
   const _zlbl = (id) => { const m = String(id || '').toUpperCase().replace(/ZONA-?/, '').trim(); return /^\d+$/.test(m) ? 'Zona ' + parseInt(m, 10) : (id || '—'); };
-  // [618] PIVOTE por ZONA — una columna por zona con scroll propio. Cada producto que una zona debe = una card.
-  //   Si esa zona YA despachó (cualquier cantidad, despachadoTs presente) → NO aparece en su columna (desaparece);
-  //   el mismo producto sigue apareciendo en las otras zonas que aún lo deben. Más intuitivo e inmersivo.
+  // [618b] PIVOTE por ZONA en SECCIONES (apiladas en móvil, lado a lado en tablet). Cada producto que una zona
+  //   debe = una CARD CUADRADA (foto + nombre grande legible). Al tocar GIRA (flip) y atrás muestra el detalle
+  //   de cuánto se debe por semana. Si la zona YA despachó (cualquier cantidad) → sale de esa sección (desaparece);
+  //   sigue en las otras zonas que aún lo deben. Grid auto-fill 2–3 por fila según el ancho (mobile-first).
   const cols = {};   // zonaKey -> { zona, cards:[], desp:int }
-  items.forEach((it, idx) => {
+  items.forEach((it) => {
     const esStock = String(it.guiaTipo || '') === 'STOCK';
     const tipoLbl = esStock ? '📦 ya en almacén'
       : String(it.guiaTipo || '') === 'INGRESO_ENVASADO' ? '🏭 de envasado'
       : String(it.guiaTipo || '') === 'INGRESO_PROVEEDOR' ? '🚚 de proveedor' : '';
-    // agrupar las zonas del item (una zona podía repetirse por semana → merge, quedándonos con la más antigua)
+    // agrupar las zonas del item, PRESERVANDO el desglose por semana (bucket) para la cara trasera
     const g = {};
     (Array.isArray(it.zonas) ? it.zonas : []).forEach(z => {
       const k = String(z.zona || '—');
-      if (!g[k]) g[k] = { zona: k, pend: 0, bucketMin: null, desp: null };
-      g[k].pend += (parseFloat(z.pend) || 0);
-      if (z.bucket && (!g[k].bucketMin || z.bucket < g[k].bucketMin)) g[k].bucketMin = z.bucket;
+      if (!g[k]) g[k] = { zona: k, weeks: {}, total: 0, desp: null };
+      const bk = z.bucket || '';
+      g[k].weeks[bk] = (g[k].weeks[bk] || 0) + (parseFloat(z.pend) || 0);
+      g[k].total += (parseFloat(z.pend) || 0);
       if (z.despachadoTs && (!g[k].desp || z.despachadoTs > g[k].desp)) g[k].desp = z.despachadoTs;
     });
     Object.keys(g).forEach(k => {
       const z = g[k];
       if (!cols[k]) cols[k] = { zona: k, cards: [], desp: 0 };
-      if (z.desp) { cols[k].desp++; return; }   // despachado → sale de la columna de esta zona
-      cols[k].cards.push({ it, esStock, tipoLbl, pend: z.pend, sem: _semLbl(z.bucketMin) });
+      if (z.desp) { cols[k].desp++; return; }   // despachado → sale de esta sección
+      const semanas = Object.keys(z.weeks)
+        .map(bk => ({ bucket: bk, pend: z.weeks[bk], sem: _semLbl(bk) }))
+        .sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));   // más antigua primero
+      const vieja = semanas.find(w => w.bucket) || semanas[0] || null;       // semana más antigua con fecha
+      cols[k].cards.push({ it, esStock, tipoLbl, total: z.total, semanas, semFront: (vieja && vieja.sem) || '' });
     });
   });
   const zonaKeys = Object.keys(cols).sort((a, b) => _zlbl(a).localeCompare(_zlbl(b), 'es', { numeric: true }));
@@ -1030,33 +1036,44 @@ async function _cargarConsiderados() {
   if (cnt) cnt.textContent = totalPend;
 
   const cardHtml = (c, rank) => {
-    const it = c.it, prio = rank < 3;   // los primeros de CADA columna = más urgentes
+    const it = c.it, prio = rank < 3;   // los primeros de CADA sección = más urgentes
     const foto = it.foto
       ? `<img src="${escHtml(it.foto)}" alt="" loading="lazy" decoding="async">`
-      : '<span style="font-size:1.5rem">🎯</span>';
-    const origen = c.esStock
-      ? ('hay ' + fmtQty(parseFloat(it.cant) || 0) + ' en almacén')
-      : ('ingresó ' + _considHaceLbl(it.creado) + ' · ' + fmtQty(parseFloat(it.cant) || 0) + ' uds' + (c.tipoLbl ? ' · ' + c.tipoLbl : ''));
-    return `<div class="cons-zcard${prio ? ' prio' : ''}">
-      <div class="cons-zthumb">${foto}</div>
-      <div class="cons-zbody">
-        <p class="cons-zname">${prio ? '<span class="cons-fire">🔥</span> ' : ''}${escHtml(it.nombre || it.skuBase)}</p>
-        <div class="cons-zrow"><span class="cons-zdebe">debía ${fmtQty(c.pend)}</span><span class="cons-zage">⏱ ${escHtml(c.sem || 'semanas atrás')}</span></div>
-        <p class="cons-zorigen">${escHtml(origen)}</p>
+      : '<div class="cz-noimg">🎯</div>';
+    const nm = escHtml(it.nombre || it.skuBase);
+    const weeksHtml = c.semanas.map(w =>
+      `<div class="cz-wk"><span>${escHtml(w.sem || 'sin fecha')}</span><b>${fmtQty(w.pend)}</b></div>`).join('')
+      || `<div class="cz-wk"><span>semanas atrás</span><b>${fmtQty(c.total)}</b></div>`;
+    const stock = c.esStock ? ('hay ' + fmtQty(parseFloat(it.cant) || 0) + ' en almacén')
+      : ('ingresó ' + _considHaceLbl(it.creado) + (c.tipoLbl ? ' · ' + c.tipoLbl : ''));
+    return `<div class="cz-card${prio ? ' prio' : ''}" onclick="this.classList.toggle('flip')">
+      <div class="cz-inner">
+        <div class="cz-face cz-front">
+          <div class="cz-photo">${foto}</div>
+          ${prio ? '<span class="cz-fire">🔥</span>' : ''}
+          <span class="cz-debe">debía ${fmtQty(c.total)}</span>
+          <div class="cz-nmwrap"><p class="cz-nm">${nm}</p><p class="cz-age">⏱ ${escHtml(c.semFront || 'semanas atrás')}</p></div>
+        </div>
+        <div class="cz-face cz-back">
+          <p class="cz-bnm">${nm}</p>
+          <div class="cz-wks">${weeksHtml}</div>
+          <p class="cz-bstk">${escHtml(stock)}</p>
+          <p class="cz-bhint">↻ toca para volver</p>
+        </div>
       </div>
     </div>`;
   };
   const colHtml = (k) => {
     const col = cols[k];
     const cards = col.cards.map((c, i) => cardHtml(c, i)).join('')
-      || '<div class="cons-zempty">✓ Todo despachado<br><small>nada pendiente aquí</small></div>';
+      || '<div class="cz-empty">✓ Todo despachado</div>';
     const despChip = col.desp > 0 ? `<span class="cons-zdone">✓ ${col.desp} despachado${col.desp === 1 ? '' : 's'}</span>` : '';
-    return `<div class="cons-zcol">
-      <div class="cons-zhead"><span class="cons-zttl">🏬 ${escHtml(_zlbl(k))}</span><span class="cons-zcnt">${col.cards.length}</span>${despChip}</div>
-      <div class="cons-zscroll">${cards}</div>
-    </div>`;
+    return `<section class="cz-sec">
+      <div class="cz-sechd"><span class="cz-secttl">🏬 ${escHtml(_zlbl(k))}</span><span class="cz-seccnt">${col.cards.length}</span>${despChip}</div>
+      <div class="cz-grid">${cards}</div>
+    </section>`;
   };
-  list.innerHTML = `<div class="cons-zgrid">${zonaKeys.map(colHtml).join('')}</div>`;
+  list.innerHTML = `<div class="cz-wrap">${zonaKeys.map(colHtml).join('')}</div>`;
 }
 // [FASE 3 notif] Estrellas por agotarse en el dashboard de WH, agrupadas por zona (título grande de la zona
 //   a la que se le debe). Alta rotación, sin stock en zona, pero HAY en almacén → hay que despachar. Dinámico:
