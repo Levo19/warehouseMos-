@@ -1010,25 +1010,17 @@ async function _cargarConsiderados() {
     const tipoLbl = esStock ? '📦 ya en almacén'
       : String(it.guiaTipo || '') === 'INGRESO_ENVASADO' ? '🏭 de envasado'
       : String(it.guiaTipo || '') === 'INGRESO_PROVEEDOR' ? '🚚 de proveedor' : '';
-    // agrupar las zonas del item, PRESERVANDO el desglose por semana (bucket) para la cara trasera
-    const g = {};
+    // el server (SQL 1017) ya entrega, por zona: total `pend`, `despachadoTs` y `semanas`=[{bucket,pend}]
     (Array.isArray(it.zonas) ? it.zonas : []).forEach(z => {
       const k = String(z.zona || '—');
-      if (!g[k]) g[k] = { zona: k, weeks: {}, total: 0, desp: null };
-      const bk = z.bucket || '';
-      g[k].weeks[bk] = (g[k].weeks[bk] || 0) + (parseFloat(z.pend) || 0);
-      g[k].total += (parseFloat(z.pend) || 0);
-      if (z.despachadoTs && (!g[k].desp || z.despachadoTs > g[k].desp)) g[k].desp = z.despachadoTs;
-    });
-    Object.keys(g).forEach(k => {
-      const z = g[k];
       if (!cols[k]) cols[k] = { zona: k, cards: [], desp: 0 };
-      if (z.desp) { cols[k].desp++; return; }   // despachado → sale de esta sección
-      const semanas = Object.keys(z.weeks)
-        .map(bk => ({ bucket: bk, pend: z.weeks[bk], sem: _semLbl(bk) }))
-        .sort((a, b) => String(a.bucket).localeCompare(String(b.bucket)));   // más antigua primero
-      const vieja = semanas.find(w => w.bucket) || semanas[0] || null;       // semana más antigua con fecha
-      cols[k].cards.push({ it, esStock, tipoLbl, total: z.total, semanas, semFront: (vieja && vieja.sem) || '' });
+      if (z.despachadoTs || z.despachado) { cols[k].desp++; return; }   // despachado → sale de esta sección
+      const semanas = (Array.isArray(z.semanas) ? z.semanas : [])
+        .map(w => ({ bucket: String(w.bucket || ''), pend: parseFloat(w.pend) || 0, sem: _semLbl(w.bucket) }))
+        .sort((a, b) => a.bucket.localeCompare(b.bucket));   // más antigua arriba (mayor "hace N sem")
+      const total = (parseFloat(z.pend) || 0) || semanas.reduce((s, w) => s + w.pend, 0);
+      const vieja = semanas.find(w => w.bucket) || null;     // semana más antigua = la más urgente
+      cols[k].cards.push({ it, esStock, tipoLbl, total, semanas, semFront: (vieja && vieja.sem) || '' });
     });
   });
   const zonaKeys = Object.keys(cols).sort((a, b) => _zlbl(a).localeCompare(_zlbl(b), 'es', { numeric: true }));

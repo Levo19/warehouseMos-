@@ -4515,13 +4515,23 @@
   /* ── [618b] Considerados por ZONA — flip-cards cuadradas, grid 2–3 por fila (mobile-first) ── */
   .cz-wrap { display:grid; grid-template-columns:1fr; gap:16px; }
   @media (min-width:720px){ .cz-wrap { grid-template-columns:1fr 1fr; align-items:start; } }
-  .cz-sec { min-width:0; }
-  .cz-sechd { display:flex; align-items:center; gap:6px; padding:4px 2px 9px; }
-  .cz-secttl { font-size:.92rem; font-weight:900; color:#ede9fe; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cz-sec { min-width:0; display:flex; flex-direction:column; border-radius:16px; overflow:hidden;
+    border:1.5px solid rgba(167,139,250,.34);
+    background:linear-gradient(180deg,rgba(76,29,149,.12),rgba(15,23,42,.5)); }
+  .cz-sechd { position:sticky; top:0; z-index:3; display:flex; align-items:center; gap:6px; padding:8px 11px;
+    background:linear-gradient(135deg,rgba(91,33,182,.95),rgba(30,27,75,.97));
+    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+    border-bottom:1px solid rgba(167,139,250,.3); }
+  .cz-secttl { font-size:.9rem; font-weight:900; color:#ede9fe; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cz-seccnt { font-size:.62rem; font-weight:800; color:#0b1020; background:#c4b5fd; border-radius:999px; padding:1px 7px; flex-shrink:0; }
   .cons-zdone { margin-left:auto; font-size:.58rem; font-weight:800; color:#6ee7b7; white-space:nowrap; flex-shrink:0;
     background:rgba(16,185,129,.14); border:1px solid rgba(16,185,129,.4); border-radius:999px; padding:1px 6px; }
-  .cz-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(138px,1fr)); gap:10px; }
+  .cz-grid { max-height:56vh; overflow-y:auto; overflow-x:hidden; padding:10px;
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(138px,1fr)); gap:10px; align-content:start;
+    scrollbar-width:thin; scrollbar-color:rgba(167,139,250,.55) transparent; -webkit-overflow-scrolling:touch; }
+  .cz-grid::-webkit-scrollbar { width:7px; }
+  .cz-grid::-webkit-scrollbar-thumb { background:rgba(167,139,250,.55); border-radius:4px; }
+  .cz-grid::-webkit-scrollbar-track { background:transparent; }
   .cz-card { position:relative; aspect-ratio:1/1; min-height:150px; perspective:900px; cursor:pointer; -webkit-tap-highlight-color:transparent;
     animation:considEntra .38s cubic-bezier(.2,.9,.3,1) both; }
   .cz-inner { position:absolute; inset:0; transform-style:preserve-3d; transition:transform .45s cubic-bezier(.2,.85,.3,1); }
@@ -11190,6 +11200,6 @@
 <script src="js/cargadores.js?v=2.13.586"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.589"></script>
+<script src="js/app.js?v=2.13.590"></script>
 </body>
 </html>
