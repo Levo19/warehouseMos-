@@ -241,7 +241,7 @@
     // [rev] Si abro un día DISTINTO al que ya tengo en memoria, NO mostrar los datos del día anterior
     // (era el "primero muestra hoy y al rato el día que clickié"). Vaciar + mostrar "Cargando…".
     if (_fechaActual === fecha) {
-      _dia = _dia.filter(c => c && !c._prov);   // mismo día → cache instantáneo (descarta provisionales)
+      _dia.forEach(c => { if (c && c._prov) _persistCarga(c, { silent: true }); });   // [618] reintenta las no confirmadas — ya NO se descartan (no perder cargas)
       _render();
     } else {
       _dia = []; _fechaActual = fecha;
@@ -254,7 +254,7 @@
   function cerrar() {
     document.getElementById('overlayCargadores').style.display = 'none';
     document.getElementById('modalCargadores').classList.remove('open');
-    _dia = _dia.filter(c => c && !c._prov);   // provisionales abandonadas (<10%, sin foto) no cuentan
+    _dia.forEach(c => { if (c && c._prov) _persistCarga(c, { silent: true }); });   // [618] reintenta persistir las pendientes en vez de descartarlas
     if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
     // refrescar el mapa {fecha→nº cargas} → la moto de cada día de guías/preingresos refleja lo recién registrado
     if (typeof App !== 'undefined' && App.precargarConteoCargas) App.precargarConteoCargas();
@@ -297,7 +297,7 @@
         <div class="cgv-handle" id="cgvHandle_${id}" style="left:${p}%"></div>
       </div>
       <div class="cgv-scale"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
-      <div class="cgv-warn" id="cgvWarn_${id}" style="${p >= MIN_GUARDAR ? 'display:none' : ''}">⚠ Jala la barra — mínimo ${MIN_GUARDAR}% para registrar esta carga.</div>
+      <div class="cgv-warn" id="cgvWarn_${id}" style="${p >= MIN_GUARDAR ? 'display:none' : ''}">⚠ Falta indicar cuánta carga trae — jala la barra.</div>
       <div class="cgv-fotos">
         <div class="cgv-fotos-row" id="cgvFotos_${id}">
           ${thumbs}
@@ -384,16 +384,39 @@
       <span class="ma">+ carga</span></button>`).join('');
   }
 
-  // ── agregar una CARGA nueva (provisional hasta ≥10% o foto) ──
+  // [618] Persistir una carga en el server (nivel actual, 0 por defecto). Marca _prov=false al confirmar.
+  //   El acto de AGREGAR ya es el evento real (el cargador vino) → se guarda de INMEDIATO; jalar la barra
+  //   solo AFINA cuánta carga trae. Antes vivía solo en el navegador hasta llegar a ≥10% o foto: si cerraban
+  //   o recargaban se perdía y el trabajador la re-registraba (bug reportado — carga de la mañana desaparecía).
+  async function _persistCarga(c, opts) {
+    if (!c) return false;
+    try {
+      const res = await API.post('cargadorCargaSetNivel', { idCarga: c.idCarga, idCargador: c.idCargador, nivel: parseInt(c.nivel) || 0, fecha: _fechaActual || _hoyStr(), nombre: c.nombre || '', usuario: _usuario(), deviceId: _deviceId() });
+      if (res && res.ok) {
+        c._prov = false;
+        const card = document.getElementById('cgvCarga_' + _escAttr(c.idCarga)); if (card) card.classList.remove('prov');
+        if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
+        return true;
+      }
+      if (!(opts && opts.silent) && typeof toast === 'function') toast('No se pudo registrar la carga — reintenta', 'warn');
+    } catch (e) {
+      if (!(opts && opts.silent) && typeof toast === 'function') toast('Sin conexión · la carga se guardará al reconectar', 'warn');
+    }
+    return false;
+  }
+
+  // ── agregar una CARGA nueva (se PERSISTE al instante en nivel 0; luego se afina jalando la barra) ──
   async function agregar(idCargador, nombre) {
     const idCarga = _nuevaIdCarga();
-    _dia.unshift({ idCarga, idCargador, nombre, nivel: 0, fotos: [], hora: _horaAhora(), ts: '', _prov: true });
+    const c = { idCarga, idCargador, nombre, nivel: 0, fotos: [], hora: _horaAhora(), ts: '', _prov: true };
+    _dia.unshift(c);
     _addOpen = false; _searchVal = '';
     _render();
     _tono(0);
-    if (typeof toast === 'function') toast('Jala la barra a ≥' + MIN_GUARDAR + '% para registrar la carga', 'info', 2600);
     const el = document.getElementById('cgvCarga_' + _escAttr(idCarga));
     if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    const ok = await _persistCarga(c);
+    if (ok && typeof toast === 'function') toast('🛺 Carga de ' + (nombre || '') + ' registrada — indica cuánta trae jalando la barra', 'ok', 2600);
   }
 
   async function quitar(idCarga) {
@@ -415,7 +438,8 @@
     _dia = _dia.filter(x => String(x.idCarga) !== String(idCarga));
     _render();
     if (navigator.vibrate) navigator.vibrate([10, 30, 10]);
-    if (c && c._prov) return;   // nunca se persistió
+    // [618] siempre intentar el quitar en server: la fila puede existir aunque _prov siga true (persist en vuelo).
+    // El RPC es un no-op inofensivo si la fila nunca se creo (update where id_log=X → 0 filas).
     try { const r = await API.post('cargadorCargaQuitar', { idCarga });
       if (r && r.ok && typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
     } catch(e){ if (typeof toast === 'function') toast('No se pudo quitar — reintenta', 'warn'); }
@@ -467,7 +491,7 @@
     const id = _drag.id, p = Math.max(0, Math.min(100, Math.round(parseInt(document.getElementById('cgvPct_' + id)?.textContent) || 0)));
     _drag = null;
     const c = _dia.find(x => String(x.idCarga) === String(id)); if (c) c.nivel = p;
-    if (c && c._prov && p < MIN_GUARDAR) return;   // provisional <10% → no persistir
+    // [618] jalar la barra SIEMPRE persiste (la carga ya es una fila real desde que se agrego).
     clearTimeout(_saveTimers[id]);
     _saveTimers[id] = setTimeout(async () => {
       delete _saveTimers[id];   // el timer ya disparó: no dejar handles rancios acumulados en el mapa
