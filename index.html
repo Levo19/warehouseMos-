@@ -4359,18 +4359,18 @@
     animation:skelShimmer 1.5s ease-in-out infinite;
   }
 
-  /* ── Accesos rápidos: grid 2-col móvil ── */
+  /* ── Accesos rápidos: UNA sola fila (6 acciones), compactos y diferenciados por color ── */
   .dash-quick-grid {
-    display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+    display:grid; grid-template-columns:repeat(6,1fr); gap:6px;
   }
   .dash-quick {
     position:relative;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
-    gap:6px; padding:14px 10px; min-height:74px;
-    border-radius:16px; cursor:pointer;
+    gap:4px; padding:10px 3px; min-height:62px;
+    border-radius:13px; cursor:pointer;
     background:rgba(30,41,59,.55);
     border:1px solid rgba(148,163,184,.16);
-    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+    background:rgba(30,41,59,.7);
     color:#cbd5e1;
     -webkit-tap-highlight-color:transparent;
     transition:transform .12s, border-color .15s, background .15s, box-shadow .15s;
@@ -4381,11 +4381,28 @@
     box-shadow:0 6px 18px -8px rgba(59,130,246,.35);
   }
   .dash-quick:active { transform:scale(.95); }
-  .dash-quick-ico { font-size:1.4rem; line-height:1; }
+  .dash-quick-ico { font-size:1.3rem; line-height:1; }
   .dash-quick-lbl {
-    font-size:11px; font-weight:800; letter-spacing:.02em;
+    font-size:9.5px; font-weight:800; letter-spacing:0; line-height:1.12;
     color:#94a3b8; text-align:center;
   }
+  /* diferenciación por acción (mismo orden del HTML): un color de acento por botón */
+  .dash-quick:nth-child(1) { border-color:rgba(96,165,250,.4); }
+  .dash-quick:nth-child(1) .dash-quick-lbl { color:#93c5fd; }
+  .dash-quick:nth-child(3) { border-color:rgba(45,212,191,.42); }
+  .dash-quick:nth-child(3) .dash-quick-lbl { color:#5eead4; }
+  .dash-quick:nth-child(4) { border-color:rgba(129,140,248,.42); }
+  .dash-quick:nth-child(4) .dash-quick-lbl { color:#a5b4fc; }
+  .dash-quick:nth-child(5) { border-color:rgba(251,113,133,.42); }
+  .dash-quick:nth-child(5) .dash-quick-lbl { color:#fda4af; }
+  .dash-quick:nth-child(6) { border-color:rgba(251,146,60,.42); }
+  .dash-quick:nth-child(6) .dash-quick-lbl { color:#fdba74; }
+  @media (min-width:560px){ .dash-quick-lbl { font-size:11px; } }
+  /* [618] Horario dentro del header: compacto, recortado, sin romper la barra */
+  .wh-hdr-horario { display:flex; align-items:center; min-width:0; max-width:42vw; overflow:hidden; }
+  .wh-hdr-horario, .wh-hdr-horario * { font-size:11px !important; line-height:1.15 !important; }
+  .wh-hdr-horario :is(svg,img) { width:14px !important; height:14px !important; }
+  .wh-hdr-horario:empty { display:none; }
   /* Acceso Envasador destacado (acción diaria estrella) */
   .dash-quick-env {
     background:linear-gradient(135deg, rgba(245,158,11,.14), rgba(217,119,6,.08));
@@ -4522,7 +4539,6 @@
     background:linear-gradient(180deg,rgba(76,29,149,.12),rgba(15,23,42,.5)); }
   .cz-sechd { position:sticky; top:0; z-index:3; display:flex; align-items:center; gap:6px; padding:8px 11px;
     background:linear-gradient(135deg,rgba(91,33,182,.95),rgba(30,27,75,.97));
-    -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
     border-bottom:1px solid rgba(167,139,250,.3); }
   .cz-secttl { font-size:.9rem; font-weight:900; color:#ede9fe; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .cz-seccnt { font-size:.62rem; font-weight:800; color:#0b1020; background:#c4b5fd; border-radius:999px; padding:1px 7px; flex-shrink:0; }
@@ -6418,8 +6434,12 @@
     <h1 id="pageTitle" class="font-semibold text-xs text-slate-400 truncate">Dashboard</h1>
   </div>
 
-  <!-- Derecha: búsqueda global + estado + avatar -->
+  <!-- Derecha: horario + búsqueda global + estado + avatar -->
   <div id="topBarRight" class="flex items-center gap-2">
+
+    <!-- [618] Widget "Mi horario" (sistema seguridad) — vive en el header para ahorrar espacio -->
+    <div id="segWidgetHorario" class="wh-hdr-horario"></div>
+
 
 
     <!-- [Unificación mermas 2026-07-19] La cesta F2.5 del topbar se ELIMINÓ: sistema paralelo
@@ -6535,8 +6555,7 @@
   <!-- ── DASHBOARD ─────────────────────────────── -->
   <section id="view-dashboard" class="view active slide-up">
 
-    <!-- [v2.13.121] Widget "Mi horario" (sistema seguridad centralizado) -->
-    <div id="segWidgetHorario" style="margin-bottom:10px;display:flex;justify-content:center"></div>
+    <!-- [618] Widget "Mi horario" movido al header (topBar) para ganar espacio vertical -->
 
     <!-- [Parte 1] Indicador no bloqueante de refresco del dashboard -->
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:5px;height:0;position:relative;top:2px">
@@ -11209,6 +11228,6 @@
 <script src="js/cargadores.js?v=2.13.586"></script>
 <!-- [Pregúntale a tu almacén] chat IA read-only (tool-use sobre datos Supabase). Necesita API → tras api.js. -->
 <script src="js/chat-almacen.js?v=2.13.556"></script>
-<script src="js/app.js?v=2.13.592"></script>
+<script src="js/app.js?v=2.13.593"></script>
 </body>
 </html>

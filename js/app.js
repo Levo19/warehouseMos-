@@ -1072,29 +1072,37 @@ async function _cargarConsiderados() {
 //   a mano) y retoma solo tras ~1.4s. Un único loop RAF para todos los cuadrantes; respeta reduce-motion.
 function _marqueeMount() {
   if (_marqueeMount._on) return; _marqueeMount._on = true;
+  let els = [], last = 0;
   const attach = (el) => {
-    if (el._mqInit) return; el._mqInit = true; el._mqDir = 1; el._mqPaused = false; el._mqResumeAt = 0;
+    if (el._mqInit) return; el._mqInit = true; el._mqDir = 1; el._mqPaused = false; el._mqResumeAt = 0; el._mqPos = el.scrollTop || 0;
     const pause = () => { el._mqPaused = true; };
-    const later = () => { el._mqPaused = false; el._mqResumeAt = performance.now() + 1400; };
+    const later = () => { el._mqPaused = false; el._mqResumeAt = performance.now() + 1400; el._mqPos = el.scrollTop; };
     el.addEventListener('pointerenter', pause);
     el.addEventListener('pointerdown', pause);
     el.addEventListener('touchstart', pause, { passive: true });
-    el.addEventListener('wheel', () => { el._mqResumeAt = performance.now() + 1800; }, { passive: true });
+    el.addEventListener('wheel', () => { el._mqResumeAt = performance.now() + 1800; el._mqPos = el.scrollTop; }, { passive: true });
     el.addEventListener('pointerleave', later);
     el.addEventListener('pointerup', later);
     el.addEventListener('touchend', later, { passive: true });
     el.addEventListener('touchcancel', later, { passive: true });
   };
+  // Refresco espaciado (cada 600ms): re-colecta cuadrantes y CACHEA el desborde → el loop por frame
+  //   NO toca el DOM para leer layout (solo escribe scrollTop desde una posición llevada en JS) = fluido.
+  const refresh = (t) => {
+    els = Array.prototype.slice.call(document.querySelectorAll('.cz-grid.marq'));
+    els.forEach(el => { attach(el); el._mqMax = Math.max(0, el.scrollHeight - el.clientHeight); if (el._mqPaused || el._mqPos == null) el._mqPos = el.scrollTop; });
+    last = t;
+  };
   const loop = (t) => {
     requestAnimationFrame(loop);
-    document.querySelectorAll('.cz-grid.marq').forEach(el => {
-      attach(el);
-      const max = el.scrollHeight - el.clientHeight;
-      if (max <= 4 || el._mqPaused || (el._mqResumeAt && t < el._mqResumeAt)) return;
-      let y = el.scrollTop + el._mqDir * 0.55;   // ~33px/s, cinta lenta y visible
+    if (!last || t - last > 600) refresh(t);
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i], max = el._mqMax || 0;
+      if (max <= 4 || el._mqPaused || (el._mqResumeAt && t < el._mqResumeAt)) continue;
+      let y = (el._mqPos || 0) + el._mqDir * 0.5;   // ~30px/s, cinta lenta y visible
       if (y >= max) { y = max; el._mqDir = -1; } else if (y <= 0) { y = 0; el._mqDir = 1; }
-      el.scrollTop = y;
-    });
+      el._mqPos = y; el.scrollTop = y;
+    }
   };
   requestAnimationFrame(loop);
 }
