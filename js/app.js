@@ -964,10 +964,12 @@ function normCb(s) { return String(s || '').replace(/[\x00-\x1F\x7F-\x9F]/g, '')
 // [942] Informativo: card con foto + zonas AGRUPADAS con sello de despacho (✓ despachado / ⏳ pendiente).
 // Sin ✔/✕ (eran confusos): expira solo a los 7 días. El sello sale del server (última SALIDA a esa zona).
 function _considHaceLbl(ts) {
-  try {
-    const d = Math.floor((Date.now() - new Date(String(ts).slice(0, 16)).getTime()) / 86400000);
-    return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : 'hace ' + d + 'd';
-  } catch (_) { return ''; }
+  // [618] ts inválido/null → new Date da NaN (NO lanza) → evitar "hace NaNd" con isFinite.
+  if (!ts) return '';
+  const t = new Date(String(ts).slice(0, 16)).getTime();
+  if (!isFinite(t)) return '';
+  const d = Math.floor((Date.now() - t) / 86400000);
+  return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : 'hace ' + d + 'd';
 }
 async function _cargarConsiderados() {
   const cont = document.getElementById('dashConsiderados');
@@ -988,7 +990,15 @@ async function _cargarConsiderados() {
     localStorage.setItem(k, String(Date.now()));
     if (hayNuevo && last > 0) toast('🎯 Ingresó mercadería que alguna vez se debió — revisa Considerados', 'warn', 5000);
   } catch (_) {}
-  const _semLbl = (bucket) => { try { const n = Math.max(1, Math.round((Date.now() - new Date(bucket + 'T12:00:00').getTime()) / (7 * 86400000))); return 'hace ' + n + ' sem'; } catch (_) { return ''; } };
+  const _semLbl = (bucket) => {
+    // [618] bucket puede venir null/invalid (zona sin fecha de solicitud) → new Date da NaN (NO lanza,
+    // por eso el try/catch viejo no lo atrapaba → salía "hace NaN sem"). Guardamos con isFinite.
+    if (!bucket) return '';
+    const t = new Date(bucket + 'T12:00:00').getTime();
+    if (!isFinite(t)) return '';
+    const n = Math.max(1, Math.round((Date.now() - t) / (7 * 86400000)));
+    return isFinite(n) ? 'hace ' + n + ' sem' : '';
+  };
   list.innerHTML = items.map((it, idx) => {
     const esStock = String(it.guiaTipo || '') === 'STOCK';   // [945] había stock y se debe (no ingresó hoy)
     const esPrio = idx < 3;   // [v3] los 3 primeros vienen por mayor prioridad del server → despachar primero
