@@ -3047,6 +3047,9 @@ const API = (() => {
     consideradoResolver: (p={}) => _sbRpcWH('considerado_resolver', { p }),
     // [FASE 3 notif] estrellas por agotarse por zona (RPC mos, perfil 'mos') → {ok,data:{zonas:[{zona,total,items:[...]}]}}
     estrellasCriticas:   ()     => _sbRpcWH('estrellas_criticas_listar', { p: {} }, 'mos'),
+    // [mensajes de voz 1026] este equipo lee sus pendientes y los marca leídos (perfil mos, cross-app).
+    vozPendientes:  (deviceId)      => _sbRpcWH('voz_pendientes',   { p: { deviceId } },      'mos', 8000),
+    vozMarcarLeido: (deviceId, ids) => _sbRpcWH('voz_marcar_leido', { p: { deviceId, ids } }, 'mos', 8000),
     ingresosRecientes:   (p={}) => _sbRpcWH('ingresos_recientes',   { p: { dias: (p && p.dias) || 3 } }),
     registrarPN:                 (p)    => post({ action: 'registrarProductoNuevo', ...p }),
 

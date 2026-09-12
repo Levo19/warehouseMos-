@@ -1885,6 +1885,32 @@ const Session = (() => {
       if (document.visibilityState === 'visible') _whHeartbeatAccesos();
     }, 5 * 60 * 1000);
 
+    // ── [Mensajes de voz 1026] admin (MOS) → este equipo LO LEE en voz alta (TTS Web Speech). ──
+    //   Poll liviano (20s, solo pantalla visible). El TTS solo suena si hubo un toque previo (política de
+    //   autoplay); los operadores usan la pantalla en turno, así que el audio ya está desbloqueado.
+    if (window._vozPollTimer) clearInterval(window._vozPollTimer);
+    setTimeout(_vozPollWH, 6000);
+    window._vozPollTimer = setInterval(() => { if (document.visibilityState === 'visible') _vozPollWH(); }, 20000);
+    async function _vozPollWH() {
+      if (window._vozPollBusy) return;
+      if (document.visibilityState !== 'visible') return;
+      const dev = (typeof _getDeviceIdWH === 'function' ? _getDeviceIdWH() : '') || '';
+      if (!dev || typeof API === 'undefined' || !API.vozPendientes) return;
+      window._vozPollBusy = true;
+      try {
+        const r = await API.vozPendientes(dev);
+        const msgs = (r && r.ok && Array.isArray(r.data)) ? r.data : [];
+        if (msgs.length) {
+          for (const m of msgs) {
+            try { if (window.Voice && Voice.speak) Voice.speak(String(m.texto || ''), { lang: 'es-PE' }); } catch(_){}
+            try { toast('🔊 ' + String(m.texto || ''), 'info', 9000); } catch(_){}
+          }
+          try { await API.vozMarcarLeido(dev, msgs.map(m => m.id)); } catch(_){}
+        }
+      } catch(_){}
+      finally { window._vozPollBusy = false; }
+    }
+
     // [v2.13.37] Precarga de impresoras del ecosistema (admin/master).
     // Cuando el admin abra el modal de elegir impresora, ya estará cacheado
     // → modal abre INSTANT en vez de "⏳ Cargando impresoras..." por 2-3s.
