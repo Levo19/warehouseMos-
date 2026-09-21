@@ -200,6 +200,9 @@ const OfflineManager = (() => {
     // que cualquier read concurrente que ocurra entre la invalidación y
     // el setItem caiga al miss y refresque.
     _invalidarParseCache(key);
+    // [2.13.596] Respaldo en memoria: si el storage está lleno (origen levo19.github.io compartido con
+    // MOS/ME) el cleanup desaloja caches TIER1 entre sí y wh_guias quedaba vacío → "no cargan las guías".
+    _memFallback.set(key, data);
     try { localStorage.setItem(key, _serializar({ data, ts: Date.now() })); }
     catch(e) {
       // [v2.13.98 BUG CRITICO FIX] Cleanup en 2 fases preserva trabajo en progreso.
@@ -336,6 +339,7 @@ const OfflineManager = (() => {
   // TTL de 15s como seguro adicional contra staleness en edge cases.
   const _parseCache = new Map();   // key → { data, ts }
   const _PARSE_TTL_MS = 15000;
+  const _memFallback = new Map();  // key → último data escrito por guardar() (sobrevive al desalojo por cuota)
 
   function cargar(key) {
     // 1. Hit en cache de parseo
@@ -346,7 +350,9 @@ const OfflineManager = (() => {
     // 2. Miss → descomprimir + parsear
     const raw = localStorage.getItem(key);
     const obj = _deserializar(raw);
-    const data = obj ? obj.data : null;
+    let data = obj ? obj.data : null;
+    // [2.13.596] desalojado por cuota → lo último escrito en esta sesión (nunca peor que "vacío")
+    if (data === null && !raw && _memFallback.has(key)) data = _memFallback.get(key);
     if (data !== null) _parseCache.set(key, { data, ts: Date.now() });
     return data;
   }

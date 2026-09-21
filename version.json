@@ -1,1 +1,1 @@
-{"version":"2.13.595","build":"Receptor de mensajes de voz (TTS): poll a mos.voz_pendientes por deviceId; el equipo lee en voz alta los mensajes del admin (Voice.speak) y marca leido. SQL 1026."}
+{"version":"2.13.596","build":"Guías no cargaban con storage lleno: offline.js guarda respaldo en memoria de lo último escrito; si el cleanup por cuota desaloja wh_guias (origen compartido con MOS/ME) cargar() devuelve ese respaldo."}
