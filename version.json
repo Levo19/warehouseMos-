@@ -1,1 +1,1 @@
-{"version":"2.13.596","build":"Guías no cargaban con storage lleno: offline.js guarda respaldo en memoria de lo último escrito; si el cleanup por cuota desaloja wh_guias (origen compartido con MOS/ME) cargar() devuelve ese respaldo."}
+{"version":"2.13.597","build":"Jalar pickup/lista sombra con el storage lleno: guardado resiliente (libera caches regenerables, reintenta, avisa) — antes el setItem lanzaba y la lista desaparecia del feed sin abrirse."}

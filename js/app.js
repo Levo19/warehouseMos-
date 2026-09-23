@@ -12685,7 +12685,31 @@ const DespachoView = (() => {
   let _cart = [];
   let _tipoSalida = 'SALIDA_ZONA';
 
-  function _saveCart() { localStorage.setItem(CART_KEY, JSON.stringify(_cart)); }
+  // [2.13.597 · BUG "la lista desaparece"] El origen levo19.github.io comparte ~5 MB con MOS/ME. Con el
+  // storage lleno, localStorage.setItem LANZA: al jalar un pickup el error cortaba abrirPickup JUSTO después
+  // de marcarlo activo en memoria → no se dibujaba el checklist, no sonaba, no avisaba, y el siguiente poll
+  // lo escondía del feed (el feed oculta el pickup activo) = "desapareció". Ahora nunca lanza: libera caches
+  // regenerables (se re-descargan solas), reintenta, y si aun así no entra el trabajo sigue en pantalla con
+  // un aviso claro. Mismo guardado para el carrito, la zona y la lista sombra.
+  const _LS_REGENERABLES = ['wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c',
+                            'wh_ubicaciones','wh_equivalencias','wh_zonas','wh_impresoras','wh_pn','wh_config','wh_guias'];
+  let _lsAvisoLleno = false;
+  function _lsSetSeguro(key, valor) {
+    try { localStorage.setItem(key, valor); return true; } catch (e) {
+      for (const k of _LS_REGENERABLES) {
+        if (k === key) continue;
+        try { localStorage.removeItem(k); } catch (_) {}
+        try { localStorage.setItem(key, valor); return true; } catch (_) {}
+      }
+      console.warn('[WH] storage lleno · no se pudo guardar', key, (e && e.name) || e);
+      if (!_lsAvisoLleno) {
+        _lsAvisoLleno = true;
+        try { toast('⚠ Sin espacio en el navegador · tu avance sigue en pantalla pero NO se guardará si cierras la app. Termina esta guía y recarga WH.', 'error', 12000); } catch (_) {}
+      }
+      return false;
+    }
+  }
+  function _saveCart() { _lsSetSeguro(CART_KEY, JSON.stringify(_cart)); }
   function _loadCart() {
     try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; }
   }
@@ -12696,7 +12720,7 @@ const DespachoView = (() => {
       // referencia de respaldo para soltarlo solo cuando el servidor ya lo despachó
       // (los pickups guardados por versiones anteriores no traen `tsTomado`).
       _pickupActivo.tsGuardado = Date.now();
-      localStorage.setItem(PICKUP_KEY, JSON.stringify(_pickupActivo));
+      _lsSetSeguro(PICKUP_KEY, JSON.stringify(_pickupActivo));
     }
     else               localStorage.removeItem(PICKUP_KEY);
   }
@@ -12704,7 +12728,7 @@ const DespachoView = (() => {
     try { return JSON.parse(localStorage.getItem(PICKUP_KEY) || 'null'); } catch { return null; }
   }
   function _clearPickup() { localStorage.removeItem(PICKUP_KEY); }
-  function _saveZona(id) { if (id) localStorage.setItem(ZONA_KEY, id); }
+  function _saveZona(id) { if (id) _lsSetSeguro(ZONA_KEY, id); }
   function _loadZona()   { return localStorage.getItem(ZONA_KEY) || ''; }
   function _saveHist(entry) {
     try {
@@ -17123,7 +17147,7 @@ const DespachoView = (() => {
   let _listaSombra = null;
 
   function _lsSave() {
-    if (_listaSombra) localStorage.setItem(LS_KEY, JSON.stringify(_listaSombra));
+    if (_listaSombra) _lsSetSeguro(LS_KEY, JSON.stringify(_listaSombra));
     else              localStorage.removeItem(LS_KEY);
   }
   function _lsLoad() {
