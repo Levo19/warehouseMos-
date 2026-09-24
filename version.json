@@ -1,1 +1,1 @@
-{"version":"2.13.598","build":"Escaneo en pickup: el lector marca aunque el cursor este en la casilla de peso del granel o en el buscador del checklist (rafaga=lector, tecleo=persona); la casilla conserva su valor."}
+{"version":"2.13.599","build":"Escaneo en pickup afinado tras revision QA: manda e.target (el Enter del peso desenfoca antes), solo se toma como codigo lo que PARECE codigo (6+ digitos o letras/guion), no duplica con el panel de escaneo abierto, restaura sobre el nodo vivo y el aviso de sin-espacio se re-arma."}

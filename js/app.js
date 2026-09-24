@@ -12693,7 +12693,7 @@ const DespachoView = (() => {
   // un aviso claro. Mismo guardado para el carrito, la zona y la lista sombra.
   const _LS_REGENERABLES = ['wh_productos','wh_stock','wh_proveedores','wh_ajustes','wh_auditorias_c',
                             'wh_ubicaciones','wh_equivalencias','wh_zonas','wh_impresoras','wh_pn','wh_config','wh_guias'];
-  let _lsAvisoLleno = false;
+  let _lsAvisoLleno = 0;   // [2.13.599] ts del último aviso: se re-arma a los 3 min (antes: uno por carga)
   function _lsSetSeguro(key, valor) {
     try { localStorage.setItem(key, valor); return true; } catch (e) {
       for (const k of _LS_REGENERABLES) {
@@ -12702,8 +12702,8 @@ const DespachoView = (() => {
         try { localStorage.setItem(key, valor); return true; } catch (_) {}
       }
       console.warn('[WH] storage lleno · no se pudo guardar', key, (e && e.name) || e);
-      if (!_lsAvisoLleno) {
-        _lsAvisoLleno = true;
+      if (Date.now() - _lsAvisoLleno > 180000) {
+        _lsAvisoLleno = Date.now();
         try { toast('⚠ Sin espacio en el navegador · tu avance sigue en pantalla pero NO se guardará si cierras la app. Termina esta guía y recarga WH.', 'error', 12000); } catch (_) {}
       }
       return false;
@@ -18246,9 +18246,25 @@ const DespachoView = (() => {
     return el.classList.contains('pkck-ctrl-granel') || el.id === 'pkckSearchInput';
   }
   let _tolTgt = null, _tolVal = '';   // casilla tolerante y su valor antes de la ráfaga
+  // [2.13.599] En las casillas tolerantes NO basta la velocidad (un operador teclea '100' en el peso con
+  // el teclado numérico igual de rápido que un lector): además tiene que PARECER código de barras —
+  // 6+ dígitos seguidos, o traer letras/guion, que un peso jamás tiene.
+  function _pareceCodigo(txt) {
+    const t = String(txt || '').trim();
+    return t.length >= 6 && (/^[0-9]{6,}$/.test(t) || /[^0-9.,]/.test(t));
+  }
   function _restaurarTolerante() {
     if (!_tolTgt) return;
-    try { _tolTgt.value = _tolVal; _tolTgt.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+    // [2.13.599] si el checklist se re-renderizó, el nodo del snapshot ya no está en pantalla: restaurar sobre
+    // el equivalente vivo (mismo casillero enfocado) para no dejar los dígitos del código dentro del peso.
+    let tgt = _tolTgt;
+    try {
+      if (!tgt.isConnected) {
+        const act = document.activeElement;
+        tgt = (act && act.classList && act.classList.contains('pkck-ctrl-granel')) ? act : null;
+      }
+    } catch (_) {}
+    if (tgt) { try { tgt.value = _tolVal; tgt.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {} }
     _tolTgt = null; _tolVal = '';
   }
 
@@ -18271,19 +18287,23 @@ const DespachoView = (() => {
     } catch(_) { return; }
     // No robar el teclado si el operador está escribiendo en un campo… salvo las dos casillas del pickup que
     // roban el foco (peso granel / buscador): ahí decide la VELOCIDAD (ráfaga = lector, pausado = tipeo).
-    const _act = document.activeElement;
-    const _tol = _esCampoTolerante(_act);
-    if (_esCampoEditable(_act) && !_tol) return;
+    const _act = (e.target && e.target.tagName) ? e.target : document.activeElement;   // [2.13.599] e.target manda:
+    const _tol = _esCampoTolerante(_act);                                              // el Enter de la casilla de peso
+    if (_esCampoEditable(_act) && !_tol) return;                                       // la desenfoca antes de llegar acá
     // Si el sheet de escaneo HID propio del despacho está abierto, ese
     // tiene su propio listener — no duplicar.
     const hidSheet = document.getElementById('sheetScanInput');
     if (hidSheet && hidSheet.classList.contains('open')) return;
+    // [2.13.599] …y el TELÓN de escaneo inline (despScanInlinePanel) también tiene el suyo: con el panel
+    // abierto y el foco en una casilla tolerante, ambos listeners veían la misma ráfaga → doble marcado.
+    const telon = document.getElementById('despScanInlinePanel');
+    if (telon && telon.style.display !== 'none') return;
 
     const now = Date.now();
     if (e.key === 'Enter') {
       // En una casilla tolerante, el Enter solo cierra un CÓDIGO si viene pegado a la ráfaga del lector;
       // el Enter del operador (tras escribir el peso y pausar) confirma su peso, no se toca.
-      if (_tol && !(buf.length >= 3 && (now - lastTs) <= 80)) { buf = ''; _tolTgt = null; _tolVal = ''; return; }
+      if (_tol && !((now - lastTs) <= 80 && _pareceCodigo(buf))) { buf = ''; _tolTgt = null; _tolVal = ''; return; }
       if (buf) { clearTimeout(timer); _procesar(); }
       return;
     }
@@ -18298,7 +18318,7 @@ const DespachoView = (() => {
     clearTimeout(timer);
     // En casilla tolerante el fallback SOLO dispara si la ráfaga ya parece un código de barras (6+ chars):
     // así un peso tipeado ("1.5") nunca se confunde con un escaneo.
-    timer = setTimeout(() => { if (_tol && buf.trim().length < 6) { buf = ''; _tolTgt = null; _tolVal = ''; return; } _procesar(); }, 120);
+    timer = setTimeout(() => { if (_tol && !_pareceCodigo(buf)) { buf = ''; _tolTgt = null; _tolVal = ''; return; } _procesar(); }, 120);
   });
 })();
 
