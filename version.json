@@ -1,1 +1,1 @@
-{"version":"2.13.597","build":"Jalar pickup/lista sombra con el storage lleno: guardado resiliente (libera caches regenerables, reintenta, avisa) — antes el setItem lanzaba y la lista desaparecia del feed sin abrirse."}
+{"version":"2.13.598","build":"Escaneo en pickup: el lector marca aunque el cursor este en la casilla de peso del granel o en el buscador del checklist (rafaga=lector, tecleo=persona); la casilla conserva su valor."}

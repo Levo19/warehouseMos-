@@ -18236,10 +18236,27 @@ const DespachoView = (() => {
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
   }
 
+  // [2.13.598 · BUG "lee el código y no marca nada"] Dos casillas del pickup roban el foco y dejaban SORDO al
+  // lector: el peso del granel (WH enfoca ese casillero al escanear un granel) y el buscador del checklist.
+  // Desde ahí, cada escaneo se TIPEABA dentro de la casilla en vez de marcar el producto. Ahora esas dos son
+  // "tolerantes": si la entrada llega en RÁFAGA (lector) se trata como código y se restaura lo que había;
+  // si es tipeo humano (pausado) se respeta lo que escribe el operador.
+  function _esCampoTolerante(el) {
+    if (!el || !el.classList) return false;
+    return el.classList.contains('pkck-ctrl-granel') || el.id === 'pkckSearchInput';
+  }
+  let _tolTgt = null, _tolVal = '';   // casilla tolerante y su valor antes de la ráfaga
+  function _restaurarTolerante() {
+    if (!_tolTgt) return;
+    try { _tolTgt.value = _tolVal; _tolTgt.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+    _tolTgt = null; _tolVal = '';
+  }
+
   function _procesar() {
     const code = buf.trim();
     buf = '';
-    if (code.length < 3) return;
+    if (code.length < 3) { _tolTgt = null; _tolVal = ''; return; }
+    _restaurarTolerante();   // lo que entró era un CÓDIGO: la casilla vuelve a su valor
     try {
       if (window.DespachoView && DespachoView.hayDespachoActivo && DespachoView.hayDespachoActivo()) {
         DespachoView.procesarScanGlobal(code);
@@ -18252,8 +18269,11 @@ const DespachoView = (() => {
     try {
       if (!(window.DespachoView && DespachoView.hayDespachoActivo && DespachoView.hayDespachoActivo())) return;
     } catch(_) { return; }
-    // No robar el teclado si el operador está escribiendo en un campo.
-    if (_esCampoEditable(document.activeElement)) return;
+    // No robar el teclado si el operador está escribiendo en un campo… salvo las dos casillas del pickup que
+    // roban el foco (peso granel / buscador): ahí decide la VELOCIDAD (ráfaga = lector, pausado = tipeo).
+    const _act = document.activeElement;
+    const _tol = _esCampoTolerante(_act);
+    if (_esCampoEditable(_act) && !_tol) return;
     // Si el sheet de escaneo HID propio del despacho está abierto, ese
     // tiene su propio listener — no duplicar.
     const hidSheet = document.getElementById('sheetScanInput');
@@ -18261,6 +18281,9 @@ const DespachoView = (() => {
 
     const now = Date.now();
     if (e.key === 'Enter') {
+      // En una casilla tolerante, el Enter solo cierra un CÓDIGO si viene pegado a la ráfaga del lector;
+      // el Enter del operador (tras escribir el peso y pausar) confirma su peso, no se toca.
+      if (_tol && !(buf.length >= 3 && (now - lastTs) <= 80)) { buf = ''; _tolTgt = null; _tolVal = ''; return; }
       if (buf) { clearTimeout(timer); _procesar(); }
       return;
     }
@@ -18268,11 +18291,14 @@ const DespachoView = (() => {
     // [fix layout ES-LatAm] e.code (tecla física) para que el "-" no se lea "'" en teclado Español.
     const ch = (e.code === 'Minus' || e.code === 'NumpadSubtract') ? '-' : e.key;
     // Velocidad: si pasó >80ms entre teclas, es tecleo humano → reiniciar
-    if (buf.length > 0 && (now - lastTs) > 80) buf = '';
+    if (buf.length > 0 && (now - lastTs) > 80) { buf = ''; _tolTgt = null; _tolVal = ''; }
     lastTs = now;
+    if (_tol && !buf) { _tolTgt = _act; _tolVal = String(_act.value || ''); }   // snapshot antes de la ráfaga
     buf += ch;
     clearTimeout(timer);
-    timer = setTimeout(_procesar, 120); // fallback si el scanner no manda Enter
+    // En casilla tolerante el fallback SOLO dispara si la ráfaga ya parece un código de barras (6+ chars):
+    // así un peso tipeado ("1.5") nunca se confunde con un escaneo.
+    timer = setTimeout(() => { if (_tol && buf.trim().length < 6) { buf = ''; _tolTgt = null; _tolVal = ''; return; } _procesar(); }, 120);
   });
 })();
 
