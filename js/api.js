@@ -440,7 +440,7 @@ const API = (() => {
   // baseline no cargado) => se comporta EXACTO como antes (micro-cache 4s). Escritura propia => _invalidarLecturas()
   // vacía todo el cache igual que siempre.
   const _OPSV = { ok: false, v: {}, sub: false };   // sub = canal SUBSCRIBED ahora (QA 600: un baseline en vuelo no puede revivir ok tras caída)
-  const _OPSV_MAX_MS = 150000;
+  const _OPSV_MAX_MS = 60000;   // [QA 600] 150s→60s: tope de datos viejos si el WS muere en silencio
   function _opsvSet(dom, ver) {
     const n = Number(ver);
     if (!dom || !isFinite(n)) return;
@@ -2937,9 +2937,10 @@ const API = (() => {
       _rtRefrescarToken();                                        // canal vivo → solo refrescar token
     };
     try {
-      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reasegurar(); });
+      // [QA 600] Al volver a primer plano / reconectar, el WS pudo morir dormido: descartar lo cacheado → la próxima lectura va fresca.
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { _invalidarLecturas(); reasegurar(); } });
       window.addEventListener('focus',  reasegurar);
-      window.addEventListener('online', reasegurar);
+      window.addEventListener('online', () => { _invalidarLecturas(); reasegurar(); });
     } catch (_) {}
   }
 
