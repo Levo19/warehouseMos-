@@ -1,1 +1,1 @@
-{"version":"2.13.600","build":"Adhesivos: la clave del lote es estable por envasado y crearLoteAdhesivo ya no se encola offline (ni imprime a ciegas); el modal avisa Sin conexion con Reintentar. Menos carga en la base: lecturas de tablas se reusan mientras el realtime confirme que no cambiaron."}
+{"version":"2.13.601","build":"Cargadores: el modal muestra el dia (HOY / AYER dd/mm) y avisa si no es hoy; el boton principal registra en HOY. El refresco del contador ya no pisa el modal abierto en otro dia y cada carga conserva su fecha."}

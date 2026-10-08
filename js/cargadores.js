@@ -213,7 +213,7 @@
           (cg.cargas || []).forEach(k => flat.push({
             idCarga: k.idCarga, idCargador: cg.idCargador, nombre: cg.nombre,
             nivel: parseInt(k.nivel) || 0, fotos: Array.isArray(k.fotos) ? k.fotos : [],
-            hora: k.hora || '', editado: k.editado || '', edito: !!k.edito, ts: k.ts || '', _prov: false
+            hora: k.hora || '', editado: k.editado || '', edito: !!k.edito, ts: k.ts || '', fecha: nuevaFecha, _prov: false
           }));
         });
         if (_fechaActual === nuevaFecha) {
@@ -320,20 +320,41 @@
     </div>`;
   }
 
+  // [2.13.601] ¿El modal muestra HOY? En la mañana el 1er pill 🛺 de la lista es el de AYER (aún no hay guías
+  // de hoy) → registraban la carga de hoy en el día anterior sin darse cuenta. Ahora el día se ve SIEMPRE y,
+  // si no es hoy, el botón principal registra en HOY.
+  function _esHoy() { return !_fechaActual || _fechaActual === _hoyStr(); }
+  function _etqDia(f) {
+    if (!f || f === _hoyStr()) return 'HOY';
+    const d = new Date(f + 'T12:00:00Z'), ay = new Date(_hoyStr() + 'T12:00:00Z'); ay.setUTCDate(ay.getUTCDate() - 1);
+    const dm = f.slice(8, 10) + '/' + f.slice(5, 7);
+    return (d.getTime() === ay.getTime()) ? 'AYER ' + dm : dm;
+  }
+  function irHoy(conAgregar) {
+    abrir(_hoyStr());
+    if (conAgregar) { _addOpen = true; _renderAdd(); }
+  }
+
   function _render() {
     const res = document.getElementById('cargResumen');
     if (!res) return;
+    const tit = document.querySelector('#modalCargadores .carg-title');
+    if (tit) tit.textContent = '🛺 Cargas · ' + _etqDia(_fechaActual);
+    const aviso = _esHoy() ? '' : `<div style="background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.5);color:#fcd34d;border-radius:12px;padding:10px 12px;margin:0 0 12px;font-size:13px;display:flex;align-items:center;gap:10px">
+        <span style="flex:1">⚠️ Estás viendo <b>${_escHtml(_etqDia(_fechaActual))}</b>, no hoy.</span>
+        <button onclick="Cargadores.irHoy()" style="background:#f59e0b;color:#111827;border:0;border-radius:9px;padding:7px 12px;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap">Ir a HOY</button>
+      </div>`;
     const grupos = _grupos();
     const totCargas = _dia.length, totCarg = grupos.length;
     const totalEl = document.getElementById('cargTotal'); if (totalEl) totalEl.textContent = totCargas;
     if (!grupos.length) {
-      res.innerHTML = `<div class="cgv-empty">
+      res.innerHTML = aviso + `<div class="cgv-empty">
         <div class="moto">🛺<span class="plus">＋</span></div>
-        <p>Sin cargas registradas hoy.</p>
+        <p>Sin cargas registradas ${_esHoy() ? 'hoy' : 'ese día'}.</p>
         <small>Toca “+ Carga nueva” para registrar la primera.</small>
       </div>`;
     } else {
-      res.innerHTML = `<div class="cgv-stats">
+      res.innerHTML = aviso + `<div class="cgv-stats">
           <div class="cgv-stat"><div class="k">Cargas</div><div class="v">${totCargas}</div></div>
           <div class="cgv-stat b"><div class="k">Cargadores</div><div class="v">${totCarg}</div></div>
         </div>` + grupos.map(_grupoHTML).join('');
@@ -346,7 +367,10 @@
   function _renderAdd() {
     const box = document.getElementById('cargAdd'); if (!box) return;
     if (!_addOpen) {
-      box.innerHTML = `<button class="cgv-addbtn" onclick="Cargadores.toggleAdd(true)"><span class="b">＋</span> Carga nueva</button>`;
+      box.innerHTML = _esHoy()
+        ? `<button class="cgv-addbtn" onclick="Cargadores.toggleAdd(true)"><span class="b">＋</span> Carga nueva</button>`
+        : `<button class="cgv-addbtn" onclick="Cargadores.irHoy(true)"><span class="b">＋</span> Carga nueva de HOY</button>
+           <button onclick="Cargadores.toggleAdd(true)" style="display:block;margin:8px auto 0;background:none;border:0;color:#94a3b8;font-size:12px;text-decoration:underline;cursor:pointer">Registrar tarde en ${_escHtml(_etqDia(_fechaActual))}</button>`;
       return;
     }
     const top3 = _master.slice(0, 3);
@@ -354,7 +378,7 @@
       <div class="cgv-quick">${top3.map(c => `<div class="cgv-qcard" onclick="Cargadores.agregar('${_escJs(c.idCargador)}','${_escJs(c.nombre)}')">
         <div class="qi">🛺</div><div class="qn">${_escHtml(c.nombre)}</div><div class="qv">${c.veces ? c.veces + ' días' : 'nuevo'}</div></div>`).join('')}</div>` : '';
     box.innerHTML = `<div class="cgv-add">
-      <div class="cgv-add-hd"><span class="t">Agregar carga</span><button class="x" onclick="Cargadores.toggleAdd(false)">✕</button></div>
+      <div class="cgv-add-hd"><span class="t">Agregar carga${_esHoy() ? '' : ' · ' + _escHtml(_etqDia(_fechaActual))}</span><button class="x" onclick="Cargadores.toggleAdd(false)">✕</button></div>
       ${quick}
       <div class="cgv-srch"><span style="color:#64748b">🔎</span>
         <input id="cargBuscarInput" type="text" placeholder="Buscar cargador…" value="${_escAttr(_searchVal)}" oninput="Cargadores._filtrar(this.value)"/>
@@ -391,7 +415,7 @@
   async function _persistCarga(c, opts) {
     if (!c) return false;
     try {
-      const res = await API.post('cargadorCargaSetNivel', { idCarga: c.idCarga, idCargador: c.idCargador, nivel: parseInt(c.nivel) || 0, fecha: _fechaActual || _hoyStr(), nombre: c.nombre || '', usuario: _usuario(), deviceId: _deviceId() });
+      const res = await API.post('cargadorCargaSetNivel', { idCarga: c.idCarga, idCargador: c.idCargador, nivel: parseInt(c.nivel) || 0, fecha: c.fecha || _fechaActual || _hoyStr(), nombre: c.nombre || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok) {
         c._prov = false;
         const card = document.getElementById('cgvCarga_' + _escAttr(c.idCarga)); if (card) card.classList.remove('prov');
@@ -408,7 +432,7 @@
   // ── agregar una CARGA nueva (se PERSISTE al instante en nivel 0; luego se afina jalando la barra) ──
   async function agregar(idCargador, nombre) {
     const idCarga = _nuevaIdCarga();
-    const c = { idCarga, idCargador, nombre, nivel: 0, fotos: [], hora: _horaAhora(), ts: '', _prov: true };
+    const c = { idCarga, idCargador, nombre, nivel: 0, fotos: [], hora: _horaAhora(), ts: '', fecha: _fechaActual || _hoyStr(), _prov: true };   // [2.13.601] la carga lleva SU día
     _dia.unshift(c);
     _addOpen = false; _searchVal = '';
     _render();
@@ -495,7 +519,7 @@
     clearTimeout(_saveTimers[id]);
     _saveTimers[id] = setTimeout(async () => {
       delete _saveTimers[id];   // el timer ya disparó: no dejar handles rancios acumulados en el mapa
-      try { const res = await API.post('cargadorCargaSetNivel', { idCarga: id, idCargador: c && c.idCargador, nivel: p, fecha: _fechaActual || _hoyStr(), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
+      try { const res = await API.post('cargadorCargaSetNivel', { idCarga: id, idCargador: c && c.idCargador, nivel: p, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
         if (res && res.ok) {
           if (c) { c._prov = false; const card = document.getElementById('cgvCarga_' + _escAttr(id)); if (card) card.classList.remove('prov'); }
           if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
@@ -584,7 +608,7 @@
     try { const rc = await _comprimirImagen(file, 1600, 0.82); if (rc && rc.blob) { blob = rc.blob; mime = rc.mime; } } catch(_){}
     const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => res(''); r.readAsDataURL(blob); });
     try {
-      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: mime, nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
+      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: mime, nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok && res.data) {
         if (c) { c.fotos = res.data.fotos || c.fotos; c._prov = false; }
         if (navigator.vibrate) navigator.vibrate(12);
@@ -792,13 +816,21 @@
   async function refreshCountDia(fecha) {
     fecha = fecha || _hoyStr();
     const m = document.getElementById('modalCargadores');
-    if (m && m.classList.contains('open') && _fechaActual === fecha) return _dia.filter(c => c && !c._prov).length;   // fuente viva (solo persistidas)
+    const abierto = !!(m && m.classList.contains('open'));
+    if (abierto && _fechaActual === fecha) return _dia.filter(c => c && !c._prov).length;   // fuente viva (solo persistidas)
+    // [2.13.601] Modal abierto en OTRO día (p.ej. pill "Ayer"): solo contar, SIN tocar _dia/_fechaActual.
+    // Antes _cargarResumen(hoy) reemplazaba la lista del modal → la carga recién agregada "desaparecía"
+    // y sus fotos/nivel siguientes se mandaban sin cargador y con la fecha cambiada.
+    if (abierto) {
+      try { const res = await API.get('resumenCargasDia', { fecha }); return (res && res.ok && res.data && res.data.totalCargas) || 0; }
+      catch (e) { return 0; }
+    }
     const r = await _cargarResumen(fecha);
     return (r.totalCargas != null) ? r.totalCargas : _dia.filter(c => c && !c._prov).length;
   }
 
   window.Cargadores = {
-    abrir, cerrar, agregar, quitar, compartir, compartirImagen, imprimir, toggleAdd,
+    abrir, cerrar, agregar, quitar, compartir, compartirImagen, imprimir, toggleAdd, irHoy,
     getCountDia, refreshCountDia,
     _filtrar, _hoyStr, _pickFoto, _fotoDesde, _cerrarFotoChooser, _carousel
   };
