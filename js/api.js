@@ -2354,7 +2354,7 @@ const API = (() => {
     if (params.action === 'cargadorCargaSetNivel') {
       const out = await _sbRpcWH('cargador_carga_set_nivel', { p: {
         idCarga: String(params.idCarga || ''), idCargador: String(params.idCargador || ''),
-        fecha: params.fecha || '', nivel: parseInt(params.nivel) || 0,
+        fecha: params.fecha || '', nivel: parseInt(params.nivel) || 0, tarde: params.tarde === true,
         nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
       } });
       return out || { ok: false, error: 'sin respuesta del servidor' };
@@ -2373,7 +2373,7 @@ const API = (() => {
       if (!url) return { ok: false, error: 'Falta la foto' };
       const out = await _sbRpcWH('cargador_carga_add_foto', { p: {
         idCarga: String(params.idCarga || ''), idCargador: String(params.idCargador || ''),
-        fecha: params.fecha || '', url, nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
+        fecha: params.fecha || '', tarde: params.tarde === true, url, nombre: params.nombre || '', usuario: params.usuario || '', deviceId: params.deviceId || ''
       } });
       if (!out || out.ok === false) return { ok: false, error: (out && out.error) || 'No se guardó la foto' };
       return out;   // { ok, data:{ idCarga, fotos, fecha } }

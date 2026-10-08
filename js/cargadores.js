@@ -330,6 +330,8 @@
     const dm = f.slice(8, 10) + '/' + f.slice(5, 7);
     return (d.getTime() === ay.getTime()) ? 'AYER ' + dm : dm;
   }
+  // [1036] el server manda a HOY toda carga NUEVA de un día pasado salvo tarde=true (elegido a conciencia).
+  function _esTarde(c) { const f = (c && c.fecha) || _fechaActual || ''; return !!f && f < _hoyStr(); }
   function irHoy(conAgregar) {
     abrir(_hoyStr());
     if (conAgregar) { _addOpen = true; _renderAdd(); }
@@ -415,7 +417,7 @@
   async function _persistCarga(c, opts) {
     if (!c) return false;
     try {
-      const res = await API.post('cargadorCargaSetNivel', { idCarga: c.idCarga, idCargador: c.idCargador, nivel: parseInt(c.nivel) || 0, fecha: c.fecha || _fechaActual || _hoyStr(), nombre: c.nombre || '', usuario: _usuario(), deviceId: _deviceId() });
+      const res = await API.post('cargadorCargaSetNivel', { idCarga: c.idCarga, idCargador: c.idCargador, nivel: parseInt(c.nivel) || 0, fecha: c.fecha || _fechaActual || _hoyStr(), tarde: _esTarde(c), nombre: c.nombre || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok) {
         c._prov = false;
         const card = document.getElementById('cgvCarga_' + _escAttr(c.idCarga)); if (card) card.classList.remove('prov');
@@ -519,7 +521,7 @@
     clearTimeout(_saveTimers[id]);
     _saveTimers[id] = setTimeout(async () => {
       delete _saveTimers[id];   // el timer ya disparó: no dejar handles rancios acumulados en el mapa
-      try { const res = await API.post('cargadorCargaSetNivel', { idCarga: id, idCargador: c && c.idCargador, nivel: p, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
+      try { const res = await API.post('cargadorCargaSetNivel', { idCarga: id, idCargador: c && c.idCargador, nivel: p, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), tarde: _esTarde(c), nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
         if (res && res.ok) {
           if (c) { c._prov = false; const card = document.getElementById('cgvCarga_' + _escAttr(id)); if (card) card.classList.remove('prov'); }
           if (typeof App !== 'undefined' && App.actualizarChipDia) App.actualizarChipDia();
@@ -608,7 +610,7 @@
     try { const rc = await _comprimirImagen(file, 1600, 0.82); if (rc && rc.blob) { blob = rc.blob; mime = rc.mime; } } catch(_){}
     const b64 = await new Promise(res => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = () => res(''); r.readAsDataURL(blob); });
     try {
-      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), fotoBase64: b64, mimeType: mime, nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
+      const res = await API.post('cargadorCargaAddFoto', { idCarga, idCargador: c && c.idCargador, fecha: (c && c.fecha) || _fechaActual || _hoyStr(), tarde: _esTarde(c), fotoBase64: b64, mimeType: mime, nombre: (c && c.nombre) || '', usuario: _usuario(), deviceId: _deviceId() });
       if (res && res.ok && res.data) {
         if (c) { c.fotos = res.data.fotos || c.fotos; c._prov = false; }
         if (navigator.vibrate) navigator.vibrate(12);
