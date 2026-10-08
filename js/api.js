@@ -439,7 +439,7 @@ const API = (() => {
   // _OPSV_MAX_MS (red de seguridad ante un WS caído en silencio). Cualquier duda (canal no sano, versión desconocida,
   // baseline no cargado) => se comporta EXACTO como antes (micro-cache 4s). Escritura propia => _invalidarLecturas()
   // vacía todo el cache igual que siempre.
-  const _OPSV = { ok: false, v: {} };
+  const _OPSV = { ok: false, v: {}, sub: false };   // sub = canal SUBSCRIBED ahora (QA 600: un baseline en vuelo no puede revivir ok tras caída)
   const _OPSV_MAX_MS = 150000;
   function _opsvSet(dom, ver) {
     const n = Number(ver);
@@ -2853,7 +2853,7 @@ const API = (() => {
         try { console.log('[Realtime] canal catalogo_meta:', status); } catch (_) {}
         // [2.13.600] Cache versionado de lecturas: solo vale con el canal sano. Al (re)suscribir se reinician las
         // versiones y se carga el baseline REAL de wh.ops_meta (cubre eventos perdidos mientras el WS estuvo caído).
-        if (status === 'SUBSCRIBED') { _opsvBaseline(); } else { _OPSV.ok = false; }
+        if (status === 'SUBSCRIBED') { _OPSV.sub = true; _opsvBaseline(); } else { _OPSV.sub = false; _OPSV.ok = false; }
         // Al (re)suscribir, leer la versión actual del catálogo y notificarla por si
         // perdimos un UPDATE mientras el WS estaba caído/dormido. Money-safe: notificar
         // pasa por el mismo núcleo que el poller (no re-descarga si la versión no subió).
@@ -2921,7 +2921,7 @@ const API = (() => {
       }, 8000);
       if (!res.ok) return;
       const rows = await res.json().catch(() => null);
-      if (!Array.isArray(rows) || !rows.length || gen !== _opsvGen) return;
+      if (!Array.isArray(rows) || !rows.length || gen !== _opsvGen || !_OPSV.sub) return;
       rows.forEach(r => _opsvSet(String(r.dominio || ''), r.version));
       _OPSV.ok = true;
     } catch (_) { /* sin baseline => camino anterior */ }
@@ -2944,7 +2944,7 @@ const API = (() => {
   }
 
   function _detenerRealtimeCatalogo() {
-    _OPSV.ok = false; _OPSV.v = {};   // [2.13.600] sin canal no hay invalidación por versión
+    _OPSV.ok = false; _OPSV.sub = false; _OPSV.v = {}; _opsvGen++;   // [2.13.600] sin canal no hay invalidación por versión
     _RT.gen++;   // [anti-orphan] invalida cualquier arranque en vuelo (post-await abortará en vez de abrir un canal huérfano)
     try { if (_RT.channel && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.channel); } catch (_) {}
     try { if (_RT.chPres && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.chPres); } catch (_) {}
