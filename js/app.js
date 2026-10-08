@@ -10930,7 +10930,8 @@ const EnvasadosView = (() => {
           codigoBarra:     String(prod.codigoBarra),
           descripcion:     prod.descripcion || '',
           total:           producidas,
-          fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0]
+          fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0],
+          claveEnvasado:   idempotencyKey   // [2.13.600] estable por envasado -> reintentos dedupean
         });
       } catch (e) {
         toast('No se pudo iniciar lote: ' + (e?.message || ''), 'danger', 5000);
@@ -15233,14 +15234,16 @@ const DespachoView = (() => {
     }
   }
 
-  async function _pollPickups(_retry) {
+  async function _pollPickups(_retry, _suave) {
     // [perf sesión larga] No pollear/renderizar con la pestaña oculta: el feed se refresca al volver a
     // 'visible' (handler central). Ahorra red + re-render de fondo todo el turno. El realtime/manual re-llama
     // esta función al volver. (El timer sigue tickeando pero sale barato.)
     if (document.hidden) return;
     // [v2.13.372] force=true → lectura FRESCA (bypass caché 4s) para que la consolidación
     // server-side (realtime) y la carga inicial muestren los productos al instante, sin refrescar.
-    const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO', force: true }).catch(() => ({ ok: false }));
+    // [2.13.600] _suave = tick del timer de respaldo (30s): NO fuerza red; si el canal realtime está sano y la versión
+    // de wh.ops_meta['pickups'] no cambió, reusa la lectura (máx 150s). Eventos realtime / acciones manuales siguen forzando.
+    const res = await API.getPickups({ estado: 'PENDIENTE,EN_PROCESO', force: !_suave }).catch(() => ({ ok: false }));
     // [FIX flicker] Si el poll FALLA (timeout/5xx/red), NO vaciar la lista — conservar la
     // última buena. Solo un fetch OK actualiza la lista. (vacío legítimo = ok:true, data:[].)
     if (!res || res.ok !== true) {
@@ -15437,7 +15440,7 @@ const DespachoView = (() => {
     if (_pollTimer) return;
     _pollPickups();
     // Polling 30s — antes era 120s. Ruido de almacén = se necesita aviso rápido.
-    _pollTimer = setInterval(_pollPickups, 30_000);
+    _pollTimer = setInterval(() => _pollPickups(0, true), 30_000);
     // [v2.13.344] Realtime: re-pollear al INSTANTE cuando wh.pickups cambia (cierre/consolidación/
     // despacho dispara wh.ops_meta dominio 'pickups' → api.js emite 'wh:pickups-realtime').
     // El poller de 30s queda de respaldo. Listener una sola vez (guard).
@@ -25640,6 +25643,12 @@ const WhLoteAdhesivo = (() => {
     _setStatus('CREADO');
 
     // 1. Crear lote en backend (en background, ya con modal abierto)
+    // [WH 2.13.600] Clave de idempotencia ESTABLE: la del envasado (opts.claveEnvasado) o, en reimpresión, una
+    // generada UNA vez por apertura (opts.idempotencyKey). Todo reintento del mismo intento reusa la misma clave ->
+    // wh.lote_adhesivo_crear dedupea y no se imprimen etiquetas dobles. Reimprimir de nuevo = nueva apertura = lote nuevo.
+    const idemKey = String(opts.idempotencyKey ||
+      (opts.claveEnvasado ? 'wh_lote_' + opts.claveEnvasado : 'wh_lote_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)));
+    if (_state) _state.optsReintento = { ...opts, idempotencyKey: idemKey };
     let r;
     try {
       r = await API.post('crearLoteAdhesivo', {
@@ -25650,10 +25659,17 @@ const WhLoteAdhesivo = (() => {
         origen:           'WH',
         vto:              opts.vto || '',
         fechaEnvasado:    opts.fechaEnvasado || '',
-        idempotencyKey:   'wh_lote_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+        idempotencyKey:   idemKey
       });
     } catch (e) {
-      _setStatus('PAUSADO_ERROR', 'Sin conexión al crear el lote: ' + (e?.message || ''));
+      _mostrarSinConexion();
+      return;
+    }
+    // Re-check: usuario puede haber cancelado el modal mientras esperaba.
+    if (!_state) return;
+    // Sin confirmación del servidor (timeout / sin red / offline-encolado): NO orquestar sin idLote.
+    if (r && (r.sinConexion || r.offline || r._ceroGas)) {
+      _mostrarSinConexion();
       return;
     }
     if (r && r.ok === false) {
@@ -25661,9 +25677,11 @@ const WhLoteAdhesivo = (() => {
       return;
     }
     // WH API.post retorna {ok, data}. NO desempaca como MOS.
-    const d = r.data || r;
-    // Re-check: usuario puede haber cancelado el modal mientras esperaba.
-    if (!_state) return;
+    const d = (r && r.data) || r || {};
+    if (!d.idLote) {
+      _mostrarSinConexion();
+      return;
+    }
     // 2. Completar metadata del state con la respuesta real
     _state.idLote      = d.idLote;
     _state.total       = d.total || total;
@@ -25673,6 +25691,25 @@ const WhLoteAdhesivo = (() => {
     _render();
     // 3. Arrancar orquestación
     _orquestar(d.idLote);
+  }
+
+  // [WH 2.13.600] Estado claro cuando el lote no se pudo confirmar. No se encola (imprimiría a ciegas después).
+  function _mostrarSinConexion() {
+    if (!_state) return;
+    _setStatus('PAUSADO_ERROR', 'Sin conexión con el servidor: no se confirmó el lote. Si ya se creó, se imprimirá solo; si no, reintenta cuando vuelva la conexión.');
+    const actions = document.getElementById('whLoteActions');
+    if (actions) actions.innerHTML = `
+      <button class="wh-lote-btn-primary" onclick="WhLoteAdhesivo.reintentarCrear()">↻ Reintentar</button>
+      <button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cerrar()">Cerrar</button>`;
+    try { vibrate && vibrate([60, 40, 60]); } catch(_) {}
+  }
+
+  // Reintenta la creación con la MISMA clave de idempotencia (dedup server-side si el 1er intento sí commiteó).
+  function reintentarCrear() {
+    if (!_state || !_state.optsReintento) return;
+    const o = _state.optsReintento;
+    cerrar();
+    crearYEjecutar(o);
   }
 
   async function _orquestar(idLote, runOpts) {
@@ -25907,7 +25944,7 @@ const WhLoteAdhesivo = (() => {
     return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  return { crearYEjecutar, continuar, cancelar, _cancelarConfirmado, _abortarCancelacion, cancelarSilencioso, cerrar };
+  return { crearYEjecutar, reintentarCrear, continuar, cancelar, _cancelarConfirmado, _abortarCancelacion, cancelarSilencioso, cerrar };
 })();
 
 // ════════════════════════════════════════════════════════════════════
@@ -26138,7 +26175,9 @@ const WhAdhesivoReprint = (() => {
         descripcion:    datos.descripcion,
         total:          cant,
         vto:            '',  // backend lo recalcula desde fechaEnvasado
-        fechaEnvasado:  datos.fechaEnvasado
+        fechaEnvasado:  datos.fechaEnvasado,
+        // [2.13.600] Reimpresión MANUAL: clave nueva por apertura del modal (lote nuevo intencional), estable en los reintentos.
+        idempotencyKey: 'wh_rep_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
       });
     } else {
       try { toast('Sistema de lotes no disponible', 'error'); } catch(_) {}

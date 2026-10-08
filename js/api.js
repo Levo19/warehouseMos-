@@ -433,15 +433,35 @@ const API = (() => {
     // poder resolver su zona destino en el historial sin esperar los 90s del TTL.
     try { _histAux.lotes = null; _histAux.lotesTs = 0; _histAux.zonas = null; _histAux.zonasTs = 0; } catch (_) {}
   }
-  function _dedupRead(key, ttlMs, fn) {
+  // [WH 2.13.600 · carga leer_tabla_rls] Versiones de wh.ops_meta (bumpeadas por trigger al cambiar guias/preingresos/
+  // mermas/envasados/vencimientos/pickups/stock) mantenidas por el canal realtime ya abierto. Mientras el canal esté
+  // SUBSCRIBED y la versión del dominio no haya cambiado desde la lectura cacheada, esa lectura sigue VIGENTE hasta
+  // _OPSV_MAX_MS (red de seguridad ante un WS caído en silencio). Cualquier duda (canal no sano, versión desconocida,
+  // baseline no cargado) => se comporta EXACTO como antes (micro-cache 4s). Escritura propia => _invalidarLecturas()
+  // vacía todo el cache igual que siempre.
+  const _OPSV = { ok: false, v: {} };
+  const _OPSV_MAX_MS = 150000;
+  function _opsvSet(dom, ver) {
+    const n = Number(ver);
+    if (!dom || !isFinite(n)) return;
+    if (_OPSV.v[dom] === undefined || n > _OPSV.v[dom]) _OPSV.v[dom] = n;
+  }
+  function _opsvVigente(dom, verLeida, edadMs) {
+    return !!(_OPSV.ok && dom && verLeida !== undefined && _OPSV.v[dom] === verLeida && edadMs < _OPSV_MAX_MS);
+  }
+  function _dedupRead(key, ttlMs, fn, dom) {
     const inf = _readInflight.get(key);
     if (inf) return inf;                                   // (1) comparte la in-flight
     const hit = _readCache.get(key);
-    if (hit && (Date.now() - hit.ts) < ttlMs) {            // (2) micro-cache fresco
-      return Promise.resolve(hit.val);
+    if (hit) {
+      const edad = Date.now() - hit.ts;
+      if (edad < ttlMs || _opsvVigente(dom, hit.ver, edad)) {   // (2) micro-cache fresco / vigente por versión
+        return Promise.resolve(hit.val);
+      }
     }
+    const ver0 = dom ? _OPSV.v[dom] : undefined;           // versión ANTES de leer (un cambio en vuelo => se re-lee luego)
     const p = Promise.resolve().then(fn).then(val => {
-      _readCache.set(key, { ts: Date.now(), val });
+      _readCache.set(key, { ts: Date.now(), val, ver: ver0 });
       _readInflight.delete(key);
       return val;
     }).catch(err => {
@@ -693,15 +713,26 @@ const API = (() => {
   // [perf v2.13.242] Dedup + micro-cache 4s: si getDashboard y descargarOperacional
   // piden 'guias' en la misma ráfaga, se hace UNA sola leer_tabla_rls compartida.
   // 4s << ciclo de refresh (60s) → no afecta frescura percibida.
-  function _sbLeerTablaWH(tabla, force) {
-    // [v2.13.372] force=true → invalida el micro-caché (4s) antes de leer, para lecturas que
-    // necesitan frescura inmediata (poll de pickups + realtime), sin afectar la ráfaga del dashboard.
-    if (force) { try { _readCache.delete('tabla:' + tabla); } catch (_) {} }
-    return _dedupRead('tabla:' + tabla, 4000, async () => {
+  // tabla -> dominio de wh.ops_meta que la invalida (solo las que tienen trigger de bump).
+  const _TABLA_DOM = { guias: 'guias', preingresos: 'preingresos', mermas: 'mermas', envasados: 'envasados',
+                       lotes_vencimiento: 'vencimientos', pickups: 'pickups' };
+  // Tablas SIN trigger de bump y que crecen sin tope (1.1MB / 640KB): solo alimentan el kardex/motivos; TTL de tiempo.
+  const _TABLA_TTL = { ajustes: 90000, auditorias: 90000 };
+  // Lectura CRUDA (filas wh.*) con dedup + cache versionado. Compartida por el lector mapeado y los que usan filas crudas.
+  function _sbLeerTablaRawWH(tabla, force) {
+    const key = 'raw:' + tabla;
+    const dom = _TABLA_DOM[tabla];
+    if (force) { try { _readCache.delete(key); } catch (_) {} }
+    return _dedupRead(key, _TABLA_TTL[tabla] || 4000, async () => {
       const out = await _sbRpcWH('leer_tabla_rls', { p_tabla: tabla });
       if (!out || out.ok === false) throw new Error((out && out.error) || 'leer_tabla error');
-      return _sbRowsToObjsFront(tabla, out.data);
-    });
+      return Array.isArray(out.data) ? out.data : [];
+    }, dom);
+  }
+  function _sbLeerTablaWH(tabla, force) {
+    // [v2.13.372] force=true -> lectura fresca (poll de pickups por evento realtime / acciones manuales).
+    // Filas MAPEADAS nuevas por llamada (el cache guarda las crudas): ningún lector puede mutar lo que ve otro.
+    return _sbLeerTablaRawWH(tabla, force).then(rows => _sbRowsToObjsFront(tabla, rows));
   }
 
   // [CARGA INTELIGENTE Guías] Detalle operacional FILTRADO server-side (wh.guia_detalle_operacional):
@@ -826,8 +857,7 @@ const API = (() => {
   async function _histLotes() {
     if (_histAux.lotes && (Date.now() - _histAux.lotesTs) < _HIST_AUX_TTL) return _histAux.lotes;
     try {
-      const lo = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
-      const arr = (lo && lo.ok !== false && Array.isArray(lo.data)) ? lo.data : [];
+      const arr = await _sbLeerTablaRawWH('lotes_vencimiento');   // [2.13.600] cache compartido versionado
       _histAux.lotes = arr; _histAux.lotesTs = Date.now();
       return arr;
     } catch (_) { return _histAux.lotes || []; }
@@ -838,9 +868,9 @@ const API = (() => {
     if (_histAux.zonas && (Date.now() - _histAux.zonasTs) < _HIST_AUX_TTL) return _histAux.zonas;
     const map = {};
     try {
-      const gz = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'guias' });
-      if (gz && gz.ok !== false && Array.isArray(gz.data)) {
-        gz.data.forEach(g => {
+      const gzRows = await _sbLeerTablaRawWH('guias');   // [2.13.600] cache compartido versionado
+      if (Array.isArray(gzRows)) {
+        gzRows.forEach(g => {
           const gid = String(g.id_guia || '');
           if (gid) map[gid] = { zona: String(g.id_zona || ''), tipo: String(g.tipo || ''), usuario: String(g.usuario || '') };
         });
@@ -1137,11 +1167,10 @@ const API = (() => {
       // shape propio (fechaVencimiento ISO), diasRestantes en TZ Lima (blindaje). getHistorialLote NO migrado → sigue GAS.
       const codigoProducto = String(params.codigoProducto || '').trim();
       if (!codigoProducto) return { ok: false, error: 'codigoProducto requerido' };
-      const out = await _sbRpcWH('leer_tabla_rls', { p_tabla: 'lotes_vencimiento' });
-      if (!out || out.ok === false) throw new Error((out && out.error) || 'lotes error');
+      const lotesRaw = await _sbLeerTablaRawWH('lotes_vencimiento');   // [2.13.600] cache compartido (lanza si falla)
       const hoyMs = _diaLimaMs(new Date());
       const lotes = [];
-      (out.data || []).forEach(d => {
+      (lotesRaw || []).forEach(d => {
         if (String(d.cod_producto).toUpperCase() !== codigoProducto.toUpperCase()) return;
         if (String(d.estado || '').toUpperCase() !== 'ACTIVO') return;
         const cant = parseFloat(d.cantidad_actual) || 0;
@@ -1528,6 +1557,13 @@ const API = (() => {
     return null;
   }
 
+  // [WH 2.13.600 · adhesivos duplicados] crearLoteAdhesivo NUNCA se encola offline: encolarlo = imprimir a ciegas
+  // minutos/horas después (incidente 07-oct: 4 reintentos -> 4 lotes con claves distintas -> 200 etiquetas por 50).
+  // Si la RPC SÍ commiteó antes del timeout, el cron wh-lote-adhesivo-procesar imprime ese lote server-side; el
+  // reintento manual del operador usa la MISMA idempotencyKey -> wh.lote_adhesivo_crear devuelve dedup (sin duplicar).
+  function _loteAdhesivoSinConexion() {
+    return { ok: false, error: 'sin-conexion-lote', sinConexion: true };
+  }
   async function _postDirecto(params) {
     const lid = params.localId || _genLocalId();
 
@@ -1539,6 +1575,8 @@ const API = (() => {
 
     // [v2.13.300] LOTE de adhesivos vía Supabase (gate PROPIO _whLoteAdhesivoDirecto). También antes de
     // la escritura directa: la cola de adhesivos tiene su propio flag y no requiere la escritura ON.
+    // Ítems crearLoteAdhesivo ya encolados por versiones previas: se descartan (no imprimir a ciegas).
+    if (params.action === 'crearLoteAdhesivo' && params._fromQueue) return { ok: false, error: 'lote-no-reencolable', _descartar: true };
     const _loteResult = await _postDirectoLoteAdhesivo(params);
     if (_loteResult !== undefined) return _loteResult;
 
@@ -2613,6 +2651,7 @@ const API = (() => {
         // aplicar el cambio y perderse la respuesta. Invalidar el micro-cache para que el
         // refresh del front no sirva datos de hace <4s que omitan ese posible cambio.
         _invalidarLecturas();
+        if (params.action === 'crearLoteAdhesivo') return _loteAdhesivoSinConexion();
         if (params._fromQueue) return { ok: false, error: 'timeout-directo', _retry: true };
         // [100x rollback-fix] La RPC PUDO commitear en Supabase y perderse la respuesta.
         // Sellamos la VÍA de reintento POR ÍTEM (no por flag global al sincronizar): este
@@ -2643,6 +2682,7 @@ const API = (() => {
     // dedupea al reintentar). El fail-closed queda SOLO para el caso online-sin-camino.
     // _WH_NO_GAS (ramas muertas sin RPC cableada) NO se encola: no tiene a dónde ir.
     if (!navigator.onLine && !_WH_NO_GAS.has(params.action)) {
+      if (params.action === 'crearLoteAdhesivo') return _loteAdhesivoSinConexion();
       if (params._fromQueue) return { ok: false, error: 'sin-conexion', _retry: true };
       const _selladoOff = (_whEscrituraDirecta() || _whImpresionDirecta() || _whLoteAdhesivoDirecto())
         ? { ...params, _viaDirecta: true } : params;
@@ -2660,6 +2700,7 @@ const API = (() => {
     }
 
     if (!navigator.onLine) {
+      if (params.action === 'crearLoteAdhesivo') return _loteAdhesivoSinConexion();
       if (params._fromQueue) return { ok: false, error: 'sin-conexion', _retry: true };
       // [FIX pre-corte GAS · auditoría 2026-07-08] Encolar OFFLINE sella la VÍA DIRECTA (si la app
       // opera en escritura directa, que en prod es SIEMPRE): sin el sello, sincronizar() replayaba
@@ -2797,6 +2838,7 @@ const API = (() => {
           try {
             const rec = (payload && (payload.new || (payload.data && payload.data.record))) || {};
             const dom = String(rec.dominio || '');
+            _opsvSet(dom, rec.version);   // [2.13.600] versión viva -> invalida lecturas cacheadas de ese dominio
             if (dom === 'pickups') {
               window.dispatchEvent(new CustomEvent('wh:pickups-realtime'));
             } else if (dom === 'stock') {
@@ -2809,6 +2851,9 @@ const API = (() => {
       );
       channel.subscribe((status) => {
         try { console.log('[Realtime] canal catalogo_meta:', status); } catch (_) {}
+        // [2.13.600] Cache versionado de lecturas: solo vale con el canal sano. Al (re)suscribir se reinician las
+        // versiones y se carga el baseline REAL de wh.ops_meta (cubre eventos perdidos mientras el WS estuvo caído).
+        if (status === 'SUBSCRIBED') { _opsvBaseline(); } else { _OPSV.ok = false; }
         // Al (re)suscribir, leer la versión actual del catálogo y notificarla por si
         // perdimos un UPDATE mientras el WS estaba caído/dormido. Money-safe: notificar
         // pasa por el mismo núcleo que el poller (no re-descarga si la versión no subió).
@@ -2862,6 +2907,26 @@ const API = (() => {
     } catch (_) {}
   }
 
+  // [2.13.600] Baseline de versiones (GET wh.ops_meta, 7 filas, lectura abierta a authenticated por RLS).
+  // Si falla, _OPSV.ok queda false => todo sigue con el micro-cache de 4s de siempre (camino anterior).
+  let _opsvGen = 0;
+  async function _opsvBaseline() {
+    const gen = ++_opsvGen;
+    _OPSV.ok = false; _OPSV.v = {};
+    try {
+      const token = await _mintTokenWH();
+      const res = await _whFetchTimeout(`${_SB_URL}/rest/v1/ops_meta?select=dominio,version`, {
+        method: 'GET',
+        headers: { 'apikey': _SB_ANON, 'Authorization': 'Bearer ' + token, 'Accept-Profile': 'wh' }
+      }, 8000);
+      if (!res.ok) return;
+      const rows = await res.json().catch(() => null);
+      if (!Array.isArray(rows) || !rows.length || gen !== _opsvGen) return;
+      rows.forEach(r => _opsvSet(String(r.dominio || ''), r.version));
+      _OPSV.ok = true;
+    } catch (_) { /* sin baseline => camino anterior */ }
+  }
+
   function _rtCablearListeners() {
     if (_RT.listeners || typeof window === 'undefined') return;
     _RT.listeners = true;
@@ -2879,6 +2944,7 @@ const API = (() => {
   }
 
   function _detenerRealtimeCatalogo() {
+    _OPSV.ok = false; _OPSV.v = {};   // [2.13.600] sin canal no hay invalidación por versión
     _RT.gen++;   // [anti-orphan] invalida cualquier arranque en vuelo (post-await abortará en vez de abrir un canal huérfano)
     try { if (_RT.channel && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.channel); } catch (_) {}
     try { if (_RT.chPres && _RT.client && _RT.client.removeChannel) _RT.client.removeChannel(_RT.chPres); } catch (_) {}
