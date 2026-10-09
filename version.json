@@ -1,1 +1,1 @@
-{"version":"2.13.602","build":"Cargadores: las cargas registradas a proposito en un dia pasado se marcan como tarde; el servidor manda a HOY cualquier otra (candado SQL 1036)."}
+{"version":"2.13.603","build":"Envasado registrado sin conexion: al sincronizar imprime sus adhesivos solo, una sola vez (misma clave de lote); si estuvo mas de 12 h en cola pregunta antes de imprimir."}

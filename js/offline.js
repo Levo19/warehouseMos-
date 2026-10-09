@@ -122,7 +122,8 @@ const OfflineManager = (() => {
         // NO caches regenerables. Estaban fuera de la allowlist → el cleanup por cambio de versión los borraba y
         // se perdía la lista al actualizar. Se preservan por PREFIJO (no por key puntual) para que un estado
         // nuevo de despacho quede protegido automáticamente sin tener que acordarse de agregarlo aquí.
-        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_.*|wh_lista_sombra)$/;
+        // [2.13.603] wh_lote_auto = adhesivos pendientes de envasados en cola: es estado ligado a wh_queue, no cache.
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_.*|wh_lista_sombra|wh_lote_auto)$/;
         let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;
@@ -651,6 +652,70 @@ const OfflineManager = (() => {
     return patched;
   }
 
+  // ── [2.13.603] Adhesivos de envasados encolados offline ─────────────────────
+  // Problema (QA tras 2.13.600): crearLoteAdhesivo ya NUNCA se encola (evita lotes duplicados), así que un
+  // ENVASADO registrado sin red subía al reconectar pero sus adhesivos no salían solos (había que tocar
+  // "Reintentar"). Este registro persistido recuerda "este envasado (clave ENV-…) quiere adhesivos" y su
+  // estado, para que app.js (WhLoteAuto) los imprima UNA vez cuando la cola confirme el envasado.
+  // Va en localStorage CRUDO (sin el cache de parseo de cargar(), que es por pestaña y con TTL 15s): dos
+  // pestañas deben ver el mismo estado al instante. Es chico (unas pocas entradas) y se purga solo.
+  // Estados: PENDIENTE (envasado en cola) → SINCRONIZADO (la cola lo confirmó) → TOMADO (una pestaña lo
+  // está creando) → HECHO. Laterales: AVISO (>12h, se pregunta), DESCARTADO (el operador dijo que no),
+  // DESHECHO (↺ Deshacer sobre el optimista: jamás imprimir).
+  const LOTE_AUTO_KEY = 'wh_lote_auto';
+  const _LOTE_AUTO_FINALES = ['HECHO', 'DESCARTADO', 'DESHECHO'];
+  function _loteAutoLeer() {
+    try { const o = JSON.parse(localStorage.getItem(LOTE_AUTO_KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; }
+    catch (_) { return {}; }
+  }
+  function _loteAutoEscribir(mapa) {
+    // Purga: finales >3 días y cualquier entrada >7 días (un PENDIENTE cuyo envasado la cola descartó).
+    const ahora = Date.now();
+    Object.keys(mapa).forEach(k => {
+      const e = mapa[k] || {};
+      const edad = ahora - (e.tsRegistro || e.tsEstado || 0);
+      if (edad > 7 * 864e5 || (_LOTE_AUTO_FINALES.indexOf(e.estado) >= 0 && edad > 3 * 864e5)) delete mapa[k];
+    });
+    try { localStorage.setItem(LOTE_AUTO_KEY, JSON.stringify(mapa)); return true; }
+    catch (_) { return false; }   // storage lleno: el peor caso es volver al "Reintentar" manual de hoy
+  }
+  // Alta SOLO si no existe: si el lote ya se confirmó (HECHO) antes de que llegue el .then del envasado, no se pisa.
+  function loteAutoRegistrar(clave, datos) {
+    if (!clave) return false;
+    const m = _loteAutoLeer();
+    if (m[clave]) return false;
+    m[clave] = { ...datos, clave, estado: 'PENDIENTE', tsEstado: Date.now(), tsRegistro: (datos && datos.tsRegistro) || Date.now() };
+    return _loteAutoEscribir(m);
+  }
+  function loteAutoGet(clave) { return clave ? (_loteAutoLeer()[clave] || null) : null; }
+  function loteAutoListar() { const m = _loteAutoLeer(); return Object.keys(m).map(k => m[k]); }
+  // Parche de estado. `crear:true` permite crear la entrada mínima (p.ej. HECHO cuando el lote se confirmó
+  // en línea antes de que existiera el registro). `soloSi` = lista de estados desde los que se permite el cambio.
+  function loteAutoSet(clave, patch, opts) {
+    if (!clave) return false;
+    const m = _loteAutoLeer();
+    const prev = m[clave];
+    if (!prev && !(opts && opts.crear)) return false;
+    if (prev && opts && opts.soloSi && opts.soloSi.indexOf(prev.estado) < 0) return false;
+    m[clave] = { ...(prev || { clave, tsRegistro: Date.now() }), ...patch, tsEstado: Date.now() };
+    return _loteAutoEscribir(m);
+  }
+  // ↺ Deshacer sobre el optimista (ENV_OPT_*): la entrada se ubica por ese id.
+  function loteAutoDeshacerPorOpt(idOpt) { return _loteAutoDeshacerPor('idOpt', idOpt); }
+  // [2.13.603 · QA H3] Anular un envasado ya con id real (ENV_L…): la entrada guarda idEnvasado al sincronizar.
+  function loteAutoDeshacerPorId(idEnvasado) { return _loteAutoDeshacerPor('idEnvasado', idEnvasado); }
+  function _loteAutoDeshacerPor(campo, valor) {
+    if (!valor) return false;
+    const m = _loteAutoLeer();
+    let hit = false;
+    Object.keys(m).forEach(k => {
+      if (m[k] && m[k][campo] === valor && _LOTE_AUTO_FINALES.indexOf(m[k].estado) < 0) {
+        m[k] = { ...m[k], estado: 'DESHECHO', tsEstado: Date.now() }; hit = true;
+      }
+    });
+    return hit ? _loteAutoEscribir(m) : false;
+  }
+
   function limpiarSincronizados() {
     const queue = getQueue().filter(i => i.status === 'pending' || i.status === 'error');
     guardar(KEYS.QUEUE, queue);
@@ -718,7 +783,16 @@ const OfflineManager = (() => {
           continue;
         }
         _actualizarItemQueue(item.localId, (res && res.ok) ? 'synced' : 'error');
-        if (res && res.ok && item.action === 'registrarEnvasado') huboEnvasado = true;
+        if (res && res.ok && item.action === 'registrarEnvasado') {
+          huboEnvasado = true;
+          // [2.13.603] El envasado (clave ENV-…) quedó confirmado en el servidor: si esperaba adhesivos, se marca
+          // SINCRONIZADO AQUÍ MISMO (persistido, no solo un evento) para que una recarga entre el sync y la
+          // impresión no lo pierda: WhLoteAuto barre los SINCRONIZADO al iniciar sesión. Solo PENDIENTE avanza.
+          const _claveEnv = item.params && item.params.idempotencyKey;
+          if (_claveEnv && loteAutoSet(_claveEnv, { estado: 'SINCRONIZADO', idEnvasado: (res.data && res.data.idEnvasado) || '' }, { soloSi: ['PENDIENTE'] })) {
+            try { window.dispatchEvent(new CustomEvent('wh:envasado-sincronizado', { detail: { clave: String(_claveEnv) } })); } catch (_) {}
+          }
+        }
         // [FIX Rep#1 · auto-print] Al drenar una GUÍA creada por red lenta, disparar la impresión del ticket con el
         // idGuia REAL. Sin esto la guía se sincronizaba en Supabase pero el ticket nunca salía → el operador debía
         // "imprimir copia" a mano. El dedup atómico wh.reservar_ticket evita cualquier doble ticket (idempotente).
@@ -1182,6 +1256,7 @@ const OfflineManager = (() => {
     iniciarPollerCatalogo, detenerPollerCatalogo, notificarVersionCatalogo,
     setSubiendoFotos, isSubiendoFotos,
     patchPendingDetalleVenc,
+    loteAutoRegistrar, loteAutoGet, loteAutoListar, loteAutoSet, loteAutoDeshacerPorOpt, loteAutoDeshacerPorId,   // [2.13.603]
     marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
   };

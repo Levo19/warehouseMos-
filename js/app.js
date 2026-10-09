@@ -24,7 +24,7 @@ function _whConfirm(msg, opts) {
         <div class="wh-modal-generic-head">
           <span class="wh-modal-generic-ico">${icoMap[accent]}</span>
           <strong>${_whEsc(titulo)}</strong>
-          <button class="wh-modal-generic-close" data-cancel>✕</button>
+          <button class="wh-modal-generic-close" ${opts.cierreNulo ? 'data-dismiss' : 'data-cancel'}>✕</button>
         </div>
         <div class="wh-modal-generic-body">${(msg || '').split('\n\n').map(p => '<p>' + _whEsc(p).replace(/\n/g, '<br>') + '</p>').join('')}</div>
         <div class="wh-modal-generic-foot">
@@ -37,9 +37,11 @@ function _whConfirm(msg, opts) {
       setTimeout(() => { try { backdrop.remove(); } catch(_){} }, 200);
       resolve(v);
     };
+    // [2.13.603] opts.cierreNulo: ✕ / tocar fuera devuelven null (= "no decidí"), distinto del botón Cancelar (false).
     backdrop.addEventListener('click', (ev) => {
       const t = ev.target;
-      if (t === backdrop || (t.closest && t.closest('[data-cancel]'))) cerrar(false);
+      if (opts.cierreNulo && (t === backdrop || (t.closest && t.closest('[data-dismiss]')))) cerrar(null);
+      else if (t === backdrop || (t.closest && t.closest('[data-cancel]'))) cerrar(false);
       else if (t.closest && t.closest('[data-ok]')) cerrar(true);
     });
     document.body.appendChild(backdrop);
@@ -1849,6 +1851,9 @@ const Session = (() => {
 
     // Si hay cola pendiente y hay red, sincronizar
     if (navigator.onLine) OfflineManager.sincronizar();
+    // [2.13.603] Adhesivos de envasados que se sincronizaron antes del login o con la app recargada a mitad
+    // (entradas SINCRONIZADO / TOMADO viejo persistidas): retomarlos una vez con la sesión ya aplicada.
+    setTimeout(() => { try { WhLoteAuto.procesar(); } catch (_) {} }, 4000);
 
     // Polling de bloqueo remoto desde MOS
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.iniciar();
@@ -10924,15 +10929,19 @@ const EnvasadosView = (() => {
     // (esperaba a que registrarEnvasado responda). Ahora aparece instantáneo.
     // El lote se crea en PARALELO al registro del envasado.
     // Si registrarEnvasado falla, cancelamos el lote en el rollback.
+    // [2.13.603] Datos del lote en una constante: los reusa el registro de "adhesivos pendientes" si el envasado
+    // se encola offline (WhLoteAuto los imprime al sincronizar, con la MISMA clave -> el servidor no duplica).
+    const optsLote = {
+      codigoBarra:     String(prod.codigoBarra),
+      descripcion:     prod.descripcion || '',
+      total:           producidas,
+      fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0],
+      claveEnvasado:   idempotencyKey   // [2.13.600] estable por envasado -> reintentos dedupean
+    };
+    const tsClickEnv = Date.now();
     if (imprimir) {
       try {
-        WhLoteAdhesivo.crearYEjecutar({
-          codigoBarra:     String(prod.codigoBarra),
-          descripcion:     prod.descripcion || '',
-          total:           producidas,
-          fechaEnvasado:   fechaVenc || new Date().toISOString().split('T')[0],
-          claveEnvasado:   idempotencyKey   // [2.13.600] estable por envasado -> reintentos dedupean
-        });
+        WhLoteAdhesivo.crearYEjecutar({ ...optsLote });
       } catch (e) {
         toast('No se pudo iniciar lote: ' + (e?.message || ''), 'danger', 5000);
       }
@@ -10990,6 +10999,20 @@ const EnvasadosView = (() => {
             .catch(() => toast('⚠ No se pudo deshacer en el servidor — revisa el historial', 'danger', 6000));
         }
         return;
+      }
+
+      // [2.13.603] Envasado ENCOLADO (sin red / timeout): el lote en paralelo no pudo confirmarse y ya NO se
+      // encola (2.13.600). Se deja registrado "este envasado quiere adhesivos" -> cuando la cola lo confirme,
+      // WhLoteAuto los imprime UNA vez con la misma clave. Alta solo-si-no-existe: si el lote ya se confirmó
+      // (HECHO) en esta carrera, no se re-registra.
+      // [2.13.603 · QA H1] Si el operador ya tocó "Cancelar lote" en el modal de este envasado, NO registrar.
+      // [2.13.603 · QA H2] El texto "se imprimirán solos" solo si el alta realmente se guardó; si no, queda el
+      // texto genérico con "Reintentar".
+      if (imprimir && res.offline && !WhLoteAdhesivo.fueCancelado(idempotencyKey)) {
+        try {
+          const _alta = OfflineManager.loteAutoRegistrar(idempotencyKey, { opts: { ...optsLote }, idOpt: idEnvOptimista, tsRegistro: tsClickEnv });
+          if (_alta) WhLoteAdhesivo.marcarEsperaAuto(idempotencyKey);
+        } catch (_) {}
       }
 
       if (idReal !== idEnvOptimista) {
@@ -11084,6 +11107,8 @@ const EnvasadosView = (() => {
         window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
       }
       _envDeshacerPendiente.set(idEnvasado, true);
+      // [2.13.603] Si ese envasado quedó en cola esperando adhesivos, jamás imprimirlos al reconectar.
+      try { OfflineManager.loteAutoDeshacerPorOpt(idEnvasado); } catch (_) {}
       toast('↺ Envasado deshecho · stock revertido', 'ok', 3000);
       return;
     }
@@ -11100,6 +11125,10 @@ const EnvasadosView = (() => {
     const uds     = parseFloat(env.unidadesProducidas || unidades) || 0;
     const estadoPrev = env.estado;
 
+    // [2.13.603 · QA H3] Si este envasado (ya con id real) aún espera adhesivos automáticos, no imprimirlos.
+    // Se marca al confirmar la anulación (conservador: si luego el servidor la rechaza, el adhesivo queda para
+    // reimpresión manual desde el historial, nunca una impresión sorpresa de un envasado anulado).
+    try { OfflineManager.loteAutoDeshacerPorId(idEnvasado); } catch (_) {}
     // Optimista: revertir stock + marcar como ANULADO
     if (cbBase) OfflineManager.patchStockCache(cbBase, +cantB);
     if (cbDer)  OfflineManager.patchStockCache(cbDer,  -uds);
@@ -25617,15 +25646,17 @@ const WhLoteAdhesivo = (() => {
   //            descripcion, codigoBarra, vto, tInicio, orquestando }
 
   async function crearYEjecutar(opts) {
+    // [2.13.603] Devuelve un código de resultado (lo usa WhLoteAuto; los demás callers lo ignoran):
+    //   'OK' (servidor confirmó el lote) · 'SIN_CONEXION' · 'ERROR' (rechazo) · 'OCUPADO' · 'INVALIDO' · 'CANCELADO'.
     if (_state) {
       try { toast('Ya hay un lote en curso. Termínalo primero.', 'warn'); } catch(_) {}
-      return;
+      return 'OCUPADO';
     }
     const cb = String(opts.codigoBarra || '').trim();
     const total = parseInt(opts.total) || 0;
     if (!cb || total <= 0) {
       try { toast('Datos de lote inválidos', 'error'); } catch(_) {}
-      return;
+      return 'INVALIDO';
     }
 
     // [v2.13.113 OPTIMISTIC] Abrir modal de progreso INMEDIATAMENTE con
@@ -25663,24 +25694,33 @@ const WhLoteAdhesivo = (() => {
       });
     } catch (e) {
       _mostrarSinConexion();
-      return;
+      return 'SIN_CONEXION';
+    }
+    // [2.13.603] Respuesta con idLote = el servidor YA tiene este lote (nuevo o dedup). Se marca HECHO en el registro
+    // de adhesivos pendientes ANTES del re-check de cancelación: aunque el operador cierre el modal, el lote existe
+    // y WhLoteAuto no debe volver a abrirlo al sincronizar. crear:true cubre la carrera en que el lote se confirma
+    // antes de que el .then del envasado encolado alcance a registrar la entrada (loteAutoRegistrar no la pisa).
+    const _dOk = (r && r.ok !== false && ((r.data && r.data.idLote) || r.idLote)) ? true : false;
+    if (_dOk && opts.claveEnvasado) {
+      try { OfflineManager.loteAutoSet(String(opts.claveEnvasado), { estado: 'HECHO' },
+        { crear: true, soloSi: ['PENDIENTE', 'SINCRONIZADO', 'TOMADO', 'AVISO'] }); } catch (_) {}
     }
     // Re-check: usuario puede haber cancelado el modal mientras esperaba.
-    if (!_state) return;
+    if (!_state) return 'CANCELADO';
     // Sin confirmación del servidor (timeout / sin red / offline-encolado): NO orquestar sin idLote.
     if (r && (r.sinConexion || r.offline || r._ceroGas)) {
       _mostrarSinConexion();
-      return;
+      return 'SIN_CONEXION';
     }
     if (r && r.ok === false) {
       _setStatus('PAUSADO_ERROR', 'Backend rechazó: ' + (r.error || 'desconocido'));
-      return;
+      return 'ERROR';
     }
     // WH API.post retorna {ok, data}. NO desempaca como MOS.
     const d = (r && r.data) || r || {};
     if (!d.idLote) {
       _mostrarSinConexion();
-      return;
+      return 'SIN_CONEXION';
     }
     // 2. Completar metadata del state con la respuesta real
     _state.idLote      = d.idLote;
@@ -25691,17 +25731,49 @@ const WhLoteAdhesivo = (() => {
     _render();
     // 3. Arrancar orquestación
     _orquestar(d.idLote);
+    return 'OK';
   }
 
   // [WH 2.13.600] Estado claro cuando el lote no se pudo confirmar. No se encola (imprimiría a ciegas después).
   function _mostrarSinConexion() {
     if (!_state) return;
-    _setStatus('PAUSADO_ERROR', 'Sin conexión con el servidor: no se confirmó el lote. Si ya se creó, se imprimirá solo; si no, reintenta cuando vuelva la conexión.');
+    // [2.13.603] Si el envasado de este lote quedó en la cola offline (registro PENDIENTE), el texto lo dice:
+    // los adhesivos saldrán solos al reconectar. (Cubre el orden en que el .then del envasado llegó primero.)
+    const _clave = _state.optsReintento && _state.optsReintento.claveEnvasado;
+    let _pend = null;
+    try { _pend = _clave ? OfflineManager.loteAutoGet(String(_clave)) : null; } catch (_) {}
+    _setStatus('PAUSADO_ERROR', (_pend && _pend.estado === 'PENDIENTE')
+      ? _MSG_ESPERA_AUTO
+      : 'Sin conexión con el servidor: no se confirmó el lote. Si ya se creó, se imprimirá solo; si no, reintenta cuando vuelva la conexión.');
     const actions = document.getElementById('whLoteActions');
     if (actions) actions.innerHTML = `
       <button class="wh-lote-btn-primary" onclick="WhLoteAdhesivo.reintentarCrear()">↻ Reintentar</button>
       <button class="wh-lote-btn-warn" onclick="WhLoteAdhesivo.cerrar()">Cerrar</button>`;
     try { vibrate && vibrate([60, 40, 60]); } catch(_) {}
+  }
+
+  // [2.13.603] Texto del modal cuando el envasado quedó encolado: no hace falta que el operador haga nada.
+  const _MSG_ESPERA_AUTO = 'Sin conexión: el envasado quedó guardado y se subirá al volver la conexión. Entonces los adhesivos se imprimirán solos, una sola vez. Puedes cerrar esta ventana.';
+  // Lo llama EnvasadosView cuando el envasado se encoló (orden inverso: el modal "Sin conexión" ya estaba abierto).
+  function marcarEsperaAuto(claveEnvasado) {
+    if (!_state || _state.idLote || !claveEnvasado) return;
+    const c = _state.optsReintento && _state.optsReintento.claveEnvasado;
+    if (String(c || '') !== String(claveEnvasado)) return;
+    if (_state.status !== 'PAUSADO_ERROR') return;   // aún creando: _mostrarSinConexion pondrá el texto al fallar
+    _state.ultimoError = _MSG_ESPERA_AUTO;
+    _render();
+  }
+  // [2.13.603 · QA H1] Claves de envasado cuyo lote canceló el operador en esta pestaña (memoria, no persiste).
+  const _canceladosOperador = new Set();
+  function fueCancelado(clave) { return !!clave && _canceladosOperador.has(String(clave)); }
+  // [2.13.603] Estado mínimo para WhLoteAuto: ¿hay modal?, ¿de qué envasado?, ¿es el "Sin conexión" sin idLote?
+  function estado() {
+    if (!_state) return { ocupado: false };
+    return {
+      ocupado:     true,
+      clave:       String((_state.optsReintento && _state.optsReintento.claveEnvasado) || ''),
+      sinConexion: !_state.idLote && _state.status === 'PAUSADO_ERROR'
+    };
   }
 
   // Reintenta la creación con la MISMA clave de idempotencia (dedup server-side si el 1er intento sí commiteó).
@@ -25913,6 +25985,14 @@ const WhLoteAdhesivo = (() => {
   }
   async function _cancelarConfirmado() {
     if (!_state) return;
+    // [2.13.603 · QA H1] "Cancelar lote" = el operador NO quiere estos adhesivos: la entrada automática (si existe)
+    // queda DESCARTADO y se recuerda en memoria por si el .then del envasado encolado llega después del cancel.
+    // ("Cerrar" a secas NO descarta: solo oculta el modal.)
+    const _cl = String((_state.optsReintento && _state.optsReintento.claveEnvasado) || '');
+    if (_cl) {
+      _canceladosOperador.add(_cl);
+      try { OfflineManager.loteAutoSet(_cl, { estado: 'DESCARTADO' }, { soloSi: ['PENDIENTE', 'SINCRONIZADO', 'TOMADO'] }); } catch (_) {}
+    }
     try { await API.post('cancelarLoteAdhesivo', { idLote: _state.idLote }); } catch(_) {}
     _setStatus('CANCELADO');
     setTimeout(cerrar, 800);
@@ -25938,14 +26018,196 @@ const WhLoteAdhesivo = (() => {
     const ov = document.getElementById('whLoteOverlay');
     if (ov) ov.remove();
     _state = null;
+    // [2.13.603] Si quedaron adhesivos de envasados sincronizados esperando a que el modal se libere, seguir.
+    try { WhLoteAuto.alLiberarse(); } catch (_) {}
   }
 
   function _esc(s) {
     return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
-  return { crearYEjecutar, reintentarCrear, continuar, cancelar, _cancelarConfirmado, _abortarCancelacion, cancelarSilencioso, cerrar };
+  return { crearYEjecutar, reintentarCrear, continuar, cancelar, _cancelarConfirmado, _abortarCancelacion, cancelarSilencioso, cerrar,
+           marcarEsperaAuto, estado, fueCancelado };
 })();
+
+// ════════════════════════════════════════════════════════════════════
+// WhLoteAuto — [2.13.603] adhesivos de envasados registrados SIN conexión
+// ════════════════════════════════════════════════════════════════════
+// Desde 2.13.600 crearLoteAdhesivo nunca se encola (encolarlo imprimía a ciegas y duplicó lotes el 07-oct).
+// Efecto anotado por QA: un envasado registrado offline subía al reconectar, pero sus adhesivos NO salían
+// solos (había que tocar "Reintentar"). Este módulo cierra ese hueco SIN reabrir el riesgo de duplicado:
+//   • offline.js marca la entrada (clave ENV-…) SINCRONIZADO cuando la cola confirma el envasado y emite
+//     'wh:envasado-sincronizado'. Aquí se crea el lote con la MISMA clave estable (wh_lote_<ENV-…>):
+//     wh.lote_adhesivo_crear dedupea por idempotency_key (ON CONFLICT, índice único) y la Edge solo se dispara
+//     para un lote NUEVO; además cada rango de etiquetas se reserva atómico (lote_adhesivo_reservar, FOR UPDATE).
+//     => como mucho 1 lote y 1 impresión por envasado, aunque dos pestañas lo intenten a la vez.
+//   • Guard local (por pestaña y entre pestañas): la entrada pasa a TOMADO bajo navigator.locks y a HECHO apenas
+//     el servidor contesta. Una recarga a mitad deja un TOMADO viejo (>3 min) → se reintenta con la misma clave
+//     (dedup: si el lote ya existía, no se crea otro ni se reimprime; si ya estaba COMPLETADO, el modal solo
+//     lo muestra completado).
+//   • > 12 h en cola: NO imprime solo (el dueño no quiere impresiones sorpresa de días anteriores); pregunta con
+//     botón para imprimir manual. "No imprimir" lo deja DESCARTADO (queda la reimpresión desde el historial).
+//   • Un intento automático por envasado: si falla, el modal queda con "Reintentar" (misma clave), como hoy.
+//   • Un modal a la vez: si hay otro lote abierto se espera a que se cierre (alLiberarse) o se reintenta en 15 s.
+const WhLoteAuto = (() => {
+  'use strict';
+  const MAX_AUTO_MS  = 12 * 3600 * 1000;   // más viejo que esto (desde el toque en "Registrar") → aviso + manual
+  const STALE_MS     = 3 * 60 * 1000;      // TOMADO/AVISO sin cerrar en 3 min = la pestaña murió → re-elegible
+  const REINTENTO_MS = 15000;
+  let _corriendo = false;
+  let _timer = null;
+  const _avisosAbiertos = new Set();   // claves con el aviso de >12 h en pantalla EN ESTA pestaña (no re-mostrar)
+
+  function _elegible(e) {
+    if (!e || _avisosAbiertos.has(e.clave)) return false;
+    if (e.estado === 'SINCRONIZADO') return true;
+    if ((e.estado === 'TOMADO' || e.estado === 'AVISO') && (Date.now() - (e.tsEstado || 0)) > STALE_MS) return true;
+    return false;
+  }
+  function _hayElegibles() {
+    try { return OfflineManager.loteAutoListar().some(_elegible); } catch (_) { return false; }
+  }
+  function _reprogramar(ms) {
+    if (_timer) return;
+    _timer = setTimeout(() => { _timer = null; procesar(); }, ms || REINTENTO_MS);
+  }
+
+  // Exclusión entre pestañas del mismo equipo: Web Locks (atómico). Sin Web Locks (navegador viejo): marca con
+  // token + relectura tras un jitter; una carrera residual igual la absorbe el dedup del servidor (misma clave).
+  function _hayLocks() { return !!(navigator.locks && typeof navigator.locks.request === 'function'); }
+  function _conLock(fn) {
+    return _hayLocks() ? navigator.locks.request('wh-lote-auto', fn) : fn();
+  }
+  function _tomar(clave) {
+    return _conLock(async () => {
+      const e = OfflineManager.loteAutoGet(clave);   // relectura FRESCA dentro del lock (otra pestaña pudo tomarla)
+      if (!_elegible(e)) return { r: 'SKIP' };
+      const st = WhLoteAdhesivo.estado();
+      if (st.ocupado) {
+        // El modal "Sin conexión" de ESTE mismo envasado (abierto al registrar) se reemplaza por el lote real.
+        if (st.sinConexion && st.clave === clave) WhLoteAdhesivo.cerrar();
+        else return { r: 'OCUPADO' };
+      }
+      const vencido = !e.aprobado && (Date.now() - (e.tsRegistro || 0)) > MAX_AUTO_MS;
+      const token = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      if (!OfflineManager.loteAutoSet(clave, { estado: vencido ? 'AVISO' : 'TOMADO', token })) return { r: 'SKIP' };
+      if (!_hayLocks()) {
+        await new Promise(res => setTimeout(res, 150 + Math.floor(Math.random() * 350)));
+        const e2 = OfflineManager.loteAutoGet(clave);
+        if (!e2 || e2.token !== token) return { r: 'SKIP' };
+      }
+      return { r: vencido ? 'AVISO' : 'TOMADO', e, token };
+    });
+  }
+
+  async function _imprimir(clave, e, token) {
+    const o = (e && e.opts) || {};
+    const nombre = o.descripcion || o.codigoBarra;
+    // [2.13.603 · QA H3] Relectura justo antes de crear: si entre la toma y aquí la entrada cambió (Deshacer/anular,
+    // "Cancelar lote", otra pestaña), se aborta. Solo sigue si sigue TOMADO con NUESTRO token.
+    const cur = OfflineManager.loteAutoGet(clave);
+    if (!cur || cur.estado !== 'TOMADO' || (token && cur.token !== token)) return 'SKIP';
+    // [2.13.603 · QA H8] Ocupado → volver a la fila SIN anunciar "imprimiendo".
+    if (WhLoteAdhesivo.estado().ocupado) {
+      OfflineManager.loteAutoSet(clave, { estado: 'SINCRONIZADO' }, { soloSi: ['TOMADO'] });
+      return 'OCUPADO';
+    }
+    try { toast(`📦 Envasado sincronizado · imprimiendo ${o.total} adhesivos de ${nombre}`, 'ok', 5000); } catch (_) {}
+    let res;
+    try { res = await WhLoteAdhesivo.crearYEjecutar({ ...o, claveEnvasado: clave }); }
+    catch (_) { res = 'ERROR'; }
+    if (res === 'OCUPADO') {
+      // Otro modal se abrió entre el chequeo y la llamada: devolver a la fila y reintentar.
+      OfflineManager.loteAutoSet(clave, { estado: 'SINCRONIZADO' }, { soloSi: ['TOMADO'] });
+      return 'OCUPADO';
+    }
+    // 'OK' ya quedó HECHO dentro de crearYEjecutar. Cualquier otro resultado también cierra el intento automático:
+    // el modal queda con "Reintentar" (misma clave → dedup), igual que el flujo manual de hoy. soloSi TOMADO: un
+    // "Cancelar lote" (DESCARTADO) durante la creación no se pisa.
+    OfflineManager.loteAutoSet(clave, { estado: 'HECHO', resultado: String(res || '') }, { soloSi: ['TOMADO'] });
+    // [2.13.603 · QA H7] Fallo explícito (el operador cancelando a propósito no es error).
+    if (res !== 'OK' && res !== 'CANCELADO') {
+      try { toast(`⚠ No se pudieron imprimir los adhesivos de ${nombre}. Usa Reintentar o reimprime desde el historial.`, 'danger', 8000); } catch (_) {}
+    }
+    return res;
+  }
+
+  async function _avisar(clave, e) {
+    if (_avisosAbiertos.has(clave)) return;
+    _avisosAbiertos.add(clave);
+    let aprobado = false;
+    try { aprobado = await _avisarModal(clave, e); } finally { _avisosAbiertos.delete(clave); }
+    if (aprobado) procesar();   // ya fuera del set: la entrada vuelve a ser elegible
+  }
+  async function _avisarModal(clave, e) {
+    const o = (e && e.opts) || {};
+    const horas = Math.floor((Date.now() - (e.tsRegistro || 0)) / 3600000);
+    let cuando = '';
+    try { cuando = new Date(e.tsRegistro).toLocaleString('es-PE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) {}
+    const ok = await _whConfirm(
+      `El envasado de ${o.descripcion || o.codigoBarra} (${o.total} uds) registrado sin conexión${cuando ? ' el ' + cuando : ''} recién se sincronizó, ${horas} h después.\n\n` +
+      'Por seguridad sus adhesivos no se imprimieron solos. ¿Quieres imprimirlos ahora?',
+      { warning: true, titulo: 'Adhesivos pendientes de un envasado anterior', okText: '🖨 Imprimir ahora', cancelText: 'No imprimir', cierreNulo: true });
+    const cur = OfflineManager.loteAutoGet(clave);
+    if (!cur || cur.estado !== 'AVISO') return false;   // otra pestaña ya lo resolvió mientras el aviso estaba abierto
+    // [2.13.603 · QA H6d] ✕ o tocar fuera = "no decidí": queda AVISO (se reinicia su reloj) y se vuelve a preguntar
+    // cuando venza (STALE_MS). Solo el botón "No imprimir" descarta.
+    if (ok === null) {
+      OfflineManager.loteAutoSet(clave, { estado: 'AVISO' }, { soloSi: ['AVISO'] });
+      _reprogramar(STALE_MS + 1000);
+      return false;
+    }
+    if (!ok) {
+      OfflineManager.loteAutoSet(clave, { estado: 'DESCARTADO' });
+      try { toast('Adhesivos no impresos · puedes reimprimirlos desde el historial del envasador', 'info', 5000); } catch (_) {}
+      return false;
+    }
+    // Aprobado a mano: vuelve a la fila sin el tope de 12 h y se procesa ya (o cuando se libere el modal).
+    OfflineManager.loteAutoSet(clave, { estado: 'SINCRONIZADO', aprobado: true });
+    return true;
+  }
+
+  async function procesar() {
+    if (_corriendo) return;
+    if (!navigator.onLine) return;
+    if (!(window.WH_CONFIG && window.WH_CONFIG.idSesion)) return;   // sin sesión: lo retoma aplicarSesion
+    if (typeof OfflineManager === 'undefined' || !OfflineManager.loteAutoListar) return;
+    _corriendo = true;
+    let aviso = null;
+    try {
+      const lista = OfflineManager.loteAutoListar().filter(_elegible)
+        .sort((a, b) => (a.tsRegistro || 0) - (b.tsRegistro || 0));
+      for (const it of lista) {
+        const t = await _tomar(it.clave);
+        if (t.r === 'SKIP') continue;
+        if (t.r === 'OCUPADO') { _reprogramar(); break; }
+        if (t.r === 'AVISO') { aviso = { clave: it.clave, e: t.e }; break; }
+        const r = await _imprimir(it.clave, t.e, t.token);
+        if (r === 'SKIP') continue;
+        if (r === 'OCUPADO') _reprogramar();
+        // [2.13.603 · QA H6a] Si no quedó modal abierto (falló antes de abrirlo / se cerró ya), seguir con el siguiente.
+        else if (!WhLoteAdhesivo.estado().ocupado) alLiberarse();
+        break;   // un lote (modal) a la vez: el siguiente sale al cerrarse este (alLiberarse)
+      }
+    } catch (err) {
+      try { console.warn('[WhLoteAuto] procesar:', err && err.message); } catch (_) {}
+    } finally {
+      _corriendo = false;
+    }
+    if (aviso) _avisar(aviso.clave, aviso.e);   // fuera del guard: el aviso espera al operador
+  }
+
+  // Al cerrarse el modal de lote: si quedan envasados sincronizados esperando, seguir con el siguiente.
+  function alLiberarse() {
+    if (_hayElegibles()) _reprogramar(1500);
+  }
+
+  window.addEventListener('wh:envasado-sincronizado', () => { setTimeout(procesar, 300); });
+  window.addEventListener('online', () => { if (_hayElegibles()) _reprogramar(3000); });
+
+  return { procesar, alLiberarse };
+})();
+
 
 // ════════════════════════════════════════════════════════════════════
 // WhAdhesivoReprint — [v2.13.150]
