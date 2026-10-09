@@ -1,1 +1,1 @@
-{"version":"2.13.604","build":"Deshacer un envasado registrado sin conexion: si sigue en la cola se quita y no se envia; si ya viajaba se anula solo en el servidor al confirmarse (misma anulacion idempotente del Deshacer en linea). Mas de 12 h o rechazo del servidor: aviso, sin forzar."}
+{"version":"2.13.605","build":"Deshacer sin conexion: defensa extra para no imprimir adhesivos de un envasado deshecho aunque la memoria este llena; si el envasado no se ubica en la cola no se revierte nada y se avisa."}

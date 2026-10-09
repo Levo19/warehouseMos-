@@ -11157,6 +11157,11 @@ const EnvasadosView = (() => {
           toast('⚠ No se pudo registrar el deshacer (memoria llena). Anúlalo a mano cuando sincronice.', 'danger', 9000);
           return;
         }
+        // [2.13.605 · QA] Sin id no hay intención guardada → el envasado subirá igual: no revertir nada, avisar.
+        if (_modoCola === 'SIN_ID') {
+          toast('⚠ No se pudo ubicar este envasado en la cola. Anúlalo a mano cuando sincronice.', 'danger', 9000);
+          return;
+        }
         _envOptCola.delete(idEnvasado);
       }
       if (envOpt) {
@@ -11175,8 +11180,7 @@ const EnvasadosView = (() => {
       try { OfflineManager.loteAutoDeshacerPorOpt(idEnvasado); } catch (_) {}
       if (_infoCola) {
         const _modo = _modoCola;
-        if (_modo === 'SIN_ID') toast('⚠ Envasado deshecho en este equipo, pero no se pudo ubicar en la cola. Revisa el historial al reconectar.', 'warn', 7000);
-        else if (_modo === 'QUITADO') toast('↺ Envasado deshecho · no se enviará al servidor', 'ok', 3000);
+        if (_modo === 'QUITADO') toast('↺ Envasado deshecho · no se enviará al servidor', 'ok', 3000);
         else toast('↺ Envasado deshecho · se anulará en el servidor al sincronizar', 'ok', 4000);
         return;
       }
@@ -26183,6 +26187,16 @@ const WhLoteAuto = (() => {
     // "Cancelar lote", otra pestaña), se aborta. Solo sigue si sigue TOMADO con NUESTRO token.
     const cur = OfflineManager.loteAutoGet(clave);
     if (!cur || cur.estado !== 'TOMADO' || (token && cur.token !== token)) return 'SKIP';
+    // [2.13.605 · QA] Defensa extra: si hay un ↺ Deshacer guardado para este envasado (wh_env_deshacer), no imprimir
+    // aunque la marca DESHECHO de wh_lote_auto no se haya podido escribir (memoria llena). RECHAZADO/VENCIDO = el
+    // envasado sigue vivo en el servidor → sí se imprime.
+    try {
+      const _ed = OfflineManager.envDeshacerGet(clave);
+      if (_ed && _ed.estado !== 'RECHAZADO' && _ed.estado !== 'VENCIDO') {
+        OfflineManager.loteAutoSet(clave, { estado: 'DESHECHO' }, { soloSi: ['TOMADO'] });
+        return 'SKIP';
+      }
+    } catch (_) {}
     // [2.13.603 · QA H8] Ocupado → volver a la fila SIN anunciar "imprimiendo".
     if (WhLoteAdhesivo.estado().ocupado) {
       OfflineManager.loteAutoSet(clave, { estado: 'SINCRONIZADO' }, { soloSi: ['TOMADO'] });
