@@ -2262,6 +2262,12 @@ const API = (() => {
         id_envasado: String(params.idEnvasado || ''), cod_producto_envasado: cbDer,
         cod_producto_base: base ? String(base.codigoBarra) : '', motivo: params.motivo || 'anulación manual', usuario: params.usuario || 'manual'
       } });
+      // [2.13.604] Solo el procesador de "deshacer envasado encolado" (offline.js) pide el código del servidor
+      // (_detalleError): distingue ENVASADO_NO_ENCONTRADO (nunca llegó) de un rechazo real. Sin ese flag, el
+      // comportamiento es el de siempre (null → error genérico cero-GAS) → el Deshacer en línea no cambia.
+      if (params._detalleError && out && out.ok === false && out.error && !/_OFF$/.test(String(out.error))) {
+        return { ok: false, error: String(out.error), _rechazoServidor: true };
+      }
       if (!out || out.ok === false) return null;   // *_OFF o error → GAS (legado, solo si el flag está apagado)
       // [shape] el front solo lee res.ok (app.js:10091) / fire-and-forget (app.js:9958). Réplica del shape GAS
       // {ok:true, data:{idEnvasado, yaAnulado?}}. La RPC devuelve {ok,yaAnulado?,id_envasado} al nivel raíz.

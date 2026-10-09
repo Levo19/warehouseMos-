@@ -1854,6 +1854,12 @@ const Session = (() => {
     // [2.13.603] Adhesivos de envasados que se sincronizaron antes del login o con la app recargada a mitad
     // (entradas SINCRONIZADO / TOMADO viejo persistidas): retomarlos una vez con la sesión ya aplicada.
     setTimeout(() => { try { WhLoteAuto.procesar(); } catch (_) {} }, 4000);
+    // [2.13.604] ↺ Deshacer de envasados encolados que quedaron pendientes (recarga antes de reconectar) + avisos
+    // que se generaron con la app cerrada.
+    setTimeout(() => {
+      try { OfflineManager.envDeshacerProcesar && OfflineManager.envDeshacerProcesar(); } catch (_) {}
+      try { _envDeshacerMostrarAvisos(); } catch (_) {}
+    }, 5000);
 
     // Polling de bloqueo remoto desde MOS
     if (typeof BloqueoRemoto !== 'undefined') BloqueoRemoto.iniciar();
@@ -10013,6 +10019,13 @@ function _renderEnvasadosPorDia(list, container, opts) {
     const _realKeysEnv = new Set(list.filter(e => e.idEnvasado && !_esOptEnv(e)).map(_kEnv));
     list = list.filter(e => !(_esOptEnv(e) && _realKeysEnv.has(_kEnv(e))));
   }
+  // [2.13.604 · QA H4] Envasados deshechos mientras estaban en la cola offline: al sincronizar, el backend los
+  // devuelve (COMPLETADO hasta que se anulan, luego ANULADO). El operador ya los deshizo → no mostrar su tarjeta.
+  // Los que el servidor rechazó o pasaron de 12 h SÍ se muestran (para anularlos a mano). Filtro por id exacto.
+  try {
+    const _ocultos = (OfflineManager.envDeshacerIdsOcultos && OfflineManager.envDeshacerIdsOcultos()) || null;
+    if (_ocultos && _ocultos.size && Array.isArray(list)) list = list.filter(e => !_ocultos.has(String(e.idEnvasado || '')));
+  } catch (_) {}
 
   // Mapa codigoBarra → descripcion del maestro (para legibilidad).
   // Fallback en cascada: App.getProductosMaestro (memoria) → OfflineManager
@@ -10870,7 +10883,11 @@ const EnvasadosView = (() => {
       estado:                 'COMPLETADO',
       colaborador:            colaborador,   // [418] 🤝 visible en la card al instante
       descripcionProductoEnvasado: prod.descripcion || '',
-      descripcionProductoBase:     prodBase?.descripcion || ''
+      descripcionProductoBase:     prodBase?.descripcion || '',
+      // [2.13.604] Clave del envasado + hora del click: si queda encolado offline y el operador lo deshace (incluso
+      // tras recargar), el ↺ ubica su ítem en wh_queue por ESTA clave (nunca por producto/nombre).
+      claveEnv:               idempotencyKey,
+      tsRegistroEnv:          Date.now()
     });
     _colabReset();   // [418] no arrastrar el 🤝 al siguiente registro
     toast(`${producidas} uds registradas${colaborador ? ' · 🤝 con ' + colaborador : ''}${imprimir ? ' · enviando etiquetas...' : ''}`, 'ok', 4000);
@@ -10997,8 +11014,33 @@ const EnvasadosView = (() => {
             motivo:     'deshacer inmediato (envasado optimista)'
           }).then(() => OfflineManager.precargarOperacional(true).catch(() => {}))
             .catch(() => toast('⚠ No se pudo deshacer en el servidor — revisa el historial', 'danger', 6000));
+        } else if (res.offline) {
+          // [2.13.604 · QA H4] Deshecho ANTES de que el POST cayera a la cola (red lenta → timeout → encolado): el
+          // ítem acaba de entrar a wh_queue. Antes no se anulaba nada y la cola lo creaba al reconectar. Ahora se
+          // quita de la cola (o, si ya viaja, se anula al confirmarse), siempre por la clave del envasado.
+          // [QA H1] Aquí el stock local ya se revirtió (el tap fue antes): si no hay espacio para la intención, el
+          // ítem queda en la cola y subirá → avisar; el próximo refresco del servidor corrige el stock local.
+          let _m = '';
+          try {
+            _m = OfflineManager.envDeshacerEncolado(idempotencyKey, {
+              localId: res.localId || '', idOpt: idEnvOptimista, tsRegistro: tsClickEnv,
+              descripcion: prod.descripcion || cbDerivado, unidades: producidas
+            });
+          } catch (_) { _m = 'SIN_ESPACIO'; }
+          if (_m === 'SIN_ESPACIO') toast('⚠ No se pudo registrar el deshacer (memoria llena). Anúlalo a mano cuando sincronice.', 'danger', 9000);
         }
         return;
+      }
+
+      // [2.13.604] Encolado offline: recordar su localId (memoria + cache del optimista) para que un ↺ Deshacer
+      // posterior —aun tras recargar— encuentre su ítem en wh_queue o, si ya se envió, su id real 'ENV_'+localId.
+      if (res.offline && res.localId) {
+        _envOptCola.set(idEnvOptimista, { clave: idempotencyKey, localId: res.localId, tsRegistro: tsClickEnv });
+        try {
+          const _c = OfflineManager.getEnvasadosCache();
+          const _e = _c.find(e => e.idEnvasado === idEnvOptimista);
+          if (_e) { _e.localIdCola = res.localId; OfflineManager.guardarEnvasadosCache(_c); }
+        } catch (_) {}
       }
 
       // [2.13.603] Envasado ENCOLADO (sin red / timeout): el lote en paralelo no pudo confirmarse y ya NO se
@@ -11094,6 +11136,29 @@ const EnvasadosView = (() => {
     if (String(idEnvasado).indexOf('ENV_OPT_') === 0) {
       const cacheOpt = OfflineManager.getEnvasadosCache();
       const envOpt = cacheOpt.find(e => e.idEnvasado === idEnvasado);
+      // [2.13.604 · QA H4] ¿Ya cayó a la cola offline? (el .then del registro corrió con res.offline y dejó su
+      // localId). Se lee ANTES de remover el optimista del cache. Clave = la del envasado, nunca nombre/producto.
+      const _infoCola = _envOptCola.get(idEnvasado) || (envOpt && envOpt.claveEnv && envOpt.localIdCola
+        ? { clave: envOpt.claveEnv, localId: envOpt.localIdCola, tsRegistro: envOpt.tsRegistroEnv } : null);
+      // [2.13.604] Encolado: quitarlo de wh_queue si aún no viaja; si viaja (o ya subió), anularlo por su id real
+      // cuando la cola lo confirme (intención persistida en wh_env_deshacer, sobrevive a recargas). Va ANTES de
+      // revertir nada [QA H1]: si no se pudo guardar la intención (memoria llena), el envasado SÍ subirá → no se
+      // revierte el stock ni se quita la tarjeta; se avisa para anularlo a mano.
+      let _modoCola = '';
+      if (_infoCola) {
+        try {
+          _modoCola = OfflineManager.envDeshacerEncolado(_infoCola.clave, {
+            localId: _infoCola.localId, idOpt: idEnvasado, tsRegistro: _infoCola.tsRegistro,
+            descripcion: (envOpt && (envOpt.descripcionProductoEnvasado || envOpt.codigoProductoEnvasado)) || '',
+            unidades: (envOpt && envOpt.unidadesProducidas) || unidades || 0
+          });
+        } catch (_) { _modoCola = 'SIN_ESPACIO'; }
+        if (_modoCola === 'SIN_ESPACIO') {
+          toast('⚠ No se pudo registrar el deshacer (memoria llena). Anúlalo a mano cuando sincronice.', 'danger', 9000);
+          return;
+        }
+        _envOptCola.delete(idEnvasado);
+      }
       if (envOpt) {
         const cbB = String(envOpt.codigoProductoBase || '');
         const cbD = String(envOpt.codigoProductoEnvasado || codigoDerivado || '');
@@ -11106,9 +11171,16 @@ const EnvasadosView = (() => {
         _emitirEnvasadoReconciliado();
         window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['stock'] } }));
       }
-      _envDeshacerPendiente.set(idEnvasado, true);
       // [2.13.603] Si ese envasado quedó en cola esperando adhesivos, jamás imprimirlos al reconectar.
       try { OfflineManager.loteAutoDeshacerPorOpt(idEnvasado); } catch (_) {}
+      if (_infoCola) {
+        const _modo = _modoCola;
+        if (_modo === 'SIN_ID') toast('⚠ Envasado deshecho en este equipo, pero no se pudo ubicar en la cola. Revisa el historial al reconectar.', 'warn', 7000);
+        else if (_modo === 'QUITADO') toast('↺ Envasado deshecho · no se enviará al servidor', 'ok', 3000);
+        else toast('↺ Envasado deshecho · se anulará en el servidor al sincronizar', 'ok', 4000);
+        return;
+      }
+      _envDeshacerPendiente.set(idEnvasado, true);
       toast('↺ Envasado deshecho · stock revertido', 'ok', 3000);
       return;
     }
@@ -11171,6 +11243,10 @@ const EnvasadosView = (() => {
   // la anulación REAL contra el backend (el registro SÍ se creó allá). Evita
   // mandar un id ENV_OPT_* al backend (que no existe) y evita stock fantasma.
   const _envDeshacerPendiente = new Map();
+  // [2.13.604] optimistaId → { clave, localId, tsRegistro } de envasados que cayeron a la cola offline. Respaldo en
+  // memoria del dato que también se guarda en el cache del optimista (claveEnv/localIdCola), que es el que sobrevive
+  // a una recarga.
+  const _envOptCola = new Map();
   function _celebrarEnvasado(idReal, descripcion, uds) {
     try {
       if (typeof SoundFX !== 'undefined') {
@@ -26207,6 +26283,41 @@ const WhLoteAuto = (() => {
 
   return { procesar, alLiberarse };
 })();
+
+// ════════════════════════════════════════════════════════════════════
+// [2.13.604 · QA H4] Avisos del ↺ Deshacer de envasados encolados offline (OfflineManager · wh_env_deshacer):
+// rechazo del servidor, más de 12 h o anulación aún pendiente. Se toman UNA vez (se marcan al leerlos) y se
+// muestran como toast; si llegaron con la app cerrada, el barrido al iniciar sesión los muestra.
+// [QA M1] Los de PELIGRO (RECHAZADO/VENCIDO) van en modal, uno a la vez, y solo se marcan vistos cuando el operador
+// toca "Entendido" ("Ver luego" / tocar fuera los deja pendientes). Con el login a la vista o la app oculta no se
+// muestra nada (quedan para el próximo evento, el regreso a primer plano o el barrido al iniciar sesión).
+let _envAvisoAbierto = false;
+async function _envDeshacerMostrarAvisos() {
+  if (_envAvisoAbierto) return;
+  try {
+    if (document.hidden) return;
+    const login = document.getElementById('loginScreen');
+    if (login && login.style.display !== 'none') return;
+    if (!window.WH_CONFIG || !window.WH_CONFIG.usuario) return;
+    const avisos = (OfflineManager.envDeshacerAvisosPendientes && OfflineManager.envDeshacerAvisosPendientes()) || [];
+    // Informativos: toast y listo.
+    avisos.filter(a => a.tipo === 'info').forEach(a => {
+      try { toast(a.mensaje, 'warn', 7000); } catch (_) {}
+      try { OfflineManager.envDeshacerMarcarAvisado(a.clave, a.mensaje); } catch (_) {}
+    });
+    const peligro = avisos.filter(a => a.tipo !== 'info');
+    if (!peligro.length) return;
+    _envAvisoAbierto = true;
+    for (const a of peligro) {
+      const r = await _whConfirm(a.mensaje, { danger: true, titulo: 'Envasado deshecho sin conexión', okText: 'Entendido', cancelText: 'Ver luego', cierreNulo: true });
+      if (r !== true) break;                                   // lo deja pendiente (y los que siguen)
+      try { OfflineManager.envDeshacerMarcarAvisado(a.clave, a.mensaje); } catch (_) {}
+    }
+  } catch (_) {
+  } finally { _envAvisoAbierto = false; }
+}
+window.addEventListener('wh:env-deshacer-aviso', () => { setTimeout(_envDeshacerMostrarAvisos, 200); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) setTimeout(_envDeshacerMostrarAvisos, 800); });
 
 
 // ════════════════════════════════════════════════════════════════════

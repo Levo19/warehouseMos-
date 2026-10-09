@@ -80,7 +80,9 @@ const OfflineManager = (() => {
     });
   }
 
-  window.addEventListener('online',  () => { _notificar(); sincronizar(); });
+  // [2.13.604] Al reconectar también se retoman los ↺ Deshacer de envasados encolados (wh_env_deshacer): sincronizar()
+  // sale temprano si la cola está vacía, y una intención persistida (p.ej. tras recargar) igual debe ejecutarse.
+  window.addEventListener('online',  () => { _notificar(); sincronizar(); setTimeout(() => { try { _envDeshacerProcesar(); } catch (_) {} }, 1500); });
   window.addEventListener('offline', () => _notificar());
 
   // [FIX lag sync] Reintento PERIÓDICO de la cola. Antes sincronizar() solo corría en el evento 'online',
@@ -91,6 +93,8 @@ const OfflineManager = (() => {
   setInterval(() => {
     if (!navigator.onLine || _syncing) return;
     if (getQueue().some(i => i.status === 'pending' || i.status === 'error')) sincronizar();
+    // [2.13.604] Intenciones de deshacer pendientes (reintentos con backoff propio; no hace nada si no hay).
+    else { try { _envDeshacerProcesar(); } catch (_) {} }
   }, 20000);
 
   // [v2.13.74] Auto-cleanup AGRESIVO al cambio de versión. Al actualizar la
@@ -123,7 +127,8 @@ const OfflineManager = (() => {
         // se perdía la lista al actualizar. Se preservan por PREFIJO (no por key puntual) para que un estado
         // nuevo de despacho quede protegido automáticamente sin tener que acordarse de agregarlo aquí.
         // [2.13.603] wh_lote_auto = adhesivos pendientes de envasados en cola: es estado ligado a wh_queue, no cache.
-        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_.*|wh_lista_sombra|wh_lote_auto)$/;
+        // [2.13.604] wh_env_deshacer = ↺ Deshacer de envasados encolados pendientes de anular: también ligado a wh_queue.
+        const PRESERVAR = /^(wh_sesion|wh_device_id|wh_app_version|wh_audio_ok|wh_perms_done_v.*|wh_personal|wh_admin_cache|wh_queue|wh_gas_url|wh_despacho_.*|wh_lista_sombra|wh_lote_auto|wh_env_deshacer)$/;
         let borrados = 0;
         Object.keys(localStorage).forEach(k => {
           if (!k.startsWith('wh_')) return;
@@ -196,6 +201,15 @@ const OfflineManager = (() => {
     return obj?.ts || 0;
   }
 
+  // [2.13.604] Tiers de desalojo por cuota en constantes de módulo: los usa guardar() (abajo, misma lógica de
+  // siempre) y también wh_env_deshacer, que se escribe en crudo pero debe poder liberar espacio igual.
+  const _STORAGE_TIER1 = [
+    'wh_productos','wh_stock','wh_proveedores','wh_ajustes',
+    'wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas',
+    'wh_impresoras','wh_pn','wh_config','wh_guias'
+  ];
+  const _STORAGE_TIER2 = ['wh_guia_detalle','wh_preingresos','wh_envasados'];
+
   function guardar(key, data) {
     // [v2.13.110] Invalidar cache de parseo ANTES de escribir — garantiza
     // que cualquier read concurrente que ocurra entre la invalidación y
@@ -249,12 +263,8 @@ const OfflineManager = (() => {
         //   wh_guia_detalle → addDetalleCache (mods optimistas detalles)
         //   wh_preingresos  → inyectarPreingreso / patchPreingresosCache
         //   wh_envasados    → inyectarEnvasadoCache
-        const TIER1 = [
-          'wh_productos','wh_stock','wh_proveedores','wh_ajustes',
-          'wh_auditorias_c','wh_ubicaciones','wh_equivalencias','wh_zonas',
-          'wh_impresoras','wh_pn','wh_config','wh_guias'
-        ];
-        const TIER2 = ['wh_guia_detalle','wh_preingresos','wh_envasados'];
+        const TIER1 = _STORAGE_TIER1;   // [2.13.604] mismas listas, ahora en constantes de módulo
+        const TIER2 = _STORAGE_TIER2;
 
         // [v2.13.102] Cleanup por antigüedad — anti round-robin destructivo.
         //
@@ -627,7 +637,14 @@ const OfflineManager = (() => {
   }
 
   function _actualizarItemQueue(localId, status) {
-    const queue = getQueue().map(i => i.localId === localId ? { ...i, status } : i);
+    // [2.13.604] Al fijar el resultado se limpia la marca de "en vuelo" (enVueloTs): el envío ya terminó.
+    // Lectura FRESCA (QA L2): otra pestaña (↺ Deshacer) pudo cambiar la cola durante el await del envío.
+    _invalidarParseCache(KEYS.QUEUE);
+    const queue = getQueue().map(i => {
+      if (i.localId !== localId) return i;
+      const { enVueloTs, ...resto } = i;
+      return { ...resto, status };
+    });
     guardar(KEYS.QUEUE, queue);
   }
 
@@ -716,6 +733,283 @@ const OfflineManager = (() => {
     return hit ? _loteAutoEscribir(m) : false;
   }
 
+  // ── [2.13.604] ↺ Deshacer de un ENVASADO registrado sin red (QA H4) ─────────────────────────────────
+  // BUG: el Deshacer sobre un envasado ENCOLADO (id optimista ENV_OPT_*, ítem registrarEnvasado en wh_queue)
+  // solo revertía el stock local; el .then del registro ya había corrido con res.offline (idReal === optimista,
+  // nada que anular) y el ítem seguía en la cola → al reconectar el envasado SE CREABA igual y movía stock.
+  // Diseño (siempre por la CLAVE del envasado = idempotencyKey 'ENV-…', jamás por nombre/producto):
+  //   1) Ítem en la cola y NO en vuelo → se QUITA de wh_queue (síncrono → atómico frente a sincronizar() de esta
+  //      pestaña, que re-chequea la cola viva antes de mandar cada envasado). Queda además una intención "por
+  //      anular" SIN confirmar sobre su id determinista ('ENV_' + localId): si el ítem nació de un TIMEOUT, la RPC
+  //      pudo haber commiteado → se anula; si nunca llegó, el servidor responde ENVASADO_NO_ENCONTRADO y se da
+  //      por hecho (tras una ventana de gracia, por si el commit del timeout llega tarde).
+  //   2) Ítem en vuelo (o ya enviado y purgado) → intención persistida; cuando la cola lo CONFIRMA con su id real
+  //      se anula con la MISMA operación del Deshacer en línea (API.anularEnvasadoManual → wh.anular_envasado,
+  //      idempotente por estado: un segundo intento devuelve yaAnulado, nunca revierte dos veces).
+  //   3) Envasado que PUDO crearse por la cola con >12 h desde el registro, o rechazo definitivo del servidor →
+  //      no se fuerza nada: aviso al operador (modal "Entendido"). Una intención de un ítem QUITADO de la cola no
+  //      tiene ese tope (QA M2): lo esperable es NO_ENCONTRADO → hecho. APP_NO_AUTORIZADA / 401 / 403 / red son
+  //      transitorias con backoff; si se repiten por más de 12 h → VENCIDO con aviso (QA M3/L1).
+  //   4) Sin espacio para guardar la intención (QA H1) → NO se toca la cola y el Deshacer se informa como fallido.
+  // Va en localStorage CRUDO (como wh_lote_auto): debe sobrevivir a una recarga y verse entre pestañas.
+  // Estados: ESPERA_COLA (ítem en vuelo) → POR_ANULAR → ANULANDO (lease 60 s: una pestaña lo está anulando) →
+  // HECHO. Finales laterales: RECHAZADO (el servidor no lo anuló), VENCIDO (>12 h, no se tocó).
+  const ENV_DESHACER_KEY = 'wh_env_deshacer';
+  const _ED_FINALES   = ['HECHO', 'RECHAZADO', 'VENCIDO'];
+  const _ED_MAX_MS    = 12 * 3600e3;    // ventana para anular solo (mismo criterio que los adhesivos en cola)
+  const _ED_GRACIA_MS = 120000;         // NO_ENCONTRADO sin confirmar se acepta recién tras 2 min (commit tardío)
+  const _ED_LEASE_MS  = 60000;          // ANULANDO huérfano (pestaña cerrada a mitad) se retoma tras 60 s
+  const _ED_VUELO_MS  = 60000;          // enVueloTs persistido más viejo que esto = envío muerto (pestaña cerrada)
+  let _enVueloLocalId = null;           // localId del envasado que ESTA pestaña está enviando ahora mismo
+  let _edBusy = false;                  // guard anti-reentrada del procesador
+  function _edLeer() {
+    try { const o = JSON.parse(localStorage.getItem(ENV_DESHACER_KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; }
+    catch (_) { return {}; }
+  }
+  function _edEscribir(mapa) {
+    // Purga: finales >3 días (ya avisados) y cualquier entrada >7 días.
+    const ahora = Date.now();
+    Object.keys(mapa).forEach(k => {
+      const e = mapa[k] || {};
+      const edad = ahora - (e.tsDeshacer || e.tsEstado || 0);
+      if (edad > 7 * 864e5 || (_ED_FINALES.indexOf(e.estado) >= 0 && !e.avisoPend && edad > 3 * 864e5)) delete mapa[k];
+    });
+    const json = JSON.stringify(mapa);
+    try { localStorage.setItem(ENV_DESHACER_KEY, json); return true; }
+    catch (_) {}
+    // [2.13.604 · QA H1] Storage lleno (origen compartido con MOS/ME): liberar con los MISMOS tiers que guardar()
+    // (caches puros primero, el más viejo primero; trabajo en progreso solo como último recurso) y reintentar.
+    try {
+      const _porEdad = tier => tier.filter(k => localStorage.getItem(k)).map(k => ({ k, ts: _leerTs(k) })).sort((a, b) => a.ts - b.ts);
+      for (const tier of [_STORAGE_TIER1, _STORAGE_TIER2]) {
+        for (const { k } of _porEdad(tier)) {
+          try { localStorage.removeItem(k); _invalidarParseCache(k); } catch (_) {}
+          try { localStorage.setItem(ENV_DESHACER_KEY, json); return true; } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+  // [2.13.604 · QA H1] Devuelve la entrada actualizada, o null si no existe o NO se pudo guardar (storage lleno).
+  function _edPatch(clave, patch) {
+    const m = _edLeer();
+    if (!m[clave]) return null;
+    m[clave] = { ...m[clave], ...patch, tsEstado: Date.now() };
+    return _edEscribir(m) ? m[clave] : null;
+  }
+  // Ítem registrarEnvasado de la cola por su clave (lectura FRESCA: otra pestaña pudo cambiar la cola).
+  function _edItemCola(clave) {
+    _invalidarParseCache(KEYS.QUEUE);
+    return getQueue().find(i => i && i.action === 'registrarEnvasado' && i.params && String(i.params.idempotencyKey || '') === String(clave)) || null;
+  }
+  function _edEnVuelo(item) {
+    if (!item) return false;
+    if (_enVueloLocalId && _enVueloLocalId === item.localId) return true;
+    return !!(item.enVueloTs && (Date.now() - item.enVueloTs) < _ED_VUELO_MS);
+  }
+  // Quita el ítem de la cola (solo si sigue ahí y no está en vuelo). Síncrono de punta a punta.
+  function _edQuitarDeCola(localId) {
+    _invalidarParseCache(KEYS.QUEUE);
+    const q = getQueue();
+    const it = q.find(i => i && i.localId === localId);
+    if (!it || _edEnVuelo(it)) return false;
+    guardar(KEYS.QUEUE, q.filter(i => i && i.localId !== localId));
+    try { _notificar(); } catch (_) {}   // [QA L4] el contador "N por sincronizar" baja al instante (también en la retoma)
+    return true;
+  }
+  function _edIdDe(localId) { return localId ? 'ENV_' + localId : ''; }   // = id que siembra api.js (registrar_envasado)
+
+  // Punto de entrada del ↺ Deshacer (app.js). info: { localId?, idOpt?, tsRegistro?, descripcion?, unidades? }.
+  // Devuelve 'QUITADO' | 'EN_VUELO' | 'YA_ENVIADO' | 'YA_REGISTRADO' | 'SIN_ID'.
+  function envDeshacerEncolado(clave, info) {
+    if (!clave) return 'SIN_ID';
+    info = info || {};
+    const m = _edLeer();
+    if (m[clave]) return 'YA_REGISTRADO';                 // doble tap / otra pestaña: una sola intención por envasado
+    const item = _edItemCola(clave);
+    const localId = (item && item.localId) || info.localId || '';
+    const base = {
+      clave: String(clave), localId, idOpt: info.idOpt || '', idEnvasado: _edIdDe(localId),
+      descripcion: String(info.descripcion || ''), unidades: info.unidades || 0,
+      tsRegistro: info.tsRegistro || (item && item.ts) || Date.now(), tsDeshacer: Date.now(),
+      intentos: 0, proximoTs: 0, confirmado: false
+    };
+    let modo, quitar = false;
+    if (item && item.status === 'synced') {
+      // Ya enviado (sincronizar() aún no purgó la cola): anular por su id determinista. Sin 'confirmado': un ítem
+      // descartado por el servidor también queda 'synced' y ahí NO_ENCONTRADO es lo correcto (→ hecho tras la gracia).
+      base.estado = 'POR_ANULAR'; modo = 'YA_ENVIADO';
+    } else if (item && !_edEnVuelo(item)) {
+      base.estado = 'POR_ANULAR'; base.tsQuitado = Date.now(); modo = 'QUITADO'; quitar = true;
+    } else if (item) {
+      base.estado = 'ESPERA_COLA'; modo = 'EN_VUELO';
+    } else {
+      if (!localId) return 'SIN_ID';                      // sin cola ni id determinista: no se adivina nada
+      base.estado = 'POR_ANULAR'; modo = 'YA_ENVIADO';
+    }
+    // [2.13.604 · QA H1] La intención se escribe PRIMERO. Si no se pudo guardar (ni liberando espacio), NO se toca
+    // la cola: quitar el ítem sin intención persistida perdería la anulación de un posible commit por timeout.
+    m[clave] = { ...base, tsEstado: Date.now() };
+    if (!_edEscribir(m)) return 'SIN_ESPACIO';
+    if (quitar) {
+      // Síncrono: entre la lectura de arriba y esto no corre nada de sincronizar() en esta pestaña.
+      _edQuitarDeCola(item.localId);
+      // Si la cola en disco aún lo tiene (guardar() no pudo persistir por cuota), esperar como "en vuelo": la retoma
+      // lo quita cuando haya espacio, o lo anula cuando la cola lo confirme.
+      if (_edItemCola(clave) && _edPatch(clave, { estado: 'ESPERA_COLA', tsQuitado: 0 })) modo = 'EN_VUELO';
+    }
+    if (navigator.onLine) setTimeout(() => { try { _envDeshacerProcesar(); } catch (_) {} }, 0);
+    return modo;
+  }
+
+  // Hook de sincronizar() tras enviar un registrarEnvasado. El caller igual lo envuelve en try/catch.
+  function _envDeshacerTrasEnvio(item, res) {
+    const clave = item && item.params && item.params.idempotencyKey;
+    if (!clave) return;
+    const e = _edLeer()[clave];
+    if (!e || e.estado !== 'ESPERA_COLA') return;
+    if (res && res.ok && !res._descartar && !res.offline) {
+      // La cola CONFIRMÓ el envasado: ahora sí existe → anularlo por su id real.
+      _edPatch(clave, { estado: 'POR_ANULAR', confirmado: true, idEnvasado: (res.data && res.data.idEnvasado) || _edIdDe(item.localId) });
+    } else {
+      // Falló / descartado: el ítem ya no está en vuelo → sacarlo de la cola para que no se reintente nunca.
+      // Queda POR_ANULAR sin confirmar (si un timeout sí commiteó, se anula; si no, NO_ENCONTRADO → hecho).
+      _edQuitarDeCola(item.localId);
+      _edPatch(clave, { estado: 'POR_ANULAR', tsQuitado: Date.now() });
+    }
+  }
+
+  // tipo 'peligro' (RECHAZADO/VENCIDO): app.js lo muestra en modal y solo se marca visto con "Entendido" (QA M1).
+  // tipo 'info' (reintento en curso): toast; se marca visto al mostrarse.
+  function _edAviso(clave, mensaje, tipo) {
+    _edPatch(clave, { avisoPend: mensaje, avisoTipo: tipo || 'peligro' });
+    try { window.dispatchEvent(new CustomEvent('wh:env-deshacer-aviso', { detail: { clave: String(clave) } })); } catch (_) {}
+  }
+
+  // Ejecuta las intenciones pendientes, una a la vez, con lease y backoff. Solo toca la cola para quitar un ítem
+  // que dejó de estar en vuelo (retoma tras recarga).
+  async function _envDeshacerProcesar() {
+    if (_edBusy || !navigator.onLine) return;
+    if (typeof API === 'undefined' || !API.anularEnvasadoManual) return;
+    _edBusy = true;
+    let huboCambio = false;
+    try {
+      const claves = Object.keys(_edLeer());
+      for (const clave of claves) {
+        let e = _edLeer()[clave];                           // re-leer: otra pestaña pudo avanzarla
+        if (!e || _ED_FINALES.indexOf(e.estado) >= 0) continue;
+        const ahora = Date.now();
+        if (e.estado === 'ESPERA_COLA') {
+          // Retoma tras recarga o pestaña muerta a mitad del envío: si el ítem ya no está en vuelo, decidir.
+          const it = _edItemCola(clave);
+          if (it && _edEnVuelo(it)) continue;
+          if (it) { _edQuitarDeCola(it.localId); e = _edPatch(clave, { estado: 'POR_ANULAR', tsQuitado: ahora }); }
+          else    { e = _edPatch(clave, { estado: 'POR_ANULAR' }); }   // ya se envió y purgó: anular por id determinista
+          if (!e) continue;
+        }
+        if (e.estado === 'ANULANDO' && (ahora - (e.tsEstado || 0)) < _ED_LEASE_MS) continue;
+        if (e.proximoTs && ahora < e.proximoTs) continue;
+        if (!e.idEnvasado) { _edPatch(clave, { estado: 'RECHAZADO' }); continue; }
+        // Tope de 12 h solo si el envasado PUDO crearse por la cola (no quitado). [QA M2] Un ítem QUITADO se intenta
+        // igual: lo esperable es NO_ENCONTRADO → hecho; y si un timeout sí lo creó, anularlo es lo correcto.
+        if (!e.tsQuitado && ahora - (e.tsRegistro || ahora) > _ED_MAX_MS) {
+          _edPatch(clave, { estado: 'VENCIDO' });
+          _edAviso(clave, '⚠ Un envasado deshecho sin conexión (' + (e.descripcion || e.idEnvasado) + ') tiene más de 12 h: no se anuló automáticamente. Revísalo en el historial y anúlalo a mano si aparece.');
+          huboCambio = true;
+          continue;
+        }
+        if (!_edPatch(clave, { estado: 'ANULANDO' })) break;   // [QA H1] sin espacio para el lease: no anular a ciegas
+        let res = null;
+        try {
+          // MISMA operación del Deshacer en línea. _fromQueue: un timeout NO se re-encola en wh_queue (este
+          // procesador ya reintenta). _detalleError: devolver el código del servidor en vez del genérico cero-GAS.
+          res = await API.anularEnvasadoManual({
+            idEnvasado: e.idEnvasado,
+            usuario:    (window.WH_CONFIG && window.WH_CONFIG.usuario) || 'manual',
+            motivo:     'deshacer de envasado registrado sin conexión',
+            _fromQueue: true, _detalleError: true
+          });
+        } catch (err) { res = { ok: false, error: (err && err.message) || 'error', _retry: true }; }
+        const t = Date.now();
+        if (res && res.ok) {
+          _edPatch(clave, { estado: 'HECHO', yaAnulado: !!(res.data && res.data.yaAnulado), avisoPend: '' });
+          huboCambio = true;
+          continue;
+        }
+        // [QA M3] APP_NO_AUTORIZADA (token/claim del equipo) es transitoria → cae al backoff de abajo.
+        if (res && res._rechazoServidor && res.error !== 'APP_NO_AUTORIZADA') {
+          if (res.error === 'ENVASADO_NO_ENCONTRADO' && !e.confirmado) {
+            // Nunca llegó al servidor. Se acepta pasada la ventana de gracia (commit tardío de un timeout).
+            const desde = e.tsQuitado || e.tsDeshacer || 0;
+            if (t - desde >= _ED_GRACIA_MS) { _edPatch(clave, { estado: 'HECHO', sinRegistro: true, avisoPend: '' }); huboCambio = true; }
+            else _edPatch(clave, { estado: 'POR_ANULAR', proximoTs: desde + _ED_GRACIA_MS });
+            continue;
+          }
+          _edPatch(clave, { estado: 'RECHAZADO', ultimoError: String(res.error || '') });
+          _edAviso(clave, '⚠ No se pudo deshacer en el servidor el envasado ' + (e.descripcion || e.idEnvasado) + ' (' + (res.error || 'rechazado') + '). Revísalo en el historial y anúlalo a mano.');
+          huboCambio = true;
+          continue;
+        }
+        // Falla transitoria: red/timeout/servicio, APP_NO_AUTORIZADA, o HTTP 401/403 que api.js entrega como
+        // 'rechazo-directo' [QA L1]. Reintentable con backoff 20 s → 5 min y aviso informativo una sola vez.
+        // Si sigue fallando más de 12 h desde el PRIMER fallo → VENCIDO con aviso de peligro (no se insiste más).
+        const tsPrimerFallo = e.tsPrimerFallo || t;
+        const ultimoError = String((res && res.error) || '');
+        if (t - tsPrimerFallo > _ED_MAX_MS) {
+          _edPatch(clave, { estado: 'VENCIDO', ultimoError });
+          _edAviso(clave, '⚠ No se pudo anular en el servidor el envasado deshecho (' + (e.descripcion || e.idEnvasado) + ') tras 12 h de reintentos (' + (ultimoError || 'sin respuesta') + '). Revísalo en el historial y anúlalo a mano.');
+          huboCambio = true;
+          continue;
+        }
+        const intentos = (e.intentos || 0) + 1;
+        const espera = Math.min(300000, 20000 * Math.pow(2, Math.min(intentos - 1, 4)));
+        if (!_edPatch(clave, { estado: 'POR_ANULAR', intentos, tsPrimerFallo, proximoTs: t + espera, ultimoError })) break;
+        if (!e.avisoError) {
+          _edPatch(clave, { avisoError: true });
+          _edAviso(clave, '⚠ Aún no se pudo anular en el servidor el envasado deshecho (' + (e.descripcion || e.idEnvasado) + '). Se reintentará solo; no lo registres de nuevo.', 'info');
+        }
+      }
+    } catch (err) {
+      try { console.warn('[envDeshacer] procesar:', err && err.message); } catch (_) {}
+    } finally {
+      _edBusy = false;
+    }
+    if (huboCambio) {
+      try { window.dispatchEvent(new CustomEvent('wh:envasado-reconciliado')); } catch (_) {}
+      try { const p = precargarOperacional(true); if (p && p.catch) p.catch(() => {}); } catch (_) {}
+      try { window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['envasados'] } })); } catch (_) {}
+    }
+  }
+
+  // Ids reales que la UI oculta: deshechos (pendientes o hechos). RECHAZADO/VENCIDO se muestran para que el
+  // operador pueda anularlos a mano.
+  function envDeshacerIdsOcultos() {
+    const out = new Set();
+    try {
+      const m = _edLeer();
+      Object.keys(m).forEach(k => {
+        const e = m[k];
+        if (e && e.idEnvasado && e.estado !== 'RECHAZADO' && e.estado !== 'VENCIDO') out.add(String(e.idEnvasado));
+      });
+    } catch (_) {}
+    return out;
+  }
+  // [QA M1] Avisos pendientes SIN marcarlos: app.js marca cada uno con envDeshacerMarcarAvisado() recién cuando el
+  // operador lo vio (peligro: tocó "Entendido"; info: se mostró el toast).
+  function envDeshacerAvisosPendientes() {
+    const m = _edLeer();
+    return Object.keys(m).filter(k => m[k] && m[k].avisoPend)
+      .map(k => ({ clave: k, mensaje: String(m[k].avisoPend), tipo: m[k].avisoTipo || 'peligro' }));
+  }
+  // Solo limpia si el aviso sigue siendo el mismo (no borra uno más nuevo de la misma clave).
+  function envDeshacerMarcarAvisado(clave, mensaje) {
+    const m = _edLeer();
+    if (!m[clave] || String(m[clave].avisoPend || '') !== String(mensaje || '')) return false;
+    m[clave] = { ...m[clave], avisoPend: '', avisoTipo: '' };
+    return _edEscribir(m);
+  }
+  function envDeshacerGet(clave) { return clave ? (_edLeer()[clave] || null) : null; }
+
   function limpiarSincronizados() {
     const queue = getQueue().filter(i => i.status === 'pending' || i.status === 'error');
     guardar(KEYS.QUEUE, queue);
@@ -752,9 +1046,16 @@ const OfflineManager = (() => {
     var huboEnvasado = false;
     try {
     for (const item of queue) {
+      let res, enviado = false;   // [2.13.604] para el hook de deshacer (finally)
       try {
+        // [2.13.604] La cola se tomó como FOTO al empezar: un ↺ Deshacer pudo quitar este envasado mientras se
+        // drenaban los anteriores. Re-chequeo síncrono contra la cola VIVA justo antes de enviarlo.
+        if (item.action === 'registrarEnvasado') {
+          let _sigue = true;
+          try { _invalidarParseCache(KEYS.QUEUE); _sigue = getQueue().some(i => i && i.localId === item.localId); } catch (_) {}
+          if (!_sigue) continue;
+        }
         const viaDirecta = !!(item._viaDirecta || (item.params && item.params._viaDirecta));
-        let res;
         if (viaDirecta) {
           // Ítem que pudo commitear en Supabase → SIEMPRE reintento directo (dedup), nunca GAS.
           if (typeof API === 'undefined' || !API._postCola) {
@@ -763,6 +1064,13 @@ const OfflineManager = (() => {
             _actualizarItemQueue(item.localId, 'error');
             continue;
           }
+          // [2.13.604] Marca EN VUELO (memoria + persistida en el ítem, para otras pestañas): el Deshacer no lo
+          // quita de la cola mientras viaja; espera la confirmación y lo anula por su id real.
+          if (item.action === 'registrarEnvasado') {
+            _enVueloLocalId = item.localId;
+            try { guardar(KEYS.QUEUE, getQueue().map(i => i.localId === item.localId ? { ...i, enVueloTs: Date.now() } : i)); } catch (_) {}
+          }
+          enviado = true;
           res = await API._postCola(item.params);
         } else {
           // [CERO-GAS Rep#1] Ítem legacy SIN sello _viaDirecta. En prod NO existe (todo se sella al encolar bajo
@@ -802,6 +1110,12 @@ const OfflineManager = (() => {
         }
       } catch {
         _actualizarItemQueue(item.localId, 'error');
+      } finally {
+        // [2.13.604] Fin del vuelo + ¿este envasado tenía un ↺ Deshacer esperando? Envuelto: jamás traba la cola.
+        if (item.action === 'registrarEnvasado') {
+          if (_enVueloLocalId === item.localId) _enVueloLocalId = null;
+          if (enviado) { try { _envDeshacerTrasEnvio(item, res); } catch (_) {} }
+        }
       }
     }
 
@@ -821,6 +1135,8 @@ const OfflineManager = (() => {
     if (huboEnvasado) {
       try { window.dispatchEvent(new CustomEvent('wh:data-refresh', { detail: { changed: ['envasados'] } })); } catch(_){}
     }
+    // [2.13.604] Anular los envasados deshechos que la cola acaba de confirmar (fuera del loop: no frena la cola).
+    try { _envDeshacerProcesar(); } catch (_) {}
   }
 
   // ── Precarga operacional (guías, preingresos, stock, ajustes, auditorías) ──
@@ -1257,6 +1573,8 @@ const OfflineManager = (() => {
     setSubiendoFotos, isSubiendoFotos,
     patchPendingDetalleVenc,
     loteAutoRegistrar, loteAutoGet, loteAutoListar, loteAutoSet, loteAutoDeshacerPorOpt, loteAutoDeshacerPorId,   // [2.13.603]
+    envDeshacerEncolado, envDeshacerIdsOcultos, envDeshacerAvisosPendientes, envDeshacerMarcarAvisado, envDeshacerGet,   // [2.13.604]
+    envDeshacerProcesar: () => _envDeshacerProcesar(),   // [2.13.604] barrido al iniciar sesión
     marcarPreingresoPendiente, marcarCargadoresPendiente,
     estaOnline: () => navigator.onLine
   };

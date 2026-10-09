@@ -1,1 +1,1 @@
-{"version":"2.13.603","build":"Envasado registrado sin conexion: al sincronizar imprime sus adhesivos solo, una sola vez (misma clave de lote); si estuvo mas de 12 h en cola pregunta antes de imprimir."}
+{"version":"2.13.604","build":"Deshacer un envasado registrado sin conexion: si sigue en la cola se quita y no se envia; si ya viajaba se anula solo en el servidor al confirmarse (misma anulacion idempotente del Deshacer en linea). Mas de 12 h o rechazo del servidor: aviso, sin forzar."}
